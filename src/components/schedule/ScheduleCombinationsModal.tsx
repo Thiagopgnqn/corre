@@ -277,8 +277,8 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
                                 className="flex items-center justify-between text-[11px] bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-800/60"
                               >
                                 <span className="font-semibold text-white truncate pr-2">{name}</span>
-                                <span className="font-mono text-indigo-300 shrink-0 font-bold">
-                                  Com. {comm.code}
+                                <span className="font-mono text-indigo-300 shrink-0 font-bold px-1.5 py-0.5 rounded bg-indigo-950/60 border border-indigo-500/20">
+                                  {comm.code}
                                 </span>
                               </div>
                             );

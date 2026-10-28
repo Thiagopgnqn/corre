@@ -15,6 +15,7 @@ import {
   Info,
   ChevronsUp,
   ChevronsDown,
+  X,
 } from 'lucide-react';
 import type { Commission, SubjectSchedule, Shift } from '../../types/schedule';
 import type { Subject } from '../../types/career';
@@ -27,9 +28,11 @@ interface ScheduleLeftPanelProps {
   schedulesMap: Map<number, SubjectSchedule>;
   selections: Record<number, Commission>;
   onSelectCommission: (subjectId: number, commissionId: string) => void;
+  onRemoveCommission?: (subjectId: number) => void;
   onHoverCommission: (data: { commission: Commission; subjectId: number; subjectName: string; hasConflict: boolean } | null) => void;
   subjectNamesMap: Map<number, string>;
   focusedSubjectId?: number | null;
+  onViewInGrid?: () => void;
 }
 
 export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
@@ -39,9 +42,11 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   schedulesMap,
   selections,
   onSelectCommission,
+  onRemoveCommission,
   onHoverCommission,
   subjectNamesMap,
   focusedSubjectId,
+  onViewInGrid,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | Shift>('all');
@@ -161,14 +166,23 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
 
         {/* Search bar */}
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Buscar materia, código o docente..."
-            className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white"
+              title="Borrar búsqueda"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Filters bar */}
@@ -283,10 +297,24 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                       <span>•</span>
                       <span>{subject.weeklyHours} hs/sem</span>
                       {selectedComm && (
-                        <span className="text-emerald-300 font-bold flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px]">
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span>{selectedComm.code} elegida</span>
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-emerald-300 font-bold flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px]">
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span>{selectedComm.code} elegida</span>
+                          </span>
+                          {onViewInGrid && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onViewInGrid();
+                              }}
+                              className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline decoration-indigo-400/50 active:scale-95 transition-transform"
+                            >
+                              Ver en grilla ➔
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -376,23 +404,39 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                     )}
                                   </div>
 
-                                  <button
-                                    onClick={() => handleSelectCommission(subject.id, comm.id)}
-                                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1 cursor-pointer ${
-                                      isSelected
-                                        ? 'bg-emerald-600 text-white shadow-sm'
-                                        : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
-                                    }`}
-                                  >
-                                    {isSelected ? (
-                                      <>
-                                        <Check className="w-3 h-3" />
-                                        <span>Elegida</span>
-                                      </>
-                                    ) : (
-                                      <span>Elegir</span>
+                                  <div className="flex items-center gap-1.5">
+                                    {isSelected && onRemoveCommission && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onRemoveCommission(subject.id);
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg font-semibold text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/30 transition-all active:scale-95"
+                                        title="Deseleccionar comisión"
+                                      >
+                                        Quitar
+                                      </button>
                                     )}
-                                  </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSelectCommission(subject.id, comm.id)}
+                                      className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
+                                        isSelected
+                                          ? 'bg-emerald-600 text-white shadow-sm'
+                                          : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                                      }`}
+                                    >
+                                      {isSelected ? (
+                                        <>
+                                          <Check className="w-3.5 h-3.5" />
+                                          <span>Elegida</span>
+                                        </>
+                                      ) : (
+                                        <span>Elegir</span>
+                                      )}
+                                    </button>
+                                  </div>
                                 </div>
 
                                 {/* Professors */}

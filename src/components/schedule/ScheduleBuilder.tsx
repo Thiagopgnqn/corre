@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Clock,
   Upload,
@@ -11,6 +11,11 @@ import {
   Edit2,
   Check,
   Calendar,
+  BookOpen,
+  PieChart,
+  ArrowRight,
+  ChevronDown,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
@@ -196,10 +201,273 @@ export const ScheduleBuilder: React.FC = () => {
     pushHistory(next);
   };
 
+  // Mobile tabs & menu state
+  const [mobileTab, setMobileTab] = useState<'oferta' | 'grilla' | 'resumen'>('oferta');
+  const [mobileProposalsOpen, setMobileProposalsOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Total weekly hours
+  const totalHours = useMemo(() => {
+    let minutes = 0;
+    Object.values(selectedCommissionsMap).forEach((comm) => {
+      comm.slots.forEach((s) => {
+        const [sh, sm] = s.start.split(':').map(Number);
+        const [eh, em] = s.end.split(':').map(Number);
+        minutes += eh * 60 + em - (sh * 60 + sm);
+      });
+    });
+    return Math.round((minutes / 60) * 10) / 10;
+  }, [selectedCommissionsMap]);
+
+  const selectedCount = Object.keys(selectedCommissionsMap).length;
+
   return (
-    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-3 sm:py-4 flex-1 flex flex-col gap-3 min-h-0 h-[calc(100vh-64px)] overflow-hidden">
-      {/* Top Banner & Control Toolbar */}
-      <div className="bg-slate-900/70 border border-slate-800 p-3 sm:p-4 rounded-2xl backdrop-blur-md shadow-xl space-y-3 shrink-0">
+    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-4 flex-1 flex flex-col gap-2 sm:gap-3 min-h-0 lg:h-[calc(100vh-64px)] lg:overflow-hidden">
+      {/* Mobile Header Bar & Sub-Nav (< lg) */}
+      {!isDesktop && (
+        <div className="flex flex-col gap-2 shrink-0">
+          <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-2xl backdrop-blur-md shadow-lg flex items-center justify-between gap-2">
+            {/* Left: icon + title */}
+            <div className="flex items-center gap-2 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                <Clock className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-sm font-bold text-white tracking-tight truncate">
+                  Horarios
+                </h2>
+                <div className="text-[10px] text-slate-400 font-mono truncate">
+                  {selectedCount} mat. • {totalHours} hs/sem
+                </div>
+              </div>
+            </div>
+
+            {/* Right controls */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {/* 1C / 2C compact toggle */}
+              <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800 text-[11px] font-bold">
+                <button
+                  onClick={() => setScheduleTerm('1C')}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    scheduleTerm === '1C' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400'
+                  }`}
+                >
+                  1C
+                </button>
+                <button
+                  onClick={() => setScheduleTerm('2C')}
+                  className={`px-2 py-1 rounded transition-colors ${
+                    scheduleTerm === '2C' ? 'bg-indigo-600 text-white font-bold' : 'text-slate-400'
+                  }`}
+                >
+                  2C
+                </button>
+              </div>
+
+              {/* Undo / Redo */}
+              <button
+                onClick={handleUndo}
+                disabled={historyIndex <= 0}
+                className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform"
+                title="Deshacer"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={historyIndex >= history.length - 1}
+                className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform"
+                title="Rehacer"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Proposals dropdown toggle */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setMobileProposalsOpen(!mobileProposalsOpen);
+                    setMobileActionsOpen(false);
+                  }}
+                  className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-transform"
+                >
+                  <span>Planes</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
+
+                {/* Proposals Dropdown Panel */}
+                {mobileProposalsOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-56 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 z-50 space-y-1">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2 py-1">
+                      Mis propuestas
+                    </div>
+                    {scheduleDrafts.map((draft) => (
+                      <div
+                        key={draft.id}
+                        onClick={() => {
+                          loadDraft(draft.id);
+                          setMobileProposalsOpen(false);
+                        }}
+                        className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-800 cursor-pointer text-xs"
+                      >
+                        <div className="flex items-center gap-1.5 font-bold text-white truncate">
+                          <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          <span className="truncate">{draft.name}</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                          ({Object.keys(draft.selections).length})
+                        </span>
+                      </div>
+                    ))}
+
+                    <button
+                      onClick={() => {
+                        setMobileProposalsOpen(false);
+                        const name = prompt(
+                          'Nombre para esta propuesta (ej. Plan B):',
+                          `Plan ${String.fromCharCode(65 + scheduleDrafts.length)}`
+                        );
+                        if (name) saveDraft(name, scheduleTerm);
+                      }}
+                      className="w-full mt-1 py-1.5 px-2 rounded-lg border border-dashed border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/10 text-xs font-bold flex items-center justify-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Guardar como propuesta</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* More Options toggle */}
+              <div className="relative">
+                <button
+                  onClick={() => {
+                    setMobileActionsOpen(!mobileActionsOpen);
+                    setMobileProposalsOpen(false);
+                  }}
+                  className="p-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white text-[11px] active:scale-95 transition-transform"
+                  title="Más opciones"
+                >
+                  <MoreHorizontal className="w-3.5 h-3.5" />
+                </button>
+
+                {mobileActionsOpen && (
+                  <div className="absolute right-0 top-full mt-1.5 w-52 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 z-50 space-y-1">
+                    {semesterBasket.length > 0 && (
+                      <button
+                        onClick={() => {
+                          handleLoadFromBasket();
+                          setMobileActionsOpen(false);
+                        }}
+                        className="w-full text-left p-2 rounded-lg hover:bg-slate-800 text-xs text-cyan-300 font-semibold flex items-center gap-2"
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Cargar canasta ({semesterBasket.length})</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setImportModalOpen(true);
+                        setMobileActionsOpen(false);
+                      }}
+                      className="w-full text-left p-2 rounded-lg hover:bg-slate-800 text-xs text-slate-200 font-semibold flex items-center gap-2"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Importar horarios JSON</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleClearWithHistory();
+                        setMobileActionsOpen(false);
+                      }}
+                      disabled={selectedCount === 0}
+                      className="w-full text-left p-2 rounded-lg hover:bg-rose-950/40 text-xs text-rose-400 font-semibold flex items-center gap-2 disabled:opacity-40"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Limpiar selecciones</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Mobile Sub-Navigation Tabs */}
+          <div className="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold gap-1 shadow-inner">
+            <button
+              onClick={() => setMobileTab('oferta')}
+              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                mobileTab === 'oferta'
+                  ? 'bg-indigo-600 text-white shadow-md font-black'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Oferta</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  mobileTab === 'oferta' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                }`}
+              >
+                {availableSubjects.length}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setMobileTab('grilla')}
+              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                mobileTab === 'grilla'
+                  ? 'bg-indigo-600 text-white shadow-md font-black'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Horarios</span>
+              {selectedCount > 0 && (
+                <span
+                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                    mobileTab === 'grilla' ? 'bg-white/20 text-white' : 'bg-indigo-500/20 text-indigo-300'
+                  }`}
+                >
+                  {selectedCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setMobileTab('resumen')}
+              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all relative active:scale-95 ${
+                mobileTab === 'resumen'
+                  ? 'bg-indigo-600 text-white shadow-md font-black'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+              }`}
+            >
+              <PieChart className="w-3.5 h-3.5" />
+              <span>Resumen</span>
+              {conflicts.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse">
+                  !{conflicts.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Top Banner & Control Toolbar (Desktop >= lg) */}
+      {isDesktop && (
+        <div className="bg-slate-900/70 border border-slate-800 p-3 sm:p-4 rounded-2xl backdrop-blur-md shadow-xl space-y-3 shrink-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
@@ -395,26 +663,100 @@ export const ScheduleBuilder: React.FC = () => {
           </div>
         </div>
       </div>
+      )}
 
-      {/* Main 3-Column Layout: Left Subjects Panel, Center Timetable Grid, Right Summary Panel */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 sm:gap-4 items-stretch overflow-hidden">
-        {/* Left Subjects & Commissions Accordion Panel (340px) */}
-        <ScheduleLeftPanel
-          term={scheduleTerm}
-          availableSubjects={availableSubjects}
-          allSubjects={allSubjects}
-          schedulesMap={schedulesMap}
-          selections={selectedCommissionsMap}
-          onSelectCommission={handleSelectCommissionWithHistory}
-          onHoverCommission={setHoveredCommission}
-          subjectNamesMap={subjectNamesMap}
-          focusedSubjectId={focusedSubjectId}
-        />
+      {/* Main Layout: Desktop 3-Column vs Mobile Single Tab */}
+      {isDesktop ? (
+        <div className="flex-1 min-h-0 flex flex-row gap-3 sm:gap-4 items-stretch overflow-hidden">
+          {/* Left Subjects & Commissions Accordion Panel (340px) */}
+          <ScheduleLeftPanel
+            term={scheduleTerm}
+            availableSubjects={availableSubjects}
+            allSubjects={allSubjects}
+            schedulesMap={schedulesMap}
+            selections={selectedCommissionsMap}
+            onSelectCommission={handleSelectCommissionWithHistory}
+            onRemoveCommission={handleRemoveCommissionWithHistory}
+            onHoverCommission={setHoveredCommission}
+            subjectNamesMap={subjectNamesMap}
+            focusedSubjectId={focusedSubjectId}
+            onViewInGrid={() => setMobileTab('grilla')}
+          />
 
-        {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
-        <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-3 sm:gap-4 overflow-y-auto xl:overflow-hidden">
-          {/* Center Timetable Weekly Calendar Grid */}
-          <div className="flex-1 min-h-0 flex flex-col h-full">
+          {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
+          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-3 sm:gap-4 overflow-y-auto xl:overflow-hidden">
+            {/* Center Timetable Weekly Calendar Grid */}
+            <div className="flex-1 min-h-0 flex flex-col h-full">
+              <ScheduleWeeklyGrid
+                selections={selectedCommissionsMap}
+                onRemoveCommission={handleRemoveCommissionWithHistory}
+                hoveredCommission={hoveredCommission}
+                conflicts={conflicts}
+                subjectNamesMap={subjectNamesMap}
+                focusedConflictId={focusedConflictId}
+                onFocusSubject={(sId) => setFocusedSubjectId(sId)}
+              />
+            </div>
+
+            {/* Right Summary & Actions Panel (320px on xl, stacked under grid on lg) */}
+            <div className="w-full xl:w-[320px] shrink-0 flex flex-col min-h-0 xl:h-full">
+              <ScheduleSummaryPanel
+                selections={selectedCommissionsMap}
+                conflicts={conflicts}
+                subjectNamesMap={subjectNamesMap}
+                onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
+                onApplyToEnrolled={applyScheduleToEnrolled}
+                onClearAll={handleClearWithHistory}
+                onSelectConflict={setFocusedConflictId}
+                onNavigateToTab={(tab) => setMobileTab(tab)}
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col relative pb-16">
+          {mobileTab === 'oferta' && (
+            <>
+              <ScheduleLeftPanel
+                term={scheduleTerm}
+                availableSubjects={availableSubjects}
+                allSubjects={allSubjects}
+                schedulesMap={schedulesMap}
+                selections={selectedCommissionsMap}
+                onSelectCommission={handleSelectCommissionWithHistory}
+                onRemoveCommission={handleRemoveCommissionWithHistory}
+                onHoverCommission={setHoveredCommission}
+                subjectNamesMap={subjectNamesMap}
+                focusedSubjectId={focusedSubjectId}
+                onViewInGrid={() => setMobileTab('grilla')}
+              />
+
+              {/* Floating action pill above bottom navigation */}
+              {selectedCount > 0 && (
+                <div className="fixed bottom-[68px] left-3 right-3 z-30">
+                  <button
+                    onClick={() => setMobileTab('grilla')}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:brightness-110 text-white font-bold text-xs shadow-2xl shadow-indigo-600/50 border border-indigo-400/40 flex items-center justify-between active:scale-[0.98] transition-transform"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center">
+                        <Calendar className="w-3.5 h-3.5 text-white" />
+                      </div>
+                      <span>
+                        {selectedCount} {selectedCount === 1 ? 'materia elegida' : 'materias elegidas'} ({totalHours} hs)
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 font-extrabold text-indigo-100">
+                      <span>Ver horarios</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </div>
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {mobileTab === 'grilla' && (
             <ScheduleWeeklyGrid
               selections={selectedCommissionsMap}
               onRemoveCommission={handleRemoveCommissionWithHistory}
@@ -422,12 +764,14 @@ export const ScheduleBuilder: React.FC = () => {
               conflicts={conflicts}
               subjectNamesMap={subjectNamesMap}
               focusedConflictId={focusedConflictId}
-              onFocusSubject={(sId) => setFocusedSubjectId(sId)}
+              onFocusSubject={(sId) => {
+                setFocusedSubjectId(sId);
+                setMobileTab('oferta');
+              }}
             />
-          </div>
+          )}
 
-          {/* Right Summary & Actions Panel (320px on xl, stacked under grid on lg) */}
-          <div className="w-full xl:w-[320px] shrink-0 flex flex-col min-h-0 xl:h-full">
+          {mobileTab === 'resumen' && (
             <ScheduleSummaryPanel
               selections={selectedCommissionsMap}
               conflicts={conflicts}
@@ -435,11 +779,15 @@ export const ScheduleBuilder: React.FC = () => {
               onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
               onApplyToEnrolled={applyScheduleToEnrolled}
               onClearAll={handleClearWithHistory}
-              onSelectConflict={setFocusedConflictId}
+              onSelectConflict={(cId) => {
+                setFocusedConflictId(cId);
+                setMobileTab('grilla');
+              }}
+              onNavigateToTab={(tab) => setMobileTab(tab)}
             />
-          </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Global Modals for Schedule Builder */}
       <ScheduleCombinationsModal

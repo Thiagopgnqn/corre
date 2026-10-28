@@ -78,8 +78,14 @@ function calculateCardCoords(
   const isMobile = windowSize.width < 640;
 
   if (isMobile) {
+    if (!rect || placement === 'center') {
+      return {
+        top: Math.max(margin, Math.round((windowSize.height - cardHeight) / 2)),
+        left: margin,
+      };
+    }
     return {
-      top: windowSize.height - cardHeight - margin,
+      top: Math.max(margin, windowSize.height - cardHeight - 74),
       left: margin,
     };
   }
