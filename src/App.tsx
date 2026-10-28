@@ -6,6 +6,7 @@ import { SimulationBar } from './components/graph/SimulationBar';
 import { CorrelativeGraph } from './components/graph/CorrelativeGraph';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { SemesterPlanner } from './components/planner/SemesterPlanner';
+import { ScheduleBuilder } from './components/schedule/ScheduleBuilder';
 import { ElectivesPicker } from './components/electives/ElectivesPicker';
 import { StatsDashboard } from './components/stats/StatsDashboard';
 import { QuickStatusModal } from './components/common/QuickStatusModal';
@@ -37,7 +38,10 @@ const AppContent: React.FC = () => {
           >
             {currentView === 'graph' && <CorrelativeGraph />}
             {currentView === 'kanban' && <KanbanBoard />}
-            {currentView === 'planner' && <SemesterPlanner />}
+            {currentView === 'planner' && (
+              <SemesterPlanner onNavigateToSchedule={() => setCurrentView('schedule')} />
+            )}
+            {currentView === 'schedule' && <ScheduleBuilder />}
             {currentView === 'electives' && <ElectivesPicker />}
             {currentView === 'stats' && <StatsDashboard />}
           </motion.div>

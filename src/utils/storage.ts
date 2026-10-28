@@ -1,4 +1,5 @@
 import type { UserCareerState, AssignedElectivesByYear } from '../types/career';
+import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
 import { ELECTIVES } from '../data/electives';
 
 const STORAGE_KEY_STATE = 'mi_carrera_user_state_v1';
@@ -7,6 +8,10 @@ const STORAGE_KEY_OLD_SLOTS = 'mi_carrera_electives_slots_v1';
 const STORAGE_KEY_BASKET = 'mi_carrera_semester_basket_v1';
 const STORAGE_KEY_SETTINGS = 'mi_carrera_settings_v1';
 export const STORAGE_KEY_TUTORIAL = 'mi_carrera_tutorial_completed_v1';
+export const STORAGE_KEY_SCHEDULE_SELECTIONS = 'mi_carrera_schedule_selections_v1';
+export const STORAGE_KEY_SCHEDULE_DRAFTS = 'mi_carrera_schedule_drafts_v1';
+export const STORAGE_KEY_CUSTOM_SCHEDULES = 'mi_carrera_custom_schedules_v1';
+export const STORAGE_KEY_SCHEDULE_TERM = 'mi_carrera_schedule_term_v1';
 
 export interface AppSettings {
   includePromotionsInGPA: boolean;
@@ -257,20 +262,115 @@ export function saveSettings(settings: AppSettings): void {
   }
 }
 
+export function loadScheduleSelections(): Record<number, string> {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_SELECTIONS);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveScheduleSelections(selections: Record<number, string>): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_SCHEDULE_SELECTIONS, JSON.stringify(selections));
+  } catch (e) {
+    console.error('Error saving schedule selections:', e);
+  }
+}
+
+export function loadScheduleDrafts(): ScheduleDraft[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_DRAFTS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveScheduleDrafts(drafts: ScheduleDraft[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_SCHEDULE_DRAFTS, JSON.stringify(drafts));
+  } catch (e) {
+    console.error('Error saving schedule drafts:', e);
+  }
+}
+
+export function loadCustomSchedules(): SubjectSchedule[] | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_SCHEDULES);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveCustomSchedules(schedules: SubjectSchedule[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_CUSTOM_SCHEDULES, JSON.stringify(schedules));
+  } catch (e) {
+    console.error('Error saving custom schedules:', e);
+  }
+}
+
+export function clearCustomSchedules(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_CUSTOM_SCHEDULES);
+  } catch (e) {
+    console.error('Error clearing custom schedules:', e);
+  }
+}
+
+export function loadScheduleTerm(): '1C' | '2C' {
+  if (typeof localStorage === 'undefined') return '1C';
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_TERM);
+    return raw === '2C' ? '2C' : '1C';
+  } catch {
+    return '1C';
+  }
+}
+
+export function saveScheduleTerm(term: '1C' | '2C'): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_SCHEDULE_TERM, term);
+  } catch (e) {
+    console.error('Error saving schedule term:', e);
+  }
+}
+
 export function exportCareerToJson(
   userState: UserCareerState,
   settings: AppSettings,
   basket: number[],
-  assignedElectives: AssignedElectivesByYear
+  assignedElectives: AssignedElectivesByYear,
+  extra?: {
+    scheduleDrafts?: ScheduleDraft[];
+    scheduleSelections?: Record<number, string>;
+    customSchedules?: SubjectSchedule[];
+    scheduleTerm?: '1C' | '2C';
+  }
 ): string {
   const exportPayload = {
-    version: '2.0',
+    version: '2.1',
     exportDate: new Date().toISOString(),
     plan: 'Plan 2023 ISI UTN',
     userState,
     settings,
     basket,
     assignedElectives,
+    scheduleDrafts: extra?.scheduleDrafts || loadScheduleDrafts(),
+    scheduleSelections: extra?.scheduleSelections || loadScheduleSelections(),
+    customSchedules: extra?.customSchedules || loadCustomSchedules(),
+    scheduleTerm: extra?.scheduleTerm || loadScheduleTerm(),
   };
   return JSON.stringify(exportPayload, null, 2);
 }
@@ -281,6 +381,10 @@ export function importCareerFromJson(jsonString: string): {
   settings?: AppSettings;
   basket?: number[];
   assignedElectives?: AssignedElectivesByYear;
+  scheduleDrafts?: ScheduleDraft[];
+  scheduleSelections?: Record<number, string>;
+  customSchedules?: SubjectSchedule[];
+  scheduleTerm?: '1C' | '2C';
   error?: string;
 } {
   try {
@@ -296,10 +400,23 @@ export function importCareerFromJson(jsonString: string): {
       ? sanitizeAssignedElectives(parsed.assignedElectives)
       : migrateLegacyElectives(userState);
 
+    const scheduleDrafts = Array.isArray(parsed.scheduleDrafts) ? parsed.scheduleDrafts : [];
+    const scheduleSelections = parsed.scheduleSelections && typeof parsed.scheduleSelections === 'object'
+      ? parsed.scheduleSelections
+      : {};
+    const customSchedules = Array.isArray(parsed.customSchedules) ? parsed.customSchedules : null;
+    const scheduleTerm = parsed.scheduleTerm === '2C' ? '2C' : '1C';
+
     saveUserState(userState);
     saveSettings(settings);
     saveBasket(basket);
     saveAssignedElectives(assignedElectives);
+    saveScheduleDrafts(scheduleDrafts);
+    saveScheduleSelections(scheduleSelections);
+    if (customSchedules) {
+      saveCustomSchedules(customSchedules);
+    }
+    saveScheduleTerm(scheduleTerm);
 
     return {
       success: true,
@@ -307,6 +424,10 @@ export function importCareerFromJson(jsonString: string): {
       settings,
       basket,
       assignedElectives,
+      scheduleDrafts,
+      scheduleSelections,
+      customSchedules: customSchedules || undefined,
+      scheduleTerm,
     };
   } catch {
     return { success: false, error: 'El archivo JSON está corrupto o mal formado.' };
@@ -319,6 +440,10 @@ export function clearCareerData(): void {
   localStorage.removeItem(STORAGE_KEY_ASSIGNED_ELECTIVES);
   localStorage.removeItem(STORAGE_KEY_OLD_SLOTS);
   localStorage.removeItem(STORAGE_KEY_BASKET);
+  localStorage.removeItem(STORAGE_KEY_SCHEDULE_SELECTIONS);
+  localStorage.removeItem(STORAGE_KEY_SCHEDULE_DRAFTS);
+  localStorage.removeItem(STORAGE_KEY_CUSTOM_SCHEDULES);
+  localStorage.removeItem(STORAGE_KEY_SCHEDULE_TERM);
 }
 
 /**

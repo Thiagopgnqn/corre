@@ -53,9 +53,20 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
 7. **📅 "Armá tu Cuatrimestre" (Planificador Semestral)**:
    - Filtros por cuatrimestre (1C, 2C, Anual) y materias 100% disponibles.
    - Canasta interactiva para planear el cuatrimestre, sumando horas semanales en vivo y evaluando la intensidad de la carga académica.
+   - Botón directo para pasar a armar los horarios de cursada con las materias elegidas en la canasta.
    - Botón para pasar la selección en bloque a estado *"Cursando"*.
 
-8. **📊 Dashboard de Estadísticas & Camino Crítico**:
+8. **🕒 Armador de Horarios de Cuatrimestre & Detección de Choques**:
+   - **Grilla semanal interactiva**: columnas de Lunes a Sábado con franjas horarias configurables y dinámicas. Bloques coloreados por materia con código, aula y docentes.
+   - **Detección visual de superposiciones**: patrón rayado animado en rojo sobre los bloques en conflicto, contador global de choques y lista clickeable que enfoca y resalta cada conflicto.
+   - **Previsualización al pasar el mouse (Ghost / Fantasma)**: al posar el cursor sobre una comisión candidata en el panel lateral, se dibuja semitransparente en la grilla indicando si caería sin choques o en rojo si superpone.
+   - **Sugeridor inteligente de combinaciones**: algoritmo automático que calcula combinaciones 100% sin choques, ordenables por *menos días de cursada*, *menos huecos libres* o *preferencia de turno* (mañana, tarde, noche); en caso de conflicto generalizado, sugiere la opción con menor cantidad de choques.
+   - **Gestión de borradores**: guarda hasta 5 propuestas independientes con nombre (ej. "Plan A", "Plan B"), con opción de duplicar, renombrar y comparar.
+   - **Importador y validador JSON**: permite cargar ofertas horarias reales mediante arrastrar y soltar o pegado de texto con validación estricta de formato y detección preventiva de errores.
+   - **Exportación**: impresión y guardado en PDF nativo, y copia rápida de resumen en texto al portapapeles.
+   - **Pasar a "Cursando"**: confirmación para inscribir las materias elegidas en el avance general de la carrera.
+
+9. **📊 Dashboard de Estadísticas & Camino Crítico**:
    - **Selector de Modo de Cálculo de Avance**:
      - *Solo obligatorias*: porcentaje basado únicamente en las materias troncales activas (36, o 37 con Analista).
      - *Con electivas (por defecto)*: suma las electivas como un bloque proporcional de 7 materias equivalentes (`ELECTIVE_SLOTS_EQUIVALENT = 7`, correspondiente a 20 créditos).
@@ -67,16 +78,16 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
    - **Camino Crítico Algorítmico**: cálculo del camino más largo de dependencias hacia el Proyecto Final y estimación de cuatrimestres restantes.
    - **Hitos & Medallas**: 25%, 50%, 75%, Graduación (100% materias + 20 cr electivas), Habilitación PPS y Analista Universitario (cuando está activo).
 
-9. **⚡ UX & Accesibilidad**:
-   - Buscador global rápido con el atajo de teclado **Ctrl + K** (o Cmd + K).
-   - **Carga rápida inicial**: marcación en lote de niveles enteros con notas por defecto o carga de perfil demo (estudiante de 3er año).
-   - **Efectos de sonido procedurales** con Web Audio API y botón para silenciar.
-   - **Confetti** animado al aprobar, promocionar o desbloquear hitos.
-   - Persistencia automática en **`localStorage`**, exportación e importación completa en formato **JSON** (incluyendo electivas asignadas por año), y reinicio con confirmación.
+10. **⚡ UX & Accesibilidad**:
+    - Buscador global rápido con el atajo de teclado **Ctrl + K** (o Cmd + K).
+    - **Carga rápida inicial**: marcación en lote de niveles enteros con notas por defecto o carga de perfil demo (estudiante de 3er año).
+    - **Efectos de sonido procedurales** con Web Audio API y botón para silenciar.
+    - **Confetti** animado al aprobar, promocionar o desbloquear hitos.
+    - Persistencia automática en **`localStorage`**, exportación e importación completa en formato **JSON** (incluyendo propuestas y comisiones guardadas), y reinicio con confirmación.
 
-10. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
+11. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
     - **Spotlight animado nativo**: recorte SVG con halo dorado pulsante y transiciones fluidas con Framer Motion (sin librerías pesadas externas).
-    - **13 pasos guiados**: bienvenida, mapa de correlativas, estados y colores, drawer interactivo, cambio de estado y festejo, tipos de aristas, simulador "¿Y si...?", electivas libres (20 cr), título de analista (99), vistas y planificador, dashboard con selector con/sin electivas, privacidad/respaldo JSON y finalización.
+    - **14 pasos guiados**: bienvenida, mapa de correlativas, estados y colores, drawer interactivo, cambio de estado y festejo, tipos de aristas, simulador "¿Y si...?", electivas libres (20 cr), título de analista (99), vistas de la app, armador de horarios de cuatrimestre, dashboard de estadísticas, privacidad/respaldo JSON y finalización.
     - **Entorno Sandbox Seguro**: cualquier acción interactiva durante el tour opera sobre una copia temporal y restaura el estado real del usuario al finalizar o salir.
     - **Convivencia con Carga Rápida**: el tour se ejecuta primero en nuevos ingresos y, en el paso final, ofrece la opción *"Cargar mis materias"* o *"Empezar solo"*.
     - **Detección inteligente de usuarios existentes**: si ya contás con materias registradas, el tutorial no interrumpe tu navegación y queda disponible a demanda desde el botón **"?" (Ver tutorial)** en la barra de navegación (desktop y móvil).

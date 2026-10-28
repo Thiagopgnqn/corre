@@ -147,7 +147,20 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Layers',
   },
 
-  // 11. Dashboard de Estadísticas
+  // 11. Armador de Horarios de Cuatrimestre
+  {
+    id: 'schedule-builder-tour',
+    title: 'Armador de Horarios & Choques',
+    description:
+      'Planificá tu semana eligiendo comisiones, detectá superposiciones con alertas visuales rayadas, previsualizá bloques al posar el mouse y generá combinaciones automáticas sin choques.',
+    badge: 'Grilla Semanal',
+    targetSelector: '[data-tour="nav-tabs"]',
+    targetView: 'schedule',
+    placement: 'bottom',
+    iconName: 'Clock',
+  },
+
+  // 12. Dashboard de Estadísticas
   {
     id: 'stats-tour',
     title: 'Estadísticas & Camino Crítico',

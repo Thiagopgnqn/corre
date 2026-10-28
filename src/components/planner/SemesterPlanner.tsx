@@ -15,7 +15,11 @@ import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
 
-export const SemesterPlanner: React.FC = () => {
+export interface SemesterPlannerProps {
+  onNavigateToSchedule?: () => void;
+}
+
+export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSchedule }) => {
   const {
     activeState,
     semesterBasket,
@@ -337,7 +341,18 @@ export const SemesterPlanner: React.FC = () => {
             </div>
 
             {/* Action buttons */}
-            <div className="pt-2 border-t border-slate-800">
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              {onNavigateToSchedule && (
+                <button
+                  onClick={onNavigateToSchedule}
+                  disabled={basketSubjects.length === 0}
+                  className="w-full py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 disabled:opacity-40 text-indigo-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
+                >
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                  <span>Armar horarios con esta canasta 🕒</span>
+                </button>
+              )}
+
               <button
                 onClick={handleStartTakingAll}
                 disabled={basketSubjects.length === 0}

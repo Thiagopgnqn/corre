@@ -7,6 +7,8 @@ import type {
   Subject,
   AssignedElectivesByYear,
 } from '../types/career';
+import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
+import { SAMPLE_SCHEDULES } from '../data/schedule';
 import { CORE_SUBJECTS } from '../data/plan2023';
 import {
   ELECTIVES,
@@ -42,6 +44,15 @@ import {
   getSample3rdYearStudent,
   shouldAutoStartTutorial,
   markTutorialCompleted,
+  loadScheduleSelections,
+  saveScheduleSelections,
+  loadScheduleDrafts,
+  saveScheduleDrafts,
+  loadCustomSchedules,
+  saveCustomSchedules,
+  clearCustomSchedules,
+  loadScheduleTerm,
+  saveScheduleTerm,
 } from '../utils/storage';
 
 interface CareerContextType {
@@ -98,6 +109,25 @@ interface CareerContextType {
   prevTutorialStep: () => void;
   goToTutorialStep: (step: number) => void;
 
+  // Schedule builder
+  scheduleSelections: Record<number, string>;
+  setScheduleSelections: (selections: Record<number, string>) => void;
+  selectCommission: (subjectId: number, commissionId: string) => void;
+  removeCommission: (subjectId: number) => void;
+  clearScheduleSelections: () => void;
+  scheduleDrafts: ScheduleDraft[];
+  saveDraft: (name: string, term: '1C' | '2C') => ScheduleDraft;
+  loadDraft: (draftId: string) => void;
+  deleteDraft: (draftId: string) => void;
+  renameDraft: (draftId: string, newName: string) => void;
+  duplicateDraft: (draftId: string) => void;
+  customSchedules: SubjectSchedule[] | null;
+  setCustomSchedules: (schedules: SubjectSchedule[] | null) => void;
+  activeSchedules: SubjectSchedule[];
+  scheduleTerm: '1C' | '2C';
+  setScheduleTerm: (term: '1C' | '2C') => void;
+  applyScheduleToEnrolled: () => { success: boolean; enrolledCount: number };
+
   exportData: () => string;
   importData: (json: string) => { success: boolean; error?: string };
   resetAll: () => void;
@@ -118,6 +148,16 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
   const [semesterBasket, setSemesterBasket] = useState<number[]>(() => loadBasket());
   const [showElectivesInGraph, setShowElectivesInGraph] = useState<boolean>(false);
+
+  // Schedule builder state
+  const [scheduleSelections, setScheduleSelections] = useState<Record<number, string>>(() => loadScheduleSelections());
+  const [scheduleDrafts, setScheduleDrafts] = useState<ScheduleDraft[]>(() => loadScheduleDrafts());
+  const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(() => loadCustomSchedules());
+  const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>(() => loadScheduleTerm());
+
+  const activeSchedules = useMemo(() => {
+    return customSchedules && customSchedules.length > 0 ? customSchedules : SAMPLE_SCHEDULES;
+  }, [customSchedules]);
 
   // Tutorial state & sandbox snapshot
   const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(() => shouldAutoStartTutorial());
@@ -146,6 +186,26 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     saveBasket(semesterBasket);
   }, [semesterBasket]);
+
+  useEffect(() => {
+    saveScheduleSelections(scheduleSelections);
+  }, [scheduleSelections]);
+
+  useEffect(() => {
+    saveScheduleDrafts(scheduleDrafts);
+  }, [scheduleDrafts]);
+
+  useEffect(() => {
+    if (customSchedules) {
+      saveCustomSchedules(customSchedules);
+    } else {
+      clearCustomSchedules();
+    }
+  }, [customSchedules]);
+
+  useEffect(() => {
+    saveScheduleTerm(scheduleTerm);
+  }, [scheduleTerm]);
 
   const isSimulationMode = simulationState !== null;
   const activeState = simulationState ?? userState;
@@ -471,9 +531,103 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return calculateCriticalPath(activeState, settings.includeAnalistaTrack);
   }, [activeState, settings.includeAnalistaTrack]);
 
+  const selectCommission = useCallback((subjectId: number, commissionId: string) => {
+    setScheduleSelections((prev) => ({
+      ...prev,
+      [subjectId]: commissionId,
+    }));
+    soundManager.playClick();
+  }, []);
+
+  const removeCommission = useCallback((subjectId: number) => {
+    setScheduleSelections((prev) => {
+      const next = { ...prev };
+      delete next[subjectId];
+      return next;
+    });
+    soundManager.playClick();
+  }, []);
+
+  const clearScheduleSelections = useCallback(() => {
+    setScheduleSelections({});
+    soundManager.playClick();
+  }, []);
+
+  const saveDraft = useCallback((name: string, term: '1C' | '2C') => {
+    const newDraft: ScheduleDraft = {
+      id: `draft-${Date.now()}`,
+      name: name.trim() || `Plan ${scheduleDrafts.length + 1}`,
+      term,
+      selections: { ...scheduleSelections },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setScheduleDrafts((prev) => {
+      const next = [newDraft, ...prev.filter((d) => d.name !== newDraft.name)].slice(0, 5);
+      return next;
+    });
+    soundManager.playMilestone();
+    return newDraft;
+  }, [scheduleSelections, scheduleDrafts]);
+
+  const loadDraft = useCallback((draftId: string) => {
+    const draft = scheduleDrafts.find((d) => d.id === draftId);
+    if (draft) {
+      setScheduleSelections(draft.selections);
+      setScheduleTerm(draft.term);
+      soundManager.playClick();
+    }
+  }, [scheduleDrafts]);
+
+  const deleteDraft = useCallback((draftId: string) => {
+    setScheduleDrafts((prev) => prev.filter((d) => d.id !== draftId));
+    soundManager.playClick();
+  }, []);
+
+  const renameDraft = useCallback((draftId: string, newName: string) => {
+    setScheduleDrafts((prev) =>
+      prev.map((d) => (d.id === draftId ? { ...d, name: newName.trim() || d.name, updatedAt: Date.now() } : d))
+    );
+  }, []);
+
+  const duplicateDraft = useCallback((draftId: string) => {
+    const draft = scheduleDrafts.find((d) => d.id === draftId);
+    if (!draft) return;
+    const duplicated: ScheduleDraft = {
+      id: `draft-${Date.now()}`,
+      name: `${draft.name} (Copia)`,
+      term: draft.term,
+      selections: { ...draft.selections },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    setScheduleDrafts((prev) => [duplicated, ...prev].slice(0, 5));
+    soundManager.playClick();
+  }, [scheduleDrafts]);
+
+  const applyScheduleToEnrolled = useCallback(() => {
+    const selectedIds = Object.keys(scheduleSelections).map(Number);
+    if (selectedIds.length === 0) {
+      return { success: false, enrolledCount: 0 };
+    }
+    const updates = selectedIds.map((id) => ({
+      id,
+      status: 'cursando' as SubjectStatus,
+    }));
+    batchUpdateStatus(updates);
+    soundManager.playMilestone();
+    fireConfetti();
+    return { success: true, enrolledCount: selectedIds.length };
+  }, [scheduleSelections, batchUpdateStatus]);
+
   const exportData = useCallback(() => {
-    return exportCareerToJson(userState, settings, semesterBasket, assignedElectives);
-  }, [userState, settings, semesterBasket, assignedElectives]);
+    return exportCareerToJson(userState, settings, semesterBasket, assignedElectives, {
+      scheduleDrafts,
+      scheduleSelections,
+      customSchedules: customSchedules || undefined,
+      scheduleTerm,
+    });
+  }, [userState, settings, semesterBasket, assignedElectives, scheduleDrafts, scheduleSelections, customSchedules, scheduleTerm]);
 
   const importData = useCallback((json: string) => {
     const res = importCareerFromJson(json);
@@ -482,6 +636,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (res.settings) setSettings(res.settings);
       if (res.basket) setSemesterBasket(res.basket);
       if (res.assignedElectives) setAssignedElectives(res.assignedElectives);
+      if (res.scheduleDrafts) setScheduleDrafts(res.scheduleDrafts);
+      if (res.scheduleSelections) setScheduleSelections(res.scheduleSelections);
+      if (res.customSchedules) setCustomSchedules(res.customSchedules);
+      if (res.scheduleTerm) setScheduleTerm(res.scheduleTerm);
       soundManager.playMilestone();
       fireConfetti();
       return { success: true };
@@ -494,6 +652,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setUserState({});
     setSemesterBasket([]);
     setAssignedElectives({ ...INITIAL_ASSIGNED_ELECTIVES });
+    setScheduleSelections({});
+    setScheduleDrafts([]);
+    setCustomSchedules(null);
     setSimulationState(null);
     soundManager.playClick();
   }, []);
@@ -612,6 +773,23 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         nextTutorialStep,
         prevTutorialStep,
         goToTutorialStep,
+        scheduleSelections,
+        setScheduleSelections,
+        selectCommission,
+        removeCommission,
+        clearScheduleSelections,
+        scheduleDrafts,
+        saveDraft,
+        loadDraft,
+        deleteDraft,
+        renameDraft,
+        duplicateDraft,
+        customSchedules,
+        setCustomSchedules,
+        activeSchedules,
+        scheduleTerm,
+        setScheduleTerm,
+        applyScheduleToEnrolled,
         exportData,
         importData,
         resetAll,

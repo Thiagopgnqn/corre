@@ -23,7 +23,17 @@ import {
   resetTutorialState,
 } from '../src/utils/storage';
 import { TUTORIAL_STEPS } from '../src/data/tutorialSteps';
+import { SAMPLE_SCHEDULES } from '../src/data/schedule';
+import {
+  timeToMinutes,
+  minutesToTime,
+  checkSlotsOverlap,
+  detectAllConflicts,
+  validateScheduleData,
+  generateScheduleCombinations,
+} from '../src/utils/scheduleLogic';
 import type { UserCareerState } from '../src/types/career';
+import type { Commission, Slot } from '../src/types/schedule';
 
 function assert(cond: boolean, message: string) {
   if (!cond) {
@@ -350,7 +360,7 @@ randomScenarios.forEach((sc, i) => {
 
 // 17. Interactive Welcome Tutorial Configuration
 assert(Array.isArray(TUTORIAL_STEPS), 'TUTORIAL_STEPS must be an array');
-assert(TUTORIAL_STEPS.length === 13, `TUTORIAL_STEPS must have exactly 13 steps, got ${TUTORIAL_STEPS.length}`);
+assert(TUTORIAL_STEPS.length === 14, `TUTORIAL_STEPS must have exactly 14 steps, got ${TUTORIAL_STEPS.length}`);
 
 const expectedStepIds = [
   'welcome',
@@ -363,6 +373,7 @@ const expectedStepIds = [
   'electives-tour',
   'analista-switch',
   'app-views',
+  'schedule-builder-tour',
   'stats-tour',
   'persistence-tour',
   'finish',
@@ -421,4 +432,148 @@ assert(shouldAutoStartTutorial(newUserData) === false, 'shouldAutoStartTutorial 
 resetTutorialState();
 assert(shouldAutoStartTutorial(newUserData) === true, 'shouldAutoStartTutorial must return true after resetTutorialState for fresh user');
 
-console.log('ALL UNIT LOGIC TESTS (INCLUDING INTERACTIVE TUTORIAL & LEGACY MIGRATION) PASSED SUCCESSFULLY!');
+// 19. Schedule Builder Logic Tests
+// A) Time conversion
+assert(timeToMinutes('08:00') === 480, '08:00 must be 480 minutes');
+assert(timeToMinutes('10:15') === 615, '10:15 must be 615 minutes');
+assert(minutesToTime(480) === '08:00', '480 must be 08:00');
+assert(minutesToTime(615) === '10:15', '615 must be 10:15');
+
+// B) Slot overlap tests
+const slotA: Slot = { day: 'LUN', start: '08:00', end: '10:15' };
+const slotOverlap: Slot = { day: 'LUN', start: '09:00', end: '11:00' };
+const slotConsecutive: Slot = { day: 'LUN', start: '10:15', end: '12:30' };
+const slotSeparated: Slot = { day: 'LUN', start: '14:00', end: '16:00' };
+const slotDifferentDay: Slot = { day: 'MAR', start: '08:00', end: '10:15' };
+
+// Overlapping same day
+const resOverlap = checkSlotsOverlap(slotA, slotOverlap);
+assert(resOverlap.overlaps === true, 'Slots 08:00-10:15 and 09:00-11:00 on LUN must overlap');
+assert(resOverlap.overlapStart === '09:00', 'Overlap start must be 09:00');
+assert(resOverlap.overlapEnd === '10:15', 'Overlap end must be 10:15');
+assert(resOverlap.isConsecutive === false, 'Overlapping slots are not consecutive');
+
+// Touching borders on same day -> NOT overlap, IS consecutive
+const resConsecutive = checkSlotsOverlap(slotA, slotConsecutive);
+assert(resConsecutive.overlaps === false, 'Touching border (10:15 and 10:15) must NOT count as overlap');
+assert(resConsecutive.isConsecutive === true, 'Touching border (10:15 and 10:15) must be consecutive');
+assert(resConsecutive.consecutiveTime === '10:15', 'Consecutive time must be 10:15');
+
+// Separated same day
+const resSeparated = checkSlotsOverlap(slotA, slotSeparated);
+assert(resSeparated.overlaps === false, 'Separated slots on same day must not overlap');
+assert(resSeparated.isConsecutive === false, 'Separated slots with gap must not be consecutive');
+
+// Different days
+const resDifferentDay = checkSlotsOverlap(slotA, slotDifferentDay);
+assert(resDifferentDay.overlaps === false, 'Slots on different days must not overlap');
+assert(resDifferentDay.isConsecutive === false, 'Slots on different days must not be consecutive');
+
+// C) Pairwise conflict detector
+const comm1: Commission = {
+  id: '1-1K1',
+  code: '1K1',
+  professors: ['Prof A'],
+  slots: [slotA], // 08:00 - 10:15
+};
+const comm2Overlapping: Commission = {
+  id: '6-1K2',
+  code: '1K2',
+  professors: ['Prof B'],
+  slots: [{ day: 'LUN', start: '08:30', end: '10:00' }], // Overlaps with comm1, ends before comm3
+};
+const comm3NoConflict: Commission = {
+  id: '8-1K1',
+  code: '1K1',
+  professors: ['Prof C'],
+  slots: [slotConsecutive], // 10:15 - 12:30 -> touches comm1 at 10:15
+};
+
+const conflictResult = detectAllConflicts({
+  1: comm1,
+  6: comm2Overlapping,
+  8: comm3NoConflict,
+});
+assert(conflictResult.conflicts.length === 1, 'There must be exactly 1 conflict between comm1 and comm2');
+assert(conflictResult.conflicts[0].overlapStart === '08:30', 'Conflict overlap start must be 08:30');
+assert(conflictResult.conflicts[0].overlapEnd === '10:00', 'Conflict overlap end must be 10:00');
+assert(conflictResult.consecutiveWarnings.length === 1, 'There must be 1 consecutive warning between comm1 and comm3');
+
+// 20. Schedule Schema Validation & Combination Generator Tests
+// A) Validation on Sample Schedules
+const validSampleRes = validateScheduleData(SAMPLE_SCHEDULES);
+assert(validSampleRes.valid === true, `SAMPLE_SCHEDULES must be valid, got errors: ${validSampleRes.errors.join(', ')}`);
+assert(validSampleRes.schedulesCount === 4, 'Sample schedules must have 4 subjects');
+
+// B) Validation rejects invalid formats
+const invalidDataEndBeforeStart = [
+  {
+    subjectId: 1,
+    term: '1C',
+    commissions: [
+      {
+        id: '1-BAD',
+        code: 'BAD',
+        professors: ['Prof'],
+        slots: [{ day: 'LUN', start: '12:00', end: '10:00' }], // End before start
+      },
+    ],
+  },
+];
+const resBad = validateScheduleData(invalidDataEndBeforeStart);
+assert(resBad.valid === false, 'Validation must fail when end time is before start time');
+
+const invalidDuplicateCommId = [
+  {
+    subjectId: 1,
+    term: '1C',
+    commissions: [
+      { id: 'DUP-1', code: 'A', professors: [], slots: [{ day: 'LUN', start: '08:00', end: '10:00' }] },
+      { id: 'DUP-1', code: 'B', professors: [], slots: [{ day: 'MAR', start: '08:00', end: '10:00' }] },
+    ],
+  },
+];
+const resDup = validateScheduleData(invalidDuplicateCommId);
+assert(resDup.valid === false, 'Validation must fail on duplicate commission IDs');
+
+// C) Combination Generator: Conflict-Free combinations available
+const sampleSchedulesMap = new Map<number, (typeof SAMPLE_SCHEDULES)[0]>();
+SAMPLE_SCHEDULES.forEach((s) => sampleSchedulesMap.set(Number(s.subjectId), s));
+
+const comboResult = generateScheduleCombinations(
+  [1, 6], // AM1 and AED
+  sampleSchedulesMap,
+  { sortBy: 'fewer-days' }
+);
+assert(comboResult.hasConflictFree === true, 'There must exist conflict-free combinations between AM1 and AED');
+assert(comboResult.combinations.length > 0, 'Must return at least 1 combination');
+assert(comboResult.combinations[0].conflictCount === 0, 'Top combination must have 0 conflicts');
+
+// D) Combination Generator: Fallback when ALL combinations conflict
+// Let's create an artificial scenario where all commissions clash
+const clashingMap = new Map<number, (typeof SAMPLE_SCHEDULES)[0]>();
+clashingMap.set(100, {
+  subjectId: 100,
+  term: '1C',
+  commissions: [
+    { id: '100-A', code: 'A', professors: [], slots: [{ day: 'LUN', start: '08:00', end: '12:00' }] },
+  ],
+});
+clashingMap.set(200, {
+  subjectId: 200,
+  term: '1C',
+  commissions: [
+    { id: '200-A', code: 'A', professors: [], slots: [{ day: 'LUN', start: '10:00', end: '14:00' }] },
+  ],
+});
+
+const impossibleCombos = generateScheduleCombinations(
+  [100, 200],
+  clashingMap,
+  { sortBy: 'fewer-days' }
+);
+assert(impossibleCombos.hasConflictFree === false, 'Must report hasConflictFree = false when no solution exists');
+assert(impossibleCombos.combinations.length === 1, 'Must still return the best combination with minimal conflicts');
+assert(impossibleCombos.combinations[0].conflictCount === 1, 'Returned combination must reflect 1 conflict');
+
+console.log('ALL UNIT LOGIC TESTS (INCLUDING SCHEDULE BUILDER, CLASH DETECTOR & COMBINATIONS) PASSED SUCCESSFULLY!');

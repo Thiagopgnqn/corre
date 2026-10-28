@@ -17,10 +17,11 @@ import {
   Layers,
   Award,
   HelpCircle,
+  Clock,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 
-export type AppView = 'graph' | 'kanban' | 'planner' | 'electives' | 'stats';
+export type AppView = 'graph' | 'kanban' | 'planner' | 'schedule' | 'electives' | 'stats';
 
 interface NavbarProps {
   currentView: AppView;
@@ -80,6 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     { id: 'graph', label: 'Mapa de Correlativas', icon: Compass },
     { id: 'kanban', label: 'Niveles & Tablero', icon: Kanban },
     { id: 'planner', label: 'Armá tu Cuatrimestre', icon: CalendarDays },
+    { id: 'schedule', label: 'Horarios', icon: Clock },
     { id: 'electives', label: 'Electivas', icon: Sparkles },
     { id: 'stats', label: 'Estadísticas & Camino Crítico', icon: BarChart3 },
   ];
