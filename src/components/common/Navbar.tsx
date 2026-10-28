@@ -109,7 +109,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
   return (
     <>
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 w-full overflow-x-hidden">
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 w-full">
         <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-6 flex items-center justify-between h-16 gap-2 sm:gap-4">
           {/* Logo & Plan */}
           <div className="flex items-center gap-2.5 shrink-0">
@@ -252,7 +252,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80">
+                <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80">
                   <div className="px-3.5 py-2 text-[11px] text-slate-400">
                     Progreso: <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span> de materias
                   </div>
