@@ -14,8 +14,25 @@ import { SearchModal } from './components/common/SearchModal';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 
+const VALID_VIEWS: AppView[] = ['graph', 'kanban', 'planner', 'schedule', 'electives', 'stats'];
+
+const getInitialView = (): AppView => {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace('#', '') as AppView;
+    if (VALID_VIEWS.includes(hash)) return hash;
+  }
+  return 'graph';
+};
+
 const AppContent: React.FC = () => {
-  const [currentView, setCurrentView] = useState<AppView>('graph');
+  const [currentView, setCurrentView] = useState<AppView>(getInitialView);
+
+  const handleSetView = (view: AppView) => {
+    setCurrentView(view);
+    if (typeof window !== 'undefined') {
+      window.location.hash = view;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
@@ -23,7 +40,7 @@ const AppContent: React.FC = () => {
       <SimulationBar />
 
       {/* Main navigation header */}
-      <Navbar currentView={currentView} setCurrentView={setCurrentView} />
+      <Navbar currentView={currentView} setCurrentView={handleSetView} />
 
       {/* Main content body with smooth transitions */}
       <main className="flex-1 flex flex-col overflow-x-hidden pb-16 md:pb-0">
@@ -39,7 +56,7 @@ const AppContent: React.FC = () => {
             {currentView === 'graph' && <CorrelativeGraph />}
             {currentView === 'kanban' && <KanbanBoard />}
             {currentView === 'planner' && (
-              <SemesterPlanner onNavigateToSchedule={() => setCurrentView('schedule')} />
+              <SemesterPlanner onNavigateToSchedule={() => handleSetView('schedule')} />
             )}
             {currentView === 'schedule' && <ScheduleBuilder />}
             {currentView === 'electives' && <ElectivesPicker />}

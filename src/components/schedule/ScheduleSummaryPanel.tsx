@@ -8,6 +8,7 @@ import {
   Trash2,
   Calendar,
   CheckCircle2,
+  CalendarPlus,
 } from 'lucide-react';
 import type { Commission, ScheduleConflict, DayOfWeek } from '../../types/schedule';
 import { calculateScheduleSummary, DAY_LABELS } from '../../utils/scheduleLogic';
@@ -20,6 +21,7 @@ interface ScheduleSummaryPanelProps {
   onApplyToEnrolled: () => void;
   onClearAll: () => void;
   onSelectConflict: (conflictId: string) => void;
+  onNavigateToTab?: (tab: 'oferta' | 'grilla' | 'resumen') => void;
 }
 
 export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
@@ -30,6 +32,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   onApplyToEnrolled,
   onClearAll,
   onSelectConflict,
+  onNavigateToTab,
 }) => {
   const [copied, setCopied] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
@@ -73,6 +76,84 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   // Trigger print dialog (users can print or save as PDF directly from the browser)
   const handlePrint = () => {
     window.print();
+  };
+
+  // Export recurring classes to standard iCalendar (.ics) format
+  const handleExportIcs = () => {
+    if (selectedCount === 0) return;
+
+    const dayToIcsDay: Record<DayOfWeek, string> = {
+      LUN: 'MO',
+      MAR: 'TU',
+      MIE: 'WE',
+      JUE: 'TH',
+      VIE: 'FR',
+      SAB: 'SA',
+    };
+
+    const dayOffset: Record<DayOfWeek, number> = {
+      LUN: 0,
+      MAR: 1,
+      MIE: 2,
+      JUE: 3,
+      VIE: 4,
+      SAB: 5,
+    };
+
+    const now = new Date();
+    const currentDay = now.getDay();
+    const distanceToMonday = (8 - currentDay) % 7 || 7;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + distanceToMonday);
+
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Mi Carrera UTN ISI//Armador de Horarios//ES',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+    ];
+
+    Object.entries(selections).forEach(([sIdStr, comm]) => {
+      const sId = Number(sIdStr);
+      const name = subjectNamesMap.get(sId) || `Materia #${sId}`;
+
+      comm.slots.forEach((slot, idx) => {
+        const offset = dayOffset[slot.day] || 0;
+        const eventDate = new Date(monday.getTime() + offset * 86400000);
+        const y = eventDate.getFullYear();
+        const m = String(eventDate.getMonth() + 1).padStart(2, '0');
+        const d = String(eventDate.getDate()).padStart(2, '0');
+
+        const [sh, sm] = slot.start.split(':');
+        const [eh, em] = slot.end.split(':');
+
+        const dtstart = `${y}${m}${d}T${sh}${sm}00`;
+        const dtend = `${y}${m}${d}T${eh}${em}00`;
+
+        ics.push(
+          'BEGIN:VEVENT',
+          `UID:${Date.now()}-${sId}-${comm.id}-${idx}@micarrera.utn`,
+          `DTSTAMP:${y}${m}${d}T000000Z`,
+          `DTSTART:${dtstart}`,
+          `DTEND:${dtend}`,
+          `RRULE:FREQ=WEEKLY;BYDAY=${dayToIcsDay[slot.day]};COUNT=16`,
+          `SUMMARY:${name} (${comm.code})`,
+          `DESCRIPTION:Comisión ${comm.code}${comm.professors.length > 0 ? `\\nDocentes: ${comm.professors.join(', ')}` : ''}${slot.mode === 'virtual' ? '\\nModalidad: Virtual' : ''}`,
+          slot.room ? `LOCATION:Aula ${slot.room}` : 'LOCATION:UTN FRBA',
+          'END:VEVENT'
+        );
+      });
+    });
+
+    ics.push('END:VCALENDAR');
+
+    const blob = new Blob([ics.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `horarios-utn-${new Date().toISOString().slice(0, 10)}.ics`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -168,8 +249,11 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
             {conflicts.map((conf, cIdx) => (
               <button
                 key={cIdx}
-                onClick={() => onSelectConflict(`${conf.commissionId1}-${conf.commissionId2}`)}
-                className="w-full p-2 rounded-xl bg-rose-900/40 hover:bg-rose-900/70 border border-rose-500/30 text-left text-xs transition-colors flex items-center justify-between"
+                onClick={() => {
+                  onSelectConflict(`${conf.commissionId1}-${conf.commissionId2}`);
+                  if (onNavigateToTab) onNavigateToTab('grilla');
+                }}
+                className="w-full p-2.5 rounded-xl bg-rose-900/40 hover:bg-rose-900/70 border border-rose-500/30 text-left text-xs transition-colors flex items-center justify-between active:scale-[0.99]"
               >
                 <div className="min-w-0 pr-2">
                   <span className="font-bold text-white block truncate">
@@ -179,6 +263,9 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
                     {conf.day} • {conf.overlapStart} - {conf.overlapEnd}
                   </span>
                 </div>
+                <span className="text-[10px] text-rose-300 font-bold bg-rose-950/80 px-2 py-0.5 rounded border border-rose-500/30 shrink-0">
+                  Ver ➔
+                </span>
               </button>
             ))}
           </div>
@@ -223,6 +310,17 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
               <span>Copiar resumen en texto</span>
             </>
           )}
+        </button>
+
+        {/* Export to Google / Apple Calendar (.ics) */}
+        <button
+          onClick={handleExportIcs}
+          disabled={selectedCount === 0}
+          className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          title="Exportar archivo .ics para Google Calendar, Apple Calendar o Outlook"
+        >
+          <CalendarPlus className="w-4 h-4 text-indigo-400" />
+          <span>Exportar a Calendario (.ics)</span>
         </button>
 
         {/* Print / Export PDF button */}

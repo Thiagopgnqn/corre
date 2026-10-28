@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
@@ -159,7 +159,20 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   onFocusSubject,
 }) => {
   const [selectedMobileDay, setSelectedMobileDay] = useState<DayOfWeek>('LUN');
+  const [mobileGridMode, setMobileGridMode] = useState<'day' | 'week'>('day');
+  const [isDesktop, setIsDesktop] = useState(
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
   const [activePopover, setActivePopover] = useState<ScheduledItem | null>(null);
+
+  // Resize listener to adapt layout dynamically between mobile & desktop
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Detect current day of week to highlight column
   const todayDay: DayOfWeek | null = useMemo(() => {
@@ -174,6 +187,13 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
     };
     return mapping[dayNum] || null;
   }, []);
+
+  // Initialize selectedMobileDay with today if valid weekday
+  useEffect(() => {
+    if (todayDay) {
+      setSelectedMobileDay(todayDay);
+    }
+  }, [todayDay]);
 
   // Compute start/end time bounds dynamically based on active commissions + 1h margin
   const { minMinute, maxMinute, hoursRange } = useMemo(() => {
@@ -296,64 +316,100 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
     touchStartX.current = null;
   };
 
+  const isSingleDayMode = !isDesktop && mobileGridMode === 'day';
+  const activeDays = isSingleDayMode ? [selectedMobileDay] : DAYS_ORDER;
+  const gridColsClass = isSingleDayMode ? 'grid-cols-[48px_1fr]' : 'grid-cols-[55px_repeat(6,1fr)]';
+  const containerWidthClass = isSingleDayMode ? 'w-full lg:min-w-0' : 'min-w-[640px] lg:min-w-0';
+
   return (
     <div className="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0 relative">
-      {/* Mobile Day Selector with quick arrows & indicators */}
-      <div className="lg:hidden flex items-center justify-between p-2 bg-slate-950/80 border-b border-slate-800 shrink-0">
-        <button
-          onClick={() => {
-            const idx = DAYS_ORDER.indexOf(selectedMobileDay);
-            if (idx > 0) setSelectedMobileDay(DAYS_ORDER[idx - 1]);
-          }}
-          disabled={DAYS_ORDER.indexOf(selectedMobileDay) === 0}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20"
-        >
-          <ChevronLeft className="w-4 h-4" />
-        </button>
+      {/* Mobile Day Selector & View Mode Switcher */}
+      <div className="lg:hidden flex items-center justify-between p-2 bg-slate-950/90 border-b border-slate-800 gap-1 shrink-0">
+        <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
+          <button
+            onClick={() => {
+              const idx = DAYS_ORDER.indexOf(selectedMobileDay);
+              if (idx > 0) setSelectedMobileDay(DAYS_ORDER[idx - 1]);
+            }}
+            disabled={DAYS_ORDER.indexOf(selectedMobileDay) === 0}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0"
+            title="Día anterior"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
 
-        <div className="flex items-center gap-1 overflow-x-auto px-1">
-          {DAYS_ORDER.map((d) => {
-            const count = scheduledItems.filter((i) => i.slot.day === d).length;
-            const isActive = selectedMobileDay === d;
-            const isToday = todayDay === d;
-            return (
-              <button
-                key={d}
-                onClick={() => setSelectedMobileDay(d)}
-                className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 ${
-                  isActive
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'bg-slate-900 text-slate-400 hover:text-white'
-                }`}
-              >
-                <span>{d}</span>
-                {isToday && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
-                )}
-                {count > 0 && (
-                  <span
-                    className={`text-[9px] px-1 rounded-full font-mono ${
-                      isActive ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+          <div className="flex items-center gap-1 overflow-x-auto py-0.5 no-scrollbar flex-1">
+            {DAYS_ORDER.map((d) => {
+              const count = scheduledItems.filter((i) => i.slot.day === d).length;
+              const isActive = selectedMobileDay === d;
+              const isToday = todayDay === d;
+              return (
+                <button
+                  key={d}
+                  onClick={() => {
+                    setSelectedMobileDay(d);
+                    setMobileGridMode('day');
+                  }}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 active:scale-95 ${
+                    isActive && mobileGridMode === 'day'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-900 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>{d}</span>
+                  {isToday && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                  )}
+                  {count > 0 && (
+                    <span
+                      className={`text-[9px] px-1 rounded-full font-mono font-bold ${
+                        isActive && mobileGridMode === 'day' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={() => {
+              const idx = DAYS_ORDER.indexOf(selectedMobileDay);
+              if (idx < DAYS_ORDER.length - 1) setSelectedMobileDay(DAYS_ORDER[idx + 1]);
+            }}
+            disabled={DAYS_ORDER.indexOf(selectedMobileDay) === DAYS_ORDER.length - 1}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0"
+            title="Día siguiente"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
 
-        <button
-          onClick={() => {
-            const idx = DAYS_ORDER.indexOf(selectedMobileDay);
-            if (idx < DAYS_ORDER.length - 1) setSelectedMobileDay(DAYS_ORDER[idx + 1]);
-          }}
-          disabled={DAYS_ORDER.indexOf(selectedMobileDay) === DAYS_ORDER.length - 1}
-          className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
+        {/* Day / Week View Mode Toggle on Mobile */}
+        <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[10px] font-bold shrink-0">
+          <button
+            onClick={() => setMobileGridMode('day')}
+            className={`px-2 py-1 rounded-md transition-all ${
+              mobileGridMode === 'day'
+                ? 'bg-indigo-600 text-white shadow-sm font-black'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Día
+          </button>
+          <button
+            onClick={() => setMobileGridMode('week')}
+            className={`px-2 py-1 rounded-md transition-all ${
+              mobileGridMode === 'week'
+                ? 'bg-indigo-600 text-white shadow-sm font-black'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Semana
+          </button>
+        </div>
       </div>
 
       {/* Main Grid Canvas Wrapper with Independent Internal Vertical & Horizontal Scroll */}
@@ -362,48 +418,68 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        <div className="min-w-[680px] lg:min-w-0 flex flex-col" style={{ height: `${totalGridHeight + 50}px` }}>
+        <div className={`${containerWidthClass} flex flex-col`} style={{ height: `${totalGridHeight + 50}px` }}>
           {/* Day Headers: Sticky at top */}
-          <div className="grid grid-cols-[55px_repeat(6,1fr)] border-b border-slate-800 pb-2 mb-2 sticky top-0 bg-[#090d16] z-20">
+          <div className={`grid ${gridColsClass} border-b border-slate-800 pb-2 mb-2 sticky top-0 bg-[#090d16] z-20`}>
             <div className="text-[11px] font-mono text-slate-500 flex items-center justify-center">
               <Clock className="w-3.5 h-3.5" />
             </div>
-            {DAYS_ORDER.map((day) => {
-              const dayItems = scheduledItems.filter((i) => i.slot.day === day);
-              const isToday = todayDay === day;
-              const isMobileActive = selectedMobileDay === day;
-
-              return (
-                <div
-                  key={day}
-                  className={`text-center py-1 px-1 rounded-xl transition-colors relative ${
-                    isToday
-                      ? 'bg-indigo-500/15 border-b-2 border-indigo-400 text-indigo-300 font-bold'
-                      : isMobileActive
-                      ? 'bg-slate-800/60 text-slate-200'
-                      : 'text-slate-400'
-                  }`}
-                >
-                  <div className="flex items-center justify-center gap-1">
-                    <span className="text-xs font-bold block">{DAY_LABELS[day]}</span>
-                    {isToday && (
-                      <span className="text-[9px] font-bold px-1 py-0.1 rounded bg-indigo-500/30 text-indigo-300 uppercase tracking-wider">
-                        Hoy
-                      </span>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-slate-500 font-mono block">
-                    {dayItems.length > 0
-                      ? `${dayItems.length} clase${dayItems.length > 1 ? 's' : ''}`
-                      : 'Libre'}
-                  </span>
+            {isSingleDayMode ? (
+              <div className="flex items-center justify-between py-1 px-3 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-white">{DAY_LABELS[selectedMobileDay]}</span>
+                  {todayDay === selectedMobileDay && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 uppercase tracking-wider">
+                      Hoy
+                    </span>
+                  )}
                 </div>
-              );
-            })}
+                <span className="text-[11px] text-indigo-300 font-mono font-bold">
+                  {scheduledItems.filter((i) => i.slot.day === selectedMobileDay).length > 0
+                    ? `${scheduledItems.filter((i) => i.slot.day === selectedMobileDay).length} ${
+                        scheduledItems.filter((i) => i.slot.day === selectedMobileDay).length === 1 ? 'clase' : 'clases'
+                      }`
+                    : 'Día libre'}
+                </span>
+              </div>
+            ) : (
+              DAYS_ORDER.map((day) => {
+                const dayItems = scheduledItems.filter((i) => i.slot.day === day);
+                const isToday = todayDay === day;
+                const isMobileActive = selectedMobileDay === day;
+
+                return (
+                  <div
+                    key={day}
+                    className={`text-center py-1 px-1 rounded-xl transition-colors relative ${
+                      isToday
+                        ? 'bg-indigo-500/15 border-b-2 border-indigo-400 text-indigo-300 font-bold'
+                        : isMobileActive
+                        ? 'bg-slate-800/60 text-slate-200'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span className="text-xs font-bold block">{DAY_LABELS[day]}</span>
+                      {isToday && (
+                        <span className="text-[9px] font-bold px-1 py-0.1 rounded bg-indigo-500/30 text-indigo-300 uppercase tracking-wider">
+                          Hoy
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[10px] text-slate-500 font-mono block">
+                      {dayItems.length > 0
+                        ? `${dayItems.length} clase${dayItems.length > 1 ? 's' : ''}`
+                        : 'Libre'}
+                    </span>
+                  </div>
+                );
+              })
+            )}
           </div>
 
           {/* Time Slots & Columns Container */}
-          <div className="relative flex-1 grid grid-cols-[55px_repeat(6,1fr)]">
+          <div className={`relative flex-1 grid ${gridColsClass}`}>
             {/* Time labels axis (Sticky on left) */}
             <div className="relative border-r border-slate-800/80 pr-2 sticky left-0 z-10 bg-[#090d16]/95">
               {hoursRange.map((hour, hIdx) => {
@@ -435,8 +511,8 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               })}
             </div>
 
-            {/* 6 Columns for LUN to SAB */}
-            {DAYS_ORDER.map((day, dayIndex) => {
+            {/* Active Day Columns */}
+            {activeDays.map((day, dayIndex) => {
               const dayScheduled = scheduledItems.filter((item) => item.slot.day === day);
               const isHoveredDay = hoveredCommission?.commission.slots.some((s) => s.day === day);
               const isToday = todayDay === day;
@@ -452,6 +528,18 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                       : 'bg-transparent'
                   }`}
                 >
+                  {/* Empty day free state in single day mode */}
+                  {dayScheduled.length === 0 && isSingleDayMode && (
+                    <div className="absolute inset-x-4 top-1/3 -translate-y-1/2 p-6 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-2 backdrop-blur-md shadow-2xl pointer-events-none z-10">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center">
+                        <Calendar className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-white">¡Día libre!</h4>
+                      <p className="text-xs text-slate-400">
+                        No tenés materias programadas para los {DAY_LABELS[day].toLowerCase()}s.
+                      </p>
+                    </div>
+                  )}
                   {/* Horizontal Hour Lines & 30-min Sublines */}
                   {hoursRange.map((hour, hIdx) => {
                     const minute = hour * 60;
@@ -553,13 +641,20 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                         {/* Top: Short Subject Name & Commission Code */}
                         <div className="relative z-10 flex items-start justify-between gap-1 w-full">
                           <div className="min-w-0 flex-1">
-                            <span className="font-extrabold text-[11px] leading-tight block truncate text-white">
-                              {shortName}
+                            <span className="font-extrabold text-xs sm:text-[11px] leading-tight block truncate text-white">
+                              {isSingleDayMode ? item.subjectName : shortName}
                             </span>
                             {!isShortBlock && (
-                              <span className="text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded inline-block mt-0.5 bg-black/40 border border-white/10">
-                                {item.commission.code}
-                              </span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded inline-block bg-black/40 border border-white/10 text-slate-200">
+                                  {item.commission.code}
+                                </span>
+                                {isSingleDayMode && item.commission.turno && (
+                                  <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+                                    {item.commission.turno}
+                                  </span>
+                                )}
+                              </div>
                             )}
                           </div>
 
@@ -574,10 +669,10 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                                 e.stopPropagation();
                                 onRemoveCommission(item.subjectId);
                               }}
-                              className="opacity-0 group-hover:opacity-100 p-0.5 rounded bg-black/60 hover:bg-rose-500/50 text-slate-300 hover:text-white transition-opacity"
+                              className="opacity-90 sm:opacity-0 sm:group-hover:opacity-100 p-1 rounded-lg bg-black/60 hover:bg-rose-500/60 text-slate-300 hover:text-white transition-opacity active:scale-95"
                               title="Quitar comisión"
                             >
-                              <X className="w-3 h-3" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -599,11 +694,11 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                           <div className="flex items-center gap-1 shrink-0">
                             {item.slot.room && (
                               <span
-                                className="flex items-center gap-0.5 text-slate-400"
+                                className="flex items-center gap-0.5 text-slate-300"
                                 title={`Aula: ${item.slot.room}`}
                               >
                                 <MapPin className="w-2.5 h-2.5" />
-                                <span className="hidden sm:inline">{item.slot.room}</span>
+                                <span>{isSingleDayMode ? `Aula ${item.slot.room}` : item.slot.room}</span>
                               </span>
                             )}
                             {item.slot.mode === 'virtual' && (
@@ -723,7 +818,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.92, y: 10 }}
               transition={{ duration: 0.18 }}
-              className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl overflow-hidden p-5 space-y-4"
+              className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-4 sm:p-5 space-y-4"
             >
               {/* Header */}
               <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
