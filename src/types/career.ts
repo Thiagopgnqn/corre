@@ -12,14 +12,15 @@ export interface Subject {
   id: number;
   code: string;
   name: string;
-  level: number; // 1, 2, 3, 4, 5
+  level: number; // 1, 2, 3, 4, 5 (Nivel sugerido por plan)
+  assignedYear?: number; // Año asignado por el usuario (1 a 5)
   modality: Modality;
   weeklyHours: number;
-  regularPrereqs: number[]; // IDs of subjects that must be >= regularizada
-  approvedPrereqs: number[]; // IDs of subjects that must be >= aprobada
+  regularPrereqs: number[]; // IDs de materias requeridas >= regularizada
+  approvedPrereqs: number[]; // IDs de materias requeridas >= aprobada
   isElective?: boolean;
   credits?: number;
-  specialRule?: string; // Special notes like "Para rendirlo requiere todas de 1 a 23"
+  specialRule?: string; // Reglas especiales
   isIntegrator?: boolean;
 }
 
@@ -31,12 +32,7 @@ export interface UserSubjectState {
 
 export type UserCareerState = Record<number | string, UserSubjectState>;
 
-export interface ElectiveSlot {
-  id: string;
-  level: number;
-  requiredCredits: number;
-  selectedElectiveId?: string;
-}
+export type AssignedElectivesByYear = Record<number, number[]>;
 
 export interface CareerProgress {
   totalSubjects: number;
@@ -53,11 +49,19 @@ export interface CareerProgress {
   averageGrade: number;
   averageGradeWithPromotions: number;
   pendingFinalsCount: number;
-  electiveCreditsN3: number;
-  electiveCreditsN4: number;
-  electiveCreditsN5: number;
-  totalElectiveCredits: number;
+  // Electivas globales (sin mínimos por nivel)
+  totalElectiveCreditsApproved: number;
+  totalElectiveCreditsTaking: number;
+  totalElectiveCreditsRequired: number;
+  missingElectiveCreditsForDegree: number;
+  missingCoreForDegree: number[];
+  // Títulos
   isAnalistaEligible: boolean;
+  missingForAnalista?: {
+    missingCoreIds: number[];
+    seminarioApproved: boolean;
+    electiveCredits: number;
+  };
   isPPSEligible: boolean;
   isDegreeEligible: boolean;
 }

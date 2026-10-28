@@ -30,6 +30,8 @@ export const CorrelativeGraph: React.FC = () => {
     setStatusModalSubjectId,
     showElectivesInGraph,
     setShowElectivesInGraph,
+    settings,
+    assignedElectives,
   } = useCareer();
 
   const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
@@ -39,11 +41,29 @@ export const CorrelativeGraph: React.FC = () => {
 
   // Build the complete list of subjects to display
   const activeSubjects = useMemo(() => {
-    if (showElectivesInGraph) {
-      return [...CORE_SUBJECTS, ...ELECTIVES];
+    const core = settings.includeAnalistaTrack
+      ? CORE_SUBJECTS
+      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+
+    if (!showElectivesInGraph) {
+      return core;
     }
-    return CORE_SUBJECTS;
-  }, [showElectivesInGraph]);
+
+    const yearByElective = new Map<number, number>();
+    for (let y = 1; y <= 5; y++) {
+      (assignedElectives[y] || []).forEach((id) => yearByElective.set(id, y));
+    }
+
+    const electivesWithAssignedYear: Subject[] = ELECTIVES.map((el) => {
+      const assignedYear = yearByElective.get(el.id);
+      return {
+        ...el,
+        assignedYear,
+      };
+    });
+
+    return [...core, ...electivesWithAssignedYear];
+  }, [settings.includeAnalistaTrack, showElectivesInGraph, assignedElectives]);
 
   // Compute upstream (prerequisites) and downstream (unlocked) dependency sets
   const { upstreamSet, downstreamSet } = useMemo(() => {
@@ -98,10 +118,13 @@ export const CorrelativeGraph: React.FC = () => {
     const levelCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
     return activeSubjects.map((subject) => {
-      const colIndex = levelCounts[subject.level] || 0;
-      levelCounts[subject.level] = colIndex + 1;
+      const targetCol = subject.assignedYear && subject.assignedYear >= 1 && subject.assignedYear <= 5
+        ? subject.assignedYear
+        : subject.level;
+      const colIndex = levelCounts[targetCol] || 0;
+      levelCounts[targetCol] = colIndex + 1;
 
-      const x = xPositions[subject.level] || 50;
+      const x = xPositions[targetCol] || 50;
       const y = 80 + colIndex * 155;
 
       const status = getSubjectStatus(subject, activeState);

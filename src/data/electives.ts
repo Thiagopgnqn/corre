@@ -6,8 +6,12 @@ export interface ElectiveSubject extends Subject {
   credits: number;
 }
 
+// Configuración general de créditos requeridos (fácil de editar)
+export const REQUIRED_ELECTIVE_CREDITS_TOTAL = 20;
+export const REQUIRED_ANALISTA_ELECTIVE_CREDITS = 4;
+
 export const ELECTIVES: ElectiveSubject[] = [
-  // ================= NIVEL 3 =================
+  // ================= NIVEL SUGERIDO 3 =================
   {
     id: 301,
     code: 'E-301',
@@ -21,7 +25,7 @@ export const ELECTIVES: ElectiveSubject[] = [
     credits: 4,
   },
 
-  // ================= NIVEL 4 =================
+  // ================= NIVEL SUGERIDO 4 =================
   {
     id: 401,
     code: 'E-401',
@@ -107,7 +111,7 @@ export const ELECTIVES: ElectiveSubject[] = [
     credits: 3,
   },
 
-  // ================= NIVEL 5 =================
+  // ================= NIVEL SUGERIDO 5 =================
   {
     id: 501,
     code: 'E-501',
@@ -241,11 +245,3 @@ export const ELECTIVES: ElectiveSubject[] = [
     credits: 3,
   },
 ];
-
-export const REQUIRED_CREDITS = {
-  LEVEL_3: 4,
-  LEVEL_4: 6,
-  LEVEL_5: 10,
-  TOTAL: 20,
-  ANALISTA: 4,
-};

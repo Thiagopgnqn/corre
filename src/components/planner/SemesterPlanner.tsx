@@ -23,6 +23,7 @@ export const SemesterPlanner: React.FC = () => {
     clearBasket,
     batchUpdateStatus,
     setSelectedSubjectId,
+    settings,
   } = useCareer();
 
   const [termFilter, setTermFilter] = useState<'all' | '1C' | '2C' | 'A'>('all');
@@ -30,7 +31,10 @@ export const SemesterPlanner: React.FC = () => {
 
   // Available subjects pool
   const availableSubjects = useMemo(() => {
-    const pool = includeElectives ? [...CORE_SUBJECTS, ...ELECTIVES] : CORE_SUBJECTS;
+    const core = settings.includeAnalistaTrack
+      ? CORE_SUBJECTS
+      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    const pool = includeElectives ? [...core, ...ELECTIVES] : core;
 
     return pool.filter((s) => {
       const status = getSubjectStatus(s, activeState);
@@ -42,7 +46,7 @@ export const SemesterPlanner: React.FC = () => {
       if (termFilter === '2C') return s.modality.includes('2C') || s.modality === 'A';
       return true;
     });
-  }, [includeElectives, termFilter, activeState]);
+  }, [includeElectives, termFilter, activeState, settings.includeAnalistaTrack]);
 
   // Basket subjects details & calculation
   const basketSubjects = useMemo(() => {

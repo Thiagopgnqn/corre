@@ -5,9 +5,11 @@ import { isApprovedOrHigher } from './correlativas';
 /**
  * Computes the Critical Path (longest remaining prerequisite chain to graduation)
  */
-export function calculateCriticalPath(userState: UserCareerState): CriticalPathResult {
+export function calculateCriticalPath(userState: UserCareerState, includeAnalistaTrack = false): CriticalPathResult {
+  const subjectsPool = includeAnalistaTrack ? CORE_SUBJECTS : CORE_SUBJECTS.filter((s) => s.id !== 99);
+
   // Filter core subjects that are not yet approved
-  const remainingSubjects = CORE_SUBJECTS.filter((s) => !isApprovedOrHigher(userState[s.id]));
+  const remainingSubjects = subjectsPool.filter((s) => !isApprovedOrHigher(userState[s.id]));
 
   if (remainingSubjects.length === 0) {
     return {
@@ -19,11 +21,11 @@ export function calculateCriticalPath(userState: UserCareerState): CriticalPathR
 
   // Build adjacency list: node -> array of subjects it unlocks (directed edge from prereq to dependent)
   const adj = new Map<number, number[]>();
-  CORE_SUBJECTS.forEach((s) => {
+  subjectsPool.forEach((s) => {
     adj.set(s.id, []);
   });
 
-  CORE_SUBJECTS.forEach((s) => {
+  subjectsPool.forEach((s) => {
     const allPrereqs = [...new Set([...s.regularPrereqs, ...s.approvedPrereqs])];
     allPrereqs.forEach((pId) => {
       const neighbors = adj.get(pId) || [];
@@ -34,7 +36,7 @@ export function calculateCriticalPath(userState: UserCareerState): CriticalPathR
 
   // Helper map for quick subject lookup
   const subjectMap = new Map<number, Subject>();
-  CORE_SUBJECTS.forEach((s) => subjectMap.set(s.id, s));
+  subjectsPool.forEach((s) => subjectMap.set(s.id, s));
 
   // Weight function: Annual subjects count as 2 terms; Cuatrimestrales as 1 term
   const getSubjectWeight = (subj: Subject): number => {

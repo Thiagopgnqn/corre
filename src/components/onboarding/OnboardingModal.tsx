@@ -11,7 +11,12 @@ export const OnboardingModal: React.FC = () => {
     setIsOnboardingOpen,
     batchUpdateStatus,
     loadSample,
+    settings,
   } = useCareer();
+
+  const corePool = settings.includeAnalistaTrack
+    ? CORE_SUBJECTS
+    : CORE_SUBJECTS.filter((s) => s.id !== 99);
 
   // Selection state: Map of subjectId -> { selected: boolean, grade: number, status: SubjectStatus }
   const [selections, setSelections] = useState<Record<number, { selected: boolean; grade: number; status: SubjectStatus }>>({});
@@ -26,7 +31,7 @@ export const OnboardingModal: React.FC = () => {
   if (!isOnboardingOpen) return null;
 
   const handleToggleLevel = (level: number, approve: boolean) => {
-    const subjectsInLevel = CORE_SUBJECTS.filter((s) => s.level === level);
+    const subjectsInLevel = corePool.filter((s) => s.level === level);
     const grade = defaultGradeByLevel[level] || 8;
 
     setSelections((prev) => {
@@ -135,7 +140,7 @@ export const OnboardingModal: React.FC = () => {
           {/* Body Levels */}
           <div className="p-5 overflow-y-auto space-y-5 flex-1">
             {levels.map((lvl) => {
-              const subjectsInLevel = CORE_SUBJECTS.filter((s) => s.level === lvl);
+              const subjectsInLevel = corePool.filter((s) => s.level === lvl);
               const allSelected = subjectsInLevel.every((s) => selections[s.id]?.selected);
               const someSelected = subjectsInLevel.some((s) => selections[s.id]?.selected);
 

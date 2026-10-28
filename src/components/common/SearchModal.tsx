@@ -15,6 +15,7 @@ export const SearchModal: React.FC = () => {
     activeState,
     setSelectedSubjectId,
     setStatusModalSubjectId,
+    settings,
   } = useCareer();
 
   const [query, setQuery] = useState('');
@@ -33,8 +34,11 @@ export const SearchModal: React.FC = () => {
   }, [isSearchOpen]);
 
   const allSubjects = useMemo(() => {
-    return [...CORE_SUBJECTS, ...ELECTIVES];
-  }, []);
+    const core = settings.includeAnalistaTrack
+      ? CORE_SUBJECTS
+      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    return [...core, ...ELECTIVES];
+  }, [settings.includeAnalistaTrack]);
 
   const filtered = useMemo(() => {
     return allSubjects.filter((subject) => {

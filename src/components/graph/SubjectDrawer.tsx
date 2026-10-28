@@ -19,6 +19,7 @@ import {
   ALL_SUBJECTS_MAP,
   isApprovedOrHigher,
   isRegularOrHigher,
+  canRenderProyectoFinal,
 } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
 
@@ -30,6 +31,7 @@ export const SubjectDrawer: React.FC = () => {
     setStatusModalSubjectId,
     semesterBasket,
     toggleBasketSubject,
+    settings,
   } = useCareer();
 
   if (!selectedSubject) return null;
@@ -152,12 +154,33 @@ export const SubjectDrawer: React.FC = () => {
 
             {/* Special rule notice if any */}
             {selectedSubject.specialRule && (
-              <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-xs space-y-1">
+              <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-xs space-y-1.5">
                 <div className="font-semibold text-purple-300 flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
-                  <span>Regla Especial</span>
+                  <span>Regla Especial de Aprobación</span>
                 </div>
-                <p className="leading-relaxed break-words">{selectedSubject.specialRule}</p>
+                <p className="leading-relaxed break-words">
+                  {selectedSubject.id === 36 && !settings.includeAnalistaTrack
+                    ? 'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Electivas).'
+                    : selectedSubject.specialRule}
+                </p>
+                {selectedSubject.id === 36 && (
+                  <div className="pt-1 text-[11px]">
+                    {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).canRender ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>¡Cumplís todas las materias previas para rendir Proyecto Final!</span>
+                      </span>
+                    ) : (
+                      <span className="text-rose-400 font-semibold flex items-center gap-1">
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>
+                          Faltan aprobar {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).missingIds.length} materias previas
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

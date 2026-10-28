@@ -5,9 +5,10 @@ import type {
   CareerProgress,
   CriticalPathResult,
   Subject,
+  AssignedElectivesByYear,
 } from '../types/career';
 import { CORE_SUBJECTS } from '../data/plan2023';
-import { ELECTIVES } from '../data/electives';
+import { ELECTIVES, REQUIRED_ELECTIVE_CREDITS_TOTAL } from '../data/electives';
 import {
   getSubjectStatus,
   isApprovedOrHigher,
@@ -26,6 +27,9 @@ import {
   loadSettings,
   saveSettings,
   type AppSettings,
+  loadAssignedElectives,
+  saveAssignedElectives,
+  INITIAL_ASSIGNED_ELECTIVES,
   clearCareerData,
   exportCareerToJson,
   importCareerFromJson,
@@ -43,6 +47,11 @@ interface CareerContextType {
 
   updateSubjectStatus: (id: number, status: SubjectStatus, grade?: number) => void;
   batchUpdateStatus: (updates: Array<{ id: number; status: SubjectStatus; grade?: number }>) => void;
+
+  assignedElectives: AssignedElectivesByYear;
+  addElectiveToYear: (electiveId: number, targetYear: number) => void;
+  removeElectiveFromYear: (electiveId: number, year: number) => void;
+  moveElectiveYear: (electiveId: number, fromYear: number, toYear: number) => void;
 
   settings: AppSettings;
   updateSettings: (newSettings: Partial<AppSettings>) => void;
@@ -84,6 +93,7 @@ const CareerContext = createContext<CareerContextType | undefined>(undefined);
 export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [userState, setUserState] = useState<UserCareerState>(() => loadUserState());
   const [simulationState, setSimulationState] = useState<UserCareerState | null>(null);
+  const [assignedElectives, setAssignedElectives] = useState<AssignedElectivesByYear>(() => loadAssignedElectives());
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => soundManager.getSoundEnabled());
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
@@ -97,6 +107,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   useEffect(() => {
     saveUserState(userState);
   }, [userState]);
+
+  useEffect(() => {
+    saveAssignedElectives(assignedElectives);
+  }, [assignedElectives]);
 
   useEffect(() => {
     saveSettings(settings);
@@ -213,6 +227,50 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [isSimulationMode, simulationState, userState]
   );
 
+  // Elective assignment handlers (strictly prevent duplication across years)
+  const addElectiveToYear = useCallback((electiveId: number, targetYear: number) => {
+    const validYear = Math.max(1, Math.min(5, targetYear));
+    setAssignedElectives((prev) => {
+      const next: AssignedElectivesByYear = {
+        1: prev[1].filter((id) => id !== electiveId),
+        2: prev[2].filter((id) => id !== electiveId),
+        3: prev[3].filter((id) => id !== electiveId),
+        4: prev[4].filter((id) => id !== electiveId),
+        5: prev[5].filter((id) => id !== electiveId),
+      };
+      next[validYear].push(electiveId);
+      return next;
+    });
+    soundManager.playClick();
+  }, []);
+
+  const removeElectiveFromYear = useCallback((electiveId: number, year: number) => {
+    setAssignedElectives((prev) => {
+      const yearList = prev[year] || [];
+      return {
+        ...prev,
+        [year]: yearList.filter((id) => id !== electiveId),
+      };
+    });
+    soundManager.playClick();
+  }, []);
+
+  const moveElectiveYear = useCallback((electiveId: number, _fromYear: number, toYear: number) => {
+    const validToYear = Math.max(1, Math.min(5, toYear));
+    setAssignedElectives((prev) => {
+      const next: AssignedElectivesByYear = {
+        1: prev[1].filter((id) => id !== electiveId),
+        2: prev[2].filter((id) => id !== electiveId),
+        3: prev[3].filter((id) => id !== electiveId),
+        4: prev[4].filter((id) => id !== electiveId),
+        5: prev[5].filter((id) => id !== electiveId),
+      };
+      next[validToYear].push(electiveId);
+      return next;
+    });
+    soundManager.playClick();
+  }, []);
+
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
   }, []);
@@ -246,6 +304,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Global statistics calculation
   const computedProgress = useMemo<CareerProgress>(() => {
+    const activeCoreSubjects = settings.includeAnalistaTrack
+      ? CORE_SUBJECTS
+      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+
     let approvedCount = 0;
     let promotedCount = 0;
     let regularizedCount = 0;
@@ -258,7 +320,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const gradesToAverage: number[] = [];
 
-    CORE_SUBJECTS.forEach((subject) => {
+    activeCoreSubjects.forEach((subject) => {
       totalWeeklyHours += subject.weeklyHours;
       const status = getSubjectStatus(subject, activeState);
       const st = activeState[subject.id];
@@ -286,45 +348,47 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     });
 
-    // Electives credits computation
-    let electiveCreditsN3 = 0;
-    let electiveCreditsN4 = 0;
-    let electiveCreditsN5 = 0;
+    // Electives credits computation (global total, regardless of level)
+    let totalElectiveCreditsApproved = 0;
+    let totalElectiveCreditsTaking = 0;
 
     ELECTIVES.forEach((el) => {
       const st = activeState[el.id];
       if (isApprovedOrHigher(st)) {
-        if (el.level === 3) electiveCreditsN3 += el.credits;
-        if (el.level === 4) electiveCreditsN4 += el.credits;
-        if (el.level === 5) electiveCreditsN5 += el.credits;
-
+        totalElectiveCreditsApproved += el.credits;
         if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
           gradesToAverage.push(st.grade);
         }
+      } else if (st?.status === 'cursando') {
+        totalElectiveCreditsTaking += el.credits;
       }
     });
 
-    const totalElectiveCredits = electiveCreditsN3 + electiveCreditsN4 + electiveCreditsN5;
     const totalApproved = approvedCount + promotedCount;
-    const careerPercentageBySubjects = Math.round((totalApproved / CORE_SUBJECTS.length) * 100);
-    const careerPercentageByHours = Math.round((approvedWeeklyHours / totalWeeklyHours) * 100);
+    const careerPercentageBySubjects = Math.round((totalApproved / activeCoreSubjects.length) * 100);
+    const careerPercentageByHours = totalWeeklyHours > 0
+      ? Math.round((approvedWeeklyHours / totalWeeklyHours) * 100)
+      : 0;
 
     const averageGrade = gradesToAverage.length > 0
       ? Number((gradesToAverage.reduce((a, b) => a + b, 0) / gradesToAverage.length).toFixed(2))
       : 0;
 
-    const analistaCheck = checkAnalistaTitle(activeState);
+    const missingElectiveCreditsForDegree = Math.max(0, REQUIRED_ELECTIVE_CREDITS_TOTAL - totalElectiveCreditsApproved);
+    const missingCoreForDegree = activeCoreSubjects
+      .filter((s) => !isApprovedOrHigher(activeState[s.id]))
+      .map((s) => s.id);
+
+    const analistaCheck = checkAnalistaTitle(activeState, totalElectiveCreditsApproved);
     const ppsCheck = isPPSEligible(activeState);
 
-    // Degree eligible: all 37 core subjects approved + min 20 elective credits
+    // Degree eligible: all active core subjects approved + 20 total elective credits
     const isDegreeEligible =
-      totalApproved === CORE_SUBJECTS.length &&
-      electiveCreditsN3 >= 4 &&
-      electiveCreditsN4 >= 6 &&
-      electiveCreditsN5 >= 10;
+      missingCoreForDegree.length === 0 &&
+      totalElectiveCreditsApproved >= REQUIRED_ELECTIVE_CREDITS_TOTAL;
 
     return {
-      totalSubjects: CORE_SUBJECTS.length,
+      totalSubjects: activeCoreSubjects.length,
       approvedCount,
       promotedCount,
       regularizedCount,
@@ -338,23 +402,25 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       averageGrade,
       averageGradeWithPromotions: averageGrade,
       pendingFinalsCount: regularizedCount,
-      electiveCreditsN3,
-      electiveCreditsN4,
-      electiveCreditsN5,
-      totalElectiveCredits,
+      totalElectiveCreditsApproved,
+      totalElectiveCreditsTaking,
+      totalElectiveCreditsRequired: REQUIRED_ELECTIVE_CREDITS_TOTAL,
+      missingElectiveCreditsForDegree,
+      missingCoreForDegree,
       isAnalistaEligible: analistaCheck.eligible,
+      missingForAnalista: analistaCheck,
       isPPSEligible: ppsCheck.eligible,
       isDegreeEligible,
     };
   }, [activeState, settings]);
 
   const criticalPath = useMemo(() => {
-    return calculateCriticalPath(activeState);
-  }, [activeState]);
+    return calculateCriticalPath(activeState, settings.includeAnalistaTrack);
+  }, [activeState, settings.includeAnalistaTrack]);
 
   const exportData = useCallback(() => {
-    return exportCareerToJson(userState, settings, semesterBasket);
-  }, [userState, settings, semesterBasket]);
+    return exportCareerToJson(userState, settings, semesterBasket, assignedElectives);
+  }, [userState, settings, semesterBasket, assignedElectives]);
 
   const importData = useCallback((json: string) => {
     const res = importCareerFromJson(json);
@@ -362,6 +428,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setUserState(res.userState);
       if (res.settings) setSettings(res.settings);
       if (res.basket) setSemesterBasket(res.basket);
+      if (res.assignedElectives) setAssignedElectives(res.assignedElectives);
       soundManager.playMilestone();
       fireConfetti();
       return { success: true };
@@ -373,13 +440,15 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     clearCareerData();
     setUserState({});
     setSemesterBasket([]);
+    setAssignedElectives({ ...INITIAL_ASSIGNED_ELECTIVES });
     setSimulationState(null);
     soundManager.playClick();
   }, []);
 
   const loadSample = useCallback(() => {
     const sample = getSample3rdYearStudent();
-    setUserState(sample);
+    setUserState(sample.userState);
+    setAssignedElectives(sample.assignedElectives);
     setSimulationState(null);
     soundManager.playMilestone();
     fireConfetti();
@@ -409,6 +478,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         resetSimulation,
         updateSubjectStatus,
         batchUpdateStatus,
+        assignedElectives,
+        addElectiveToYear,
+        removeElectiveFromYear,
+        moveElectiveYear,
         settings,
         updateSettings,
         soundEnabled,

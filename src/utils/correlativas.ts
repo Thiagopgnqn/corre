@@ -83,13 +83,19 @@ export function canRenderSeminario(userState: UserCareerState): {
 
 /**
  * Special rule check for Proyecto Final (ID 36):
- * Can only be rendered/approved if all previous plan subjects are approved
+ * Can only be rendered/approved if all previous plan subjects are approved.
+ * If includeAnalistaTrack is false, Seminario Integrador (ID 99) is excluded from this requirement.
  */
-export function canRenderProyectoFinal(userState: UserCareerState): {
+export function canRenderProyectoFinal(
+  userState: UserCareerState,
+  includeAnalistaTrack = false
+): {
   canRender: boolean;
   missingIds: number[];
 } {
-  const coreIds = CORE_SUBJECTS.map((s) => s.id).filter((id) => id !== 36);
+  const coreIds = CORE_SUBJECTS
+    .map((s) => s.id)
+    .filter((id) => id !== 36 && (includeAnalistaTrack || id !== 99));
   const missingIds = coreIds.filter((id) => !isApprovedOrHigher(userState[id]));
   return {
     canRender: missingIds.length === 0,
@@ -115,33 +121,38 @@ export function isPPSEligible(userState: UserCareerState): {
  * Check if user fulfills all requirements for "Analista Desarrollador Universitario":
  * - Subjects 1 to 23 approved
  * - Seminario Integrador 99 approved
- * - At least 4 credits of Level 3 electives approved
+ * - At least 4 credits of electives approved (any level)
  */
-export function checkAnalistaTitle(userState: UserCareerState): {
+export function checkAnalistaTitle(
+  userState: UserCareerState,
+  totalElectiveCreditsApproved?: number
+): {
   eligible: boolean;
   missingCoreIds: number[];
   seminarioApproved: boolean;
-  electiveCreditsN3: number;
+  electiveCredits: number;
 } {
   const ids1to23 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23];
   const missingCoreIds = ids1to23.filter((id) => !isApprovedOrHigher(userState[id]));
   const seminarioApproved = isApprovedOrHigher(userState[99]);
 
-  // Count approved L3 elective credits
-  const l3Electives = ELECTIVES.filter((e) => e.level === 3);
-  let electiveCreditsN3 = 0;
-  l3Electives.forEach((e) => {
-    if (isApprovedOrHigher(userState[e.id])) {
-      electiveCreditsN3 += e.credits;
-    }
-  });
+  let electiveCredits = 0;
+  if (typeof totalElectiveCreditsApproved === 'number') {
+    electiveCredits = totalElectiveCreditsApproved;
+  } else {
+    ELECTIVES.forEach((e) => {
+      if (isApprovedOrHigher(userState[e.id])) {
+        electiveCredits += e.credits;
+      }
+    });
+  }
 
-  const eligible = missingCoreIds.length === 0 && seminarioApproved && electiveCreditsN3 >= 4;
+  const eligible = missingCoreIds.length === 0 && seminarioApproved && electiveCredits >= 4;
   return {
     eligible,
     missingCoreIds,
     seminarioApproved,
-    electiveCreditsN3,
+    electiveCredits,
   };
 }
 

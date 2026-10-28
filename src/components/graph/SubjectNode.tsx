@@ -138,7 +138,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
               #{subject.code}
             </span>
             <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 shrink-0">
-              N{subject.level}
+              {subject.assignedYear ? `Año ${subject.assignedYear}` : `N${subject.level}`}
             </span>
             <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/60 px-1 py-0.5 rounded shrink-0">
               {subject.modality}

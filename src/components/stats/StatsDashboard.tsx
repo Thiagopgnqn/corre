@@ -14,7 +14,7 @@ import {
 import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, isApprovedOrHigher } from '../../utils/correlativas';
+import { getSubjectStatus, isApprovedOrHigher, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
 import { soundManager } from '../../utils/audio';
 import { fireMilestoneConfetti } from '../../utils/confetti';
 
@@ -96,7 +96,7 @@ export const StatsDashboard: React.FC = () => {
   // Milestones verification
   const milestones = useMemo(() => {
     const pct = computedProgress.careerPercentageBySubjects;
-    return [
+    const list = [
       {
         id: 'quarter',
         title: 'Primer Cuarto (25%)',
@@ -123,37 +123,47 @@ export const StatsDashboard: React.FC = () => {
       },
       {
         id: 'graduated',
-        title: 'Graduación (100%)',
-        desc: 'Todas las materias del plan aprobadas',
-        unlocked: pct >= 100 && computedProgress.totalElectiveCredits >= 20,
+        title: 'Graduación (Título Ingeniero/a)',
+        desc: 'Todas las materias obligatorias aprobadas + 20 créditos de electivas',
+        unlocked: computedProgress.isDegreeEligible,
         icon: GraduationCap,
         color: 'from-emerald-500 to-teal-500',
       },
-      {
+    ];
+
+    if (settings.includeAnalistaTrack) {
+      list.push({
         id: 'analista',
         title: 'Título Intermedio: Analista Universitario',
-        desc: 'Materias 1 a 23 + Seminario Integrador 99 + 4cr electivas N3',
+        desc: 'Materias 1 a 23 + Seminario Integrador 99 + 4 créditos de electivas',
         unlocked: computedProgress.isAnalistaEligible,
         icon: Award,
         color: 'from-amber-500 to-orange-500',
-      },
-      {
-        id: 'pps',
-        title: 'Habilitación PPS',
-        desc: 'Cumplís los requisitos para cursar la Práctica Profesional',
-        unlocked: computedProgress.isPPSEligible,
-        icon: CheckCircle2,
-        color: 'from-cyan-500 to-blue-500',
-      },
-    ];
-  }, [computedProgress]);
+      });
+    }
+
+    list.push({
+      id: 'pps',
+      title: 'Habilitación PPS',
+      desc: 'Cumplís los requisitos para cursar la Práctica Profesional',
+      unlocked: computedProgress.isPPSEligible,
+      icon: CheckCircle2,
+      color: 'from-cyan-500 to-blue-500',
+    });
+
+    return list;
+  }, [computedProgress, settings.includeAnalistaTrack]);
 
   // Level progress cards
   const levelProgressList = useMemo(() => {
+    const pool = settings.includeAnalistaTrack
+      ? CORE_SUBJECTS
+      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+
     return [1, 2, 3, 4, 5].map((lvl) => {
-      const lvlCore = CORE_SUBJECTS.filter((s) => s.level === lvl);
+      const lvlCore = pool.filter((s) => s.level === lvl);
       const approvedCount = lvlCore.filter((s) => isApprovedOrHigher(activeState[s.id])).length;
-      const pct = Math.round((approvedCount / lvlCore.length) * 100);
+      const pct = lvlCore.length > 0 ? Math.round((approvedCount / lvlCore.length) * 100) : 0;
       return {
         level: lvl,
         total: lvlCore.length,
@@ -161,7 +171,7 @@ export const StatsDashboard: React.FC = () => {
         percentage: pct,
       };
     });
-  }, [activeState]);
+  }, [activeState, settings.includeAnalistaTrack]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -364,6 +374,156 @@ export const StatsDashboard: React.FC = () => {
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Degree Requirements Status Panel */}
+          <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-indigo-400" />
+                <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+                  Requisitos para el Título de Ingeniero/a
+                </h3>
+              </div>
+              <span
+                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                  computedProgress.isDegreeEligible
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-amber-500/10 text-amber-300 border border-amber-500/20'
+                }`}
+              >
+                {computedProgress.isDegreeEligible ? '¡Requisitos Cumplidos!' : 'En Progreso'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Mandatory Core Subjects */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300">1. Materias Obligatorias</span>
+                  <span className="font-mono text-indigo-400 font-bold">
+                    {computedProgress.approvedCount + computedProgress.promotedCount} / {computedProgress.totalSubjects}
+                  </span>
+                </div>
+                {computedProgress.missingCoreForDegree.length === 0 ? (
+                  <div className="text-xs text-emerald-400 font-medium flex items-center gap-1.5 pt-1">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Todas las materias obligatorias del plan están aprobadas</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="text-xs text-slate-400">
+                      Faltan <span className="text-white font-bold">{computedProgress.missingCoreForDegree.length}</span> materias obligatorias:
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                      {computedProgress.missingCoreForDegree.map((id) => {
+                        const subj = ALL_SUBJECTS_MAP.get(id);
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => setSelectedSubjectId(id)}
+                            className="text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700/80 transition-colors"
+                          >
+                            #{subj?.code} {subj?.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Elective Credits */}
+              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-300">2. Créditos de Materias Electivas</span>
+                  <span className="font-mono text-amber-400 font-bold">
+                    {computedProgress.totalElectiveCreditsApproved} / {computedProgress.totalElectiveCreditsRequired} cr
+                  </span>
+                </div>
+
+                <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        (computedProgress.totalElectiveCreditsApproved / computedProgress.totalElectiveCreditsRequired) * 100
+                      )}%`,
+                    }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-1">
+                  {computedProgress.missingElectiveCreditsForDegree === 0 ? (
+                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Requisito de 20 créditos alcanzado</span>
+                    </span>
+                  ) : (
+                    <span>
+                      Faltan <span className="text-amber-400 font-bold">{computedProgress.missingElectiveCreditsForDegree}</span> créditos
+                    </span>
+                  )}
+                  {computedProgress.totalElectiveCreditsTaking > 0 && (
+                    <span className="text-cyan-400">
+                      ({computedProgress.totalElectiveCreditsTaking} cr en curso)
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-slate-400">
+                  * 20 créditos requeridos en total, sin importar el nivel de las electivas aprobadas.
+                </p>
+              </div>
+            </div>
+
+            {/* If Analista is enabled, also show Intermediate Title Card */}
+            {settings.includeAnalistaTrack && (
+              <div className="mt-3 p-4 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                    <Award className="w-4 h-4 text-amber-400" />
+                    <span>Título Intermedio: Analista Universitario de Sistemas</span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                      computedProgress.isAnalistaEligible
+                        ? 'bg-emerald-500/20 text-emerald-300'
+                        : 'bg-amber-500/20 text-amber-300'
+                    }`}
+                  >
+                    {computedProgress.isAnalistaEligible ? '¡Habilitado para trámite!' : 'En curso'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs pt-1">
+                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
+                    <span className="text-slate-400 block">Materias 1 a 23:</span>
+                    <span className="font-bold text-white">
+                      {23 - (computedProgress.missingForAnalista?.missingCoreIds.length || 0)} / 23 aprobadas
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
+                    <span className="text-slate-400 block">Seminario Integrador (99):</span>
+                    <span
+                      className={`font-bold ${
+                        computedProgress.missingForAnalista?.seminarioApproved
+                          ? 'text-emerald-400'
+                          : 'text-amber-400'
+                      }`}
+                    >
+                      {computedProgress.missingForAnalista?.seminarioApproved ? 'Aprobado' : 'Pendiente'}
+                    </span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
+                    <span className="text-slate-400 block">Créditos de Electivas:</span>
+                    <span className="font-bold text-amber-400">
+                      {computedProgress.totalElectiveCreditsApproved} / 4 cr (aprobados)
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -21,6 +21,7 @@ export const KanbanBoard: React.FC = () => {
     updateSubjectStatus,
     setStatusModalSubjectId,
     setSelectedSubjectId,
+    settings,
   } = useCareer();
 
   const [mode, setMode] = useState<'kanban' | 'levels'>('kanban');
@@ -28,7 +29,10 @@ export const KanbanBoard: React.FC = () => {
   const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus | 'all'>('all');
   const [draggedSubjectId, setDraggedSubjectId] = useState<number | null>(null);
 
-  const subjects = CORE_SUBJECTS.filter((s) => {
+  const subjects = (settings.includeAnalistaTrack
+    ? CORE_SUBJECTS
+    : CORE_SUBJECTS.filter((s) => s.id !== 99)
+  ).filter((s) => {
     if (levelFilter === 'all') return true;
     return s.level === levelFilter;
   });

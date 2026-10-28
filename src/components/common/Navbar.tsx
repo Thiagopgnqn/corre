@@ -15,6 +15,7 @@ import {
   MoreVertical,
   GraduationCap,
   Layers,
+  Award,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 
@@ -38,6 +39,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     resetAll,
     loadSample,
     computedProgress,
+    settings,
+    updateSettings,
   } = useCareer();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -132,6 +135,29 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
           {/* Actions & Utilities */}
           <div className="flex items-center gap-2">
+            {/* Analista / Seminario Toggle Button */}
+            <button
+              onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                settings.includeAnalistaTrack
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                  : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
+              }`}
+              title={
+                settings.includeAnalistaTrack
+                  ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
+                  : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
+              }
+            >
+              <Award className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Analista (99)</span>
+              <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+              </span>
+            </button>
+
             {/* Simulation Mode Toggle Button */}
             <button
               onClick={toggleSimulationMode}
@@ -195,6 +221,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   <div className="px-3 py-2 border-b border-slate-800 text-[11px] text-slate-400">
                     Progreso: <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span> de materias
                   </div>
+
+                  <button
+                    onClick={() => {
+                      updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Award className="w-4 h-4 text-amber-400" />
+                      <span>Seminario / Título Analista</span>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                      settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                    </span>
+                  </button>
 
                   <button
                     onClick={() => {
