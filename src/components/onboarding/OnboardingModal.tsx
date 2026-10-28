@@ -209,15 +209,15 @@ export const OnboardingModal: React.FC = () => {
                               : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:border-slate-700'
                           }`}
                         >
-                          <label className="flex items-center gap-2 cursor-pointer flex-1 truncate pr-2">
+                          <label className="flex items-center gap-2 cursor-pointer flex-1 pr-2 leading-tight min-w-0">
                             <input
                               type="checkbox"
                               checked={isChecked}
                               onChange={() => handleToggleSingle(subject.id, lvl)}
-                              className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-slate-800"
+                              className="rounded border-slate-700 text-emerald-500 focus:ring-0 bg-slate-800 shrink-0"
                             />
-                            <span className="font-mono text-slate-400 text-[10px]">#{subject.code}</span>
-                            <span className="truncate">{subject.name}</span>
+                            <span className="font-mono text-slate-400 text-[10px] shrink-0">#{subject.code}</span>
+                            <span className="break-words">{subject.name}</span>
                           </label>
 
                           {isChecked && (

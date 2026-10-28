@@ -93,12 +93,12 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
 
   return (
     <span
-      className={`inline-flex items-center font-medium rounded-full border transition-all duration-300 ${config.bgColor} ${config.textColor} ${config.borderColor} ${config.glowColor} ${sizeClasses[size]}`}
+      className={`inline-flex items-center whitespace-nowrap shrink-0 font-medium rounded-full border transition-all duration-300 ${config.bgColor} ${config.textColor} ${config.borderColor} ${config.glowColor} ${sizeClasses[size]}`}
     >
-      <Icon className={iconSizes[size]} />
-      <span>{config.label}</span>
+      <Icon className={`${iconSizes[size]} shrink-0`} />
+      <span className="whitespace-nowrap">{config.label}</span>
       {showGrade && grade !== undefined && (status === 'aprobada' || status === 'promocionada') && (
-        <span className="ml-1 px-1.5 py-0.2 rounded bg-black/40 text-white font-bold border border-white/10">
+        <span className="ml-1 px-1.5 py-0.2 rounded bg-black/40 text-white font-bold border border-white/10 shrink-0">
           {grade}
         </span>
       )}

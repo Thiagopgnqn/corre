@@ -210,15 +210,15 @@ export const ElectivesPicker: React.FC = () => {
                 }`}
               >
                 <div>
-                  <div className="flex items-center justify-between gap-1 mb-1.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-mono text-xs font-bold px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 shrink-0">
                         #{elective.code}
                       </span>
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 shrink-0">
                         {elective.credits} créditos
                       </span>
-                      <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
+                      <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded shrink-0">
                         {elective.modality}
                       </span>
                     </div>
@@ -226,22 +226,22 @@ export const ElectivesPicker: React.FC = () => {
                     <StatusBadge status={status} grade={grade} size="sm" />
                   </div>
 
-                  <h3 className="font-bold text-sm text-white leading-snug">
+                  <h3 className="font-bold text-sm text-white leading-snug break-words">
                     {elective.name}
                   </h3>
                 </div>
 
                 {/* Prerequisites requirements */}
                 <div className="text-[11px] space-y-1 bg-slate-950/50 p-2.5 rounded-lg border border-slate-800/60">
-                  <div className="font-medium text-slate-400 flex items-center justify-between">
-                    <span>Correlativas:</span>
+                  <div className="font-medium text-slate-400 flex items-center justify-between gap-2">
+                    <span className="shrink-0">Correlativas:</span>
                     {eligible ? (
-                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1 shrink-0">
                         <CheckCircle2 className="w-3 h-3" />
                         <span>Habilitada</span>
                       </span>
                     ) : (
-                      <span className="text-rose-400 font-semibold flex items-center gap-1">
+                      <span className="text-rose-400 font-semibold flex items-center gap-1 shrink-0">
                         <Lock className="w-3 h-3" />
                         <span>Faltan requisitos</span>
                       </span>
@@ -249,8 +249,8 @@ export const ElectivesPicker: React.FC = () => {
                   </div>
 
                   {elective.regularPrereqs.length > 0 && (
-                    <div className="text-slate-400">
-                      <span className="text-amber-400">Reg:</span>{' '}
+                    <div className="text-slate-400 leading-snug break-words">
+                      <span className="text-amber-400 font-medium">Reg:</span>{' '}
                       {elective.regularPrereqs
                         .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
                         .join(', ')}
@@ -258,8 +258,8 @@ export const ElectivesPicker: React.FC = () => {
                   )}
 
                   {elective.approvedPrereqs.length > 0 && (
-                    <div className="text-slate-400">
-                      <span className="text-green-400">Apr:</span>{' '}
+                    <div className="text-slate-400 leading-snug break-words">
+                      <span className="text-green-400 font-medium">Apr:</span>{' '}
                       {elective.approvedPrereqs
                         .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
                         .join(', ')}
@@ -269,17 +269,17 @@ export const ElectivesPicker: React.FC = () => {
 
                 {/* Footer action */}
                 <div
-                  className="flex items-center justify-between pt-2 border-t border-slate-800/60"
+                  className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/60 gap-2"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="text-xs text-slate-500 flex items-center gap-1">
+                  <span className="text-xs text-slate-500 flex items-center gap-1 shrink-0">
                     <BookOpen className="w-3.5 h-3.5" />
                     <span>{elective.weeklyHours} hs/sem</span>
                   </span>
 
                   <button
                     onClick={() => setStatusModalSubjectId(elective.id)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-amber-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-amber-600 text-slate-200 hover:text-white transition-all flex items-center gap-1.5 shrink-0"
                   >
                     <span>Editar estado</span>
                     <ArrowRight className="w-3 h-3" />

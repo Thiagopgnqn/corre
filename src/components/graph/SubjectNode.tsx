@@ -115,7 +115,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
 
   return (
     <div
-      className={`relative w-[210px] sm:w-[225px] rounded-xl border backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
+      className={`relative w-[230px] sm:w-[245px] rounded-xl border backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
         style.bg
       } ${
         isElective
@@ -127,26 +127,29 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2 !h-2 !bg-indigo-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
+        className="!w-2.5 !h-2.5 !bg-indigo-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
       />
 
-      <div className="p-3">
+      <div className="p-3 flex flex-col justify-between min-h-[110px]">
         {/* Top bar: Code, Level, Modality, Status Icon */}
         <div className="flex items-center justify-between gap-1 mb-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
               #{subject.code}
             </span>
-            <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/60 px-1 py-0.5 rounded">
+            <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 shrink-0">
+              N{subject.level}
+            </span>
+            <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/60 px-1 py-0.5 rounded shrink-0">
               {subject.modality}
             </span>
             {subject.isIntegrator && (
-              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
                 INT
               </span>
             )}
             {isElective && (
-              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
                 ELECT
               </span>
             )}
@@ -157,31 +160,31 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
               e.stopPropagation();
               onOpenStatusModal?.(subject.id);
             }}
-            className={`p-1 rounded-md hover:bg-slate-800 transition-colors ${style.color}`}
+            className={`p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 ${style.color}`}
             title="Cambiar estado"
           >
             <Icon className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Subject Name */}
-        <h3 className="font-bold text-xs sm:text-[13px] text-white leading-snug line-clamp-2 min-h-[36px] flex items-center">
+        {/* Subject Name: Fully readable, no line clipping */}
+        <h3 className="font-bold text-xs sm:text-[13px] text-white leading-snug break-words my-1">
           {subject.name}
         </h3>
 
         {/* Bottom bar: Hours / Credits & Grade */}
         <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-[11px]">
-          <span className="text-slate-400 flex items-center gap-1">
-            <BookOpen className="w-3 h-3 text-slate-500" />
-            <span>{subject.weeklyHours}hs</span>
+          <span className="text-slate-400 flex items-center gap-1 shrink-0">
+            <BookOpen className="w-3 h-3 text-slate-500 shrink-0" />
+            <span className="whitespace-nowrap">{subject.weeklyHours} hs</span>
             {subject.credits && (
-              <span className="text-amber-400/90 font-medium ml-0.5">({subject.credits}cr)</span>
+              <span className="text-amber-400/90 font-medium whitespace-nowrap ml-0.5">({subject.credits}cr)</span>
             )}
           </span>
 
           {grade !== undefined && (status === 'aprobada' || status === 'promocionada') ? (
             <span
-              className={`px-1.5 py-0.2 rounded font-mono font-bold text-xs ${
+              className={`px-1.5 py-0.2 rounded font-mono font-bold text-xs whitespace-nowrap shrink-0 ${
                 status === 'promocionada'
                   ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40'
                   : 'bg-emerald-900/60 text-emerald-200 border border-emerald-500/40'
@@ -190,7 +193,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
               Nota: {grade}
             </span>
           ) : (
-            <span className={`text-[10px] capitalize font-medium ${style.color}`}>
+            <span className={`text-[10px] capitalize font-medium whitespace-nowrap shrink-0 ${style.color}`}>
               {status}
             </span>
           )}
@@ -201,7 +204,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2 !h-2 !bg-emerald-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
+        className="!w-2.5 !h-2.5 !bg-emerald-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
       />
     </div>
   );

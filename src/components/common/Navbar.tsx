@@ -90,17 +90,20 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <GraduationCap className="w-5 h-5" />
               </div>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black tracking-tight text-white m-0 p-0 leading-none">
+                <h1 className="text-base sm:text-lg font-black tracking-tight text-white m-0 p-0 leading-none whitespace-nowrap">
                   Mi Carrera
                 </h1>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 whitespace-nowrap">
                   Plan 2023
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">
+              <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden sm:block">
                 UTN • Ing. en Sistemas de Información
+              </p>
+              <p className="text-[10px] text-slate-400 font-medium whitespace-nowrap sm:hidden">
+                UTN ISI
               </p>
             </div>
           </div>
@@ -266,13 +269,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 key={item.id}
                 onClick={() => setCurrentView(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
                   isActive
                     ? 'bg-indigo-600 text-white'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                 }`}
               >
-                <Icon className="w-3.5 h-3.5" />
+                <Icon className="w-3.5 h-3.5 shrink-0" />
                 <span>{item.label}</span>
               </button>
             );

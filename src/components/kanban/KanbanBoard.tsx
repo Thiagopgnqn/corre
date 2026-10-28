@@ -25,6 +25,7 @@ export const KanbanBoard: React.FC = () => {
 
   const [mode, setMode] = useState<'kanban' | 'levels'>('kanban');
   const [levelFilter, setLevelFilter] = useState<number | 'all'>('all');
+  const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus | 'all'>('all');
   const [draggedSubjectId, setDraggedSubjectId] = useState<number | null>(null);
 
   const subjects = CORE_SUBJECTS.filter((s) => {
@@ -161,97 +162,128 @@ export const KanbanBoard: React.FC = () => {
 
       {/* Mode 1: Kanban Board */}
       {mode === 'kanban' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
-          {columns.map((col) => {
-            const ColIcon = col.icon;
-            const colSubjects = subjects.filter((s) => {
-              const status = getSubjectStatus(s, activeState);
-              return col.filterFn(status);
-            });
-
-            return (
-              <div
-                key={col.id}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, col.id)}
-                className={`rounded-2xl border bg-slate-900/50 backdrop-blur-md overflow-hidden flex flex-col min-h-[580px] transition-colors ${col.borderColor}`}
+        <div className="space-y-4">
+          {/* Mobile column selector tabs */}
+          <div className="flex md:hidden items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+            <button
+              onClick={() => setMobileColumnTab('all')}
+              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+                mobileColumnTab === 'all'
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-slate-900 text-slate-400 border border-slate-800'
+              }`}
+            >
+              Todas las columnas
+            </button>
+            {columns.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setMobileColumnTab(c.id)}
+                className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+                  mobileColumnTab === c.id
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'bg-slate-900 text-slate-400 border border-slate-800'
+                }`}
               >
-                {/* Column Header */}
-                <div className="p-3.5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ColIcon className={`w-4 h-4 ${col.accentColor}`} />
-                    <span className="text-xs font-bold text-white uppercase tracking-wider">
-                      {col.title}
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300">
-                    {colSubjects.length}
-                  </span>
-                </div>
+                {c.title.split(' ')[0]}
+              </button>
+            ))}
+          </div>
 
-                {/* Cards Container */}
-                <div className="p-2.5 space-y-2.5 flex-1 overflow-y-auto max-h-[75vh]">
-                  {colSubjects.length === 0 ? (
-                    <div className="h-32 border-2 border-dashed border-slate-800/80 rounded-xl flex items-center justify-center text-xs text-slate-500">
-                      Arrastrá materias aquí
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+            {columns
+              .filter((col) => mobileColumnTab === 'all' || mobileColumnTab === col.id)
+              .map((col) => {
+                const ColIcon = col.icon;
+                const colSubjects = subjects.filter((s) => {
+                  const status = getSubjectStatus(s, activeState);
+                  return col.filterFn(status);
+                });
+
+                return (
+                  <div
+                    key={col.id}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, col.id)}
+                    className={`rounded-2xl border bg-slate-900/50 backdrop-blur-md overflow-hidden flex flex-col min-h-[380px] md:min-h-[580px] transition-colors ${col.borderColor}`}
+                  >
+                    {/* Column Header */}
+                    <div className="p-3.5 border-b border-slate-800 bg-slate-950/60 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ColIcon className={`w-4 h-4 shrink-0 ${col.accentColor}`} />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          {col.title}
+                        </span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-300 shrink-0">
+                        {colSubjects.length}
+                      </span>
                     </div>
-                  ) : (
-                    colSubjects.map((subject) => {
-                      const status = getSubjectStatus(subject, activeState);
-                      const grade = activeState[subject.id]?.grade;
 
-                      return (
-                        <div
-                          key={subject.id}
-                          draggable
-                          onDragStart={(e) => handleDragStart(e, subject.id)}
-                          onClick={() => setSelectedSubjectId(subject.id)}
-                          className={`p-3 rounded-xl border bg-slate-900/90 hover:bg-slate-800/90 transition-all cursor-grab active:cursor-grabbing group shadow-sm hover:shadow-lg hover:border-slate-600 ${
-                            status === 'disponible'
-                              ? 'border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
-                              : status === 'bloqueada'
-                              ? 'border-slate-800 opacity-80'
-                              : 'border-slate-700/80'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-1 mb-1.5">
-                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
-                              #{subject.code}
-                            </span>
-                            <span className="text-[10px] text-slate-400">
-                              Nivel {subject.level} • {subject.modality}
-                            </span>
-                          </div>
-
-                          <h4 className="font-bold text-xs text-white leading-snug group-hover:text-indigo-300 transition-colors">
-                            {subject.name}
-                          </h4>
-
-                          <div className="flex items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[11px]">
-                            <span className="text-slate-400 flex items-center gap-1">
-                              <BookOpen className="w-3 h-3 text-slate-500" />
-                              {subject.weeklyHours} hs
-                            </span>
-
-                            <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                              <StatusBadge status={status} grade={grade} size="sm" />
-                              <button
-                                onClick={() => setStatusModalSubjectId(subject.id)}
-                                className="p-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors"
-                                title="Cambiar estado"
-                              >
-                                <Sparkles className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
+                    {/* Cards Container */}
+                    <div className="p-2.5 space-y-2.5 flex-1 overflow-y-auto max-h-[75vh]">
+                      {colSubjects.length === 0 ? (
+                        <div className="h-32 border-2 border-dashed border-slate-800/80 rounded-xl flex items-center justify-center text-xs text-slate-500">
+                          Arrastrá materias aquí
                         </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
+                      ) : (
+                        colSubjects.map((subject) => {
+                          const status = getSubjectStatus(subject, activeState);
+                          const grade = activeState[subject.id]?.grade;
+
+                          return (
+                            <div
+                              key={subject.id}
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, subject.id)}
+                              onClick={() => setSelectedSubjectId(subject.id)}
+                              className={`p-3 rounded-xl border bg-slate-900/90 hover:bg-slate-800/90 transition-all cursor-grab active:cursor-grabbing group shadow-sm hover:shadow-lg hover:border-slate-600 ${
+                                status === 'disponible'
+                                  ? 'border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
+                                  : status === 'bloqueada'
+                                  ? 'border-slate-800 opacity-80'
+                                  : 'border-slate-700/80'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1 mb-1.5 flex-wrap">
+                                <span className="font-mono text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 shrink-0">
+                                  #{subject.code}
+                                </span>
+                                <span className="text-[10px] text-slate-400 shrink-0">
+                                  Nivel {subject.level} • {subject.modality}
+                                </span>
+                              </div>
+
+                              <h4 className="font-bold text-xs sm:text-[13px] text-white leading-snug break-words group-hover:text-indigo-300 transition-colors">
+                                {subject.name}
+                              </h4>
+
+                              <div className="flex flex-wrap items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] gap-2">
+                                <span className="text-slate-400 flex items-center gap-1 shrink-0">
+                                  <BookOpen className="w-3 h-3 text-slate-500 shrink-0" />
+                                  <span className="whitespace-nowrap">{subject.weeklyHours} hs</span>
+                                </span>
+
+                                <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                  <StatusBadge status={status} grade={grade} size="sm" />
+                                  <button
+                                    onClick={() => setStatusModalSubjectId(subject.id)}
+                                    className="p-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors shrink-0"
+                                    title="Cambiar estado"
+                                  >
+                                    <Sparkles className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 
@@ -315,16 +347,16 @@ export const KanbanBoard: React.FC = () => {
                               {subject.modality} • {subject.weeklyHours}hs
                             </span>
                           </div>
-                          <h4 className="font-bold text-sm text-white">
+                          <h4 className="font-bold text-sm text-white leading-snug break-words">
                             {subject.name}
                           </h4>
                         </div>
 
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-800/60" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/60 gap-2" onClick={(e) => e.stopPropagation()}>
                           <StatusBadge status={status} grade={grade} size="sm" />
                           <button
                             onClick={() => setStatusModalSubjectId(subject.id)}
-                            className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors"
+                            className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors shrink-0"
                           >
                             Modificar
                           </button>

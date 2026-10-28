@@ -146,9 +146,9 @@ export const QuickStatusModal: React.FC = () => {
                   </span>
                 )}
               </div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <span>{subject.name}</span>
-                <span className="text-sm text-slate-500 font-mono">#{subject.code}</span>
+              <h2 className="text-base sm:text-xl font-bold text-white flex flex-wrap items-baseline gap-2 leading-snug">
+                <span className="break-words">{subject.name}</span>
+                <span className="text-xs sm:text-sm text-slate-500 font-mono shrink-0">#{subject.code}</span>
               </h2>
             </div>
             <button
@@ -253,13 +253,13 @@ export const QuickStatusModal: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-10 gap-1 sm:gap-1.5">
+                <div className="grid grid-cols-5 sm:grid-cols-10 gap-1.5 sm:gap-2">
                   {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((gradeNum) => (
                     <button
                       key={gradeNum}
                       type="button"
                       onClick={() => setSelectedGrade(gradeNum)}
-                      className={`h-9 rounded-lg font-bold text-sm transition-all ${
+                      className={`h-10 sm:h-9 rounded-lg font-bold text-sm transition-all ${
                         selectedGrade === gradeNum
                           ? 'bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.5)] scale-105'
                           : gradeNum < 4

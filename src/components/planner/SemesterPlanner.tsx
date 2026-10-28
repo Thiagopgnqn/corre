@@ -159,6 +159,18 @@ export const SemesterPlanner: React.FC = () => {
         </div>
       </div>
 
+      {/* Mobile basket quick summary banner */}
+      {basketSubjects.length > 0 && (
+        <div className="lg:hidden p-3.5 rounded-xl bg-cyan-950/80 border border-cyan-500/50 flex items-center justify-between shadow-lg">
+          <div className="flex items-center gap-2 text-xs">
+            <Clock className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span className="font-bold text-white">{basketSubjects.length} {basketSubjects.length === 1 ? 'materia' : 'materias'} elegidas:</span>
+            <span className="text-cyan-300 font-black">{totalWeeklyHours} hs</span>
+          </div>
+          <span className="text-[11px] text-cyan-300/90 font-medium">{workloadInfo.label.split('(')[0]}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Available Subjects Grid (2 Cols) */}
         <div className="lg:col-span-2 space-y-4">
@@ -212,20 +224,20 @@ export const SemesterPlanner: React.FC = () => {
                         </span>
                       </div>
 
-                      <h3 className="font-bold text-sm text-white leading-snug">
+                      <h3 className="font-bold text-sm text-white leading-snug break-words">
                         {subject.name}
                       </h3>
                     </div>
 
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/60" onClick={(e) => e.stopPropagation()}>
-                      <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
+                    <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/60 gap-2" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1 whitespace-nowrap">
+                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
                         <span>Correlativas listas</span>
                       </span>
 
                       <button
                         onClick={() => toggleBasketSubject(subject.id)}
-                        className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 ${
+                        className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1 shrink-0 ${
                           inBasket
                             ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/30'
                             : 'bg-slate-800 hover:bg-cyan-600 text-slate-300 hover:text-white border border-slate-700'
@@ -302,8 +314,8 @@ export const SemesterPlanner: React.FC = () => {
                     key={s.id}
                     className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800/80 flex items-center justify-between text-xs"
                   >
-                    <div className="truncate pr-2">
-                      <span className="font-bold text-white block truncate">{s.name}</span>
+                    <div className="pr-2 leading-tight flex-1">
+                      <span className="font-bold text-white block break-words">{s.name}</span>
                       <span className="text-slate-500 text-[10px]">
                         #{s.code} • {s.modality} • {s.weeklyHours}hs
                       </span>

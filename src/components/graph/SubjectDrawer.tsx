@@ -42,7 +42,16 @@ export const SubjectDrawer: React.FC = () => {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-y-0 right-0 z-40 w-full sm:w-[420px] pointer-events-none flex justify-end">
+      {/* Mobile/Desktop Backdrop Overlay */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={() => setSelectedSubjectId(null)}
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-xs sm:bg-black/30"
+      />
+
+      <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[440px] pointer-events-none flex justify-end">
         <motion.div
           initial={{ x: '100%', opacity: 0.5 }}
           animate={{ x: 0, opacity: 1 }}
@@ -51,44 +60,45 @@ export const SubjectDrawer: React.FC = () => {
           className="pointer-events-auto h-full w-full bg-slate-900/95 backdrop-blur-xl border-l border-slate-800 shadow-2xl flex flex-col overflow-hidden"
         >
           {/* Header */}
-          <div className="p-5 border-b border-slate-800 bg-slate-950/70 flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-1.5">
-                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+          <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 shrink-0">
                   #{selectedSubject.code}
                 </span>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
                   Nivel {selectedSubject.level}
                 </span>
-                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">
                   {selectedSubject.modality}
                 </span>
               </div>
-              <h2 className="text-lg font-bold text-white leading-tight">
+              <h2 className="text-base sm:text-lg font-bold text-white leading-snug break-words">
                 {selectedSubject.name}
               </h2>
             </div>
 
             <button
               onClick={() => setSelectedSubjectId(null)}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+              title="Cerrar panel"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Drawer Body */}
-          <div className="p-5 overflow-y-auto space-y-6 flex-1 text-sm">
+          <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 text-sm">
             {/* Status & Change Action */}
-            <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800 flex items-center justify-between">
-              <div>
-                <span className="text-xs text-slate-400 block mb-1">Estado actual:</span>
+            <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-400 block">Estado actual:</span>
                 <StatusBadge status={status} grade={grade} size="md" />
               </div>
 
               <button
                 onClick={() => setStatusModalSubjectId(selectedSubject.id)}
-                className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5 shrink-0"
               >
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Cambiar</span>
@@ -98,21 +108,21 @@ export const SubjectDrawer: React.FC = () => {
             {/* Quick stats info */}
             <div className="grid grid-cols-2 gap-3">
               <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>Carga semanal</span>
+                <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Carga semanal</span>
                 </div>
-                <div className="text-lg font-bold text-white">
+                <div className="text-base sm:text-lg font-bold text-white">
                   {selectedSubject.weeklyHours} hs/sem
                 </div>
               </div>
 
               <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800">
-                <div className="flex items-center gap-2 text-slate-400 text-xs mb-1">
-                  <BookOpen className="w-3.5 h-3.5" />
-                  <span>Modalidad</span>
+                <div className="flex items-center gap-1.5 text-slate-400 text-xs mb-1">
+                  <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Modalidad</span>
                 </div>
-                <div className="text-lg font-bold text-white">
+                <div className="text-base sm:text-lg font-bold text-white">
                   {selectedSubject.modality === 'A' ? 'Anual' : 'Cuatrimestral'}
                 </div>
               </div>
@@ -129,12 +139,12 @@ export const SubjectDrawer: React.FC = () => {
             >
               {isInBasket ? (
                 <>
-                  <CalendarCheck className="w-4 h-4 text-emerald-400" />
-                  <span>Agregada a mi cuatrimestre planeado (Quitar)</span>
+                  <CalendarCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Agregada a mi cuatrimestre (Quitar)</span>
                 </>
               ) : (
                 <>
-                  <CalendarPlus className="w-4 h-4 text-indigo-400" />
+                  <CalendarPlus className="w-4 h-4 text-indigo-400 shrink-0" />
                   <span>Agregar a mi cuatrimestre planeado</span>
                 </>
               )}
@@ -144,10 +154,10 @@ export const SubjectDrawer: React.FC = () => {
             {selectedSubject.specialRule && (
               <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-xs space-y-1">
                 <div className="font-semibold text-purple-300 flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4" />
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>Regla Especial</span>
                 </div>
-                <p className="leading-relaxed">{selectedSubject.specialRule}</p>
+                <p className="leading-relaxed break-words">{selectedSubject.specialRule}</p>
               </div>
             )}
 
@@ -160,7 +170,7 @@ export const SubjectDrawer: React.FC = () => {
               {selectedSubject.regularPrereqs.length === 0 &&
               selectedSubject.approvedPrereqs.length === 0 ? (
                 <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-800 text-xs text-emerald-400 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4" />
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
                   <span>No tiene materias correlativas previas requeridas.</span>
                 </div>
               ) : (
@@ -177,24 +187,24 @@ export const SubjectDrawer: React.FC = () => {
                           / {selectedSubject.regularPrereqs.length}
                         </span>
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         {selectedSubject.regularPrereqs.map((reqId) => {
                           const reqSub = ALL_SUBJECTS_MAP.get(reqId);
                           const met = isRegularOrHigher(activeState[reqId]);
                           return (
                             <div
                               key={reqId}
-                              className={`flex items-center justify-between text-xs p-1.5 rounded-lg ${
+                              className={`flex items-start justify-between text-xs p-2 rounded-lg gap-2 ${
                                 met ? 'bg-emerald-950/20 text-emerald-300' : 'bg-rose-950/20 text-rose-300'
                               }`}
                             >
-                              <span className="truncate">
+                              <span className="leading-snug break-words flex-1">
                                 #{reqSub?.code} {reqSub?.name || `Materia #${reqId}`}
                               </span>
                               {met ? (
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                               ) : (
-                                <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                               )}
                             </div>
                           );
@@ -215,24 +225,24 @@ export const SubjectDrawer: React.FC = () => {
                           / {selectedSubject.approvedPrereqs.length}
                         </span>
                       </div>
-                      <div className="space-y-1">
+                      <div className="space-y-1.5">
                         {selectedSubject.approvedPrereqs.map((reqId) => {
                           const reqSub = ALL_SUBJECTS_MAP.get(reqId);
                           const met = isApprovedOrHigher(activeState[reqId]);
                           return (
                             <div
                               key={reqId}
-                              className={`flex items-center justify-between text-xs p-1.5 rounded-lg ${
+                              className={`flex items-start justify-between text-xs p-2 rounded-lg gap-2 ${
                                 met ? 'bg-emerald-950/20 text-emerald-300' : 'bg-rose-950/20 text-rose-300'
                               }`}
                             >
-                              <span className="truncate">
+                              <span className="leading-snug break-words flex-1">
                                 #{reqSub?.code} {reqSub?.name || `Materia #${reqId}`}
                               </span>
                               {met ? (
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                               ) : (
-                                <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                               )}
                             </div>
                           );
@@ -259,14 +269,14 @@ export const SubjectDrawer: React.FC = () => {
                   {unlocked.unlocksOnRegularize.length > 0 && (
                     <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-800 space-y-1.5">
                       <div className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
-                        <ArrowRight className="w-3.5 h-3.5" />
+                        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                         <span>Al regularizar esta materia, habilita:</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         {unlocked.unlocksOnRegularize.map((s) => (
                           <span
                             key={s.id}
-                            className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-xs border border-slate-700"
+                            className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 text-xs border border-slate-700 leading-normal break-words"
                           >
                             #{s.code} {s.name}
                           </span>
@@ -278,14 +288,14 @@ export const SubjectDrawer: React.FC = () => {
                   {unlocked.unlocksOnApprove.length > 0 && (
                     <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-800 space-y-1.5">
                       <div className="text-xs font-semibold text-green-400 flex items-center gap-1.5">
-                        <ArrowRight className="w-3.5 h-3.5" />
+                        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
                         <span>Al aprobar esta materia, habilita:</span>
                       </div>
                       <div className="flex flex-wrap gap-1.5 pt-1">
                         {unlocked.unlocksOnApprove.map((s) => (
                           <span
                             key={s.id}
-                            className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-xs border border-slate-700"
+                            className="px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 text-xs border border-slate-700 leading-normal break-words"
                           >
                             #{s.code} {s.name}
                           </span>

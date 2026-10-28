@@ -166,10 +166,10 @@ export const StatsDashboard: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
       {/* Sub Navigation Tabs */}
-      <div className="flex items-center gap-1 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800 text-xs overflow-x-auto">
+      <div className="flex items-center gap-1.5 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800 text-xs overflow-x-auto scrollbar-none">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${
+          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'overview'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -179,7 +179,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('grades')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${
+          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'grades'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -189,7 +189,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('critical')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${
+          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'critical'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -199,7 +199,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('badges')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap transition-all ${
+          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'badges'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -439,7 +439,7 @@ export const StatsDashboard: React.FC = () => {
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
               Distribución de Calificaciones (1 - 10)
             </h3>
-            <div className="grid grid-cols-10 gap-2 items-end h-40 pt-6">
+            <div className="grid grid-cols-10 gap-1 sm:gap-2 items-end h-40 pt-6">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => {
                 const count = gradesData.distribution[num] || 0;
                 const maxCount = Math.max(...Object.values(gradesData.distribution), 1);
@@ -447,12 +447,12 @@ export const StatsDashboard: React.FC = () => {
 
                 return (
                   <div key={num} className="flex flex-col items-center h-full justify-end gap-1.5">
-                    <span className="text-[10px] text-slate-400 font-bold">{count}</span>
+                    <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{count}</span>
                     <div
                       className="w-full rounded-t-lg bg-gradient-to-t from-indigo-600 to-cyan-400 transition-all duration-500"
                       style={{ height: `${Math.max(heightPercent, 4)}%` }}
                     />
-                    <span className="text-xs font-bold text-slate-300 font-mono">{num}</span>
+                    <span className="text-[11px] sm:text-xs font-bold text-slate-300 font-mono">{num}</span>
                   </div>
                 );
               })}
@@ -464,7 +464,7 @@ export const StatsDashboard: React.FC = () => {
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
               Promedio por Nivel
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
               {[1, 2, 3, 4, 5].map((lvl) => {
                 const data = gradesData.avgByLevel[lvl];
                 return (
@@ -540,14 +540,14 @@ export const StatsDashboard: React.FC = () => {
                       onClick={() => setSelectedSubjectId(subj.id)}
                       className="p-4 rounded-xl border border-slate-800 bg-slate-900/80 hover:bg-slate-800/90 transition-all cursor-pointer flex flex-wrap items-center justify-between gap-3 group"
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 flex items-center justify-center font-bold text-xs">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 flex items-center justify-center font-bold text-xs shrink-0">
                           {idx + 1}
                         </span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs text-slate-400">#{subj.code}</span>
-                            <span className="font-bold text-sm text-white group-hover:text-indigo-300 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-xs text-slate-400 shrink-0">#{subj.code}</span>
+                            <span className="font-bold text-sm text-white break-words group-hover:text-indigo-300 transition-colors">
                               {subj.name}
                             </span>
                           </div>
@@ -557,11 +557,11 @@ export const StatsDashboard: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 capitalize">
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 capitalize whitespace-nowrap">
                           {status}
                         </span>
-                        <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+                        <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors shrink-0" />
                       </div>
                     </div>
 

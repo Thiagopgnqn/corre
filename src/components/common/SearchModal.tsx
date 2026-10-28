@@ -148,26 +148,26 @@ export const SearchModal: React.FC = () => {
                 return (
                   <div
                     key={subject.id}
-                    className="group flex items-center justify-between p-3 rounded-xl hover:bg-slate-800/70 border border-transparent hover:border-slate-700/60 transition-all cursor-pointer"
+                    className="group flex flex-wrap sm:flex-nowrap items-center justify-between p-3 rounded-xl hover:bg-slate-800/70 border border-transparent hover:border-slate-700/60 transition-all cursor-pointer gap-2"
                     onClick={() => {
                       setSelectedSubjectId(subject.id);
                       setIsSearchOpen(false);
                     }}
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center font-mono text-xs font-bold text-slate-300">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center font-mono text-xs font-bold text-slate-300 shrink-0">
                         {subject.code}
                       </span>
-                      <div>
-                        <div className="font-semibold text-sm text-white group-hover:text-indigo-300 transition-colors flex items-center gap-2">
-                          <span>{subject.name}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm text-white group-hover:text-indigo-300 transition-colors flex items-center gap-2 flex-wrap">
+                          <span className="break-words">{subject.name}</span>
                           {subject.isElective && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 shrink-0">
                               Electiva
                             </span>
                           )}
                         </div>
-                        <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+                        <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5 flex-wrap">
                           <span>Nivel {subject.level}</span>
                           <span>•</span>
                           <span>{subject.modality}</span>
@@ -180,14 +180,14 @@ export const SearchModal: React.FC = () => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-1 sm:pt-0 border-t border-slate-800/50 sm:border-0" onClick={(e) => e.stopPropagation()}>
                       <StatusBadge status={status} grade={grade} size="sm" />
                       <button
                         onClick={() => {
                           setStatusModalSubjectId(subject.id);
                           setIsSearchOpen(false);
                         }}
-                        className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 transition-colors flex items-center gap-1"
+                        className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 transition-colors flex items-center gap-1 shrink-0"
                       >
                         <span>Estado</span>
                         <ArrowRight className="w-3 h-3" />

@@ -89,10 +89,10 @@ export const CorrelativeGraph: React.FC = () => {
   const currentNodes = useMemo(() => {
     const xPositions: Record<number, number> = {
       1: 50,
-      2: 360,
-      3: 670,
-      4: 980,
-      5: 1290,
+      2: 380,
+      3: 710,
+      4: 1040,
+      5: 1370,
     };
 
     const levelCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -102,7 +102,7 @@ export const CorrelativeGraph: React.FC = () => {
       levelCounts[subject.level] = colIndex + 1;
 
       const x = xPositions[subject.level] || 50;
-      const y = 80 + colIndex * 135;
+      const y = 80 + colIndex * 155;
 
       const status = getSubjectStatus(subject, activeState);
       const grade = activeState[subject.id]?.grade;
@@ -230,19 +230,19 @@ export const CorrelativeGraph: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[calc(100vh-4rem)] bg-slate-950 overflow-hidden">
+    <div className="relative w-full h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-4.25rem)] bg-slate-950 overflow-hidden">
       {/* Top Floating Controls & Legend */}
-      <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
-        <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-2 px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-3 text-xs">
+      <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
+        <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
           {/* Edge Legend */}
           <div className="flex items-center gap-2">
-            <span className="flex items-center gap-1.5 font-medium text-amber-400">
-              <span className="w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
+            <span className="flex items-center gap-1.5 font-medium text-amber-400 whitespace-nowrap">
+              <span className="w-4 sm:w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
               <span>Regular</span>
             </span>
             <span className="text-slate-600">•</span>
-            <span className="flex items-center gap-1.5 font-medium text-emerald-400">
-              <span className="w-5 h-0 border-t-2 border-emerald-400 inline-block" />
+            <span className="flex items-center gap-1.5 font-medium text-emerald-400 whitespace-nowrap">
+              <span className="w-4 sm:w-5 h-0 border-t-2 border-emerald-400 inline-block" />
               <span>Aprobada</span>
             </span>
           </div>
@@ -252,13 +252,13 @@ export const CorrelativeGraph: React.FC = () => {
           {/* Electives toggle */}
           <button
             onClick={() => setShowElectivesInGraph(!showElectivesInGraph)}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 ${
+            className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
               showElectivesInGraph
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
             }`}
           >
-            <Sparkles className="w-3.5 h-3.5" />
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
             <span>{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
           </button>
 
@@ -266,24 +266,13 @@ export const CorrelativeGraph: React.FC = () => {
           {selectedSubjectId && (
             <button
               onClick={() => setSelectedSubjectId(null)}
-              className="px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1 hover:bg-indigo-500/30"
+              className="px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1 hover:bg-indigo-500/30 whitespace-nowrap shrink-0"
               title="Limpiar selección"
             >
               <span>Foco activo</span>
-              <X className="w-3 h-3" />
+              <X className="w-3 h-3 shrink-0" />
             </button>
           )}
-        </div>
-      </div>
-
-      {/* Level Labels along the top columns */}
-      <div className="absolute top-2 left-0 right-0 z-10 pointer-events-none hidden md:block">
-        <div className="relative w-[1550px] mx-auto text-xs font-bold text-slate-500 tracking-wider uppercase pl-16">
-          <span className="inline-block w-[310px]">Nivel 1 (1° Año)</span>
-          <span className="inline-block w-[310px]">Nivel 2 (2° Año)</span>
-          <span className="inline-block w-[310px]">Nivel 3 (3° Año)</span>
-          <span className="inline-block w-[310px]">Nivel 4 (4° Año)</span>
-          <span className="inline-block w-[310px]">Nivel 5 (5° Año)</span>
         </div>
       </div>
 
