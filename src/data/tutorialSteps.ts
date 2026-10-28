@@ -59,7 +59,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Hacé click en cualquier materia del mapa para abrir su panel lateral (o avanzá con "Siguiente"). Verás sus horas semanales, correlativas requeridas y las materias futuras que habilita.',
     badge: 'Interactivo',
-    targetSelector: '[data-tour="graph-canvas"]',
+    targetSelector: '[data-tour="sample-subject"]',
     targetView: 'graph',
     placement: 'right',
     interactiveAction: 'click-subject',

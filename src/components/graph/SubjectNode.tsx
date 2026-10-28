@@ -115,6 +115,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
 
   return (
     <div
+      data-tour={subject.id === 1 ? 'sample-subject' : undefined}
       className={`relative w-[230px] sm:w-[245px] rounded-xl border backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
         style.bg
       } ${
