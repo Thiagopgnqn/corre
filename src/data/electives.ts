@@ -9,6 +9,7 @@ export interface ElectiveSubject extends Subject {
 // Configuración general de créditos requeridos (fácil de editar)
 export const REQUIRED_ELECTIVE_CREDITS_TOTAL = 20;
 export const REQUIRED_ANALISTA_ELECTIVE_CREDITS = 4;
+export const ELECTIVE_SLOTS_EQUIVALENT = 7; // 20 créditos / ~3 cr por electiva (redondeado hacia arriba)
 
 export const ELECTIVES: ElectiveSubject[] = [
   // ================= NIVEL SUGERIDO 3 =================

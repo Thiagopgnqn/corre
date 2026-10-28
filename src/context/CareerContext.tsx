@@ -8,13 +8,18 @@ import type {
   AssignedElectivesByYear,
 } from '../types/career';
 import { CORE_SUBJECTS } from '../data/plan2023';
-import { ELECTIVES, REQUIRED_ELECTIVE_CREDITS_TOTAL } from '../data/electives';
+import {
+  ELECTIVES,
+  REQUIRED_ELECTIVE_CREDITS_TOTAL,
+  ELECTIVE_SLOTS_EQUIVALENT,
+} from '../data/electives';
 import {
   getSubjectStatus,
   isApprovedOrHigher,
   checkAnalistaTitle,
   isPPSEligible,
   getNewlyUnlockedOnStateChange,
+  calculateProgressBreakdown,
 } from '../utils/correlativas';
 import { calculateCriticalPath } from '../utils/criticalPath';
 import { soundManager } from '../utils/audio';
@@ -350,6 +355,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Electives credits computation (global total, regardless of level)
     let totalElectiveCreditsApproved = 0;
+    let totalElectiveCreditsRegularized = 0;
     let totalElectiveCreditsTaking = 0;
 
     ELECTIVES.forEach((el) => {
@@ -359,13 +365,31 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
           gradesToAverage.push(st.grade);
         }
+      } else if (st?.status === 'regularizada') {
+        totalElectiveCreditsRegularized += el.credits;
       } else if (st?.status === 'cursando') {
         totalElectiveCreditsTaking += el.credits;
       }
     });
 
-    const totalApproved = approvedCount + promotedCount;
-    const careerPercentageBySubjects = Math.round((totalApproved / activeCoreSubjects.length) * 100);
+    const coreApproved = approvedCount + promotedCount;
+    const corePending = blockedCount + availableCount;
+
+    const breakdown = calculateProgressBreakdown({
+      coreApproved,
+      coreRegularized: regularizedCount,
+      coreTaking: takingCount,
+      corePending,
+      totalCore: activeCoreSubjects.length,
+      electiveCreditsApproved: totalElectiveCreditsApproved,
+      electiveCreditsRegularized: totalElectiveCreditsRegularized,
+      electiveCreditsTaking: totalElectiveCreditsTaking,
+      includeElectives: settings.includeElectivesInProgress,
+      electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+      requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
+    });
+
+    const careerPercentageBySubjects = breakdown.percentageApproved;
     const careerPercentageByHours = totalWeeklyHours > 0
       ? Math.round((approvedWeeklyHours / totalWeeklyHours) * 100)
       : 0;
@@ -399,11 +423,18 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       approvedWeeklyHours,
       careerPercentageBySubjects,
       careerPercentageByHours,
+      percentageApproved: breakdown.percentageApproved,
+      percentageTaking: breakdown.percentageTaking,
+      percentageRegularized: breakdown.percentageRegularized,
+      percentagePending: breakdown.percentagePending,
+      totalEquivalentSlots: breakdown.totalEquivalentSlots,
+      approvedEquivalentSlots: breakdown.approvedEquivalentSlots,
       averageGrade,
       averageGradeWithPromotions: averageGrade,
       pendingFinalsCount: regularizedCount,
       totalElectiveCreditsApproved,
       totalElectiveCreditsTaking,
+      totalElectiveCreditsRegularized,
       totalElectiveCreditsRequired: REQUIRED_ELECTIVE_CREDITS_TOTAL,
       missingElectiveCreditsForDegree,
       missingCoreForDegree,

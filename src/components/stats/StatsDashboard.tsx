@@ -222,6 +222,44 @@ export const StatsDashboard: React.FC = () => {
       {/* TAB 1: OVERVIEW */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
+          {/* Mode Selector for Progress Percentage */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <div>
+                <span className="text-xs font-bold text-white uppercase tracking-wider block">
+                  Cálculo de Avance de Carrera
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Elegí si el porcentaje de avance general incluye el bloque de 20 créditos de electivas.
+                </span>
+              </div>
+            </div>
+
+            <div className="inline-flex p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold">
+              <button
+                onClick={() => updateSettings({ includeElectivesInProgress: false })}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  !settings.includeElectivesInProgress
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Solo obligatorias
+              </button>
+              <button
+                onClick={() => updateSettings({ includeElectivesInProgress: true })}
+                className={`px-3 py-1.5 rounded-lg transition-all ${
+                  settings.includeElectivesInProgress
+                    ? 'bg-amber-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Con electivas (20 cr)
+              </button>
+            </div>
+          </div>
+
           {/* Main Progress Rings Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* By subjects */}
@@ -230,17 +268,34 @@ export const StatsDashboard: React.FC = () => {
                 Avance por Materias
               </span>
               <div className="flex items-center justify-between my-4">
-                <div>
+                <div className="min-w-0 flex-1 pr-2">
                   <div className="text-3xl font-black text-white">
                     {computedProgress.careerPercentageBySubjects}%
                   </div>
-                  <div className="text-xs text-slate-400 mt-1">
-                    {computedProgress.approvedCount + computedProgress.promotedCount} de{' '}
-                    {computedProgress.totalSubjects} materias
-                  </div>
+                  {settings.includeElectivesInProgress ? (
+                    <div className="text-xs text-slate-300 mt-1 leading-snug break-words">
+                      <span className="font-semibold text-white">
+                        {computedProgress.approvedCount + computedProgress.promotedCount} de{' '}
+                        {computedProgress.totalSubjects}
+                      </span>{' '}
+                      obligatorias +{' '}
+                      <span className="font-semibold text-amber-300">
+                        {computedProgress.totalElectiveCreditsApproved} de 20 cr
+                      </span>{' '}
+                      electivas
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-300 mt-1 leading-snug">
+                      <span className="font-semibold text-white">
+                        {computedProgress.approvedCount + computedProgress.promotedCount} de{' '}
+                        {computedProgress.totalSubjects}
+                      </span>{' '}
+                      materias obligatorias
+                    </div>
+                  )}
                 </div>
                 {/* Mini circular progress */}
-                <svg className="w-16 h-16 transform -rotate-90">
+                <svg className="w-16 h-16 transform -rotate-90 shrink-0">
                   <circle
                     cx="32"
                     cy="32"
@@ -265,7 +320,11 @@ export const StatsDashboard: React.FC = () => {
                   />
                 </svg>
               </div>
-              <div className="text-[11px] text-slate-500">Plan de estudios 2023 ISI</div>
+              <div className="text-[11px] text-slate-400">
+                {settings.includeElectivesInProgress
+                  ? 'Ponderado: obligatorias + bloque electivas (7 eq.)'
+                  : 'Solo materias obligatorias'}
+              </div>
             </div>
 
             {/* By weekly hours */}
@@ -282,7 +341,7 @@ export const StatsDashboard: React.FC = () => {
                     {computedProgress.approvedWeeklyHours} de {computedProgress.totalWeeklyHours} hs/sem
                   </div>
                 </div>
-                <svg className="w-16 h-16 transform -rotate-90">
+                <svg className="w-16 h-16 transform -rotate-90 shrink-0">
                   <circle
                     cx="32"
                     cy="32"
@@ -307,7 +366,9 @@ export const StatsDashboard: React.FC = () => {
                   />
                 </svg>
               </div>
-              <div className="text-[11px] text-slate-500">Ponderado por duración y horas</div>
+              <div className="text-[10px] text-slate-400 leading-tight">
+                * Las electivas no tienen carga horaria definida, por eso este valor no las incluye
+              </div>
             </div>
 
             {/* Pending finals */}
@@ -347,6 +408,85 @@ export const StatsDashboard: React.FC = () => {
               </div>
               <div className="text-[11px] text-emerald-400/80">
                 {settings.includePromotionsInGPA ? 'Incluye promociones' : 'Solo exámenes finales'}
+              </div>
+            </div>
+          </div>
+
+          {/* Overall Status Distribution Bar (Sums to 100%) */}
+          <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <span className="font-bold text-slate-300 uppercase tracking-wider">
+                Distribución de Estados ({settings.includeElectivesInProgress ? 'Con electivas' : 'Solo obligatorias'})
+              </span>
+              <span className="font-mono text-slate-400 text-[11px]">
+                Suma total: {computedProgress.percentageApproved + computedProgress.percentageRegularized + computedProgress.percentageTaking + computedProgress.percentagePending}%
+              </span>
+            </div>
+
+            {/* Multi-segment Progress Bar */}
+            <div className="w-full h-3 rounded-full overflow-hidden flex bg-slate-950 border border-slate-800 p-0.5">
+              {computedProgress.percentageApproved > 0 && (
+                <div
+                  className="h-full bg-emerald-500 rounded-l-full transition-all duration-500"
+                  style={{ width: `${computedProgress.percentageApproved}%` }}
+                  title={`Aprobadas: ${computedProgress.percentageApproved}%`}
+                />
+              )}
+              {computedProgress.percentageRegularized > 0 && (
+                <div
+                  className="h-full bg-amber-500 transition-all duration-500"
+                  style={{ width: `${computedProgress.percentageRegularized}%` }}
+                  title={`Regularizadas: ${computedProgress.percentageRegularized}%`}
+                />
+              )}
+              {computedProgress.percentageTaking > 0 && (
+                <div
+                  className="h-full bg-cyan-500 transition-all duration-500"
+                  style={{ width: `${computedProgress.percentageTaking}%` }}
+                  title={`Cursando: ${computedProgress.percentageTaking}%`}
+                />
+              )}
+              {computedProgress.percentagePending > 0 && (
+                <div
+                  className="h-full bg-slate-800 rounded-r-full transition-all duration-500"
+                  style={{ width: `${computedProgress.percentagePending}%` }}
+                  title={`Pendientes: ${computedProgress.percentagePending}%`}
+                />
+              )}
+            </div>
+
+            {/* Status Pills */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                <div>
+                  <div className="text-[10px] text-slate-400">Aprobadas</div>
+                  <div className="font-bold text-emerald-400">{computedProgress.percentageApproved}%</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0" />
+                <div>
+                  <div className="text-[10px] text-slate-400">Regularizadas</div>
+                  <div className="font-bold text-amber-400">{computedProgress.percentageRegularized}%</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 shrink-0" />
+                <div>
+                  <div className="text-[10px] text-slate-400">Cursando</div>
+                  <div className="font-bold text-cyan-400">{computedProgress.percentageTaking}%</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 p-2 rounded-xl bg-slate-950/60 border border-slate-800">
+                <span className="w-2.5 h-2.5 rounded-full bg-slate-600 shrink-0" />
+                <div>
+                  <div className="text-[10px] text-slate-400">Pendientes</div>
+                  <div className="font-bold text-slate-300">{computedProgress.percentagePending}%</div>
+                </div>
               </div>
             </div>
           </div>

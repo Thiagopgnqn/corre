@@ -215,3 +215,119 @@ export function getNewlyUnlockedOnStateChange(
 
   return newlyUnlocked;
 }
+
+/**
+ * Largest Remainder (Hamilton) method to round an array of numbers so their sum is strictly 100
+ */
+export function roundPercentagesStrict100(values: number[]): number[] {
+  const sum = values.reduce((a, b) => a + b, 0);
+  if (sum === 0) return values.map(() => 0);
+
+  const normalized = values.map((v) => (v / sum) * 100);
+  const floorValues = normalized.map(Math.floor);
+  const remainder = Math.round(100 - floorValues.reduce((a, b) => a + b, 0));
+
+  const diffs = normalized
+    .map((val, idx) => ({ idx, diff: val - floorValues[idx] }))
+    .sort((a, b) => b.diff - a.diff);
+
+  for (let i = 0; i < remainder; i++) {
+    floorValues[diffs[i % diffs.length].idx]++;
+  }
+
+  return floorValues;
+}
+
+export interface ProgressBreakdownParams {
+  coreApproved: number;
+  coreRegularized: number;
+  coreTaking: number;
+  corePending: number;
+  totalCore: number;
+  electiveCreditsApproved: number;
+  electiveCreditsRegularized: number;
+  electiveCreditsTaking: number;
+  includeElectives: boolean;
+  electiveSlotsEquivalent?: number; // defaults to 7
+  requiredElectiveCredits?: number; // defaults to 20
+}
+
+export interface ProgressBreakdownResult {
+  percentageApproved: number;
+  percentageRegularized: number;
+  percentageTaking: number;
+  percentagePending: number;
+  totalEquivalentSlots: number;
+  approvedEquivalentSlots: number;
+}
+
+/**
+ * Calculates the career progress breakdown across approved, regularized, taking and pending
+ * Guaranteeing that percentageApproved + percentageRegularized + percentageTaking + percentagePending === 100
+ */
+export function calculateProgressBreakdown(params: ProgressBreakdownParams): ProgressBreakdownResult {
+  const {
+    coreApproved,
+    coreRegularized,
+    coreTaking,
+    corePending,
+    totalCore,
+    electiveCreditsApproved,
+    electiveCreditsRegularized,
+    electiveCreditsTaking,
+    includeElectives,
+    electiveSlotsEquivalent = 7,
+    requiredElectiveCredits = 20,
+  } = params;
+
+  if (!includeElectives) {
+    const rawValues = [coreApproved, coreRegularized, coreTaking, corePending];
+    const [percentageApproved, percentageRegularized, percentageTaking, percentagePending] =
+      roundPercentagesStrict100(rawValues);
+
+    return {
+      percentageApproved,
+      percentageRegularized,
+      percentageTaking,
+      percentagePending,
+      totalEquivalentSlots: totalCore,
+      approvedEquivalentSlots: coreApproved,
+    };
+  }
+
+  // With electives: electives contribute up to requiredElectiveCredits (20), scaled to electiveSlotsEquivalent (7)
+  const crApr = Math.min(electiveCreditsApproved, requiredElectiveCredits);
+  const crReg = Math.min(electiveCreditsRegularized, Math.max(0, requiredElectiveCredits - crApr));
+  const crCur = Math.min(electiveCreditsTaking, Math.max(0, requiredElectiveCredits - crApr - crReg));
+  const crPen = Math.max(0, requiredElectiveCredits - crApr - crReg - crCur);
+
+  const slotsApr = (crApr / requiredElectiveCredits) * electiveSlotsEquivalent;
+  const slotsReg = (crReg / requiredElectiveCredits) * electiveSlotsEquivalent;
+  const slotsCur = (crCur / requiredElectiveCredits) * electiveSlotsEquivalent;
+  const slotsPen = (crPen / requiredElectiveCredits) * electiveSlotsEquivalent;
+
+  const totalEquivalentSlots = totalCore + electiveSlotsEquivalent;
+  const approvedEquivalentSlots = coreApproved + slotsApr;
+  const regularizedEquivalentSlots = coreRegularized + slotsReg;
+  const takingEquivalentSlots = coreTaking + slotsCur;
+  const pendingEquivalentSlots = corePending + slotsPen;
+
+  const rawValues = [
+    approvedEquivalentSlots,
+    regularizedEquivalentSlots,
+    takingEquivalentSlots,
+    pendingEquivalentSlots,
+  ];
+
+  const [percentageApproved, percentageRegularized, percentageTaking, percentagePending] =
+    roundPercentagesStrict100(rawValues);
+
+  return {
+    percentageApproved,
+    percentageRegularized,
+    percentageTaking,
+    percentagePending,
+    totalEquivalentSlots,
+    approvedEquivalentSlots: Number(approvedEquivalentSlots.toFixed(2)),
+  };
+}

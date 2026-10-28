@@ -52,9 +52,17 @@ export interface CareerProgress {
   // Electivas globales (sin mínimos por nivel)
   totalElectiveCreditsApproved: number;
   totalElectiveCreditsTaking: number;
+  totalElectiveCreditsRegularized: number;
   totalElectiveCreditsRequired: number;
   missingElectiveCreditsForDegree: number;
   missingCoreForDegree: number[];
+  // Porcentajes de avance y desglose (suman 100%)
+  percentageApproved: number;
+  percentageTaking: number;
+  percentageRegularized: number;
+  percentagePending: number;
+  totalEquivalentSlots: number;
+  approvedEquivalentSlots: number;
   // Títulos
   isAnalistaEligible: boolean;
   missingForAnalista?: {

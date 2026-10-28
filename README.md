@@ -56,7 +56,11 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
    - Botón para pasar la selección en bloque a estado *"Cursando"*.
 
 8. **📊 Dashboard de Estadísticas & Camino Crítico**:
-   - Anillos de progreso de carrera (% por materias y % por horas semanales).
+   - **Selector de Modo de Cálculo de Avance**:
+     - *Solo obligatorias*: porcentaje basado únicamente en las materias troncales activas (36, o 37 con Analista).
+     - *Con electivas (por defecto)*: suma las electivas como un bloque proporcional de 7 materias equivalentes (`ELECTIVE_SLOTS_EQUIVALENT = 7`, correspondiente a 20 créditos).
+     - Los porcentajes de *aprobadas*, *regularizadas*, *cursando* y *pendientes* suman estrictamente el **100%** en ambos modos.
+   - Anillos de progreso de carrera (% por materias y % por horas semanales, con nota explícita de que las electivas no computan horas de plan).
    - Panel de **Requisitos para el Título de Ingeniero/a**: desglose explícito de materias obligatorias faltantes y créditos de electivas (X / 20).
    - Promedio general ponderado con selector para incluir o excluir materias promocionadas y umbral de nota mínima (4 o 6).
    - Distribución de notas (1 a 10), mejor y peor calificación, y promedio por nivel.

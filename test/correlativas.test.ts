@@ -1,5 +1,9 @@
 import { CORE_SUBJECTS } from '../src/data/plan2023';
-import { ELECTIVES, REQUIRED_ELECTIVE_CREDITS_TOTAL } from '../src/data/electives';
+import {
+  ELECTIVES,
+  REQUIRED_ELECTIVE_CREDITS_TOTAL,
+  ELECTIVE_SLOTS_EQUIVALENT,
+} from '../src/data/electives';
 import { ACRONYM_TO_ID } from '../src/data/acronyms';
 import {
   getSubjectStatus,
@@ -8,6 +12,7 @@ import {
   checkAnalistaTitle,
   isPPSEligible,
   getUnlockedBySubject,
+  calculateProgressBreakdown,
 } from '../src/utils/correlativas';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
 import { sanitizeAssignedElectives, migrateLegacyElectives } from '../src/utils/storage';
@@ -172,4 +177,168 @@ assert(!ppsCheckEmpty.eligible, 'PPS not eligible on empty state');
 const am1Unlocks = getUnlockedBySubject(1);
 assert(am1Unlocks.totalCount >= 5, 'AM1 unlocks at least 5 subjects');
 
-console.log('ALL UNIT LOGIC TESTS (INCLUDING DUPLICATES, MIGRATION & PROYECTO FINAL) PASSED SUCCESSFULLY!');
+// 14. Progress Breakdown: Mode "Solo obligatorias"
+// Case: 18 core approved, 4 regularized, 2 taking, 12 pending out of 36 (Analista OFF)
+const progressCoreOnly = calculateProgressBreakdown({
+  coreApproved: 18,
+  coreRegularized: 4,
+  coreTaking: 2,
+  corePending: 12,
+  totalCore: 36,
+  electiveCreditsApproved: 12,
+  electiveCreditsRegularized: 3,
+  electiveCreditsTaking: 3,
+  includeElectives: false,
+});
+assert(progressCoreOnly.totalEquivalentSlots === 36, 'Core only total slots is 36');
+assert(progressCoreOnly.percentageApproved === 50, '18/36 is 50%');
+const sumCoreOnly =
+  progressCoreOnly.percentageApproved +
+  progressCoreOnly.percentageRegularized +
+  progressCoreOnly.percentageTaking +
+  progressCoreOnly.percentagePending;
+assert(sumCoreOnly === 100, `Core only sum must be 100, got ${sumCoreOnly}`);
+
+// 15. Progress Breakdown: Mode "Con electivas"
+// Denominator without Analista: 36 + 7 = 43
+// Denominator with Analista: 37 + 7 = 44
+// A) 0 elective credits
+const prog0cr = calculateProgressBreakdown({
+  coreApproved: 18,
+  coreRegularized: 0,
+  coreTaking: 0,
+  corePending: 18,
+  totalCore: 36,
+  electiveCreditsApproved: 0,
+  electiveCreditsRegularized: 0,
+  electiveCreditsTaking: 0,
+  includeElectives: true,
+  electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+});
+// 18 / 43 ~ 41.86% -> rounded to 42%
+assert(prog0cr.totalEquivalentSlots === 43, 'Total slots is 36 + 7 = 43');
+assert(prog0cr.approvedEquivalentSlots === 18, 'Approved equivalent is 18 + 0 = 18');
+assert(
+  prog0cr.percentageApproved +
+    prog0cr.percentageRegularized +
+    prog0cr.percentageTaking +
+    prog0cr.percentagePending ===
+    100,
+  'Sum of percentages with 0 elective credits must be 100'
+);
+
+// B) Below 20 credits: 10 credits approved (50% of 7 = 3.5 slots)
+const prog10cr = calculateProgressBreakdown({
+  coreApproved: 18,
+  coreRegularized: 4,
+  coreTaking: 2,
+  corePending: 12,
+  totalCore: 36,
+  electiveCreditsApproved: 10,
+  electiveCreditsRegularized: 0,
+  electiveCreditsTaking: 6, // 6 credits taking = 2.1 slots
+  includeElectives: true,
+  electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+});
+assert(prog10cr.totalEquivalentSlots === 43, 'Total slots with electives is 43');
+assert(prog10cr.approvedEquivalentSlots === 21.5, '18 + 3.5 = 21.5 slots');
+const sum10cr =
+  prog10cr.percentageApproved +
+  prog10cr.percentageRegularized +
+  prog10cr.percentageTaking +
+  prog10cr.percentagePending;
+assert(sum10cr === 100, `Sum with 10cr electives must be 100, got ${sum10cr}`);
+
+// C) Exactly 20 credits: 20 credits approved (= 7 full slots)
+const prog20cr = calculateProgressBreakdown({
+  coreApproved: 36,
+  coreRegularized: 0,
+  coreTaking: 0,
+  corePending: 0,
+  totalCore: 36,
+  electiveCreditsApproved: 20,
+  electiveCreditsRegularized: 0,
+  electiveCreditsTaking: 0,
+  includeElectives: true,
+  electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+});
+assert(prog20cr.approvedEquivalentSlots === 43, 'All 36 + 7 = 43 slots approved');
+assert(prog20cr.percentageApproved === 100, 'All approved is 100%');
+assert(
+  prog20cr.percentageApproved +
+    prog20cr.percentageRegularized +
+    prog20cr.percentageTaking +
+    prog20cr.percentagePending ===
+    100,
+  'Sum with 20cr must be 100'
+);
+
+// D) Above 20 credits (e.g. 24 credits): must be capped at 20 credits (7 slots)
+const prog24cr = calculateProgressBreakdown({
+  coreApproved: 18,
+  coreRegularized: 2,
+  coreTaking: 2,
+  corePending: 14,
+  totalCore: 36,
+  electiveCreditsApproved: 24, // exceeding 20
+  electiveCreditsRegularized: 0,
+  electiveCreditsTaking: 0,
+  includeElectives: true,
+  electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+});
+assert(prog24cr.approvedEquivalentSlots === 25, '18 + 7 = 25 (capped at 7 slots for electives)');
+assert(
+  prog24cr.percentageApproved +
+    prog24cr.percentageRegularized +
+    prog24cr.percentageTaking +
+    prog24cr.percentagePending ===
+    100,
+  'Sum with >20cr must be 100'
+);
+
+// E) With Analista mode ON (totalCore = 37 -> total slots = 37 + 7 = 44)
+const progAnalistaOn = calculateProgressBreakdown({
+  coreApproved: 22,
+  coreRegularized: 5,
+  coreTaking: 3,
+  corePending: 7,
+  totalCore: 37,
+  electiveCreditsApproved: 10,
+  electiveCreditsRegularized: 4,
+  electiveCreditsTaking: 3,
+  includeElectives: true,
+  electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+});
+assert(progAnalistaOn.totalEquivalentSlots === 44, 'Total slots with Analista ON is 37 + 7 = 44');
+const sumAnalista =
+  progAnalistaOn.percentageApproved +
+  progAnalistaOn.percentageRegularized +
+  progAnalistaOn.percentageTaking +
+  progAnalistaOn.percentagePending;
+assert(sumAnalista === 100, `Sum with Analista ON must be 100, got ${sumAnalista}`);
+
+// 16. Edge cases: all combinations strictly sum to 100%
+const randomScenarios = [
+  { cA: 0, cR: 0, cT: 0, cP: 36, eA: 0, eR: 0, eT: 0, inc: false },
+  { cA: 1, cR: 1, cT: 1, cP: 33, eA: 3, eR: 3, eT: 3, inc: true },
+  { cA: 35, cR: 1, cT: 0, cP: 0, eA: 19, eR: 1, eT: 0, inc: true },
+  { cA: 10, cR: 10, cT: 10, cP: 6, eA: 5, eR: 5, eT: 5, inc: true },
+  { cA: 37, cR: 0, cT: 0, cP: 0, eA: 30, eR: 0, eT: 0, inc: true, totalCore: 37 },
+];
+randomScenarios.forEach((sc, i) => {
+  const res = calculateProgressBreakdown({
+    coreApproved: sc.cA,
+    coreRegularized: sc.cR,
+    coreTaking: sc.cT,
+    corePending: sc.cP,
+    totalCore: sc.totalCore ?? 36,
+    electiveCreditsApproved: sc.eA,
+    electiveCreditsRegularized: sc.eR,
+    electiveCreditsTaking: sc.eT,
+    includeElectives: sc.inc,
+  });
+  const sum = res.percentageApproved + res.percentageRegularized + res.percentageTaking + res.percentagePending;
+  assert(sum === 100, `Scenario ${i} sum must be 100, got ${sum}`);
+});
+
+console.log('ALL UNIT LOGIC TESTS (INCLUDING ELECTIVES PROGRESS BREAKDOWN & 100% SUM) PASSED SUCCESSFULLY!');

@@ -12,6 +12,7 @@ export interface AppSettings {
   minPassingGrade: number;
   includeAnalistaTrack: boolean; // Default false
   allowBlockedElectivesPlanning: boolean; // Default false
+  includeElectivesInProgress: boolean; // Default true
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minPassingGrade: 4,
   includeAnalistaTrack: false,
   allowBlockedElectivesPlanning: false,
+  includeElectivesInProgress: true,
 };
 
 export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = {
@@ -180,6 +182,7 @@ export function loadSettings(): AppSettings {
       ...parsed,
       includeAnalistaTrack: parsed.includeAnalistaTrack ?? false,
       allowBlockedElectivesPlanning: parsed.allowBlockedElectivesPlanning ?? false,
+      includeElectivesInProgress: parsed.includeElectivesInProgress ?? true,
     };
   } catch {
     return DEFAULT_SETTINGS;
