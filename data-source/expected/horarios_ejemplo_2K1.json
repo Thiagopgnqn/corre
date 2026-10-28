@@ -1,0 +1,142 @@
+{
+  "_meta": {
+    "source": "Planilla '2do año', hoja '2K1' (Turno Mañana)",
+    "note": "Ejemplo de referencia verificado contra las celdas combinadas reales. Sirve como fixture de test para el importador.",
+    "assumptions": [
+      "Las celdas combinadas que se extienden sobre la fila 12:50-14:00 se recortan a las 12:50.",
+      "Los slots se conservan separados cuando los divide un recreo (ej. 08:00-09:30 y 09:40-10:25).",
+      "Materias con mismos días y horarios en 1er y 2do cuatrimestre se emiten una sola vez como term 'A'.",
+      "Abreviaturas de las celdas normalizadas: ASI = Análisis de Sistemas de Información (16), SSL = Sintaxis y Semántica de los Lenguajes (13), PPR = Paradigmas de Programación (14)."
+    ]
+  },
+  "schedule": [
+    {
+      "subjectId": 9,
+      "term": "A",
+      "commissions": [
+        {
+          "id": "9-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Savorgnano, Marcela Alejandra"],
+          "slots": [
+            { "day": "LUN", "start": "09:40", "end": "11:10" },
+            { "day": "MAR", "start": "08:00", "end": "09:30" },
+            { "day": "MAR", "start": "09:40", "end": "10:25" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 10,
+      "term": "A",
+      "commissions": [
+        {
+          "id": "10-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Gómez Astudillo, Luis Eduardo", "Musso, Javier Horacio"],
+          "slots": [
+            { "day": "MIE", "start": "08:00", "end": "09:30" },
+            { "day": "MIE", "start": "09:40", "end": "10:25" },
+            { "day": "VIE", "start": "10:25", "end": "11:10" },
+            { "day": "VIE", "start": "11:20", "end": "12:05" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 15,
+      "term": "A",
+      "commissions": [
+        {
+          "id": "15-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Serna, Monica Mariel", "Allende, Sandra Liliana", "Parisi, Germán Nicolás"],
+          "slots": [
+            { "day": "LUN", "start": "08:00", "end": "09:30" },
+            { "day": "VIE", "start": "12:05", "end": "12:50" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 16,
+      "term": "A",
+      "commissions": [
+        {
+          "id": "16-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Mac William, Maria Irene", "Castro, Claudia Susana", "Botta, Oscar Ernesto"],
+          "slots": [
+            { "day": "MIE", "start": "10:25", "end": "11:10" },
+            { "day": "MIE", "start": "11:20", "end": "12:50" },
+            { "day": "VIE", "start": "08:00", "end": "09:30" },
+            { "day": "VIE", "start": "09:40", "end": "10:25" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 13,
+      "term": "1C",
+      "commissions": [
+        {
+          "id": "13-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Montoya, Fanny Esther", "Paez, Nancy Del Valle"],
+          "slots": [
+            { "day": "MAR", "start": "10:25", "end": "11:10" },
+            { "day": "MAR", "start": "11:20", "end": "12:50" },
+            { "day": "JUE", "start": "08:00", "end": "09:30" },
+            { "day": "JUE", "start": "09:40", "end": "11:10" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 17,
+      "term": "1C",
+      "commissions": [
+        {
+          "id": "17-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Infante, Roberto Adrian", "Righetti, Andrea Fabiana"],
+          "slots": [
+            { "day": "LUN", "start": "11:20", "end": "12:50" },
+            { "day": "JUE", "start": "11:20", "end": "12:50" }
+          ]
+        }
+      ]
+    },
+    {
+      "subjectId": 14,
+      "term": "2C",
+      "commissions": [
+        {
+          "id": "14-2K1",
+          "code": "2K1",
+          "courseCode": "2K1",
+          "turno": "mañana",
+          "professors": ["Corso, Cynthia Lorena", "Polliotto, Martin Dario", "Casatti, Martín Gustavo"],
+          "slots": [
+            { "day": "MAR", "start": "10:25", "end": "11:10" },
+            { "day": "MAR", "start": "11:20", "end": "12:50" },
+            { "day": "JUE", "start": "08:00", "end": "09:30" },
+            { "day": "JUE", "start": "09:40", "end": "11:10" }
+          ]
+        }
+      ]
+    }
+  ]
+}

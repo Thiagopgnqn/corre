@@ -53,6 +53,7 @@ export const ScheduleBuilder: React.FC = () => {
   const [combinationsModalOpen, setCombinationsModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [focusedConflictId, setFocusedConflictId] = useState<string | null>(null);
+  const [focusedSubjectId, setFocusedSubjectId] = useState<number | null>(null);
 
   // Draft renaming state
   const [editingDraftId, setEditingDraftId] = useState<string | null>(null);
@@ -196,9 +197,9 @@ export const ScheduleBuilder: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-3 sm:py-4 flex-1 flex flex-col gap-3 min-h-0 h-[calc(100vh-64px)] overflow-hidden">
       {/* Top Banner & Control Toolbar */}
-      <div className="bg-slate-900/70 border border-slate-800 p-4 sm:p-5 rounded-2xl backdrop-blur-md shadow-xl space-y-4">
+      <div className="bg-slate-900/70 border border-slate-800 p-3 sm:p-4 rounded-2xl backdrop-blur-md shadow-xl space-y-3 shrink-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
@@ -396,8 +397,8 @@ export const ScheduleBuilder: React.FC = () => {
       </div>
 
       {/* Main 3-Column Layout: Left Subjects Panel, Center Timetable Grid, Right Summary Panel */}
-      <div className="flex flex-col lg:flex-row gap-5 items-start">
-        {/* Left Subjects & Commissions Accordion Panel */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 sm:gap-4 items-stretch overflow-hidden">
+        {/* Left Subjects & Commissions Accordion Panel (340px) */}
         <ScheduleLeftPanel
           term={scheduleTerm}
           availableSubjects={availableSubjects}
@@ -407,28 +408,37 @@ export const ScheduleBuilder: React.FC = () => {
           onSelectCommission={handleSelectCommissionWithHistory}
           onHoverCommission={setHoveredCommission}
           subjectNamesMap={subjectNamesMap}
+          focusedSubjectId={focusedSubjectId}
         />
 
-        {/* Center Timetable Weekly Calendar Grid */}
-        <ScheduleWeeklyGrid
-          selections={selectedCommissionsMap}
-          onRemoveCommission={handleRemoveCommissionWithHistory}
-          hoveredCommission={hoveredCommission}
-          conflicts={conflicts}
-          subjectNamesMap={subjectNamesMap}
-          focusedConflictId={focusedConflictId}
-        />
+        {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
+        <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-3 sm:gap-4 overflow-y-auto xl:overflow-hidden">
+          {/* Center Timetable Weekly Calendar Grid */}
+          <div className="flex-1 min-h-0 flex flex-col h-full">
+            <ScheduleWeeklyGrid
+              selections={selectedCommissionsMap}
+              onRemoveCommission={handleRemoveCommissionWithHistory}
+              hoveredCommission={hoveredCommission}
+              conflicts={conflicts}
+              subjectNamesMap={subjectNamesMap}
+              focusedConflictId={focusedConflictId}
+              onFocusSubject={(sId) => setFocusedSubjectId(sId)}
+            />
+          </div>
 
-        {/* Right Summary & Actions Panel */}
-        <ScheduleSummaryPanel
-          selections={selectedCommissionsMap}
-          conflicts={conflicts}
-          subjectNamesMap={subjectNamesMap}
-          onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
-          onApplyToEnrolled={applyScheduleToEnrolled}
-          onClearAll={handleClearWithHistory}
-          onSelectConflict={setFocusedConflictId}
-        />
+          {/* Right Summary & Actions Panel (320px on xl, stacked under grid on lg) */}
+          <div className="w-full xl:w-[320px] shrink-0 flex flex-col min-h-0 xl:h-full">
+            <ScheduleSummaryPanel
+              selections={selectedCommissionsMap}
+              conflicts={conflicts}
+              subjectNamesMap={subjectNamesMap}
+              onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
+              onApplyToEnrolled={applyScheduleToEnrolled}
+              onClearAll={handleClearWithHistory}
+              onSelectConflict={setFocusedConflictId}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Global Modals for Schedule Builder */}

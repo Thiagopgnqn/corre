@@ -1,8 +1,8 @@
 import React, { useState, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
   ChevronDown,
-  ChevronRight,
   AlertTriangle,
   Check,
   Clock,
@@ -13,6 +13,8 @@ import {
   Eye,
   EyeOff,
   Info,
+  ChevronsUp,
+  ChevronsDown,
 } from 'lucide-react';
 import type { Commission, SubjectSchedule, Shift } from '../../types/schedule';
 import type { Subject } from '../../types/career';
@@ -27,6 +29,7 @@ interface ScheduleLeftPanelProps {
   onSelectCommission: (subjectId: number, commissionId: string) => void;
   onHoverCommission: (data: { commission: Commission; subjectId: number; subjectName: string; hasConflict: boolean } | null) => void;
   subjectNamesMap: Map<number, string>;
+  focusedSubjectId?: number | null;
 }
 
 export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
@@ -38,12 +41,20 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   onSelectCommission,
   onHoverCommission,
   subjectNamesMap,
+  focusedSubjectId,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | Shift>('all');
   const [onlyConflictFree, setOnlyConflictFree] = useState(false);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
   const [expandedSubjectIds, setExpandedSubjectIds] = useState<Set<number>>(new Set());
+
+  // Expand focused subject when requested by popover
+  React.useEffect(() => {
+    if (focusedSubjectId) {
+      setExpandedSubjectIds((prev) => new Set(prev).add(focusedSubjectId));
+    }
+  }, [focusedSubjectId]);
 
   // Determine subjects pool based on showAllSubjects and term
   const subjectsPool = useMemo(() => {
@@ -86,10 +97,33 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
     });
   };
 
+  const allExpanded = useMemo(() => {
+    if (subjectsPool.length === 0) return false;
+    return subjectsPool.every((s) => expandedSubjectIds.has(s.id));
+  }, [subjectsPool, expandedSubjectIds]);
+
+  const handleToggleAll = () => {
+    if (allExpanded) {
+      setExpandedSubjectIds(new Set());
+    } else {
+      setExpandedSubjectIds(new Set(subjectsPool.map((s) => s.id)));
+    }
+  };
+
+  const handleSelectCommission = (subjectId: number, commissionId: string) => {
+    onSelectCommission(subjectId, commissionId);
+    // Auto-collapse this subject so it shows "Com. XXX elegida" prominently
+    setExpandedSubjectIds((prev) => {
+      const next = new Set(prev);
+      next.delete(subjectId);
+      return next;
+    });
+  };
+
   return (
-    <div className="w-full lg:w-96 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md">
+    <div className="w-full xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0">
       {/* Header & Search */}
-      <div className="p-3.5 border-b border-slate-800 space-y-3 bg-slate-950/40">
+      <div className="p-3 border-b border-slate-800 space-y-2.5 bg-slate-950/40 shrink-0">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
@@ -100,32 +134,52 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             </span>
           </div>
 
-          <span className="text-[11px] font-mono text-slate-400">
-            {subjectsPool.length} materias
-          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleToggleAll}
+              className="px-2 py-0.5 rounded-lg border border-slate-700/80 bg-slate-900 hover:bg-slate-800 text-[10px] font-semibold text-slate-300 hover:text-white transition-all flex items-center gap-1 shadow-sm"
+              title={allExpanded ? 'Plegar todas las materias' : 'Desplegar todas las materias'}
+            >
+              {allExpanded ? (
+                <>
+                  <ChevronsUp className="w-3 h-3 text-indigo-400" />
+                  <span>Plegar todas</span>
+                </>
+              ) : (
+                <>
+                  <ChevronsDown className="w-3 h-3 text-indigo-400" />
+                  <span>Desplegar</span>
+                </>
+              )}
+            </button>
+
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+              {subjectsPool.length} mat.
+            </span>
+          </div>
         </div>
 
         {/* Search bar */}
         <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar por materia, código o profesor..."
-            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            placeholder="Buscar materia, código o docente..."
+            className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
 
         {/* Filters bar */}
-        <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
           {/* Shift selector */}
           <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
             {(['all', 'mañana', 'tarde', 'noche'] as const).map((sh) => (
               <button
                 key={sh}
                 onClick={() => setShiftFilter(sh)}
-                className={`px-2 py-0.5 rounded-md font-semibold capitalize transition-all ${
+                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize transition-all ${
                   shiftFilter === sh
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -139,7 +193,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Conflict-free filter toggle */}
           <button
             onClick={() => setOnlyConflictFree(!onlyConflictFree)}
-            className={`px-2 py-1 rounded-lg border font-semibold flex items-center gap-1 transition-all ${
+            className={`px-1.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
               onlyConflictFree
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -152,21 +206,21 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Show all subjects toggle */}
           <button
             onClick={() => setShowAllSubjects(!showAllSubjects)}
-            className={`px-2 py-1 rounded-lg border font-semibold flex items-center gap-1 transition-all ${
+            className={`px-1.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
               showAllSubjects
                 ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
             }`}
             title="Mostrar todas las materias del cuatrimestre incluso las bloqueadas"
           >
-            {showAllSubjects ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+            {showAllSubjects ? <Eye className="w-3 h-3 text-cyan-400" /> : <EyeOff className="w-3 h-3" />}
             <span>Todas</span>
           </button>
         </div>
       </div>
 
-      {/* Subjects Accordion List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[calc(100vh-280px)]">
+      {/* Subjects Accordion List with dedicated internal scroll */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-0">
         {subjectsPool.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-500 space-y-1">
             <Filter className="w-6 h-6 mx-auto text-slate-600" />
@@ -178,7 +232,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             const commissions = sched?.commissions || [];
             const hasCommissions = commissions.length > 0;
             const selectedComm = selections[subject.id];
-            const isExpanded = expandedSubjectIds.has(subject.id) || Boolean(selectedComm);
+            const isExpanded = expandedSubjectIds.has(subject.id);
 
             // Filter commissions based on shift and conflict free toggle
             const filteredCommissions = commissions.filter((c) => {
@@ -203,18 +257,20 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                 key={subject.id}
                 className={`rounded-xl border transition-all overflow-hidden ${
                   selectedComm
-                    ? 'border-indigo-500/50 bg-indigo-950/20'
+                    ? 'border-indigo-500/50 bg-indigo-950/20 shadow-sm'
                     : 'border-slate-800 bg-slate-950/40 hover:border-slate-700'
                 }`}
               >
-                {/* Subject Header Row */}
+                {/* Entire Subject Header Row is Clickable with aria-expanded */}
                 <button
+                  type="button"
+                  aria-expanded={isExpanded}
                   onClick={() => toggleSubjectExpanded(subject.id)}
-                  className="w-full p-2.5 flex items-center justify-between text-left hover:bg-slate-800/40 transition-colors"
+                  className="w-full p-2.5 flex items-center justify-between text-left hover:bg-slate-800/40 transition-colors cursor-pointer group"
                 >
-                  <div className="min-w-0 pr-2">
+                  <div className="min-w-0 pr-2 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400">
+                      <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 group-hover:text-slate-300">
                         #{subject.code}
                       </span>
                       <span className="text-xs font-bold text-white truncate block">
@@ -222,18 +278,15 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1">
+                    <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-1 flex-wrap">
                       <span>{subject.level}° año</span>
                       <span>•</span>
                       <span>{subject.weeklyHours} hs/sem</span>
                       {selectedComm && (
-                        <>
-                          <span>•</span>
-                          <span className="text-emerald-400 font-bold flex items-center gap-0.5">
-                            <Check className="w-3 h-3" />
-                            <span>Com. {selectedComm.code}</span>
-                          </span>
-                        </>
+                        <span className="text-emerald-300 font-bold flex items-center gap-1 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[10px]">
+                          <Check className="w-3 h-3 text-emerald-400" />
+                          <span>{selectedComm.code} elegida</span>
+                        </span>
                       )}
                     </div>
                   </div>
@@ -241,7 +294,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                   <div className="flex items-center gap-2 shrink-0">
                     {!hasCommissions ? (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-800/60 text-slate-500 border border-slate-700/40">
-                        Sin horarios
+                        Sin oferta
                       </span>
                     ) : (
                       <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
@@ -249,144 +302,155 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                       </span>
                     )}
 
-                    {isExpanded ? (
-                      <ChevronDown className="w-4 h-4 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    )}
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-400 transition-transform duration-200 ${
+                        isExpanded ? 'rotate-180 text-white' : 'rotate-0'
+                      }`}
+                    />
                   </div>
                 </button>
 
-                {/* Commissions List Dropdown */}
-                {isExpanded && (
-                  <div className="p-2 border-t border-slate-800/60 space-y-2 bg-slate-950/60">
-                    {!hasCommissions ? (
-                      <div className="p-3 text-center text-xs text-slate-500">
-                        <Info className="w-4 h-4 mx-auto mb-1 text-slate-600" />
-                        <span>No hay comisiones cargadas para esta materia aún.</span>
-                      </div>
-                    ) : filteredCommissions.length === 0 ? (
-                      <div className="p-3 text-center text-xs text-slate-500">
-                        <span>Ninguna comisión coincide con los filtros aplicados.</span>
-                      </div>
-                    ) : (
-                      filteredCommissions.map((comm) => {
-                        const isSelected = selectedComm?.id === comm.id;
-                        const { conflicts, consecutive } = getCommissionConflictsWithSelection(
-                          comm,
-                          subject.id,
-                          subject.name,
-                          selections,
-                          subjectNamesMap
-                        );
-                        const hasConflict = conflicts.length > 0;
+                {/* Animated Commissions List Dropdown */}
+                <AnimatePresence initial={false}>
+                  {isExpanded && (
+                    <motion.div
+                      key={`content-${subject.id}`}
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      className="overflow-hidden border-t border-slate-800/60 bg-slate-950/60"
+                    >
+                      <div className="p-2 space-y-2">
+                        {!hasCommissions ? (
+                          <div className="p-3 text-center text-xs text-slate-500">
+                            <Info className="w-4 h-4 mx-auto mb-1 text-slate-600" />
+                            <span>No hay comisiones cargadas para esta materia aún.</span>
+                          </div>
+                        ) : filteredCommissions.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-slate-500">
+                            <span>Ninguna comisión coincide con los filtros aplicados.</span>
+                          </div>
+                        ) : (
+                          filteredCommissions.map((comm) => {
+                            const isSelected = selectedComm?.id === comm.id;
+                            const { conflicts, consecutive } = getCommissionConflictsWithSelection(
+                              comm,
+                              subject.id,
+                              subject.name,
+                              selections,
+                              subjectNamesMap
+                            );
+                            const hasConflict = conflicts.length > 0;
 
-                        return (
-                          <div
-                            key={comm.id}
-                            onMouseEnter={() =>
-                              onHoverCommission({
-                                commission: comm,
-                                subjectId: subject.id,
-                                subjectName: subject.name,
-                                hasConflict,
-                              })
-                            }
-                            onMouseLeave={() => onHoverCommission(null)}
-                            className={`p-2.5 rounded-xl border text-xs transition-all relative ${
-                              isSelected
-                                ? 'bg-indigo-600/20 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.2)]'
-                                : hasConflict
-                                ? 'bg-slate-900 border-rose-500/30 hover:border-rose-500/60'
-                                : 'bg-slate-900 border-slate-800 hover:border-slate-700'
-                            }`}
-                          >
-                            {/* Commission Code & Shift */}
-                            <div className="flex items-center justify-between gap-1 mb-1.5">
-                              <div className="flex items-center gap-1.5">
-                                <span className="font-extrabold text-white text-xs">
-                                  Comisión {comm.code}
-                                </span>
-                                {comm.turno && (
-                                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider bg-slate-800 text-slate-300">
-                                    {comm.turno}
-                                  </span>
-                                )}
-                              </div>
-
-                              <button
-                                onClick={() => onSelectCommission(subject.id, comm.id)}
-                                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1 ${
+                            return (
+                              <div
+                                key={comm.id}
+                                onMouseEnter={() =>
+                                  onHoverCommission({
+                                    commission: comm,
+                                    subjectId: subject.id,
+                                    subjectName: subject.name,
+                                    hasConflict,
+                                  })
+                                }
+                                onMouseLeave={() => onHoverCommission(null)}
+                                className={`p-2.5 rounded-xl border text-xs transition-all relative ${
                                   isSelected
-                                    ? 'bg-emerald-600 text-white shadow-sm'
-                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                                    ? 'bg-indigo-600/20 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.2)]'
+                                    : hasConflict
+                                    ? 'bg-slate-900 border-rose-500/30 hover:border-rose-500/60'
+                                    : 'bg-slate-900 border-slate-800 hover:border-slate-700'
                                 }`}
                               >
-                                {isSelected ? (
-                                  <>
-                                    <Check className="w-3 h-3" />
-                                    <span>Elegida</span>
-                                  </>
-                                ) : (
-                                  <span>Elegir</span>
-                                )}
-                              </button>
-                            </div>
-
-                            {/* Professors */}
-                            {comm.professors.length > 0 && (
-                              <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-1.5">
-                                <User className="w-3 h-3 text-slate-500 shrink-0" />
-                                <span className="truncate">{comm.professors.join(', ')}</span>
-                              </div>
-                            )}
-
-                            {/* Slots timetable */}
-                            <div className="space-y-1 my-1.5">
-                              {comm.slots.map((s, sIdx) => (
-                                <div
-                                  key={sIdx}
-                                  className="flex items-center justify-between text-[10px] font-mono text-slate-300 bg-slate-950/50 px-2 py-0.5 rounded border border-slate-800/60"
-                                >
-                                  <span className="font-bold text-indigo-300">{s.day}</span>
-                                  <span>{s.start} - {s.end}</span>
-                                  <span className="text-slate-500 flex items-center gap-1">
-                                    {s.room && (
-                                      <span className="flex items-center gap-0.5">
-                                        <MapPin className="w-2.5 h-2.5" />
-                                        <span>{s.room}</span>
+                                {/* Commission Code & Shift */}
+                                <div className="flex items-center justify-between gap-1 mb-1.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-extrabold text-white text-xs">
+                                      Comisión {comm.code}
+                                    </span>
+                                    {comm.turno && (
+                                      <span className="text-[10px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider bg-slate-800 text-slate-300">
+                                        {comm.turno}
                                       </span>
                                     )}
-                                  </span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleSelectCommission(subject.id, comm.id)}
+                                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all flex items-center gap-1 cursor-pointer ${
+                                      isSelected
+                                        ? 'bg-emerald-600 text-white shadow-sm'
+                                        : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                                    }`}
+                                  >
+                                    {isSelected ? (
+                                      <>
+                                        <Check className="w-3 h-3" />
+                                        <span>Elegida</span>
+                                      </>
+                                    ) : (
+                                      <span>Elegir</span>
+                                    )}
+                                  </button>
                                 </div>
-                              ))}
-                            </div>
 
-                            {/* Conflict Warning Alert Tag */}
-                            {hasConflict && (
-                              <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300 font-semibold flex items-center gap-1.5 mt-1">
-                                <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                                <span className="truncate">
-                                  Choca con: {conflicts.map((c) => c.subjectName2).join(', ')}
-                                </span>
-                              </div>
-                            )}
+                                {/* Professors */}
+                                {comm.professors.length > 0 && (
+                                  <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-1.5">
+                                    <User className="w-3 h-3 text-slate-500 shrink-0" />
+                                    <span className="truncate">{comm.professors.join(', ')}</span>
+                                  </div>
+                                )}
 
-                            {/* Consecutive class notice */}
-                            {!hasConflict && consecutive.length > 0 && (
-                              <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-300 flex items-center gap-1 mt-1">
-                                <Info className="w-3 h-3 text-amber-400 shrink-0" />
-                                <span className="truncate">
-                                  Clase consecutiva con {consecutive[0].subjectName2} ({consecutive[0].day} {consecutive[0].time})
-                                </span>
+                                {/* Slots timetable */}
+                                <div className="space-y-1 my-1.5">
+                                  {comm.slots.map((s, sIdx) => (
+                                    <div
+                                      key={sIdx}
+                                      className="flex items-center justify-between text-[10px] font-mono text-slate-300 bg-slate-950/50 px-2 py-0.5 rounded border border-slate-800/60"
+                                    >
+                                      <span className="font-bold text-indigo-300">{s.day}</span>
+                                      <span>{s.start} - {s.end}</span>
+                                      <span className="text-slate-500 flex items-center gap-1">
+                                        {s.room && (
+                                          <span className="flex items-center gap-0.5">
+                                            <MapPin className="w-2.5 h-2.5" />
+                                            <span>{s.room}</span>
+                                          </span>
+                                        )}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                {/* Conflict Warning Alert Tag */}
+                                {hasConflict && (
+                                  <div className="p-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-[10px] text-rose-300 font-semibold flex items-center gap-1.5 mt-1">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                                    <span className="truncate">
+                                      Choca con: {conflicts.map((c) => c.subjectName2).join(', ')}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Consecutive class notice */}
+                                {!hasConflict && consecutive.length > 0 && (
+                                  <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-300 flex items-center gap-1 mt-1">
+                                    <Info className="w-3 h-3 text-amber-400 shrink-0" />
+                                    <span className="truncate">
+                                      Clase consecutiva con {consecutive[0].subjectName2} ({consecutive[0].day} {consecutive[0].time})
+                                    </span>
+                                  </div>
+                                )}
                               </div>
-                            )}
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
+                            );
+                          })
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             );
           })

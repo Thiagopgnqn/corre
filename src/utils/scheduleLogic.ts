@@ -336,10 +336,20 @@ export function validateScheduleData(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!raw || !Array.isArray(raw)) {
+  let rawScheduleList: unknown[];
+  let reservedElectiveSlotsCount = 0;
+
+  if (Array.isArray(raw)) {
+    rawScheduleList = raw;
+  } else if (raw && typeof raw === 'object' && Array.isArray((raw as any).schedule)) {
+    rawScheduleList = (raw as any).schedule;
+    if (Array.isArray((raw as any).reservedElectiveSlots)) {
+      reservedElectiveSlotsCount = (raw as any).reservedElectiveSlots.length;
+    }
+  } else {
     return {
       valid: false,
-      errors: ['El archivo de horarios debe contener un arreglo JSON en la raíz.'],
+      errors: ['El archivo de horarios debe contener un arreglo JSON en la raíz o un objeto con propiedad "schedule".'],
       warnings: [],
       schedulesCount: 0,
       commissionsCount: 0,
@@ -354,7 +364,7 @@ export function validateScheduleData(
   let commissionsCount = 0;
   const validSchedules: SubjectSchedule[] = [];
 
-  raw.forEach((item, itemIdx) => {
+  rawScheduleList.forEach((item, itemIdx) => {
     if (!item || typeof item !== 'object') {
       errors.push(`Elemento #${itemIdx + 1} inválido: debe ser un objeto.`);
       return;
@@ -482,6 +492,7 @@ export function validateScheduleData(
     schedulesCount,
     commissionsCount,
     validSchedules: errors.length === 0 ? validSchedules : undefined,
+    reservedElectiveSlotsCount,
   };
 }
 

@@ -8,7 +8,7 @@ import type {
   AssignedElectivesByYear,
 } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
-import { SAMPLE_SCHEDULES } from '../data/schedule';
+import { DEFAULT_SCHEDULES, SAMPLE_SCHEDULES } from '../data/schedule';
 import { CORE_SUBJECTS } from '../data/plan2023';
 import {
   ELECTIVES,
@@ -156,7 +156,11 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>(() => loadScheduleTerm());
 
   const activeSchedules = useMemo(() => {
-    return customSchedules && customSchedules.length > 0 ? customSchedules : SAMPLE_SCHEDULES;
+    return customSchedules && customSchedules.length > 0
+      ? customSchedules
+      : DEFAULT_SCHEDULES.length > 0
+      ? DEFAULT_SCHEDULES
+      : SAMPLE_SCHEDULES;
   }, [customSchedules]);
 
   // Tutorial state & sandbox snapshot

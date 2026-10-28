@@ -90,4 +90,18 @@ export interface ScheduleValidationResult {
   schedulesCount: number;
   commissionsCount: number;
   validSchedules?: SubjectSchedule[];
+  reservedElectiveSlotsCount?: number;
+}
+
+export interface ReservedElectiveSlot {
+  courseCode: string;
+  term: TermType;
+  turno: Shift;
+  label: string;
+  slots: Slot[];
+}
+
+export interface ScheduleFilePayload {
+  schedule: SubjectSchedule[];
+  reservedElectiveSlots: ReservedElectiveSlot[];
 }

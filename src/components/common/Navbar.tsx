@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Compass,
   Kanban,
@@ -48,7 +48,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Close menu on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    if (menuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [menuOpen]);
 
   const handleExport = () => {
     const json = exportData();
@@ -77,29 +93,34 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     setMenuOpen(false);
   };
 
-  const navItems: Array<{ id: AppView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-    { id: 'graph', label: 'Mapa de Correlativas', icon: Compass },
-    { id: 'kanban', label: 'Niveles & Tablero', icon: Kanban },
-    { id: 'planner', label: 'Armá tu Cuatrimestre', icon: CalendarDays },
-    { id: 'schedule', label: 'Horarios', icon: Clock },
-    { id: 'electives', label: 'Electivas', icon: Sparkles },
-    { id: 'stats', label: 'Estadísticas & Camino Crítico', icon: BarChart3 },
+  const navItems: Array<{
+    id: AppView;
+    label: string;
+    fullLabel: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = [
+    { id: 'graph', label: 'Mapa', fullLabel: 'Mapa de Correlativas', icon: Compass },
+    { id: 'kanban', label: 'Niveles', fullLabel: 'Niveles & Tablero', icon: Kanban },
+    { id: 'planner', label: 'Cuatrimestre', fullLabel: 'Armá tu Cuatrimestre', icon: CalendarDays },
+    { id: 'schedule', label: 'Horarios', fullLabel: 'Armador de Horarios', icon: Clock },
+    { id: 'electives', label: 'Electivas', fullLabel: 'Catálogo de Electivas', icon: Sparkles },
+    { id: 'stats', label: 'Estadísticas', fullLabel: 'Estadísticas & Camino Crítico', icon: BarChart3 },
   ];
 
   return (
     <>
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16 gap-4">
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 w-full overflow-x-hidden">
+        <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-6 flex items-center justify-between h-16 gap-2 sm:gap-4">
           {/* Logo & Plan */}
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
               <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-cyan-400">
                 <GraduationCap className="w-5 h-5" />
               </div>
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black tracking-tight text-white m-0 p-0 leading-none whitespace-nowrap">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white m-0 p-0 leading-none whitespace-nowrap">
                   Mi Carrera
                 </h1>
                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 whitespace-nowrap">
@@ -109,16 +130,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden sm:block">
                 UTN • Ing. en Sistemas de Información
               </p>
-              <p className="text-[10px] text-slate-400 font-medium whitespace-nowrap sm:hidden">
-                UTN ISI
-              </p>
             </div>
           </div>
 
-          {/* Desktop Nav Tabs */}
+          {/* Desktop Nav Tabs: icon + label at >= 1500px, icon-only below 1500px */}
           <nav
             data-tour="nav-tabs"
-            className="hidden lg:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800"
+            className="hidden md:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
           >
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -127,200 +145,248 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <button
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  title={item.fullLabel}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{item.label}</span>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="hidden min-[1500px]:inline whitespace-nowrap">{item.label}</span>
                 </button>
               );
             })}
           </nav>
 
           {/* Actions & Utilities */}
-          <div className="flex items-center gap-2">
-            {/* Analista / Seminario Toggle Button */}
-            <button
-              data-tour="analista-button"
-              onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
-                settings.includeAnalistaTrack
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                  : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
-              }`}
-              title={
-                settings.includeAnalistaTrack
-                  ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
-                  : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
-              }
-            >
-              <Award className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">Analista (99)</span>
-              <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
-                settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-              }`}>
-                {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-              </span>
-            </button>
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Secondary Actions (Visible only on very wide screens >= 1500px, otherwise in More Menu) */}
+            <div className="hidden min-[1500px]:flex items-center gap-2 shrink-0">
+              {/* Analista / Seminario Toggle Button */}
+              <button
+                data-tour="analista-button"
+                onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shrink-0 ${
+                  settings.includeAnalistaTrack
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                    : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
+                }`}
+                title={
+                  settings.includeAnalistaTrack
+                    ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
+                    : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
+                }
+              >
+                <Award className="w-3.5 h-3.5 text-amber-400" />
+                <span>Analista (99)</span>
+                <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                  settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                </span>
+              </button>
 
-            {/* Simulation Mode Toggle Button */}
-            <button
-              data-tour="simulation-button"
-              onClick={toggleSimulationMode}
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
-                isSimulationMode
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
-              }`}
-              title="Modo simulación hipotética"
-            >
-              <FlaskConical className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">¿Y si...?</span>
-            </button>
+              {/* Simulation Mode Toggle Button */}
+              <button
+                data-tour="simulation-button"
+                onClick={toggleSimulationMode}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shrink-0 ${
+                  isSimulationMode
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
+                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
+                }`}
+                title="Modo simulación hipotética"
+              >
+                <FlaskConical className="w-3.5 h-3.5" />
+                <span>¿Y si...?</span>
+              </button>
 
-            {/* Quick Search Ctrl+K */}
+              {/* Sound toggle */}
+              <button
+                onClick={toggleSound}
+                className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
+                title={soundEnabled ? 'Sonido activado (click para silenciar)' : 'Sonido silenciado'}
+              >
+                {soundEnabled ? (
+                  <Volume2 className="w-4 h-4 text-emerald-400" />
+                ) : (
+                  <VolumeX className="w-4 h-4 text-slate-500" />
+                )}
+              </button>
+            </div>
+
+            {/* Quick Search: Always visible */}
             <button
               data-tour="search-button"
               onClick={() => setIsSearchOpen(true)}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5"
+              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5 shrink-0"
               title="Buscar materias (Ctrl+K)"
             >
-              <Search className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="hidden sm:inline">Buscar</span>
-              <kbd className="hidden md:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
+              <Search className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span className="hidden xl:inline whitespace-nowrap">Buscar</span>
+              <kbd className="hidden 2xl:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
                 Ctrl K
               </kbd>
             </button>
 
-            {/* Tutorial Launcher Button */}
+            {/* Tutorial Launcher Button: Always visible */}
             <button
               onClick={() => startTutorial(0)}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
               title="Ver tutorial guiado interactivo"
             >
               <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="hidden sm:inline">Tutorial</span>
+              <span className="hidden xl:inline whitespace-nowrap">Tutorial</span>
             </button>
 
-            {/* Sound toggle */}
-            <button
-              onClick={toggleSound}
-              className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors"
-              title={soundEnabled ? 'Sonido activado (click para silenciar)' : 'Sonido silenciado'}
-            >
-              {soundEnabled ? (
-                <Volume2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <VolumeX className="w-4 h-4 text-slate-500" />
-              )}
-            </button>
-
-            {/* Carga Rápida Button */}
-            <button
-              onClick={() => setIsOnboardingOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 transition-all"
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Carga rápida</span>
-            </button>
-
-            {/* More Menu Dropdown */}
-            <div className="relative">
+            {/* More Menu Dropdown: Always visible */}
+            <div className="relative shrink-0" ref={menuRef}>
               <button
                 data-tour="more-menu-btn"
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors"
+                className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
+                title="Más opciones y menú"
               >
                 <MoreVertical className="w-4 h-4" />
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 mt-2 w-56 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-1 z-50 text-xs">
-                  <div className="px-3 py-2 border-b border-slate-800 text-[11px] text-slate-400">
+                <div className="absolute right-0 mt-2 w-64 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80">
+                  <div className="px-3.5 py-2 text-[11px] text-slate-400">
                     Progreso: <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span> de materias
                   </div>
 
-                  <button
-                    onClick={() => {
-                      updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Award className="w-4 h-4 text-amber-400" />
-                      <span>Seminario / Título Analista</span>
-                    </div>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                      settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
+                  <div className="py-1">
+                    {/* Analista toggle in dropdown */}
+                    <button
+                      onClick={() => {
+                        updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Award className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Título Analista (99)</span>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      startTutorial(0);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
-                  >
-                    <HelpCircle className="w-4 h-4 text-amber-400" />
-                    <span>Ver tutorial interactivo</span>
-                  </button>
+                    {/* Simulation toggle in dropdown */}
+                    <button
+                      onClick={() => {
+                        toggleSimulationMode();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Modo ¿Y si...? (Simulación)</span>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        isSimulationMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {isSimulationMode ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setIsOnboardingOpen(true);
-                      setMenuOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
-                  >
-                    <Layers className="w-4 h-4 text-indigo-400" />
-                    <span>Carga rápida por nivel</span>
-                  </button>
+                    {/* Sound toggle in dropdown */}
+                    <button
+                      onClick={toggleSound}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        {soundEnabled ? (
+                          <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        ) : (
+                          <VolumeX className="w-4 h-4 text-slate-500 shrink-0" />
+                        )}
+                        <span>Efectos de sonido</span>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        soundEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                      }`}>
+                        {soundEnabled ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
+                  </div>
 
-                  <button
-                    onClick={() => {
-                      loadSample();
-                      setMenuOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
-                  >
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Cargar demo (3er año)</span>
-                  </button>
+                  <div className="py-1">
+                    {/* Carga rápida por nivel */}
+                    <button
+                      onClick={() => {
+                        setIsOnboardingOpen(true);
+                        setMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                    >
+                      <Layers className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span>Carga rápida por nivel</span>
+                    </button>
 
-                  <button
-                    onClick={handleExport}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
-                  >
-                    <Download className="w-4 h-4 text-emerald-400" />
-                    <span>Exportar carrera (JSON)</span>
-                  </button>
+                    {/* Cargar muestra */}
+                    <button
+                      onClick={() => {
+                        loadSample();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                    >
+                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Cargar demo (3er año)</span>
+                    </button>
 
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4 text-cyan-400" />
-                    <span>Importar carrera (JSON)</span>
-                  </button>
+                    {/* Tutorial */}
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        startTutorial(0);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                    >
+                      <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Ver tutorial interactivo</span>
+                    </button>
+                  </div>
 
-                  <div className="border-t border-slate-800 my-1" />
+                  <div className="py-1">
+                    {/* Export */}
+                    <button
+                      onClick={handleExport}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                    >
+                      <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Exportar carrera (JSON)</span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setResetConfirmOpen(true);
-                    }}
-                    className="w-full text-left px-3 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Reiniciar carrera...</span>
-                  </button>
+                    {/* Import */}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                    >
+                      <Upload className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span>Importar carrera (JSON)</span>
+                    </button>
+                  </div>
+
+                  <div className="py-1">
+                    {/* Reset */}
+                    <button
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setResetConfirmOpen(true);
+                      }}
+                      className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2"
+                    >
+                      <RotateCcw className="w-4 h-4 shrink-0" />
+                      <span>Reiniciar carrera...</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -334,39 +400,32 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             />
           </div>
         </div>
-
-        {/* Mobile Navigation Bar */}
-        <div className="lg:hidden border-t border-slate-800/80 bg-slate-950/90 overflow-x-auto px-2 py-1.5 flex items-center gap-1 scrollbar-none">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = currentView === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setCurrentView(item.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all ${
-                  isActive
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5 shrink-0" />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-
-          {/* Mobile Tutorial Button */}
-          <button
-            onClick={() => startTutorial(0)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 bg-amber-500/10 text-amber-300 border border-amber-500/20"
-            title="Ver tutorial interactivo"
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>Tutorial</span>
-          </button>
-        </div>
       </header>
+
+      {/* Mobile Bottom Navigation Bar (Fixed at bottom on screens < md) */}
+      <nav
+        data-tour="nav-tabs-mobile"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-1 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
+      >
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = currentView === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setCurrentView(item.id)}
+              className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl text-[10px] font-semibold transition-all min-w-[50px] ${
+                isActive
+                  ? 'text-indigo-400 font-bold bg-indigo-500/10'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+              <span className="leading-none text-[9px]">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (

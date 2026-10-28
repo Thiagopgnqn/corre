@@ -1,4 +1,21 @@
-import type { SubjectSchedule } from '../types/schedule';
+import type { SubjectSchedule, ReservedElectiveSlot } from '../types/schedule';
+import importedData from './schedule.json';
+
+const rawScheduleList = Array.isArray(importedData)
+  ? importedData
+  : (importedData as any).schedule || [];
+
+/**
+ * Horarios oficiales importados desde data-source/ (schedule.json).
+ */
+export const DEFAULT_SCHEDULES: SubjectSchedule[] = rawScheduleList as SubjectSchedule[];
+
+/**
+ * Franjas reservadas de electivas genéricas leídas de las planillas.
+ */
+export const DEFAULT_RESERVED_ELECTIVES: ReservedElectiveSlot[] = Array.isArray((importedData as any).reservedElectiveSlots)
+  ? (importedData as any).reservedElectiveSlots
+  : [];
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -63,7 +80,6 @@ export const SAMPLE_SCHEDULES: SubjectSchedule[] = [
         professors: ['Ing. Martín Palermo', 'Lic. Lucas Silva'],
         notes: 'Incluye laboratorio de computación',
         slots: [
-          // LUN 10:15 a 12:30 -> Toca justo el borde de 1-1K1 (termina 10:15), excelente para probar clases consecutivas sin choque
           { day: 'LUN', start: '10:15', end: '12:30', room: 'Lab Redes 1', mode: 'presencial' },
           { day: 'MIE', start: '10:15', end: '12:30', room: 'Lab Redes 1', mode: 'presencial' },
         ],
@@ -75,7 +91,6 @@ export const SAMPLE_SCHEDULES: SubjectSchedule[] = [
         professors: ['Ing. Sofía Carrizo'],
         notes: 'Comisión con choque intencional de prueba con 1-1K1',
         slots: [
-          // LUN 09:00 a 12:15 -> Se pisa con 1-1K1 (08:00 a 10:15) para probar detección de choques
           { day: 'LUN', start: '09:00', end: '12:15', room: 'Lab Software', mode: 'presencial' },
           { day: 'VIE', start: '08:00', end: '10:15', room: 'Aula 204', mode: 'virtual' },
         ],
