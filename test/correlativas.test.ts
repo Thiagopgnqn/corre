@@ -15,7 +15,14 @@ import {
   calculateProgressBreakdown,
 } from '../src/utils/correlativas';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
-import { sanitizeAssignedElectives, migrateLegacyElectives } from '../src/utils/storage';
+import {
+  sanitizeAssignedElectives,
+  migrateLegacyElectives,
+  shouldAutoStartTutorial,
+  markTutorialCompleted,
+  resetTutorialState,
+} from '../src/utils/storage';
+import { TUTORIAL_STEPS } from '../src/data/tutorialSteps';
 import type { UserCareerState } from '../src/types/career';
 
 function assert(cond: boolean, message: string) {
@@ -341,4 +348,77 @@ randomScenarios.forEach((sc, i) => {
   assert(sum === 100, `Scenario ${i} sum must be 100, got ${sum}`);
 });
 
-console.log('ALL UNIT LOGIC TESTS (INCLUDING ELECTIVES PROGRESS BREAKDOWN & 100% SUM) PASSED SUCCESSFULLY!');
+// 17. Interactive Welcome Tutorial Configuration
+assert(Array.isArray(TUTORIAL_STEPS), 'TUTORIAL_STEPS must be an array');
+assert(TUTORIAL_STEPS.length === 13, `TUTORIAL_STEPS must have exactly 13 steps, got ${TUTORIAL_STEPS.length}`);
+
+const expectedStepIds = [
+  'welcome',
+  'graph-overview',
+  'status-legend',
+  'interactive-click',
+  'interactive-status',
+  'edge-types',
+  'simulation-mode',
+  'electives-tour',
+  'analista-switch',
+  'app-views',
+  'stats-tour',
+  'persistence-tour',
+  'finish',
+];
+
+TUTORIAL_STEPS.forEach((step, idx) => {
+  assert(step.id === expectedStepIds[idx], `Step index ${idx} must have id ${expectedStepIds[idx]}, got ${step.id}`);
+  assert(step.title && step.title.length > 0, `Step ${step.id} must have a non-empty title`);
+  assert(step.description && step.description.length > 0, `Step ${step.id} must have a non-empty description`);
+  assert(step.iconName && step.iconName.length > 0, `Step ${step.id} must have an iconName`);
+});
+
+const interactiveClickStep = TUTORIAL_STEPS.find((s) => s.id === 'interactive-click');
+assert(interactiveClickStep?.interactiveAction === 'click-subject', 'interactive-click step must have action click-subject');
+
+const interactiveStatusStep = TUTORIAL_STEPS.find((s) => s.id === 'interactive-status');
+assert(interactiveStatusStep?.interactiveAction === 'change-status', 'interactive-status step must have action change-status');
+
+// 18. Tutorial Auto-Start & Legacy User Migration Logic
+const storageStore = new Map<string, string>();
+const mockStorage = {
+  getItem: (k: string) => storageStore.get(k) ?? null,
+  setItem: (k: string, v: string) => storageStore.set(k, String(v)),
+  removeItem: (k: string) => storageStore.delete(k),
+  clear: () => storageStore.clear(),
+  length: 0,
+  key: () => null,
+};
+Object.defineProperty(globalThis, 'localStorage', {
+  value: mockStorage,
+  writable: true,
+  configurable: true,
+});
+
+// Test A: Brand new user with empty career state -> should auto start
+storageStore.clear();
+const newUserData: UserCareerState = {};
+assert(shouldAutoStartTutorial(newUserData) === true, 'Brand new user with empty state must auto-start tutorial');
+
+// Test B: Legacy user who already has saved progress -> must NOT auto-start tutorial
+storageStore.clear();
+const legacyUserData: UserCareerState = {
+  1: { status: 'aprobada', grade: 9 },
+  2: { status: 'regularizada' },
+};
+assert(shouldAutoStartTutorial(legacyUserData) === false, 'Legacy user with existing data must NOT auto-start tutorial');
+// Verify legacy user check silently marked tutorial as completed so future checks stay false
+assert(shouldAutoStartTutorial(newUserData) === false, 'Tutorial completed flag must be persisted after legacy user check');
+
+// Test C: Mark completed explicitly -> returns false
+storageStore.clear();
+markTutorialCompleted();
+assert(shouldAutoStartTutorial(newUserData) === false, 'shouldAutoStartTutorial must return false after markTutorialCompleted');
+
+// Test D: Reset tutorial state -> returns true again for empty user
+resetTutorialState();
+assert(shouldAutoStartTutorial(newUserData) === true, 'shouldAutoStartTutorial must return true after resetTutorialState for fresh user');
+
+console.log('ALL UNIT LOGIC TESTS (INCLUDING INTERACTIVE TUTORIAL & LEGACY MIGRATION) PASSED SUCCESSFULLY!');

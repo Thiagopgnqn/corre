@@ -16,6 +16,7 @@ import {
   GraduationCap,
   Layers,
   Award,
+  HelpCircle,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 
@@ -41,6 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     computedProgress,
     settings,
     updateSettings,
+    startTutorial,
   } = useCareer();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -112,7 +114,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </div>
 
           {/* Desktop Nav Tabs */}
-          <nav className="hidden lg:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800">
+          <nav
+            data-tour="nav-tabs"
+            className="hidden lg:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800"
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = currentView === item.id;
@@ -137,6 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           <div className="flex items-center gap-2">
             {/* Analista / Seminario Toggle Button */}
             <button
+              data-tour="analista-button"
               onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
               className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border ${
                 settings.includeAnalistaTrack
@@ -160,6 +166,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
             {/* Simulation Mode Toggle Button */}
             <button
+              data-tour="simulation-button"
               onClick={toggleSimulationMode}
               className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border ${
                 isSimulationMode
@@ -174,6 +181,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
             {/* Quick Search Ctrl+K */}
             <button
+              data-tour="search-button"
               onClick={() => setIsSearchOpen(true)}
               className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5"
               title="Buscar materias (Ctrl+K)"
@@ -183,6 +191,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <kbd className="hidden md:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
                 Ctrl K
               </kbd>
+            </button>
+
+            {/* Tutorial Launcher Button */}
+            <button
+              onClick={() => startTutorial(0)}
+              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+              title="Ver tutorial guiado interactivo"
+            >
+              <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span className="hidden sm:inline">Tutorial</span>
             </button>
 
             {/* Sound toggle */}
@@ -210,6 +228,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             {/* More Menu Dropdown */}
             <div className="relative">
               <button
+                data-tour="more-menu-btn"
                 onClick={() => setMenuOpen(!menuOpen)}
                 className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors"
               >
@@ -237,6 +256,17 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     }`}>
                       {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
                     </span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      startTutorial(0);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
+                  >
+                    <HelpCircle className="w-4 h-4 text-amber-400" />
+                    <span>Ver tutorial interactivo</span>
                   </button>
 
                   <button
@@ -323,6 +353,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               </button>
             );
           })}
+
+          {/* Mobile Tutorial Button */}
+          <button
+            onClick={() => startTutorial(0)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 bg-amber-500/10 text-amber-300 border border-amber-500/20"
+            title="Ver tutorial interactivo"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Tutorial</span>
+          </button>
         </div>
       </header>
 

@@ -11,6 +11,7 @@ import { StatsDashboard } from './components/stats/StatsDashboard';
 import { QuickStatusModal } from './components/common/QuickStatusModal';
 import { SearchModal } from './components/common/SearchModal';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
+import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 
 const AppContent: React.FC = () => {
   const [currentView, setCurrentView] = useState<AppView>('graph');
@@ -43,10 +44,11 @@ const AppContent: React.FC = () => {
         </AnimatePresence>
       </main>
 
-      {/* Global Modals */}
+      {/* Global Modals & Interactive Tour */}
       <QuickStatusModal />
       <SearchModal />
       <OnboardingModal />
+      <TutorialSpotlight currentView={currentView} onNavigateView={setCurrentView} />
     </div>
   );
 };

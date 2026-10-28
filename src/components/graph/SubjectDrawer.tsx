@@ -99,6 +99,7 @@ export const SubjectDrawer: React.FC = () => {
               </div>
 
               <button
+                data-tour="drawer-status-btn"
                 onClick={() => setStatusModalSubjectId(selectedSubject.id)}
                 className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5 shrink-0"
               >

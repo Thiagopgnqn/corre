@@ -74,6 +74,14 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
    - **Confetti** animado al aprobar, promocionar o desbloquear hitos.
    - Persistencia automática en **`localStorage`**, exportación e importación completa en formato **JSON** (incluyendo electivas asignadas por año), y reinicio con confirmación.
 
+10. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
+    - **Spotlight animado nativo**: recorte SVG con halo dorado pulsante y transiciones fluidas con Framer Motion (sin librerías pesadas externas).
+    - **13 pasos guiados**: bienvenida, mapa de correlativas, estados y colores, drawer interactivo, cambio de estado y festejo, tipos de aristas, simulador "¿Y si...?", electivas libres (20 cr), título de analista (99), vistas y planificador, dashboard con selector con/sin electivas, privacidad/respaldo JSON y finalización.
+    - **Entorno Sandbox Seguro**: cualquier acción interactiva durante el tour opera sobre una copia temporal y restaura el estado real del usuario al finalizar o salir.
+    - **Convivencia con Carga Rápida**: el tour se ejecuta primero en nuevos ingresos y, en el paso final, ofrece la opción *"Cargar mis materias"* o *"Empezar solo"*.
+    - **Detección inteligente de usuarios existentes**: si ya contás con materias registradas, el tutorial no interrumpe tu navegación y queda disponible a demanda desde el botón **"?" (Ver tutorial)** en la barra de navegación (desktop y móvil).
+    - **Navegación completa por teclado**: flechas `←` y `→`, `Enter` para avanzar y `Esc` para salir en cualquier momento; soporte adaptativo responsive con formato bottom sheet en dispositivos móviles.
+
 ---
 
 ## 🛠️ Stack Tecnológico
@@ -103,6 +111,9 @@ Los tests verifican:
 - Validación contra electivas duplicadas en múltiples años (`sanitizeAssignedElectives`).
 - Migración desde esquemas anteriores (`migrateLegacyElectives`).
 - Requisitos del título intermedio de Analista (4 créditos de electivas de cualquier nivel).
+- Desglose y cálculo estricto al 100% del avance de carrera con y sin electivas.
+- Configuración de los 13 pasos del Tutorial Interactivo de Bienvenida.
+- Detección automática y migración silenciosa para usuarios existentes sin interrupción.
 
 ---
 

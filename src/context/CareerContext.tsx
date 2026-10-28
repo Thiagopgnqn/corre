@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useMemo, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type {
   SubjectStatus,
   UserCareerState,
@@ -13,6 +13,7 @@ import {
   REQUIRED_ELECTIVE_CREDITS_TOTAL,
   ELECTIVE_SLOTS_EQUIVALENT,
 } from '../data/electives';
+import { TUTORIAL_STEPS } from '../data/tutorialSteps';
 import {
   getSubjectStatus,
   isApprovedOrHigher,
@@ -39,6 +40,8 @@ import {
   exportCareerToJson,
   importCareerFromJson,
   getSample3rdYearStudent,
+  shouldAutoStartTutorial,
+  markTutorialCompleted,
 } from '../utils/storage';
 
 interface CareerContextType {
@@ -87,6 +90,14 @@ interface CareerContextType {
   computedProgress: CareerProgress;
   criticalPath: CriticalPathResult;
 
+  isTutorialOpen: boolean;
+  currentTutorialStep: number;
+  startTutorial: (fromStep?: number) => void;
+  closeTutorial: (options?: { openOnboarding?: boolean }) => void;
+  nextTutorialStep: () => void;
+  prevTutorialStep: () => void;
+  goToTutorialStep: (step: number) => void;
+
   exportData: () => string;
   importData: (json: string) => { success: boolean; error?: string };
   resetAll: () => void;
@@ -107,6 +118,17 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
   const [semesterBasket, setSemesterBasket] = useState<number[]>(() => loadBasket());
   const [showElectivesInGraph, setShowElectivesInGraph] = useState<boolean>(false);
+
+  // Tutorial state & sandbox snapshot
+  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(() => shouldAutoStartTutorial());
+  const [currentTutorialStep, setCurrentTutorialStep] = useState<number>(0);
+  const realUserStateBackupRef = useRef<UserCareerState | null>(null);
+
+  useEffect(() => {
+    if (isTutorialOpen && realUserStateBackupRef.current === null) {
+      realUserStateBackupRef.current = { ...userState };
+    }
+  }, [isTutorialOpen, userState]);
 
   // Sync state to local storage when real state changes
   useEffect(() => {
@@ -485,6 +507,56 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     fireConfetti();
   }, []);
 
+  const startTutorial = useCallback(
+    (fromStep = 0) => {
+      realUserStateBackupRef.current = { ...userState };
+      setCurrentTutorialStep(fromStep);
+      setIsTutorialOpen(true);
+      soundManager.playClick();
+    },
+    [userState]
+  );
+
+  const closeTutorial = useCallback((options?: { openOnboarding?: boolean }) => {
+    // Restore userState from real backup if sandbox modifications happened
+    if (realUserStateBackupRef.current !== null) {
+      setUserState(realUserStateBackupRef.current);
+      realUserStateBackupRef.current = null;
+    }
+    markTutorialCompleted();
+    setIsTutorialOpen(false);
+    setSelectedSubjectId(null);
+    setStatusModalSubjectId(null);
+    soundManager.playClick();
+
+    if (options?.openOnboarding) {
+      setIsOnboardingOpen(true);
+    }
+  }, []);
+
+  const nextTutorialStep = useCallback(() => {
+    setCurrentTutorialStep((prev) => {
+      if (prev < TUTORIAL_STEPS.length - 1) {
+        soundManager.playClick();
+        return prev + 1;
+      }
+      closeTutorial();
+      return prev;
+    });
+  }, [closeTutorial]);
+
+  const prevTutorialStep = useCallback(() => {
+    setCurrentTutorialStep((prev) => {
+      soundManager.playClick();
+      return Math.max(0, prev - 1);
+    });
+  }, []);
+
+  const goToTutorialStep = useCallback((step: number) => {
+    setCurrentTutorialStep(Math.max(0, Math.min(TUTORIAL_STEPS.length - 1, step)));
+    soundManager.playClick();
+  }, []);
+
   // Keyboard shortcut for Ctrl+K / Cmd+K search
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -533,6 +605,13 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setShowElectivesInGraph,
         computedProgress,
         criticalPath,
+        isTutorialOpen,
+        currentTutorialStep,
+        startTutorial,
+        closeTutorial,
+        nextTutorialStep,
+        prevTutorialStep,
+        goToTutorialStep,
         exportData,
         importData,
         resetAll,

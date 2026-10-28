@@ -81,7 +81,10 @@ export const ElectivesPicker: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
       {/* Top Banner: Global Credits Progress */}
-      <div className="bg-slate-900/70 border border-slate-800 p-5 rounded-2xl backdrop-blur-md space-y-5 shadow-xl">
+      <div
+        data-tour="electives-banner"
+        className="bg-slate-900/70 border border-slate-800 p-5 rounded-2xl backdrop-blur-md space-y-5 shadow-xl"
+      >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">

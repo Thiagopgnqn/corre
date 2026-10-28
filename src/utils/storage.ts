@@ -6,6 +6,7 @@ const STORAGE_KEY_ASSIGNED_ELECTIVES = 'mi_carrera_assigned_electives_v2';
 const STORAGE_KEY_OLD_SLOTS = 'mi_carrera_electives_slots_v1';
 const STORAGE_KEY_BASKET = 'mi_carrera_semester_basket_v1';
 const STORAGE_KEY_SETTINGS = 'mi_carrera_settings_v1';
+export const STORAGE_KEY_TUTORIAL = 'mi_carrera_tutorial_completed_v1';
 
 export interface AppSettings {
   includePromotionsInGPA: boolean;
@@ -13,6 +14,7 @@ export interface AppSettings {
   includeAnalistaTrack: boolean; // Default false
   allowBlockedElectivesPlanning: boolean; // Default false
   includeElectivesInProgress: boolean; // Default true
+  tutorialCompleted: boolean; // Default false
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   includeAnalistaTrack: false,
   allowBlockedElectivesPlanning: false,
   includeElectivesInProgress: true,
+  tutorialCompleted: false,
 };
 
 export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = {
@@ -183,9 +186,65 @@ export function loadSettings(): AppSettings {
       includeAnalistaTrack: parsed.includeAnalistaTrack ?? false,
       allowBlockedElectivesPlanning: parsed.allowBlockedElectivesPlanning ?? false,
       includeElectivesInProgress: parsed.includeElectivesInProgress ?? true,
+      tutorialCompleted: parsed.tutorialCompleted ?? false,
     };
   } catch {
     return DEFAULT_SETTINGS;
+  }
+}
+
+/**
+ * Checks whether the tutorial should start automatically.
+ * Rule:
+ * 1. If tutorial was already completed/skipped, return false.
+ * 2. If user already had saved career data prior to this update, do not show automatically (return false)
+ *    and record tutorialCompleted as true.
+ * 3. Only brand new users with no prior data will see it automatically.
+ */
+export function shouldAutoStartTutorial(userState?: UserCareerState): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  try {
+    const rawTut = localStorage.getItem(STORAGE_KEY_TUTORIAL);
+    if (rawTut === 'true') return false;
+
+    // Check settings flag
+    const settings = loadSettings();
+    if (settings.tutorialCompleted) return false;
+
+    // Check if user already has saved career subjects prior to this update
+    const activeState = userState || loadUserState();
+    const hasExistingData = Object.keys(activeState).length > 0;
+    if (hasExistingData) {
+      // Legacy user: silently mark completed so it doesn't disturb them
+      markTutorialCompleted();
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function markTutorialCompleted(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_TUTORIAL, 'true');
+    const settings = loadSettings();
+    saveSettings({ ...settings, tutorialCompleted: true });
+  } catch (e) {
+    console.error('Error marking tutorial completed:', e);
+  }
+}
+
+export function resetTutorialState(): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(STORAGE_KEY_TUTORIAL);
+    const settings = loadSettings();
+    saveSettings({ ...settings, tutorialCompleted: false });
+  } catch (e) {
+    console.error('Error resetting tutorial state:', e);
   }
 }
 

@@ -261,7 +261,7 @@ export const StatsDashboard: React.FC = () => {
           </div>
 
           {/* Main Progress Rings Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div data-tour="stats-rings" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* By subjects */}
             <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex flex-col justify-between">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">

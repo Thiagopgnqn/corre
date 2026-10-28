@@ -253,12 +253,18 @@ export const CorrelativeGraph: React.FC = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-4.25rem)] bg-slate-950 overflow-hidden">
+    <div
+      data-tour="graph-canvas"
+      className="relative w-full h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-4.25rem)] bg-slate-950 overflow-hidden"
+    >
       {/* Top Floating Controls & Legend */}
       <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
-        <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+        <div
+          data-tour="graph-controls"
+          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-2 sm:gap-3 text-xs"
+        >
           {/* Edge Legend */}
-          <div className="flex items-center gap-2">
+          <div data-tour="edge-legend" className="flex items-center gap-2">
             <span className="flex items-center gap-1.5 font-medium text-amber-400 whitespace-nowrap">
               <span className="w-4 sm:w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
               <span>Regular</span>
