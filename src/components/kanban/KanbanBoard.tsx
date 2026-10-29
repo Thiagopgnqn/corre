@@ -104,9 +104,9 @@ export const KanbanBoard: React.FC = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* View Header & Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 border border-slate-800/80 p-4 rounded-2xl backdrop-blur-md">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-slate-900/60 border border-slate-800/80 p-3 sm:p-4 rounded-2xl backdrop-blur-md">
         <div>
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <KanbanIcon className="w-5 h-5 text-indigo-400" />
@@ -117,41 +117,41 @@ export const KanbanBoard: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           {/* Mode Switcher */}
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="grid grid-cols-2 w-full sm:w-auto bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             <button
               onClick={() => setMode('kanban')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-all text-center ${
                 mode === 'kanban'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <KanbanIcon className="w-3.5 h-3.5" />
-              <span>Columnas (Kanban)</span>
+              <KanbanIcon className="w-3.5 h-3.5 shrink-0" />
+              <span>Columnas <span className="hidden sm:inline">(Kanban)</span></span>
             </button>
             <button
               onClick={() => setMode('levels')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-all text-center ${
                 mode === 'levels'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Por Nivel (1° a 5°)</span>
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span>Por Nivel <span className="hidden sm:inline">(1° a 5°)</span></span>
             </button>
           </div>
 
           {/* Level Filter */}
-          <div className="flex items-center gap-1 text-xs">
-            <span className="text-slate-500 font-medium mr-1">Filtrar:</span>
+          <div className="flex items-center gap-1 text-xs overflow-x-auto no-scrollbar py-0.5 max-w-full">
+            <span className="text-slate-500 font-medium mr-1 shrink-0">Filtrar:</span>
             {(['all', 1, 2, 3, 4, 5] as const).map((lvl) => (
               <button
                 key={lvl}
                 onClick={() => setLevelFilter(lvl)}
-                className={`px-2.5 py-1 rounded-lg transition-colors font-medium ${
+                className={`px-2.5 py-1 rounded-lg transition-colors font-medium shrink-0 ${
                   levelFilter === lvl
                     ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
                     : 'bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -322,7 +322,7 @@ export const KanbanBoard: React.FC = () => {
                   </div>
 
                   {/* Level progress bar */}
-                  <div className="w-48 bg-slate-800 h-2.5 rounded-full overflow-hidden">
+                  <div className="w-full sm:w-48 bg-slate-800 h-2.5 rounded-full overflow-hidden shrink-0">
                     <div
                       className="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all duration-500"
                       style={{ width: `${percent}%` }}

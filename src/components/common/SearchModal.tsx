@@ -68,7 +68,7 @@ export const SearchModal: React.FC = () => {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-start justify-center pt-16 sm:pt-24 p-4 bg-black/75 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 sm:pt-24 p-2 sm:p-4 bg-black/75 backdrop-blur-md">
         <motion.div
           initial={{ opacity: 0, scale: 0.95, y: -20 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -101,8 +101,8 @@ export const SearchModal: React.FC = () => {
           </div>
 
           {/* Quick Filters */}
-          <div className="px-4 py-2.5 bg-slate-950/30 border-b border-slate-800 flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-400 font-medium">Nivel:</span>
+          <div className="px-3 sm:px-4 py-2 bg-slate-950/30 border-b border-slate-800 flex items-center gap-1.5 text-xs overflow-x-auto no-scrollbar">
+            <span className="text-slate-400 font-medium shrink-0">Nivel:</span>
             {(['all', 1, 2, 3, 4, 5] as const).map((lvl) => (
               <button
                 key={lvl}
@@ -117,9 +117,9 @@ export const SearchModal: React.FC = () => {
               </button>
             ))}
 
-            <div className="h-4 w-[1px] bg-slate-800 mx-1 hidden sm:block" />
+            <div className="h-4 w-[1px] bg-slate-800 mx-1 shrink-0" />
 
-            <span className="text-slate-400 font-medium ml-1">Estado:</span>
+            <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
             {(['all', 'disponible', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada'] as const).map(
               (st) => (
                 <button

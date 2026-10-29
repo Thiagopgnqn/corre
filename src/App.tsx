@@ -43,7 +43,7 @@ const AppContent: React.FC = () => {
       <Navbar currentView={currentView} setCurrentView={handleSetView} />
 
       {/* Main content body with smooth transitions */}
-      <main className="flex-1 flex flex-col overflow-x-hidden pb-16 md:pb-0">
+      <main className="flex-1 flex flex-col overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentView}

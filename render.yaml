@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: mi-carrera-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm install && npm run build && npm run db:migrate
+    startCommand: npm run start
+    healthCheckPath: /api/health
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REFRESH_SECRET
+        generateValue: true
+

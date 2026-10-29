@@ -174,12 +174,12 @@ export const StatsDashboard: React.FC = () => {
   }, [activeState, settings.includeAnalistaTrack]);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Sub Navigation Tabs */}
-      <div className="flex items-center gap-1.5 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800 text-xs overflow-x-auto scrollbar-none">
+      <div className="flex items-center gap-1.5 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800 text-xs overflow-x-auto no-scrollbar scrollbar-none">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'overview'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -189,7 +189,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('grades')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'grades'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -199,7 +199,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('critical')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'critical'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -209,7 +209,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('badges')}
-          className={`px-4 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
             activeTab === 'badges'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -223,23 +223,23 @@ export const StatsDashboard: React.FC = () => {
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Mode Selector for Progress Percentage */}
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md">
+            <div className="flex items-start gap-2.5">
+              <Sparkles className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
                 <span className="text-xs font-bold text-white uppercase tracking-wider block">
                   Cálculo de Avance de Carrera
                 </span>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-slate-400 leading-snug">
                   Elegí si el porcentaje de avance general incluye el bloque de 20 créditos de electivas.
                 </span>
               </div>
             </div>
 
-            <div className="inline-flex p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold">
+            <div className="grid grid-cols-2 w-full sm:w-auto p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold shrink-0">
               <button
                 onClick={() => updateSettings({ includeElectivesInProgress: false })}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
+                className={`px-2.5 py-1.5 rounded-lg text-center text-[11px] sm:text-xs transition-all ${
                   !settings.includeElectivesInProgress
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -249,7 +249,7 @@ export const StatsDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => updateSettings({ includeElectivesInProgress: true })}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
+                className={`px-2.5 py-1.5 rounded-lg text-center text-[11px] sm:text-xs transition-all ${
                   settings.includeElectivesInProgress
                     ? 'bg-amber-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'

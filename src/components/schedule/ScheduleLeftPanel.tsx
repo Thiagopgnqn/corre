@@ -32,7 +32,7 @@ interface ScheduleLeftPanelProps {
   onHoverCommission: (data: { commission: Commission; subjectId: number; subjectName: string; hasConflict: boolean } | null) => void;
   subjectNamesMap: Map<number, string>;
   focusedSubjectId?: number | null;
-  onViewInGrid?: () => void;
+  onViewInGrid?: (subjectId?: number) => void;
 }
 
 export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
@@ -126,7 +126,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   };
 
   return (
-    <div className="w-full xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0">
+    <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0">
       {/* Header & Search */}
       <div className="p-3 border-b border-slate-800 space-y-2.5 bg-slate-950/40 shrink-0">
         <div className="flex items-center justify-between gap-2">
@@ -307,7 +307,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                onViewInGrid();
+                                onViewInGrid(subject.id);
                               }}
                               className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold underline decoration-indigo-400/50 active:scale-95 transition-transform"
                             >

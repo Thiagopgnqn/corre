@@ -79,7 +79,7 @@ export const ElectivesPicker: React.FC = () => {
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Top Banner: Global Credits Progress */}
       <div
         data-tour="electives-banner"
@@ -103,30 +103,30 @@ export const ElectivesPicker: React.FC = () => {
           </div>
 
           {/* Credits Summary Badge */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800 text-center">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Créditos Aprobados
+          <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+            <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
+              <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                Aprobados
               </div>
-              <div className="text-xl font-black text-amber-400">
+              <div className="text-sm sm:text-xl font-black text-amber-400">
                 {computedProgress.totalElectiveCreditsApproved} / {REQUIRED_ELECTIVE_CREDITS_TOTAL}
               </div>
             </div>
 
-            <div className="bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800 text-center">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
+              <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
                 En Curso
               </div>
-              <div className="text-xl font-black text-cyan-400">
+              <div className="text-sm sm:text-xl font-black text-cyan-400">
                 {computedProgress.totalElectiveCreditsTaking} cr
               </div>
             </div>
 
-            <div className="bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800 text-center">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
+              <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
                 Faltan
               </div>
-              <div className="text-xl font-black text-rose-400">
+              <div className="text-sm sm:text-xl font-black text-rose-400">
                 {computedProgress.missingElectiveCreditsForDegree} cr
               </div>
             </div>

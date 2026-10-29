@@ -146,6 +146,7 @@ interface ScheduleWeeklyGridProps {
   conflicts: ScheduleConflict[];
   subjectNamesMap: Map<number, string>;
   focusedConflictId?: string | null;
+  focusedSubjectId?: number | null;
   onFocusSubject?: (subjectId: number) => void;
 }
 
@@ -156,6 +157,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   conflicts,
   subjectNamesMap,
   focusedConflictId,
+  focusedSubjectId,
   onFocusSubject,
 }) => {
   const [selectedMobileDay, setSelectedMobileDay] = useState<DayOfWeek>('LUN');
@@ -195,37 +197,13 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
     }
   }, [todayDay]);
 
-  // Compute start/end time bounds dynamically based on active commissions + 1h margin
+  // Rango horario académico fijo (07:00 a 23:00) para garantizar total estabilidad
+  // sin que la grilla salte, se achique o mueva los horarios al pasar el mouse por las comisiones.
   const { minMinute, maxMinute, hoursRange } = useMemo(() => {
-    const allComms = Object.values(selections);
-    if (hoveredCommission) {
-      allComms.push(hoveredCommission.commission);
-    }
-
-    let minSlotMin = Infinity;
-    let maxSlotMin = -Infinity;
-
-    allComms.forEach((comm) => {
-      comm.slots.forEach((s) => {
-        const start = timeToMinutes(s.start);
-        const end = timeToMinutes(s.end);
-        if (start < minSlotMin) minSlotMin = start;
-        if (end > maxSlotMin) maxSlotMin = end;
-      });
-    });
-
-    // If no slots exist, default to 08:00 to 22:00
-    if (minSlotMin === Infinity || maxSlotMin === -Infinity) {
-      minSlotMin = 8 * 60;
-      maxSlotMin = 22 * 60;
-    }
-
-    // Add 1 hour margin (clamped between 07:00 and 23:00)
-    const startHour = Math.max(7, Math.floor(minSlotMin / 60) - 1);
-    const endHour = Math.min(23, Math.ceil(maxSlotMin / 60) + 1);
-
-    const min = startHour * 60;
-    const max = endHour * 60;
+    const startHour = 7;
+    const endHour = 23;
+    const min = startHour * 60; // 420 (07:00)
+    const max = endHour * 60;   // 1380 (23:00)
 
     const hours: number[] = [];
     for (let h = startHour; h <= endHour; h++) {
@@ -233,11 +211,56 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
     }
 
     return { minMinute: min, maxMinute: max, hoursRange: hours };
-  }, [selections, hoveredCommission]);
+  }, []);
 
   const totalMinutes = maxMinute - minMinute;
-  const HOUR_HEIGHT = 64; // px per hour for generous readability
+  const HOUR_HEIGHT = 60; // 60px por hora = exacto 1px por minuto
   const totalGridHeight = (hoursRange.length - 1) * HOUR_HEIGHT;
+
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  const userHasScrolled = useRef(false);
+
+  // Auto-scroll inicial suave a la primera clase cursada para no dejar la vista vacía
+  useEffect(() => {
+    if (userHasScrolled.current) return;
+    const allComms = Object.values(selections);
+    if (allComms.length === 0) return;
+
+    let earliestMin = Infinity;
+    allComms.forEach((comm) => {
+      comm.slots.forEach((s) => {
+        const m = timeToMinutes(s.start);
+        if (m < earliestMin) earliestMin = m;
+      });
+    });
+
+    if (earliestMin !== Infinity && earliestMin > 11 * 60 && gridScrollRef.current) {
+      const targetMin = Math.max(minMinute, earliestMin - 45);
+      const targetPct = (targetMin - minMinute) / totalMinutes;
+      const targetScroll = targetPct * totalGridHeight;
+      gridScrollRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    }
+  }, [selections, minMinute, totalMinutes, totalGridHeight]);
+
+  // Scroll directo hacia la materia solicitada en foco (ej. desde el panel lateral)
+  useEffect(() => {
+    if (!focusedSubjectId || !gridScrollRef.current) return;
+    const comm = selections[focusedSubjectId];
+    if (!comm || comm.slots.length === 0) return;
+
+    let earliestSlotMin = Infinity;
+    comm.slots.forEach((s) => {
+      const m = timeToMinutes(s.start);
+      if (m < earliestSlotMin) earliestSlotMin = m;
+    });
+
+    if (earliestSlotMin !== Infinity) {
+      const targetMin = Math.max(minMinute, earliestSlotMin - 30);
+      const targetPct = (targetMin - minMinute) / totalMinutes;
+      const targetScroll = targetPct * totalGridHeight;
+      gridScrollRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    }
+  }, [focusedSubjectId, selections, minMinute, totalMinutes, totalGridHeight]);
 
   // Flatten selected slots into printable items
   const scheduledItems = useMemo(() => {
@@ -414,6 +437,10 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
 
       {/* Main Grid Canvas Wrapper with Independent Internal Vertical & Horizontal Scroll */}
       <div
+        ref={gridScrollRef}
+        onScroll={() => {
+          userHasScrolled.current = true;
+        }}
         className="flex-1 overflow-auto relative p-2 sm:p-4 min-h-0 select-none"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
@@ -604,12 +631,13 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                     const shortName = getSubjectShortName(item.subjectId, item.subjectName);
 
                     const isFocused =
-                      focusedConflictId &&
-                      conflicts.some(
-                        (c) =>
-                          (c.commissionId1 === item.commission.id || c.commissionId2 === item.commission.id) &&
-                          `${c.commissionId1}-${c.commissionId2}` === focusedConflictId
-                      );
+                      (focusedSubjectId && focusedSubjectId === item.subjectId) ||
+                      (focusedConflictId &&
+                        conflicts.some(
+                          (c) =>
+                            (c.commissionId1 === item.commission.id || c.commissionId2 === item.commission.id) &&
+                            `${c.commissionId1}-${c.commissionId2}` === focusedConflictId
+                        ));
 
                     return (
                       <motion.div

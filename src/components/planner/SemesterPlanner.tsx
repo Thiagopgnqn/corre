@@ -105,7 +105,7 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl backdrop-blur-md flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -120,10 +120,10 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs overflow-x-auto no-scrollbar max-w-full">
             <button
               onClick={() => setTermFilter('all')}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold shrink-0 transition-all ${
                 termFilter === 'all' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -131,23 +131,25 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
             </button>
             <button
               onClick={() => setTermFilter('1C')}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold shrink-0 transition-all ${
                 termFilter === '1C' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
-              1° Cuatrimestre
+              <span className="sm:hidden">1C</span>
+              <span className="hidden sm:inline">1° Cuatrimestre</span>
             </button>
             <button
               onClick={() => setTermFilter('2C')}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold shrink-0 transition-all ${
                 termFilter === '2C' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
-              2° Cuatrimestre
+              <span className="sm:hidden">2C</span>
+              <span className="hidden sm:inline">2° Cuatrimestre</span>
             </button>
             <button
               onClick={() => setTermFilter('A')}
-              className={`px-3 py-1.5 rounded-lg font-semibold transition-all ${
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg font-semibold shrink-0 transition-all ${
                 termFilter === 'A' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >

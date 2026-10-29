@@ -90,7 +90,7 @@ export const SubjectDrawer: React.FC = () => {
           </div>
 
           {/* Drawer Body */}
-          <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 text-sm">
+          <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 text-sm pb-24 sm:pb-6">
             {/* Status & Change Action */}
             <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1">

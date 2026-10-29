@@ -1,0 +1,1236 @@
+{
+  "institution": {
+    "name": "Universidad Tecnológica Nacional",
+    "code": "UTN"
+  },
+  "faculty": {
+    "name": "Facultad Regional Córdoba",
+    "code": "FRC"
+  },
+  "career": {
+    "name": "Ingeniería en Sistemas de Información",
+    "code": "ISI"
+  },
+  "studyPlan": {
+    "name": "Plan 2023",
+    "year": 2023,
+    "isActive": true,
+    "config": {
+      "requiredElectiveCredits": 20,
+      "defaultMinPassingGrade": 4,
+      "intermediateDegrees": [
+        {
+          "key": "analista",
+          "name": "Analista Universitario en Sistemas",
+          "requiredElectiveCredits": 4,
+          "specialRuleSubjectCode": 99
+        }
+      ]
+    }
+  },
+  "specialRules": [
+    {
+      "subjectCode": 99,
+      "ruleType": "approved_range",
+      "params": {
+        "fromCode": 1,
+        "toCode": 23
+      },
+      "description": "Requiere tener aprobadas todas las materias del ciclo básico y nivel 2 (códigos 1 al 23)."
+    },
+    {
+      "subjectCode": 36,
+      "ruleType": "all_previous_core_approved",
+      "params": {
+        "excludeTrackKeys": [
+          "analista"
+        ]
+      },
+      "description": "Requiere tener aprobadas todas las materias obligatorias previas del plan (excluye Seminario si no se optó por Analista)."
+    }
+  ],
+  "acronyms": [
+    {
+      "acronym": "AED",
+      "subjectCode": 6
+    },
+    {
+      "acronym": "SSL",
+      "subjectCode": 13
+    },
+    {
+      "acronym": "PPR",
+      "subjectCode": 14
+    },
+    {
+      "acronym": "SPN",
+      "subjectCode": 8
+    },
+    {
+      "acronym": "ASI",
+      "subjectCode": 16
+    },
+    {
+      "acronym": "DDS",
+      "subjectCode": 20
+    },
+    {
+      "acronym": "BDA",
+      "subjectCode": 19
+    },
+    {
+      "acronym": "RDA",
+      "subjectCode": 26
+    },
+    {
+      "acronym": "ADM",
+      "subjectCode": 30
+    },
+    {
+      "acronym": "IOP",
+      "subjectCode": 27
+    },
+    {
+      "acronym": "ICS",
+      "subjectCode": 25
+    }
+  ],
+  "subjects": [
+    {
+      "codeInPlan": 1,
+      "name": "Análisis Matemático 1",
+      "shortName": "Análisis Matemático 1",
+      "level": 1,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 2,
+      "name": "Álgebra y Geometría Analítica",
+      "shortName": "Álgebra y Geometría Analítica",
+      "level": 1,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 3,
+      "name": "Física 1",
+      "shortName": "Física 1",
+      "level": 1,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 4,
+      "name": "Inglés 1",
+      "shortName": "Inglés 1",
+      "level": 1,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 2,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 5,
+      "name": "Lógica y Estructuras Discretas",
+      "shortName": "Lógica y Estructuras Discretas",
+      "level": 1,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 6,
+      "name": "Algoritmos y Estructuras de Datos",
+      "shortName": "Algoritmos y Estructuras de Datos",
+      "level": 1,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 7,
+      "name": "Arquitectura de Computadoras",
+      "shortName": "Arquitectura de Computadoras",
+      "level": 1,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 8,
+      "name": "Sistemas y Procesos de Negocio",
+      "shortName": "Sistemas y Procesos de Negocio",
+      "level": 1,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 11,
+      "name": "Ingeniería y Sociedad",
+      "shortName": "Ingeniería y Sociedad",
+      "level": 1,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 2,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 9,
+      "name": "Análisis Matemático 2",
+      "shortName": "Análisis Matemático 2",
+      "level": 2,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        1,
+        2
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 10,
+      "name": "Física 2",
+      "shortName": "Física 2",
+      "level": 2,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 5,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        1,
+        3
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 12,
+      "name": "Inglés 2",
+      "shortName": "Inglés 2",
+      "level": 2,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 2,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        4
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 13,
+      "name": "Sintaxis y Semántica de los Lenguajes",
+      "shortName": "Sintaxis y Semántica de los Lenguajes",
+      "level": 2,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        5,
+        6
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 14,
+      "name": "Paradigmas de Programación",
+      "shortName": "Paradigmas de Programación",
+      "level": 2,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        5,
+        6
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 15,
+      "name": "Sistemas Operativos",
+      "shortName": "Sistemas Operativos",
+      "level": 2,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        7
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 16,
+      "name": "Análisis de Sistemas de Información",
+      "shortName": "Análisis de Sistemas de Información",
+      "level": 2,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 6,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        6,
+        8
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 17,
+      "name": "Probabilidad y Estadísticas",
+      "shortName": "Probabilidad y Estadísticas",
+      "level": 2,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        1,
+        2
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 18,
+      "name": "Economía",
+      "shortName": "Economía",
+      "level": 3,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": [
+        1,
+        2
+      ]
+    },
+    {
+      "codeInPlan": 19,
+      "name": "Bases de Datos",
+      "shortName": "Bases de Datos",
+      "level": 3,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        13,
+        16
+      ],
+      "approvedPrereqs": [
+        5,
+        6
+      ]
+    },
+    {
+      "codeInPlan": 20,
+      "name": "Desarrollo de Software",
+      "shortName": "Desarrollo de Software",
+      "level": 3,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        14,
+        16
+      ],
+      "approvedPrereqs": [
+        5,
+        6
+      ]
+    },
+    {
+      "codeInPlan": 21,
+      "name": "Comunicación de Datos",
+      "shortName": "Comunicación de Datos",
+      "level": 3,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [],
+      "approvedPrereqs": [
+        3,
+        7
+      ]
+    },
+    {
+      "codeInPlan": 22,
+      "name": "Análisis Numérico",
+      "shortName": "Análisis Numérico",
+      "level": 3,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        9
+      ],
+      "approvedPrereqs": [
+        1,
+        2
+      ]
+    },
+    {
+      "codeInPlan": 23,
+      "name": "Diseño de Sistemas de Información",
+      "shortName": "Diseño de Sistemas de Información",
+      "level": 3,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 6,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        14,
+        16
+      ],
+      "approvedPrereqs": [
+        4,
+        6,
+        8
+      ]
+    },
+    {
+      "codeInPlan": 99,
+      "name": "Seminario Integrador (Analista)",
+      "shortName": "Seminario Integrador (Analista)",
+      "level": 3,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": true,
+      "trackKey": "analista",
+      "regularPrereqs": [
+        16
+      ],
+      "approvedPrereqs": [
+        6,
+        8,
+        13,
+        14
+      ]
+    },
+    {
+      "codeInPlan": 24,
+      "name": "Legislación",
+      "shortName": "Legislación",
+      "level": 4,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 2,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        11
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 25,
+      "name": "Ingeniería y Calidad de Software",
+      "shortName": "Ingeniería y Calidad de Software",
+      "level": 4,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19,
+        20,
+        23
+      ],
+      "approvedPrereqs": [
+        13,
+        14
+      ]
+    },
+    {
+      "codeInPlan": 26,
+      "name": "Redes de Datos",
+      "shortName": "Redes de Datos",
+      "level": 4,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        15,
+        21
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 27,
+      "name": "Investigación Operativa",
+      "shortName": "Investigación Operativa",
+      "level": 4,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        17,
+        22
+      ],
+      "approvedPrereqs": []
+    },
+    {
+      "codeInPlan": 28,
+      "name": "Simulación",
+      "shortName": "Simulación",
+      "level": 4,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        17
+      ],
+      "approvedPrereqs": [
+        9
+      ]
+    },
+    {
+      "codeInPlan": 29,
+      "name": "Tecnologías para la Automatización",
+      "shortName": "Tecnologías para la Automatización",
+      "level": 4,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        10,
+        22
+      ],
+      "approvedPrereqs": [
+        9
+      ]
+    },
+    {
+      "codeInPlan": 30,
+      "name": "Administración de Sistemas de Información",
+      "shortName": "Administración de Sistemas de Información",
+      "level": 4,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 6,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        18,
+        23
+      ],
+      "approvedPrereqs": [
+        16
+      ]
+    },
+    {
+      "codeInPlan": 31,
+      "name": "Inteligencia Artificial",
+      "shortName": "Inteligencia Artificial",
+      "level": 5,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        28
+      ],
+      "approvedPrereqs": [
+        17,
+        22
+      ]
+    },
+    {
+      "codeInPlan": 32,
+      "name": "Ciencia de Datos",
+      "shortName": "Ciencia de Datos",
+      "level": 5,
+      "modality": "2C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        28
+      ],
+      "approvedPrereqs": [
+        17,
+        19
+      ]
+    },
+    {
+      "codeInPlan": 33,
+      "name": "Sistemas de Gestión",
+      "shortName": "Sistemas de Gestión",
+      "level": 5,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        18,
+        27
+      ],
+      "approvedPrereqs": [
+        23
+      ]
+    },
+    {
+      "codeInPlan": 34,
+      "name": "Gestión Gerencial",
+      "shortName": "Gestión Gerencial",
+      "level": 5,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        24,
+        30
+      ],
+      "approvedPrereqs": [
+        18
+      ]
+    },
+    {
+      "codeInPlan": 35,
+      "name": "Seguridad en los Sistemas de Información",
+      "shortName": "Seguridad en los Sistemas de Información",
+      "level": 5,
+      "modality": "1C-CC",
+      "contraCuatrimestral": true,
+      "weeklyHours": 3,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        26,
+        30
+      ],
+      "approvedPrereqs": [
+        20,
+        21
+      ]
+    },
+    {
+      "codeInPlan": 36,
+      "name": "Proyecto Final",
+      "shortName": "Proyecto Final",
+      "level": 5,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 6,
+      "kind": "obligatoria",
+      "credits": null,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        25,
+        26,
+        30
+      ],
+      "approvedPrereqs": [
+        12,
+        20,
+        23
+      ]
+    },
+    {
+      "codeInPlan": 301,
+      "name": "Backend de Aplicaciones",
+      "shortName": "Backend de Aplicaciones",
+      "level": 3,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "electiva",
+      "credits": 4,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        14,
+        13
+      ],
+      "approvedPrereqs": [
+        6
+      ]
+    },
+    {
+      "codeInPlan": 401,
+      "name": "Green Software",
+      "shortName": "Green Software",
+      "level": 4,
+      "modality": "1C/2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        20,
+        19
+      ],
+      "approvedPrereqs": [
+        14,
+        13
+      ]
+    },
+    {
+      "codeInPlan": 402,
+      "name": "Gestión Industrial de la Producción",
+      "shortName": "Gestión Industrial de la Producción",
+      "level": 4,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19
+      ],
+      "approvedPrereqs": [
+        8,
+        16
+      ]
+    },
+    {
+      "codeInPlan": 403,
+      "name": "Gestión de la Mejora de los Procesos",
+      "shortName": "Gestión de la Mejora de los Procesos",
+      "level": 4,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19
+      ],
+      "approvedPrereqs": [
+        8,
+        16
+      ]
+    },
+    {
+      "codeInPlan": 404,
+      "name": "Desarrollo y Operaciones DevOps",
+      "shortName": "Desarrollo y Operaciones DevOps",
+      "level": 4,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19,
+        20
+      ],
+      "approvedPrereqs": [
+        14,
+        13
+      ]
+    },
+    {
+      "codeInPlan": 405,
+      "name": "Desarrollo de Aplicaciones con Objetos",
+      "shortName": "Desarrollo de Aplicaciones con Objetos",
+      "level": 4,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        13
+      ],
+      "approvedPrereqs": [
+        6
+      ]
+    },
+    {
+      "codeInPlan": 406,
+      "name": "Comunicación Multimedial en el Desarrollo de Sistemas de Información",
+      "shortName": "Comunicación Multimedial en el Desarrollo de Sistemas de Información",
+      "level": 4,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19
+      ],
+      "approvedPrereqs": [
+        8,
+        16
+      ]
+    },
+    {
+      "codeInPlan": 407,
+      "name": "Arquitectura de Software",
+      "shortName": "Arquitectura de Software",
+      "level": 4,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        19,
+        20
+      ],
+      "approvedPrereqs": [
+        14,
+        13
+      ]
+    },
+    {
+      "codeInPlan": 501,
+      "name": "Desarrollo de Tecnologías Blockchain",
+      "shortName": "Desarrollo de Tecnologías Blockchain",
+      "level": 5,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        26,
+        19
+      ],
+      "approvedPrereqs": [
+        14,
+        20
+      ]
+    },
+    {
+      "codeInPlan": 502,
+      "name": "Creatividad e Innovación en Ingeniería",
+      "shortName": "Creatividad e Innovación en Ingeniería",
+      "level": 5,
+      "modality": "1C/2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 503,
+      "name": "Auditoría de SI/TI",
+      "shortName": "Auditoría de SI/TI",
+      "level": 5,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 504,
+      "name": "Gerenciamiento Estratégico",
+      "shortName": "Gerenciamiento Estratégico",
+      "level": 5,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 505,
+      "name": "Consultoría en Negocios Digitales",
+      "shortName": "Consultoría en Negocios Digitales",
+      "level": 5,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 506,
+      "name": "Emprendimientos Tecnológicos",
+      "shortName": "Emprendimientos Tecnológicos",
+      "level": 5,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        16,
+        19
+      ]
+    },
+    {
+      "codeInPlan": 507,
+      "name": "Decisiones en Escenarios Complejos",
+      "shortName": "Decisiones en Escenarios Complejos",
+      "level": 5,
+      "modality": "1C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        27
+      ],
+      "approvedPrereqs": [
+        19
+      ]
+    },
+    {
+      "codeInPlan": 508,
+      "name": "Testing de Software",
+      "shortName": "Testing de Software",
+      "level": 5,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        25
+      ],
+      "approvedPrereqs": [
+        19,
+        20
+      ]
+    },
+    {
+      "codeInPlan": 509,
+      "name": "Seguridad en el Desarrollo de Software",
+      "shortName": "Seguridad en el Desarrollo de Software",
+      "level": 5,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        26,
+        19
+      ],
+      "approvedPrereqs": [
+        20,
+        8
+      ]
+    },
+    {
+      "codeInPlan": 510,
+      "name": "Integración de Aplicaciones en Entorno Web",
+      "shortName": "Integración de Aplicaciones en Entorno Web",
+      "level": 5,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        26,
+        19
+      ],
+      "approvedPrereqs": [
+        19,
+        20
+      ]
+    },
+    {
+      "codeInPlan": 511,
+      "name": "Ingeniería de Software de fuentes abiertas/libres",
+      "shortName": "Ingeniería de Software de fuentes abiertas/libres",
+      "level": 5,
+      "modality": "2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        20,
+        19,
+        26
+      ],
+      "approvedPrereqs": [
+        13,
+        14
+      ]
+    },
+    {
+      "codeInPlan": 408,
+      "name": "Experiencia e Interfaces de Usuario (UI/UX)",
+      "shortName": "Experiencia e Interfaces de Usuario (UI/UX)",
+      "level": 4,
+      "modality": "1C/2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        20
+      ],
+      "approvedPrereqs": [
+        14
+      ]
+    },
+    {
+      "codeInPlan": 512,
+      "name": "Habilidades Blandas",
+      "shortName": "Habilidades Blandas",
+      "level": 5,
+      "modality": "1C/2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 513,
+      "name": "Creatividad y Desarrollo de Entornos Virtuales",
+      "shortName": "Creatividad y Desarrollo de Entornos Virtuales",
+      "level": 5,
+      "modality": "1C/2C",
+      "contraCuatrimestral": false,
+      "weeklyHours": 3,
+      "kind": "electiva",
+      "credits": 3,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20
+      ]
+    },
+    {
+      "codeInPlan": 514,
+      "name": "Práctica Profesional Supervisada",
+      "shortName": "Práctica Profesional Supervisada",
+      "level": 5,
+      "modality": "A",
+      "contraCuatrimestral": false,
+      "weeklyHours": 4,
+      "kind": "electiva",
+      "credits": 4,
+      "isOptionalTrack": false,
+      "trackKey": null,
+      "regularPrereqs": [
+        30
+      ],
+      "approvedPrereqs": [
+        20,
+        19
+      ]
+    }
+  ]
+}

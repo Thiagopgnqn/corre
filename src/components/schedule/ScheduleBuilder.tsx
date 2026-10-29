@@ -121,14 +121,14 @@ export const ScheduleBuilder: React.FC = () => {
     CORE_SUBJECTS.forEach((s) => map.set(s.id, s.name));
     ELECTIVES.forEach((e) => map.set(e.id, e.name));
     return map;
-  }, []);
+
 
   const knownSubjectIds = useMemo(() => {
     const set = new Set<number | string>();
     CORE_SUBJECTS.forEach((s) => set.add(s.id));
     ELECTIVES.forEach((e) => set.add(e.id));
     return set;
-  }, []);
+
 
   // Schedules by subject map
   const schedulesMap = useMemo(() => {
@@ -215,7 +215,19 @@ export const ScheduleBuilder: React.FC = () => {
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, []);
+
+  // Al cambiar de pestaña en móvil, volver arriba para evitar quedar desfasado del scroll
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [mobileTab]);
+
+
+  // Al cambiar de pestaña en móvil, volver arriba para evitar quedar desfasado del scroll
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [mobileTab]);
+
+
 
   // Total weekly hours
   const totalHours = useMemo(() => {
@@ -680,13 +692,15 @@ export const ScheduleBuilder: React.FC = () => {
             onHoverCommission={setHoveredCommission}
             subjectNamesMap={subjectNamesMap}
             focusedSubjectId={focusedSubjectId}
-            onViewInGrid={() => setMobileTab('grilla')}
+            onViewInGrid={(sId) => {
+              if (sId) setFocusedSubjectId(sId);
+            }}
           />
 
           {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
           <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-3 sm:gap-4 overflow-y-auto xl:overflow-hidden">
             {/* Center Timetable Weekly Calendar Grid */}
-            <div className="flex-1 min-h-0 flex flex-col h-full">
+            <div className="flex-1 min-h-[500px] xl:min-h-0 flex flex-col xl:h-full">
               <ScheduleWeeklyGrid
                 selections={selectedCommissionsMap}
                 onRemoveCommission={handleRemoveCommissionWithHistory}
@@ -694,6 +708,7 @@ export const ScheduleBuilder: React.FC = () => {
                 conflicts={conflicts}
                 subjectNamesMap={subjectNamesMap}
                 focusedConflictId={focusedConflictId}
+                focusedSubjectId={focusedSubjectId}
                 onFocusSubject={(sId) => setFocusedSubjectId(sId)}
               />
             </div>
@@ -728,7 +743,10 @@ export const ScheduleBuilder: React.FC = () => {
                 onHoverCommission={setHoveredCommission}
                 subjectNamesMap={subjectNamesMap}
                 focusedSubjectId={focusedSubjectId}
-                onViewInGrid={() => setMobileTab('grilla')}
+                onViewInGrid={(sId) => {
+                  if (sId) setFocusedSubjectId(sId);
+                  setMobileTab('grilla');
+                }}
               />
 
               {/* Floating action pill above bottom navigation */}
@@ -764,6 +782,7 @@ export const ScheduleBuilder: React.FC = () => {
               conflicts={conflicts}
               subjectNamesMap={subjectNamesMap}
               focusedConflictId={focusedConflictId}
+              focusedSubjectId={focusedSubjectId}
               onFocusSubject={(sId) => {
                 setFocusedSubjectId(sId);
                 setMobileTab('oferta');

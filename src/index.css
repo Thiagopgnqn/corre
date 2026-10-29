@@ -69,3 +69,20 @@
 .glow-taking {
   animation: pulse-cyan 3s infinite ease-in-out;
 }
+
+/* Safe area padding for mobile navigation bars & gesture handles */
+.safe-area-pb {
+  padding-bottom: max(0.6rem, env(safe-area-inset-bottom, 0px));
+}
+
+/* Hide scrollbars while allowing touch/mouse scrolling */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

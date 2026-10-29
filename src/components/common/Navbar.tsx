@@ -414,14 +414,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
-              className={`flex flex-col items-center justify-center gap-0.5 px-2 py-1 rounded-xl text-[10px] font-semibold transition-all min-w-[50px] ${
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-semibold transition-all ${
                 isActive
                   ? 'text-indigo-400 font-bold bg-indigo-500/10'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-              <span className="leading-none text-[9px]">{item.label}</span>
+              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+              <span className="leading-tight text-[9px] truncate max-w-full text-center">{item.label}</span>
             </button>
           );
         })}
