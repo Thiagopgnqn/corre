@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://TU-BACKEND-EN-RENDER.onrender.com/api/:path*"
+      "destination": "https://corre-lbhv.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
