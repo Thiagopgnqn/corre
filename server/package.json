@@ -13,7 +13,8 @@
     "db:migrate": "node dist/db/migrate.js",
     "seed:generate": "tsx tools/generateSeedData.ts",
     "seed": "tsx src/scripts/seed.ts",
-    "make-admin": "tsx src/scripts/makeAdmin.ts"
+    "make-admin": "tsx src/scripts/makeAdmin.ts",
+    "import:schedule": "tsx src/scripts/importScheduleDb.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
@@ -32,6 +33,7 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
     "typescript": "^5.7.3",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {

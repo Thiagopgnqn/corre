@@ -4,6 +4,13 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { env } from './config/env.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { AuthController } from './modules/auth/auth.controller.js';
+import catalogRouter from './modules/catalog/catalog.routes.js';
+import { updateSelectedPlan } from './modules/catalog/catalog.controller.js';
+import adminRouter from './modules/admin/admin.routes.js';
+import userStateRouter from './modules/user-state/userState.routes.js';
+import { requireAuth } from './middlewares/auth.middleware.js';
+import { csrfProtection } from './middlewares/csrf.middleware.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 
 export const app = express();
@@ -45,7 +52,7 @@ app.use(
 );
 
 // 3. Parsers de body y cookies
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -58,10 +65,17 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// 5. Rutas de Autenticación
-app.use('/api/auth', authRouter);
+// 5. Rutas directas /api/me (compatibilidad canónica)
+app.get('/api/me', requireAuth, AuthController.me);
+app.put('/api/me/plan', requireAuth, csrfProtection, updateSelectedPlan);
 
-// 6. Manejador de 404 para rutas no existentes
+// 6. Módulos de la API
+app.use('/api/auth', authRouter);
+app.use('/api/catalog', catalogRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api', userStateRouter);
+
+// 7. Manejador de 404 para rutas no existentes
 app.use('/api/*', (req, res) => {
   res.status(404).json({
     success: false,
@@ -69,7 +83,7 @@ app.use('/api/*', (req, res) => {
   });
 });
 
-// 7. Manejador centralizado de errores
+// 8. Manejador centralizado de errores
 app.use(errorHandler);
 
 // Iniciar servidor si se ejecuta directamente
@@ -80,4 +94,3 @@ if (process.env.NODE_ENV !== 'test') {
     console.log(`🩺 Health check: http://localhost:${env.PORT}/api/health`);
   });
 }
-
