@@ -114,21 +114,20 @@ export const ScheduleBuilder: React.FC = () => {
     subjectName: string;
     hasConflict: boolean;
   } | null>(null);
-
   // Subject names map
   const subjectNamesMap = useMemo(() => {
     const map = new Map<number, string>();
     CORE_SUBJECTS.forEach((s) => map.set(s.id, s.name));
     ELECTIVES.forEach((e) => map.set(e.id, e.name));
     return map;
-
+  }, []);
 
   const knownSubjectIds = useMemo(() => {
     const set = new Set<number | string>();
     CORE_SUBJECTS.forEach((s) => set.add(s.id));
     ELECTIVES.forEach((e) => set.add(e.id));
     return set;
-
+  }, []);
 
   // Schedules by subject map
   const schedulesMap = useMemo(() => {
@@ -215,12 +214,7 @@ export const ScheduleBuilder: React.FC = () => {
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-
-  // Al cambiar de pestaña en móvil, volver arriba para evitar quedar desfasado del scroll
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, [mobileTab]);
-
+  }, []);
 
   // Al cambiar de pestaña en móvil, volver arriba para evitar quedar desfasado del scroll
   useEffect(() => {
