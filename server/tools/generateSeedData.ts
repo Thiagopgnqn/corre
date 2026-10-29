@@ -5,12 +5,12 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Importar datos actuales del frontend
-import { CORE_SUBJECTS } from '../../../src/data/plan2023.js';
-import { ELECTIVES } from '../../../src/data/electives.js';
-import { ACRONYM_TO_ID } from '../../../src/data/acronyms.js';
+// Importar datos actuales del frontend (fuera del backend)
+import { CORE_SUBJECTS } from '../../src/data/plan2023.js';
+import { ELECTIVES } from '../../src/data/electives.js';
+import { ACRONYM_TO_ID } from '../../src/data/acronyms.js';
 
-const targetDir = path.resolve(__dirname, '../../seed-data');
+const targetDir = path.resolve(__dirname, '../seed-data');
 if (!fs.existsSync(targetDir)) {
   fs.mkdirSync(targetDir, { recursive: true });
 }

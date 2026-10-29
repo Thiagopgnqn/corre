@@ -10,14 +10,19 @@
     "build": "tsc",
     "start": "node dist/app.js",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/db/migrate.ts",
+    "db:migrate": "node dist/db/migrate.js",
+    "seed:generate": "tsx tools/generateSeedData.ts",
     "seed": "tsx src/scripts/seed.ts",
-    "generate:seed-data": "tsx src/scripts/generateSeedData.ts",
-    "make-admin": "tsx src/scripts/makeAdmin.ts",
-    "import:schedule": "tsx src/scripts/importScheduleDb.ts"
+    "make-admin": "tsx src/scripts/makeAdmin.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
+    "@types/cookie-parser": "^1.4.8",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/node": "^22.13.5",
+    "@types/pg": "^8.11.11",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -26,18 +31,11 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
-    "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "@types/cookie-parser": "^1.4.8",
-    "@types/cors": "^2.8.17",
-    "@types/express": "^5.0.0",
-    "@types/jsonwebtoken": "^9.0.9",
-    "@types/node": "^22.13.5",
-    "@types/pg": "^8.11.11",
-    "drizzle-kit": "^0.30.4"
+    "drizzle-kit": "^0.30.4",
+    "tsx": "^4.19.3"
   }
 }
-
