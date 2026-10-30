@@ -195,7 +195,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
                 }`}>
                   {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                </button>
+                </span>
               </button>
 
               {/* Simulation Mode Toggle Button */}
@@ -290,7 +290,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                      </button>
+                      </span>
                     </button>
 
                     {/* Simulation toggle in dropdown */}
@@ -309,7 +309,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         isSimulationMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {isSimulationMode ? 'ON' : 'OFF'}
-                      </button>
+                      </span>
                     </button>
 
                     {/* Sound toggle in dropdown */}
@@ -329,7 +329,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         soundEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {soundEnabled ? 'ON' : 'OFF'}
-                      </button>
+                      </span>
                     </button>
                   </div>
 
@@ -418,7 +418,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </div>
         </div>
         <PlanSelectorModal isOpen={isPlanSelectorOpen} onClose={() => setIsPlanSelectorOpen(false)} />
-    </header>
+      </header>
 
       {/* Mobile Bottom Navigation Bar (Fixed at bottom on screens < md) */}
       <nav
