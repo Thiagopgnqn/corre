@@ -75,21 +75,22 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   };
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative shrink-0" ref={menuRef}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 transition-all text-xs font-medium cursor-pointer shadow-sm"
+        className="flex items-center gap-1.5 sm:gap-2 p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 text-slate-200 transition-all text-xs font-medium cursor-pointer shadow-sm"
+        title={user.email}
       >
-        <div className="w-6 h-6 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-[10px]">
+        <div className="w-6 h-6 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-[10px] shrink-0">
           {user.email.charAt(0)}
         </div>
-        <span className="max-w-[120px] truncate hidden sm:inline">{user.email}</span>
-        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <span className="max-w-[105px] truncate hidden xl:inline text-xs">{user.email}</span>
+        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform hidden sm:inline ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl py-2 z-50 text-slate-200 animate-fade-in backdrop-blur-xl">
+        <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl py-2 z-50 text-slate-200 animate-fade-in backdrop-blur-xl">
           {/* User info header */}
           <div className="px-4 py-2.5 border-b border-slate-800">
             <div className="flex items-center justify-between mb-1">

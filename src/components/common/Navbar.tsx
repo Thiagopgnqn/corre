@@ -18,7 +18,9 @@ import {
   Award,
   HelpCircle,
   Clock,
+  LogOut,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { UserMenu } from './UserMenu';
@@ -32,6 +34,7 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) => {
+  const { user, logout } = useAuth();
   const {
     isSimulationMode,
     toggleSimulationMode,
@@ -78,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `mi-carrera-plan2023-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `mi-carrera-${currentPlanName.toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
     setMenuOpen(false);
@@ -116,12 +119,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   return (
     <>
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 w-full">
-        <div className="w-full max-w-[1920px] mx-auto px-3 sm:px-6 flex items-center justify-between h-16 gap-2 sm:gap-4">
+        <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-4 min-w-0">
           {/* Logo & Plan */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-cyan-400">
-                <GraduationCap className="w-5 h-5" />
+          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
+              <div className="w-full h-full bg-slate-950 rounded-[9px] sm:rounded-[10px] flex items-center justify-center text-cyan-400">
+                <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
             </div>
             <div className="min-w-0">
@@ -132,13 +135,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <button
                   type="button"
                   onClick={() => setIsPlanSelectorOpen(true)}
-                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap"
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-none truncate"
                   title="Cambiar carrera o plan de estudios"
                 >
                   {currentPlanName}
                 </button>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden sm:block">
+              <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden lg:block">
                 UTN • Ing. en Sistemas de Información
               </p>
             </div>
@@ -147,7 +150,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           {/* Desktop Nav Tabs: icon + label at >= 1500px, icon-only below 1500px */}
           <nav
             data-tour="nav-tabs"
-            className="hidden md:flex items-center gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
+            className="hidden md:flex items-center gap-0.5 lg:gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
           >
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -157,7 +160,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
                   title={item.fullLabel}
-                  className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                  className={`flex items-center gap-1.5 px-2 lg:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
@@ -171,7 +174,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </nav>
 
           {/* Actions & Utilities */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             {/* Secondary Actions (Visible only on very wide screens >= 1500px, otherwise in More Menu) */}
             <div className="hidden min-[1500px]:flex items-center gap-2 shrink-0">
               {/* Analista / Seminario Toggle Button */}
@@ -227,15 +230,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               </button>
             </div>
 
-            {/* Quick Search: Always visible */}
+            {/* Quick Search */}
             <button
               data-tour="search-button"
               onClick={() => setIsSearchOpen(true)}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5 shrink-0"
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5 shrink-0"
               title="Buscar materias (Ctrl+K)"
             >
               <Search className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="hidden xl:inline whitespace-nowrap">Buscar</span>
+              <span className="hidden 2xl:inline whitespace-nowrap">Buscar</span>
               <kbd className="hidden 2xl:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
                 Ctrl K
               </kbd>
@@ -247,31 +250,51 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             {/* User Profile & Account Menu */}
             <UserMenu currentPlanName={currentPlanName} onOpenPlanSelector={() => setIsPlanSelectorOpen(true)} />
 
-            {/* Tutorial Launcher Button: Always visible */}
+            {/* Tutorial Launcher Button: Visible on xl+ (also in More menu on all screens) */}
             <button
               onClick={() => startTutorial(0)}
-              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shrink-0 shadow-sm"
+              className="hidden xl:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm"
               title="Ver tutorial guiado interactivo"
             >
               <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="hidden xl:inline whitespace-nowrap">Tutorial</span>
+              <span className="whitespace-nowrap">Tutorial</span>
             </button>
 
-            {/* More Menu Dropdown: Always visible */}
+            {/* More Menu Dropdown ("El desplegable") */}
             <div className="relative shrink-0" ref={menuRef}>
               <button
                 data-tour="more-menu-btn"
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
+                className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
                 title="Más opciones y menú"
               >
                 <MoreVertical className="w-4 h-4" />
               </button>
 
               {menuOpen && (
-                <div className="absolute right-0 mt-2 w-64 max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80">
-                  <div className="px-3.5 py-2 text-[11px] text-slate-400">
-                    Progreso: <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span> de materias
+                <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80 backdrop-blur-xl animate-fade-in">
+                  {user && (
+                    <div className="px-3.5 py-2.5 bg-slate-950/40">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-[11px] shrink-0">
+                          {user.email.charAt(0)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-white truncate">{user.email}</p>
+                          <p className="text-[10px] text-indigo-400">{currentPlanName}</p>
+                        </div>
+                        {user.role === 'admin' && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
+                            Admin
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="px-3.5 py-2 text-[11px] text-slate-400 flex items-center justify-between">
+                    <span>Progreso de carrera:</span>
+                    <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span>
                   </div>
 
                   <div className="py-1">
@@ -404,6 +427,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                       <span>Reiniciar carrera...</span>
                     </button>
                   </div>
+
+                  {user && (
+                    <div className="py-1">
+                      <button
+                        onClick={() => {
+                          setMenuOpen(false);
+                          logout();
+                        }}
+                        className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                      >
+                        <LogOut className="w-4 h-4 text-slate-400" />
+                        <span>Cerrar Sesión</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
