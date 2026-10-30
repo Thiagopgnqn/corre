@@ -147,7 +147,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             </div>
           </div>
 
-          {/* Desktop Nav Tabs: icon + label at >= 1500px, icon-only below 1500px */}
+          {/* Desktop Nav Tabs: icon + label at >= 1440px, icon-only below 1440px */}
           <nav
             data-tour="nav-tabs"
             className="hidden md:flex items-center gap-0.5 lg:gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
@@ -167,16 +167,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  <span className="hidden min-[1500px]:inline whitespace-nowrap">{item.label}</span>
+                  <span className="hidden min-[1440px]:inline whitespace-nowrap">{item.label}</span>
                 </button>
               );
             })}
           </nav>
 
           {/* Actions & Utilities */}
-          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-            {/* Secondary Actions (Visible only on very wide screens >= 1500px, otherwise in More Menu) */}
-            <div className="hidden min-[1500px]:flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Secondary Actions (Visible only on ultra-wide screens >= 1850px, otherwise in More Menu) */}
+            <div className="hidden min-[1850px]:flex items-center gap-2 shrink-0">
               {/* Analista / Seminario Toggle Button */}
               <button
                 data-tour="analista-button"
@@ -265,7 +265,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 data-tour="more-menu-btn"
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="p-1.5 sm:p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
+                className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border transition-all shrink-0 cursor-pointer shadow-sm flex items-center justify-center ${
+                  menuOpen
+                    ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40'
+                    : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700 text-slate-300 hover:text-white'
+                }`}
                 title="Más opciones y menú"
               >
                 <MoreVertical className="w-4 h-4" />
