@@ -1,6 +1,6 @@
 import { apiFetch } from './client';
 import type { Subject } from '../types/career';
-import type { SubjectSchedule, ReservedElectiveSlot } from '../types/schedule';
+import type { SubjectSchedule, ReservedElectiveSlot, ProfessorRef } from '../types/schedule';
 
 export interface Institution {
   id: string;
@@ -76,6 +76,7 @@ export interface ScheduleResponse {
       subjectCode: number;
       subjectName: string;
       professors: string[];
+      professorRefs?: ProfessorRef[];
     }>;
     term: {
       id?: string;

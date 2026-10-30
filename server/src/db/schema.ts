@@ -220,14 +220,61 @@ export const commissions = pgTable(
   ]
 );
 
-export const commissionProfessors = pgTable('commission_professors', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  commissionId: uuid('commission_id')
-    .notNull()
-    .references(() => commissions.id, { onDelete: 'cascade' }),
-  professorName: text('professor_name').notNull(),
-  ...timestamps,
-});
+export const professors = pgTable(
+  'professors',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    facultyId: uuid('faculty_id')
+      .notNull()
+      .references(() => faculties.id, { onDelete: 'cascade' }),
+    displayName: text('display_name').notNull(),
+    normalizedKey: text('normalized_key').notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique('uq_professor_faculty_norm').on(table.facultyId, table.normalizedKey),
+    index('idx_professors_faculty').on(table.facultyId),
+  ]
+);
+
+export const professorAliases = pgTable(
+  'professor_aliases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+    facultyId: uuid('faculty_id')
+      .notNull()
+      .references(() => faculties.id, { onDelete: 'cascade' }),
+    aliasRaw: text('alias_raw').notNull(),
+    aliasNormalized: text('alias_normalized').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_professor_alias_faculty_norm').on(table.facultyId, table.aliasNormalized),
+    index('idx_professor_aliases_prof').on(table.professorId),
+  ]
+);
+
+export const commissionProfessors = pgTable(
+  'commission_professors',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    commissionId: uuid('commission_id')
+      .notNull()
+      .references(() => commissions.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id').references(() => professors.id, {
+      onDelete: 'set null',
+    }),
+    professorName: text('professor_name').notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index('idx_comm_profs_comm').on(table.commissionId),
+    index('idx_comm_profs_prof').on(table.professorId),
+  ]
+);
 
 export const commissionSlots = pgTable(
   'commission_slots',
@@ -277,6 +324,25 @@ export const electiveOfferings = pgTable('elective_offerings', {
   professors: jsonb('professors').$type<string[]>().notNull().default([]),
   ...timestamps,
 });
+
+export const electiveOfferingProfessors = pgTable(
+  'elective_offering_professors',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    electiveOfferingId: uuid('elective_offering_id')
+      .notNull()
+      .references(() => electiveOfferings.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id').references(() => professors.id, {
+      onDelete: 'set null',
+    }),
+    professorName: text('professor_name').notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index('idx_elective_off_profs_off').on(table.electiveOfferingId),
+    index('idx_elective_off_profs_prof').on(table.professorId),
+  ]
+);
 
 // ==========================================
 // 2. DATOS DE CADA USUARIO
@@ -431,6 +497,169 @@ export const scheduleProposals = pgTable(
 );
 
 // ==========================================
+// 2B. RESEÑAS DE PROFESORES Y MODERACIÓN
+// ==========================================
+
+/**
+ * Vínculos manuales/históricos creados por administración para permitir reseñar
+ * profesores que dictaron una materia en períodos anteriores no cargados en horarios.
+ */
+export const professorSubjectLinks = pgTable(
+  'professor_subject_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    source: text('source').notNull().default('manual_admin'), // 'manual_admin' | 'historical'
+    notes: text('notes'),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_prof_subject_link').on(table.professorId, table.subjectId),
+    index('idx_prof_subject_links_prof').on(table.professorId),
+    index('idx_prof_subject_links_sub').on(table.subjectId),
+  ]
+);
+
+export const professorReviews = pgTable(
+  'professor_reviews',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    academicYear: integer('academic_year'),
+    term: text('term'), // '1C' | '2C' | 'A'
+    overall: integer('overall').notNull(), // 1..5
+    clarity: integer('clarity'), // 1..5
+    treatment: integer('treatment'), // 1..5
+    availability: integer('availability'), // 1..5
+    difficulty: integer('difficulty'), // 1..5 (5 = muy exigente)
+    wouldRecommend: boolean('would_recommend'),
+    comment: text('comment'), // máx 600 chars
+    status: text('status').notNull().default('published'), // 'published' | 'hidden' | 'removed'
+    helpfulCount: integer('helpful_count').notNull().default(0),
+    ...timestamps,
+  },
+  (table) => [
+    unique('uq_user_professor_subject_review').on(
+      table.userId,
+      table.professorId,
+      table.subjectId
+    ),
+    index('idx_prof_reviews_prof_status').on(table.professorId, table.status),
+    index('idx_prof_reviews_prof_sub_status').on(
+      table.professorId,
+      table.subjectId,
+      table.status
+    ),
+    index('idx_prof_reviews_user_created').on(table.userId, table.createdAt),
+  ]
+);
+
+export const reviewHelpfulVotes = pgTable(
+  'review_helpful_votes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reviewId: uuid('review_id')
+      .notNull()
+      .references(() => professorReviews.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_review_helpful_vote').on(table.reviewId, table.userId),
+    index('idx_review_helpful_review').on(table.reviewId),
+  ]
+);
+
+export const reviewReports = pgTable(
+  'review_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reviewId: uuid('review_id')
+      .notNull()
+      .references(() => professorReviews.id, { onDelete: 'cascade' }),
+    reporterUserId: uuid('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reason: text('reason').notNull(), // 'ofensiva' | 'datos personales' | 'falsa o spam' | 'otra'
+    note: text('note'),
+    status: text('status').notNull().default('open'), // 'open' | 'dismissed' | 'actioned'
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_review_reporter').on(table.reviewId, table.reporterUserId),
+    index('idx_review_reports_status').on(table.status),
+    index('idx_review_reports_review').on(table.reviewId),
+  ]
+);
+
+export const professorStats = pgTable('professor_stats', {
+  professorId: uuid('professor_id')
+    .primaryKey()
+    .references(() => professors.id, { onDelete: 'cascade' }),
+  reviewCount: integer('review_count').notNull().default(0),
+  avgOverall: numeric('avg_overall', { precision: 4, scale: 2 }),
+  bayesianScore: numeric('bayesian_score', { precision: 5, scale: 3 }),
+  stars1: integer('stars_1').notNull().default(0),
+  stars2: integer('stars_2').notNull().default(0),
+  stars3: integer('stars_3').notNull().default(0),
+  stars4: integer('stars_4').notNull().default(0),
+  stars5: integer('stars_5').notNull().default(0),
+  avgClarity: numeric('avg_clarity', { precision: 4, scale: 2 }),
+  avgTreatment: numeric('avg_treatment', { precision: 4, scale: 2 }),
+  avgAvailability: numeric('avg_availability', { precision: 4, scale: 2 }),
+  avgDifficulty: numeric('avg_difficulty', { precision: 4, scale: 2 }),
+  recommendRate: numeric('recommend_rate', { precision: 5, scale: 2 }), // 0..100
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const professorSubjectStats = pgTable(
+  'professor_subject_stats',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    reviewCount: integer('review_count').notNull().default(0),
+    avgOverall: numeric('avg_overall', { precision: 4, scale: 2 }),
+    bayesianScore: numeric('bayesian_score', { precision: 5, scale: 3 }),
+    stars1: integer('stars_1').notNull().default(0),
+    stars2: integer('stars_2').notNull().default(0),
+    stars3: integer('stars_3').notNull().default(0),
+    stars4: integer('stars_4').notNull().default(0),
+    stars5: integer('stars_5').notNull().default(0),
+    avgClarity: numeric('avg_clarity', { precision: 4, scale: 2 }),
+    avgTreatment: numeric('avg_treatment', { precision: 4, scale: 2 }),
+    avgAvailability: numeric('avg_availability', { precision: 4, scale: 2 }),
+    avgDifficulty: numeric('avg_difficulty', { precision: 4, scale: 2 }),
+    recommendRate: numeric('recommend_rate', { precision: 5, scale: 2 }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_prof_subject_stats').on(table.professorId, table.subjectId),
+    index('idx_prof_sub_stats_prof').on(table.professorId),
+  ]
+);
+
+// ==========================================
 // 3. RELACIONES DRIZZLE
 // ==========================================
 
@@ -520,5 +749,41 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   refreshTokens: many(refreshTokens),
   scheduleSelections: many(scheduleSelections),
   scheduleProposals: many(scheduleProposals),
+  professorReviews: many(professorReviews),
 }));
+
+export const professorsRelations = relations(professors, ({ one, many }) => ({
+  faculty: one(faculties, {
+    fields: [professors.facultyId],
+    references: [faculties.id],
+  }),
+  aliases: many(professorAliases),
+  commissionProfessors: many(commissionProfessors),
+  electiveOfferingProfessors: many(electiveOfferingProfessors),
+  subjectLinks: many(professorSubjectLinks),
+  reviews: many(professorReviews),
+  stats: one(professorStats, {
+    fields: [professors.id],
+    references: [professorStats.professorId],
+  }),
+  subjectStats: many(professorSubjectStats),
+}));
+
+export const professorReviewsRelations = relations(professorReviews, ({ one, many }) => ({
+  user: one(users, {
+    fields: [professorReviews.userId],
+    references: [users.id],
+  }),
+  professor: one(professors, {
+    fields: [professorReviews.professorId],
+    references: [professors.id],
+  }),
+  subject: one(subjects, {
+    fields: [professorReviews.subjectId],
+    references: [subjects.id],
+  }),
+  reports: many(reviewReports),
+  helpfulVotes: many(reviewHelpfulVotes),
+}));
+
 

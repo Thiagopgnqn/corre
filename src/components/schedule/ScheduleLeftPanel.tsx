@@ -15,11 +15,19 @@ import {
   Info,
   ChevronsUp,
   ChevronsDown,
+  Star,
   X,
 } from 'lucide-react';
 import type { Commission, SubjectSchedule, Shift } from '../../types/schedule';
 import type { Subject } from '../../types/career';
 import { getCommissionConflictsWithSelection } from '../../utils/scheduleLogic';
+import {
+  computeCommissionCombinedRating,
+  filterAndSortCommissionsByRating,
+  formatRatingDecimal,
+  type ProfessorRatingResolver,
+} from '../../utils/professorRatingsLogic';
+import { ProfessorRatingBadge } from '../professors/ProfessorRatingBadge';
 
 interface ScheduleLeftPanelProps {
   term: '1C' | '2C';
@@ -33,6 +41,8 @@ interface ScheduleLeftPanelProps {
   subjectNamesMap: Map<number, string>;
   focusedSubjectId?: number | null;
   onViewInGrid?: (subjectId?: number) => void;
+  resolveProfessorRating?: ProfessorRatingResolver;
+  onOpenProfessorDetail?: (professorId: string) => void;
 }
 
 export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
@@ -47,11 +57,15 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   subjectNamesMap,
   focusedSubjectId,
   onViewInGrid,
+  resolveProfessorRating,
+  onOpenProfessorDetail,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | Shift>('all');
   const [onlyConflictFree, setOnlyConflictFree] = useState(false);
   const [showAllSubjects, setShowAllSubjects] = useState(false);
+  const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
+  const [sortByBestRated, setSortByBestRated] = useState<boolean>(false);
   const [expandedSubjectIds, setExpandedSubjectIds] = useState<Set<number>>(new Set());
 
   // Expand focused subject when requested by popover
@@ -124,6 +138,9 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
       return next;
     });
   };
+
+  const fallbackResolver: ProfessorRatingResolver = () => null;
+  const activeRatingResolver = resolveProfessorRating || fallbackResolver;
 
   return (
     <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0">
@@ -231,6 +248,35 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             <span>Todas</span>
           </button>
         </div>
+
+        {/* Professor rating filter & sort row */}
+        <div className="flex items-center justify-between gap-1.5 pt-0.5 text-[10px]">
+          <select
+            aria-label="Valoración mínima de comisión"
+            value={minRatingFilter}
+            onChange={(e) => setMinRatingFilter(Number(e.target.value))}
+            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+          >
+            <option value={0}>Valoración mínima: Todas</option>
+            <option value={3.5}>Valoración: ★ 3,5+</option>
+            <option value={4}>Valoración: ★ 4,0+</option>
+            <option value={4.5}>Valoración: ★ 4,5+</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setSortByBestRated(!sortByBestRated)}
+            className={`px-2 py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
+              sortByBestRated
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+            title="Ordenar las comisiones mejor valoradas primero"
+          >
+            <Star className={`w-3 h-3 ${sortByBestRated ? 'text-amber-400 fill-amber-400' : 'text-amber-400'}`} />
+            <span>Mejor valoradas</span>
+          </button>
+        </div>
       </div>
 
       {/* Subjects Accordion List with dedicated internal scroll */}
@@ -248,8 +294,8 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             const selectedComm = selections[subject.id];
             const isExpanded = expandedSubjectIds.has(subject.id);
 
-            // Filter commissions based on shift and conflict free toggle
-            const filteredCommissions = commissions.filter((c) => {
+            // Filter commissions based on shift, conflict free toggle, and professor rating
+            const baseFilteredCommissions = commissions.filter((c) => {
               if (shiftFilter !== 'all' && c.turno && c.turno !== shiftFilter) {
                 return false;
               }
@@ -265,6 +311,15 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
               }
               return true;
             });
+
+            const filteredCommissions = filterAndSortCommissionsByRating(
+              baseFilteredCommissions,
+              {
+                minRating: minRatingFilter,
+                sortByRating: sortByBestRated,
+              },
+              activeRatingResolver
+            );
 
             return (
               <div
@@ -370,6 +425,10 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                               subjectNamesMap
                             );
                             const hasConflict = conflicts.length > 0;
+                            const commRating = computeCommissionCombinedRating(
+                              comm,
+                              activeRatingResolver
+                            );
 
                             return (
                               <div
@@ -393,7 +452,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                               >
                                 {/* Commission Code & Shift */}
                                 <div className="flex items-center justify-between gap-1 mb-1.5">
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
                                     <span className="font-extrabold text-white text-xs">
                                       Comisión {comm.code}
                                     </span>
@@ -402,9 +461,18 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                         {comm.turno}
                                       </span>
                                     )}
+                                    {commRating.professors.length > 1 &&
+                                      commRating.combinedAverage !== null && (
+                                        <span
+                                          className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300"
+                                          title="Valoración combinada de los docentes con promedio confiable en esta comisión"
+                                        >
+                                          Prom. ★ {formatRatingDecimal(commRating.combinedAverage, 1)}
+                                        </span>
+                                      )}
                                   </div>
 
-                                  <div className="flex items-center gap-1.5">
+                                  <div className="flex items-center gap-1.5 shrink-0">
                                     {isSelected && onRemoveCommission && (
                                       <button
                                         type="button"
@@ -439,13 +507,25 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                   </div>
                                 </div>
 
-                                {/* Professors */}
-                                {comm.professors.length > 0 && (
+                                {/* Professors with interactive rating badges & popovers */}
+                                {commRating.professors.length > 0 ? (
+                                  <div className="space-y-1 mb-1.5">
+                                    {commRating.professors.map((profEntry, pIdx) => (
+                                      <ProfessorRatingBadge
+                                        key={`${comm.id}-prof-${pIdx}`}
+                                        professorName={profEntry.name}
+                                        professorId={profEntry.id}
+                                        rating={profEntry.rating}
+                                        onOpenDetail={onOpenProfessorDetail}
+                                      />
+                                    ))}
+                                  </div>
+                                ) : comm.professors.length > 0 ? (
                                   <div className="flex items-center gap-1 text-[11px] text-slate-400 mb-1.5">
                                     <User className="w-3 h-3 text-slate-500 shrink-0" />
                                     <span className="truncate">{comm.professors.join(', ')}</span>
                                   </div>
-                                )}
+                                ) : null}
 
                                 {/* Slots timetable */}
                                 <div className="space-y-1 my-1.5">

@@ -14,7 +14,10 @@ import {
   commissionSlots,
   reservedElectiveSlots,
   electiveOfferings,
+  electiveOfferingProfessors,
 } from '../db/schema.js';
+import { resolveOrCreateProfessorInTx } from '../modules/professors/professorResolver.js';
+import { ELECTIVE_OFFERINGS_SEED } from './electiveOfferingsSeed.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -283,10 +286,11 @@ async function runScheduleImport() {
         courseGroupMap.set(cCode, createdGroup.id);
       }
 
-      // 6.2 Insertar Comisiones, Profesores y Slots
+      // 6.2 Insertar Comisiones, Profesores (con unificación de entidad) y Slots
       let insertedCommissionsCount = 0;
       let insertedSlotsCount = 0;
       let englishResolvedCount = 0;
+      const professorCache = new Map<string, string>();
 
       for (const item of rawScheduleList) {
         // Filtrar comisiones según el término solicitado (o anuales que aplican a ambos)
@@ -325,11 +329,18 @@ async function runScheduleImport() {
 
           insertedCommissionsCount++;
 
-          // Insertar docentes
+          // Insertar docentes resolviendo / creando entidad professors + alias
           for (const prof of comm.professors || []) {
             if (prof.trim()) {
+              const professorId = await resolveOrCreateProfessorInTx(
+                tx,
+                faculty.id,
+                prof.trim(),
+                professorCache
+              );
               await tx.insert(commissionProfessors).values({
                 commissionId: insertedComm.id,
+                professorId,
                 professorName: prof.trim(),
               });
             }
@@ -377,66 +388,38 @@ async function runScheduleImport() {
       }
 
       // 6.4 Insertar Electivas con Docentes pero sin Franja Asignada (Elective Offerings)
-      // Extraídas de las tablas de docentes en cursos 3er, 4to y 5to año
       let insertedElectiveOfferingsCount = 0;
 
-      // Buscar si el archivo contiene profsWithoutClasses o definirlas
-      const electiveOfferingsSeed: Array<{
-        courseCode: string;
-        subjectCode: number;
-        professors: string[];
-      }> = [
-        { courseCode: '3K1', subjectCode: 301, professors: ['Romero, Rubén Aníbal', 'Romani, German Ariel'] },
-        { courseCode: '3K1', subjectCode: 99, professors: ['Herrera, Daniel Rodolfo', 'Ortiz, Maria Cecilia'] },
-        { courseCode: '3K2', subjectCode: 301, professors: ['Steffolani, Felipe Adrian', 'Romani, German Ariel'] },
-        { courseCode: '3K2', subjectCode: 99, professors: ['Arenas, Maria Silvina', 'Mac William, Maria Irene'] },
-        { courseCode: '3K3', subjectCode: 301, professors: ['Serrano, Diego Javier', 'Romani, German Ariel'] },
-        { courseCode: '3K4', subjectCode: 301, professors: ['Bett, Gustavo Federico', 'Scarafia Altamira, Diego'] },
-        { courseCode: '3K4', subjectCode: 99, professors: ['Arenas, Maria Silvina', 'Aquino, Francisco Alejandro'] },
-        { courseCode: '4K1', subjectCode: 401, professors: ['Cuevas, Juan Carlos', 'Mana, Franco'] },
-        { courseCode: '4K1', subjectCode: 402, professors: ['Villarreal, Gustavo Javier', 'Flores, Nora Viviana'] },
-        { courseCode: '4K1', subjectCode: 403, professors: ['Bratti, Alicia Gabriela', 'Chichalof Roberts, Mabel Beatriz'] },
-        { courseCode: '4K2', subjectCode: 401, professors: ['Cuevas, Juan Carlos', 'Moya, Vanesa Veronica'] },
-        { courseCode: '4K2', subjectCode: 402, professors: ['Villarreal, Gustavo Javier', 'Flores, Nora Viviana'] },
-        { courseCode: '4K2', subjectCode: 403, professors: ['Bratti, Alicia Gabriela', 'Chichalof Roberts, Mabel Beatriz'] },
-        { courseCode: '4K3', subjectCode: 402, professors: ['Zigaran, Jose Carlos', 'Peralta, Lorena Daniela'] },
-        { courseCode: '4K3', subjectCode: 403, professors: ['Bravo, Estela Maris', 'Chichalof Roberts, Mabel Beatriz'] },
-        { courseCode: '4K4', subjectCode: 401, professors: ['Mana, Franco', 'Gimenez Zens, Ines Luz'] },
-        { courseCode: '4K4', subjectCode: 403, professors: ['Bratti, Alicia Gabriela', 'Velez, German Eduardo'] },
-        { courseCode: '4K4', subjectCode: 404, professors: ['Zea Cárdenas, Ninfa Milagros', 'Pardo, Alfredo Luis'] },
-        { courseCode: '4K4', subjectCode: 406, professors: ['Odetti, Maria Alejandra', 'Kabusch, Andrés Ricardo'] },
-        { courseCode: '5K1', subjectCode: 504, professors: ['Gigena, Elias Fernando', 'Balut Cabezas, Jorge Ariel'] },
-        { courseCode: '5K1', subjectCode: 505, professors: ['Gigena, Elias Fernando', 'Balut Cabezas, Jorge Ariel'] },
-        { courseCode: '5K1', subjectCode: 507, professors: ['Carignano, Claudia Etna', 'Rustan, Silvina'] },
-        { courseCode: '5K1', subjectCode: 512, professors: ['Cuevas, Juan Carlos', 'Castro, Claudia Susana'] },
-        { courseCode: '5K2', subjectCode: 502, professors: ['Mana, Franco', 'Gimenez Zens, Ines Luz'] },
-        { courseCode: '5K2', subjectCode: 504, professors: ['Martinez, Daniel Ignacio', 'Gigena, Elias Fernando'] },
-        { courseCode: '5K2', subjectCode: 505, professors: ['Martinez, Daniel Ignacio', 'Balut Cabezas, Jorge Ariel'] },
-        { courseCode: '5K2', subjectCode: 507, professors: ['Peretto, Claudia Beatriz', 'Rosa, Sergio Hernan'] },
-        { courseCode: '5K2', subjectCode: 512, professors: ['Cuevas, Juan Carlos', 'Gimenez Zens, Ines Luz'] },
-        { courseCode: '5K3', subjectCode: 501, professors: ['Medina, Oscar Carlos', 'Romero, Rubén Aníbal'] },
-        { courseCode: '5K3', subjectCode: 504, professors: ['Srur, Leandro Paolo', 'Martinez, Daniel Ignacio'] },
-        { courseCode: '5K3', subjectCode: 506, professors: ['Barra, Mario Augusto', 'Galvan, Diego Roman'] },
-        { courseCode: '5K3', subjectCode: 507, professors: ['Rustan, Silvina', 'Gualpa, Mariano Martín'] },
-        { courseCode: '5K3', subjectCode: 508, professors: ['Montoya, Fanny Esther', 'Bravo, Estela Maris'] },
-        { courseCode: '5K3', subjectCode: 514, professors: ['Liberatori, Marcelo Sadi', 'Damiano, Luis Esteban'] },
-        { courseCode: '5K4', subjectCode: 505, professors: ['Srur, Leandro Paolo', 'Ruffinatti, Adrian Feliciano'] },
-        { courseCode: '5K4', subjectCode: 506, professors: ['Sacco, Pablo Alberto', 'Callejas, Marisa Del Carmen'] },
-        { courseCode: '5K4', subjectCode: 509, professors: ['Parisi, Germán Nicolás', 'Bertola, Federico Javier'] },
-        { courseCode: '5K4', subjectCode: 510, professors: ['Romero, María Soledad', 'Romero, Rubén Aníbal'] },
-      ];
-
-      for (const off of electiveOfferingsSeed) {
+      for (const off of ELECTIVE_OFFERINGS_SEED) {
         const courseGroupId = courseGroupMap.get(off.courseCode.toUpperCase());
         const subjectUuid = codeToSubjectUuid.get(off.subjectCode);
 
         if (courseGroupId && subjectUuid) {
-          await tx.insert(electiveOfferings).values({
-            courseGroupId,
-            scheduleTermId: termRecord.id,
-            subjectId: subjectUuid,
-            professors: off.professors,
-          });
+          const [insertedOffering] = await tx
+            .insert(electiveOfferings)
+            .values({
+              courseGroupId,
+              scheduleTermId: termRecord.id,
+              subjectId: subjectUuid,
+              professors: off.professors,
+            })
+            .returning();
+
+          for (const rawProf of off.professors) {
+            if (!rawProf.trim()) continue;
+            const professorId = await resolveOrCreateProfessorInTx(
+              tx,
+              faculty.id,
+              rawProf.trim(),
+              professorCache
+            );
+            await tx.insert(electiveOfferingProfessors).values({
+              electiveOfferingId: insertedOffering.id,
+              professorId,
+              professorName: rawProf.trim(),
+            });
+          }
+
           insertedElectiveOfferingsCount++;
         }
       }

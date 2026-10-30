@@ -1,6 +1,6 @@
 # 🎓 Mi Carrera — Seguimiento Plan 2023 ISI (UTN)
 
-Una aplicación web moderna, interactiva y fluida para el seguimiento de la carrera **Ingeniería en Sistemas de Información (Plan 2023, Universidad Tecnológica Nacional)**. Diseñada como un árbol de habilidades con estética constellation/glassmorphism, animaciones fluidas, simulador hipotético "¿Y si...?", cálculo de camino crítico y panel de analítica.
+Una aplicación web moderna, interactiva y fluida para el seguimiento de la carrera **Ingeniería en Sistemas de Información (Plan 2023, Universidad Tecnológica Nacional)**. Diseñada como un árbol de habilidades con estética constellation/glassmorphism, animaciones fluidas, simulador hipotético "¿Y si...?", cálculo de camino crítico, armador de horarios con reseñas docentes y panel de analítica.
 
 ---
 
@@ -30,7 +30,7 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
    - **Migración transparente**: si tenías datos del esquema anterior o marcaste electivas en tu historial, se migran automáticamente sin perder estados ni notas.
 
 4. **⚡ Interruptor "Hacer Seminario Integrador / Título de Analista"**:
-   - Selector visible en la barra de navegación y en el menú de ajustes (por defecto **DESACTIVADO** y guardado en `localStorage`).
+   - Selector visible en la barra de navegación y en el menú de ajustes (por defecto **DESACTIVADO** y sincronizado en la cuenta).
    - **Desactivado (Solo Ingeniero/a)**:
      - El Seminario Integrador (ID 99) desaparece del mapa, del tablero kanban, del planificador de cuatrimestres, del buscador y de todas las estadísticas.
      - Total de materias obligatorias ajustado a **36**.
@@ -58,165 +58,122 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
 
 8. **🕒 Armador de Horarios de Cuatrimestre & Detección de Choques**:
    - **Grilla semanal interactiva**: columnas de Lunes a Sábado con franjas horarias configurables y dinámicas. Bloques coloreados por materia con código, aula y docentes.
+   - **Valoraciones docentes integradas en tiempo real**: cada docente en las tarjetas de comisión muestra su insignia (`★ 4,6 · 23`, `Pocas reseñas` o `Sin reseñas`), promedio combinado cuando hay múltiples docentes, popover con histograma y últimas opiniones, filtro de **valoración mínima** y orden **"Mejor valoradas primero"**.
    - **Detección visual de superposiciones**: patrón rayado animado en rojo sobre los bloques en conflicto, contador global de choques y lista clickeable que enfoca y resalta cada conflicto.
    - **Previsualización al pasar el mouse (Ghost / Fantasma)**: al posar el cursor sobre una comisión candidata en el panel lateral, se dibuja semitransparente en la grilla indicando si caería sin choques o en rojo si superpone.
-   - **Sugeridor inteligente de combinaciones**: algoritmo automático que calcula combinaciones 100% sin choques, ordenables por *menos días de cursada*, *menos huecos libres* o *preferencia de turno* (mañana, tarde, noche); en caso de conflicto generalizado, sugiere la opción con menor cantidad de choques.
+   - **Sugeridor inteligente de combinaciones**: algoritmo automático que calcula combinaciones 100% sin choques, ordenables por *menos días de cursada*, *menos huecos libres* o *preferencia de turno*, más criterio opcional **"Preferir mejores profesores"** como desempate.
+   - **Valoración docente promedio de tu semana**: el panel de Resumen Semanal calcula el promedio docente de tu propuesta actual.
    - **Gestión de borradores**: guarda hasta 5 propuestas independientes con nombre (ej. "Plan A", "Plan B"), con opción de duplicar, renombrar y comparar.
-   - **Importador y validador JSON**: permite cargar ofertas horarias reales mediante arrastrar y soltar o pegado de texto con validación estricta de formato y detección preventiva de errores.
-   - **Exportación**: impresión y guardado en PDF nativo, y copia rápida de resumen en texto al portapapeles.
-   - **Pasar a "Cursando"**: confirmación para inscribir las materias elegidas en el avance general de la carrera.
+   - **Importador y validador JSON** y exportación a **PDF / texto / iCalendar (`.ics`)**.
 
-9. **📊 Dashboard de Estadísticas & Camino Crítico**:
-   - **Selector de Modo de Cálculo de Avance**:
-     - *Solo obligatorias*: porcentaje basado únicamente en las materias troncales activas (36, o 37 con Analista).
-     - *Con electivas (por defecto)*: suma las electivas como un bloque proporcional de 7 materias equivalentes (`ELECTIVE_SLOTS_EQUIVALENT = 7`, correspondiente a 20 créditos).
-     - Los porcentajes de *aprobadas*, *regularizadas*, *cursando* y *pendientes* suman estrictamente el **100%** en ambos modos.
-   - Anillos de progreso de carrera (% por materias y % por horas semanales, con nota explícita de que las electivas no computan horas de plan).
-   - Panel de **Requisitos para el Título de Ingeniero/a**: desglose explícito de materias obligatorias faltantes y créditos de electivas (X / 20).
-   - Promedio general ponderado con selector para incluir o excluir materias promocionadas y umbral de nota mínima (4 o 6).
-   - Distribución de notas (1 a 10), mejor y peor calificación, y promedio por nivel.
-   - **Camino Crítico Algorítmico**: cálculo del camino más largo de dependencias hacia el Proyecto Final y estimación de cuatrimestres restantes.
-   - **Hitos & Medallas**: 25%, 50%, 75%, Graduación (100% materias + 20 cr electivas), Habilitación PPS y Analista Universitario (cuando está activo).
+9. **⭐ Reseñas de Profesores (100% Anónimas & Moderadas)**:
+   - **Directorio completo de docentes**: búsqueda por apellido, nombre o materia, filtros por materia, valoración mínima y docentes con reseñas, y ordenamiento por ranking bayesiano (`Mejor valorados`), `Más reseñas` o `Nombre (A-Z)`.
+   - **Ficha detallada por profesor**: promedio general y estrellas (habilitado a partir de **3 reseñas** para evitar sesgos), histograma animado de 5 a 1 estrellas, barras de claridad, trato, disponibilidad y exigencia, `% que lo recomienda`, desglose y filtro por materia, votos de utilidad y paginación.
+   - **Elegibilidad verificada en backend**: solo se puede reseñar un par `(profesor, materia)` si `(a)` el profesor dicta o dictó la materia en **cualquier período cargado** (o mediante vínculo histórico manual) y `(b)` el estudiante tiene esa materia en estado `regularizada`, `aprobada` o `promocionada`. Máximo 1 reseña por `(usuario, profesor, materia)`, editable o eliminable desde **"Mis reseñas"**.
+   - **Anonimato estricto**: la API pública jamás expone `userId`, correo ni fecha/hora exactas; solo publica *"Estudiante de [Materia]"* con **mes y año**, y oculta el período de cursada (`academicYear` / `term`) mientras el profesor tenga **menos de 5 reseñas**.
+   - **Convivencia y moderación**: guía rápida antes de la primera reseña, filtro automático contra insultos y datos personales (teléfonos, emails, URLs), tope de 10 reseñas nuevas por usuario/día, botón **"Reportar"** con ocultamiento preventivo automático al llegar a **3 reportes abiertos**, y panel mínimo de moderación exclusivo para administradores (`Ocultar`, `Restaurar`, `Descartar reporte`).
 
-10. **⚡ UX & Accesibilidad**:
-    - Buscador global rápido con el atajo de teclado **Ctrl + K** (o Cmd + K).
-    - **Carga rápida inicial**: marcación en lote de niveles enteros con notas por defecto o carga de perfil demo (estudiante de 3er año).
-    - **Efectos de sonido procedurales** con Web Audio API y botón para silenciar.
-    - **Confetti** animado al aprobar, promocionar o desbloquear hitos.
-    - Persistencia automática en **`localStorage`**, exportación e importación completa en formato **JSON** (incluyendo propuestas y comisiones guardadas), y reinicio con confirmación.
+10. **📊 Dashboard de Estadísticas & Camino Crítico**:
+    - **Selector de Modo de Cálculo de Avance**: *Solo obligatorias* o *Con electivas*.
+    - Anillos de progreso de carrera (% por materias y % por horas semanales).
+    - Panel de **Requisitos para el Título de Ingeniero/a**, promedio general ponderado, distribución de notas y **Camino Crítico Algorítmico**.
 
 11. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
-    - **Spotlight animado nativo**: recorte SVG con halo dorado pulsante y transiciones fluidas con Framer Motion (sin librerías pesadas externas).
-    - **14 pasos guiados**: bienvenida, mapa de correlativas, estados y colores, drawer interactivo, cambio de estado y festejo, tipos de aristas, simulador "¿Y si...?", electivas libres (20 cr), título de analista (99), vistas de la app, armador de horarios de cuatrimestre, dashboard de estadísticas, privacidad/respaldo JSON y finalización.
-    - **Entorno Sandbox Seguro**: cualquier acción interactiva durante el tour opera sobre una copia temporal y restaura el estado real del usuario al finalizar o salir.
-    - **Convivencia con Carga Rápida**: el tour se ejecuta primero en nuevos ingresos y, en el paso final, ofrece la opción *"Cargar mis materias"* o *"Empezar solo"*.
-    - **Detección inteligente de usuarios existentes**: si ya contás con materias registradas, el tutorial no interrumpe tu navegación y queda disponible a demanda desde el botón **"?" (Ver tutorial)** en la barra de navegación (desktop y móvil).
-    - **Navegación completa por teclado**: flechas `←` y `→`, `Enter` para avanzar y `Esc` para salir en cualquier momento; soporte adaptativo responsive con formato bottom sheet en dispositivos móviles.
+    - **15 pasos guiados** (incluyendo el directorio de Reseñas de Profesores y su integración con el Armador de Horarios) con entorno Sandbox seguro y navegación completa por teclado.
 
 ---
 
 ## 🛠️ Stack Tecnológico
 
-- **Framework**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
-- **Bundler**: [Vite](https://vite.dev/)
-- **Estilos**: [Tailwind CSS v4](https://tailwindcss.com/)
-- **Grafo interactivo**: [@xyflow/react](https://reactflow.dev/)
-- **Animaciones**: [Framer Motion](https://www.framer.com/motion/)
-- **Iconos**: [Lucide React](https://lucide.dev/)
-- **Celebraciones**: [canvas-confetti](https://www.npmjs.com/package/canvas-confetti)
-- **Audio**: Web Audio API Synthesizer (sin archivos externos)
+- **Frontend**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vite.dev/) + [Tailwind CSS v4](https://tailwindcss.com/) + [@xyflow/react](https://reactflow.dev/) + [Framer Motion](https://www.framer.com/motion/)
+- **Backend**: Node.js + TypeScript + Express 5 + Drizzle ORM + Zod (`server/`)
+- **Base de Datos**: PostgreSQL serverless en **Neon**
 
 ---
 
 ## 🧪 Pruebas Automatizadas
 
-El proyecto incluye tests unitarios de lógica pura ejecutables en Node.js:
+### Frontend (Raíz)
 ```bash
 npm test
 ```
-Los tests verifican:
-- Mapeo de siglas oficial (`DDS = 20`, `AED = 6`, `SSL = 13`, `PPR = 14`, etc.).
-- Correlatividades de materias troncales y electivas.
-- Regla especial de Seminario Integrador (99) y Proyecto Final (36).
-- Proyecto Final con Analista **activado** (requiere 99) vs **desactivado** (no requiere 99).
-- Validación contra electivas duplicadas en múltiples años (`sanitizeAssignedElectives`).
-- Migración desde esquemas anteriores (`migrateLegacyElectives`).
-- Requisitos del título intermedio de Analista (4 créditos de electivas de cualquier nivel).
-- Desglose y cálculo estricto al 100% del avance de carrera con y sin electivas.
-- Configuración de los 13 pasos del Tutorial Interactivo de Bienvenida.
-- Detección automática y migración silenciosa para usuarios existentes sin interrupción.
+Ejecuta las suites de correlativas, importador de horarios, estados de insignias docentes, promedios combinados de comisión/propuesta, filtros/desempate en el Armador de Horarios y navegación accesible por teclado del selector de estrellas.
+
+### Backend (`server/`)
+```bash
+npm --prefix server test
+```
+Ejecuta la suite de integración HTTP en memoria (sin tocar Neon) verificando:
+- Elegibilidad por estado académico y vínculo real docente-materia (incluyendo períodos históricos).
+- Unicidad por `(usuario, profesor, materia)`, edición y borrado solo por el autor.
+- Anonimato estricto en JSON público (ausencia total de `userId`/`email`/timestamps exactos y ocultamiento de cursada con `< 5` reseñas).
+- Tope diario de 10 reseñas nuevas, filtro de insultos/datos personales y sanitización HTML.
+- Ocultamiento preventivo automático al recibir 3 reportes abiertos y recálculo de agregados.
+- Promedio bayesiano y umbral de 3 reseñas (`Sin reseñas` / `Pocas reseñas` / promedio confiable).
+- Normalización insensible al orden (`"Botta, Oscar Ernesto"` vs `"Oscar, Botta"`), separación segura de apellidos homónimos con nombres distintos y fusión administrativa de docentes.
 
 ---
 
-## 💻 Cómo Correrlo Localmente
+## 🔐 Reglas Configurables, Migración de Profesores y Endpoints Admin
 
-### Requisitos previos
-- Tener instalado [Node.js](https://nodejs.org/) (versión 18 o superior).
+Todas las constantes de negocio están documentadas en `server/src/config/reviews.config.ts`:
+- `MIN_REVIEWS_FOR_RELIABLE_AVERAGE = 3` (umbral para mostrar promedio numérico).
+- `MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD = 5` (umbral de privacidad para mostrar año/cuatrimestre cursado).
+- `BAYESIAN_PRIOR_GLOBAL_MEAN = 3.5` y `BAYESIAN_PRIOR_WEIGHT = 5` (prior bayesiano para ordenar rankings).
+- `MAX_NEW_REVIEWS_PER_USER_PER_DAY = 10` (tope diario por cuenta).
+- `AUTO_HIDE_OPEN_REPORTS_THRESHOLD = 3` (reportes abiertos para ocultar preventivamente).
+- `ALLOWED_REVIEW_SUBJECT_STATUSES = ['regularizada', 'aprobada', 'promocionada']`.
 
-### Pasos
-
-1. Abrir una terminal en la carpeta del proyecto:
+### Migración de entidades de Profesores (`migrate:professors`)
+1. **Modo simulación segura (`--dry-run`, por defecto — no toca Neon)**:
+   Analiza los nombres docentes de los JSON locales y planillas `data-source/*.xlsx`, reportando profesores únicos, propuestas de duplicados y anomalías de formato:
    ```bash
-   cd c:\Users\PC\Desktop\correlativas
+   npm --prefix server run migrate:professors -- --dry-run
+   ```
+2. **Aplicar en base de datos Neon (cuando decidas desplegarlo)**:
+   Primero aplicá la migración SQL incremental `server/drizzle/0001_professor_reviews.sql` y luego ejecutá el poblado de entidades y vínculos:
+   ```bash
+   npm --prefix server run db:migrate
+   npm --prefix server run migrate:professors -- --apply
    ```
 
-2. Instalar dependencias:
-   ```bash
-   npm install
-   ```
-
-3. Iniciar el servidor de desarrollo:
-   ```bash
-   npm run dev
-   ```
-
-4. Abrir en el navegador la URL que muestra la consola (usualmente `http://localhost:5173`).
-
----
-
-## 🌐 Arquitectura Full Stack & Base de Datos (Neon PostgreSQL)
-
-La aplicación cuenta con una arquitectura Full Stack completa:
-- **Frontend**: React 19 + Vite + Tailwind CSS desplegado en **Vercel**.
-- **Backend**: Node.js + TypeScript + Express desplegado en **Render** (Root directory: `server/`).
-- **Base de Datos**: PostgreSQL serverless en **Neon** con pooler de conexiones y SSL (`node-postgres` con soporte transaccional ACID).
-- **Autenticación Segura**: Cookies HttpOnly con rotación de refresh tokens (ventana de gracia de 20s y detección de reutilización), Argon2id para contraseñas, validación con Zod y protección CSRF (`X-Requested-With` + `Origin`).
-- **Login Obligatorio**: Sin sesión iniciada solo se muestran las pantallas de autenticación (Login y Registro). Una vez autenticado, si el usuario posee datos en `localStorage`, se ofrece una migración guiada en un click hacia la base de datos.
-- **Sincronización Optimista**: La UI responde instantáneamente (60 FPS) y sincroniza los cambios en segundo plano con un debounce de 400ms y un indicador de estado (*Guardado* / *Guardando...* / *Sin conexión*).
+### Endpoints del Módulo de Profesores y Reseñas
+- **Públicos (requieren sesión iniciada)**:
+  - `GET /api/professors` — Directorio con búsqueda, filtros (`subjectId`, `minRating`, `withReviews`) y orden (`rating`, `reviews`, `name`).
+  - `GET /api/professors/ratings` — Lote liviano cacheable (`byId` + `byNormalizedName` + `recentReviews`) para el Armador de Horarios.
+  - `GET /api/professors/:id` y `GET /api/professors/:id/reviews` — Ficha completa, desglose por materia y reseñas paginadas.
+  - `GET /api/me/reviewable` — Pares `(profesor, materia)` habilitados, bloqueados (con motivo) y reseñas propias.
+  - `POST /api/reviews`, `PUT /api/reviews/:id`, `DELETE /api/reviews/:id` — Crear, editar o borrar reseña propia.
+  - `POST /api/reviews/:id/helpful` — Votar utilidad (toggle).
+  - `POST /api/reviews/:id/report` — Reportar reseña (`ofensiva`, `datos personales`, `falsa o spam`, `otra`).
+- **Administración (requieren `role = 'admin'`)**:
+  - `GET /api/admin/professors` — Listado de entidades y candidatos a duplicados detectados.
+  - `POST /api/admin/professors` — Crear profesor histórico (y vincularlo opcionalmente a una materia).
+  - `POST /api/admin/professors/:id/subjects` — Vincular manualmente un profesor histórico a una materia.
+  - `POST /api/admin/professors/merge` — Fusionar dos profesores (reasigna comisiones, ofertas electivas, vínculos, reseñas, guarda alias y recalcula estadísticas).
+  - `PATCH /api/admin/professors/:id` — Corregir `display_name`.
+  - `GET /api/admin/reviews/reports` — Cola de moderación (reportes abiertos y reseñas ocultas).
+  - `PATCH /api/admin/reviews/:id/status` — Cambiar estado (`published`, `hidden`, `removed`).
+  - `PATCH /api/admin/reviews/reports/:reportId` — Resolver o descartar reporte (`dismissed`, `actioned`).
+  - `GET /api/admin/reviews/stats` — Resumen estadístico general de reseñas y moderación.
 
 ---
 
 ## 💻 Ejecución Local y Comandos del Servidor
 
 ### 1. Backend (`server/`)
-
-Entrá en la carpeta del backend:
 ```bash
 cd server
 npm install
+npm run db:migrate
+npm run seed
+npm run import:schedule -- --faculty FRC --plan "Plan 2023" --year 2026 --term 1C
+npm run make-admin -- --email tu-correo@ejemplo.com
+npm run build
+npm run start
 ```
-
-Configurá tu archivo `.env` basado en `.env.example`:
-```env
-PORT=3000
-NODE_ENV=development
-CLIENT_ORIGIN=http://localhost:5173
-DATABASE_URL=postgres://usuario:password@ep-xyz-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
-DIRECT_URL=postgres://usuario:password@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
-JWT_SECRET=tu_jwt_secret_super_seguro
-REFRESH_SECRET=tu_refresh_secret_super_seguro
-```
-
-#### Comandos de Base de Datos y CLI:
-- **Correr migraciones**:
-  ```bash
-  npm run db:migrate
-  ```
-- **Cargar catálogo de materias (Seed inicial)**:
-  Lee de forma autónoma desde `server/seed-data/plan2023-catalog.json`:
-  ```bash
-  npm run seed
-  ```
-- **Importar oferta horaria a Neon**:
-  Carga grupos de curso, comisiones, slots, franjas reservadas y electivas con docentes:
-  ```bash
-  npm run import:schedule -- --faculty FRC --plan "Plan 2023" --year 2026 --term 1C
-  ```
-- **Promover usuario a Administrador**:
-  ```bash
-  npm run make-admin -- --email tu-correo@ejemplo.com
-  ```
-- **Compilar e iniciar servidor**:
-  ```bash
-  npm run build
-  npm run start
-  ```
-
----
 
 ### 2. Frontend (Raíz)
-
-En la raíz del proyecto:
 ```bash
 npm install
 npm run dev
@@ -226,28 +183,5 @@ npm run dev
 
 ## 🚀 Despliegue en Producción
 
-### 1. Render (Backend `server/`)
-- Tipo: **Web Service**.
-- **Root Directory**: `server`
-- **Build Command**: `npm install && npm run build && npm run db:migrate`
-- **Start Command**: `npm run start`
-- **Health Check Path**: `/api/health`
-- **Variables de Entorno**: `DATABASE_URL` (pooled), `DIRECT_URL` (directa para migraciones), `JWT_SECRET`, `REFRESH_SECRET`, `CLIENT_ORIGIN` (URL de Vercel), `NODE_ENV=production`.
-
-### 2. Vercel (Frontend)
-- El archivo `vercel.json` ya incluye el rewrite que envía `/api/*` a Render:
-  ```json
-  {
-    "rewrites": [
-      {
-        "source": "/api/:path*",
-        "destination": "https://TU-BACKEND-EN-RENDER.onrender.com/api/:path*"
-      },
-      {
-        "source": "/(.*)",
-        "destination": "/index.html"
-      }
-    ]
-  }
-  ```
-- Gracias a este rewrite, el navegador envía y recibe las cookies HttpOnly en el mismo dominio, eliminando problemas de cross-origin cookies entre Vercel y Render.
+- **Render (Backend `server/`)**: Root Directory `server`, Build Command `npm install && npm run build && npm run db:migrate`, Start Command `npm run start`, Health Check `/api/health`.
+- **Vercel (Frontend)**: `vercel.json` reescribe `/api/:path*` hacia el backend en Render permitiendo cookies `HttpOnly` first-party en el mismo dominio.

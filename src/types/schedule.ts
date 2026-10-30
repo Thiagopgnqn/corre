@@ -10,11 +10,17 @@ export type Slot = {
   mode?: 'presencial' | 'virtual'; // opcional
 };
 
+export type ProfessorRef = {
+  id: string | null;
+  name: string;
+};
+
 export type Commission = {
   id: string; // único global, ej. "6-1K1"
   code: string; // nombre de la comisión, ej. "1K1"
   turno?: Shift;
   professors: string[]; // uno o más profesores
+  professorRefs?: ProfessorRef[]; // referencias opcionales a entidades de profesor
   slots: Slot[]; // una comisión puede tener varios bloques en la semana
   notes?: string;
 };
@@ -67,6 +73,7 @@ export interface ScheduleDraft {
 export interface CombinationCriteria {
   preferShift?: Shift | 'cualquiera';
   sortBy: 'fewer-days' | 'fewer-gaps' | 'preferred-shift';
+  preferBestProfessors?: boolean;
   avoidDays?: DayOfWeek[];
   avoidTimeRange?: { start: string; end: string };
 }
@@ -81,6 +88,8 @@ export interface SuggestedCombination {
   shiftCounts: Record<Shift, number>;
   earliestStart: string;
   latestEnd: string;
+  averageRating?: number | null;
+  ratedCommissionsCount?: number;
 }
 
 export interface ScheduleValidationResult {

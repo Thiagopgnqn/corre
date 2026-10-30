@@ -18,6 +18,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { useProfessorRatings } from '../../hooks/useProfessorRatings';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus } from '../../utils/correlativas';
@@ -28,6 +29,8 @@ import { ScheduleLeftPanel } from './ScheduleLeftPanel';
 import { ScheduleSummaryPanel } from './ScheduleSummaryPanel';
 import { ScheduleCombinationsModal } from './ScheduleCombinationsModal';
 import { ScheduleImportModal } from './ScheduleImportModal';
+import { ProfessorDetailModal } from '../professors/ProfessorDetailModal';
+import { ReviewFormModal } from '../professors/ReviewFormModal';
 
 export const ScheduleBuilder: React.FC = () => {
   const {
@@ -54,9 +57,13 @@ export const ScheduleBuilder: React.FC = () => {
     applyScheduleToEnrolled,
   } = useCareer();
 
+  const { getRatingForProfessor, reloadRatings } = useProfessorRatings(true);
+
   // Modals state
   const [combinationsModalOpen, setCombinationsModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [detailProfessorId, setDetailProfessorId] = useState<string | null>(null);
+  const [reviewFromScheduleProfId, setReviewFromScheduleProfId] = useState<string | null>(null);
   const [focusedConflictId, setFocusedConflictId] = useState<string | null>(null);
   const [focusedSubjectId, setFocusedSubjectId] = useState<number | null>(null);
 
@@ -114,6 +121,7 @@ export const ScheduleBuilder: React.FC = () => {
     subjectName: string;
     hasConflict: boolean;
   } | null>(null);
+
   // Subject names map
   const subjectNamesMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -220,8 +228,6 @@ export const ScheduleBuilder: React.FC = () => {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [mobileTab]);
-
-
 
   // Total weekly hours
   const totalHours = useMemo(() => {
@@ -474,201 +480,201 @@ export const ScheduleBuilder: React.FC = () => {
       {/* Top Banner & Control Toolbar (Desktop >= lg) */}
       {isDesktop && (
         <div className="bg-slate-900/70 border border-slate-800 p-3 sm:p-4 rounded-2xl backdrop-blur-md shadow-xl space-y-3 shrink-0">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
-              <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-indigo-400">
-                <Clock className="w-5 h-5" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
+                <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center text-indigo-400">
+                  <Clock className="w-5 h-5" />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                    Armador de Horarios de Cuatrimestre
+                  </h2>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                    Semanal
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Elegí tus comisiones, consultá reseñas docentes y detectá superposiciones en tiempo real.
+                </p>
               </div>
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                  Armador de Horarios de Cuatrimestre
-                </h2>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Semanal
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">
-                Elegí tus comisiones, previsualizá la semana y detectá superposiciones en tiempo real.
-              </p>
-            </div>
-          </div>
 
-          {/* Right Toolbar Actions */}
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Term selector (1C / 2C) */}
-            <div className="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
-              <button
-                onClick={() => setScheduleTerm('1C')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  scheduleTerm === '1C'
-                    ? 'bg-indigo-600 text-white shadow-sm font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                1° Cuatrimestre
-              </button>
-              <button
-                onClick={() => setScheduleTerm('2C')}
-                className={`px-3 py-1.5 rounded-lg transition-all ${
-                  scheduleTerm === '2C'
-                    ? 'bg-indigo-600 text-white shadow-sm font-bold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                2° Cuatrimestre
-              </button>
-            </div>
-
-            {/* Undo / Redo */}
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
-              <button
-                onClick={handleUndo}
-                disabled={historyIndex <= 0}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                title="Deshacer selección (Ctrl+Z)"
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={handleRedo}
-                disabled={historyIndex >= history.length - 1}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                title="Rehacer selección"
-              >
-                <Redo2 className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* Load from basket button if basket has items */}
-            {semesterBasket.length > 0 && (
-              <button
-                onClick={handleLoadFromBasket}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5"
-                title="Cargar las materias que sumaste en 'Armá tu Cuatrimestre'"
-              >
-                <Layers className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Cargar mi canasta ({semesterBasket.length})</span>
-              </button>
-            )}
-
-            {/* Import schedule JSON button */}
-            <button
-              onClick={() => setImportModalOpen(true)}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-all flex items-center gap-1.5"
-              title="Importar archivo JSON de horarios"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Importar horarios</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Drafts Row: Save up to 5 proposals */}
-        <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/60 text-xs">
-          <div className="flex items-center gap-2 overflow-x-auto">
-            <span className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider shrink-0">
-              Propuestas:
-            </span>
-
-            {scheduleDrafts.map((draft) => {
-              const isEditing = editingDraftId === draft.id;
-              return (
-                <div
-                  key={draft.id}
-                  className="inline-flex items-center rounded-xl bg-slate-950 border border-slate-800 overflow-hidden shadow-sm shrink-0"
+            {/* Right Toolbar Actions */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Term selector (1C / 2C) */}
+              <div className="inline-flex rounded-xl bg-slate-950 p-1 border border-slate-800 text-xs font-semibold">
+                <button
+                  onClick={() => setScheduleTerm('1C')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    scheduleTerm === '1C'
+                      ? 'bg-indigo-600 text-white shadow-sm font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
                 >
-                  {isEditing ? (
-                    <div className="flex items-center px-2 py-1">
-                      <input
-                        type="text"
-                        value={draftNameInput}
-                        onChange={(e) => setDraftNameInput(e.target.value)}
-                        className="bg-transparent text-xs text-white outline-none w-24 font-bold"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
+                  1° Cuatrimestre
+                </button>
+                <button
+                  onClick={() => setScheduleTerm('2C')}
+                  className={`px-3 py-1.5 rounded-lg transition-all ${
+                    scheduleTerm === '2C'
+                      ? 'bg-indigo-600 text-white shadow-sm font-bold'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  2° Cuatrimestre
+                </button>
+              </div>
+
+              {/* Undo / Redo */}
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  onClick={handleUndo}
+                  disabled={historyIndex <= 0}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                  title="Deshacer selección (Ctrl+Z)"
+                >
+                  <Undo2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleRedo}
+                  disabled={historyIndex >= history.length - 1}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
+                  title="Rehacer selección"
+                >
+                  <Redo2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Load from basket button if basket has items */}
+              {semesterBasket.length > 0 && (
+                <button
+                  onClick={handleLoadFromBasket}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5"
+                  title="Cargar las materias que sumaste en 'Armá tu Cuatrimestre'"
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Cargar mi canasta ({semesterBasket.length})</span>
+                </button>
+              )}
+
+              {/* Import schedule JSON button */}
+              <button
+                onClick={() => setImportModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-all flex items-center gap-1.5"
+                title="Importar archivo JSON de horarios"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Importar horarios</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Drafts Row: Save up to 5 proposals */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-800/60 text-xs">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider shrink-0">
+                Propuestas:
+              </span>
+
+              {scheduleDrafts.map((draft) => {
+                const isEditing = editingDraftId === draft.id;
+                return (
+                  <div
+                    key={draft.id}
+                    className="inline-flex items-center rounded-xl bg-slate-950 border border-slate-800 overflow-hidden shadow-sm shrink-0"
+                  >
+                    {isEditing ? (
+                      <div className="flex items-center px-2 py-1">
+                        <input
+                          type="text"
+                          value={draftNameInput}
+                          onChange={(e) => setDraftNameInput(e.target.value)}
+                          className="bg-transparent text-xs text-white outline-none w-24 font-bold"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              renameDraft(draft.id, draftNameInput);
+                              setEditingDraftId(null);
+                            }
+                          }}
+                        />
+                        <button
+                          onClick={() => {
                             renameDraft(draft.id, draftNameInput);
                             setEditingDraftId(null);
-                          }
-                        }}
-                      />
+                          }}
+                          className="p-1 text-emerald-400 hover:text-emerald-300"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={() => {
-                          renameDraft(draft.id, draftNameInput);
-                          setEditingDraftId(null);
-                        }}
-                        className="p-1 text-emerald-400 hover:text-emerald-300"
+                        onClick={() => loadDraft(draft.id)}
+                        className="px-3 py-1.5 font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5"
                       >
-                        <Check className="w-3 h-3" />
+                        <Calendar className="w-3 h-3 text-indigo-400" />
+                        <span>{draft.name}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          ({Object.keys(draft.selections).length})
+                        </span>
                       </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => loadDraft(draft.id)}
-                      className="px-3 py-1.5 font-bold text-slate-300 hover:text-white hover:bg-slate-800 transition-colors flex items-center gap-1.5"
-                    >
-                      <Calendar className="w-3 h-3 text-indigo-400" />
-                      <span>{draft.name}</span>
-                      <span className="text-[10px] text-slate-500 font-mono">
-                        ({Object.keys(draft.selections).length})
-                      </span>
-                    </button>
-                  )}
+                    )}
 
-                  {!isEditing && (
-                    <div className="flex items-center border-l border-slate-800 px-1 gap-0.5">
-                      <button
-                        onClick={() => {
-                          setEditingDraftId(draft.id);
-                          setDraftNameInput(draft.name);
-                        }}
-                        className="p-1 text-slate-500 hover:text-slate-300"
-                        title="Renombrar propuesta"
-                      >
-                        <Edit2 className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => duplicateDraft(draft.id)}
-                        className="p-1 text-slate-500 hover:text-slate-300"
-                        title="Duplicar propuesta"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => deleteDraft(draft.id)}
-                        className="p-1 text-slate-500 hover:text-rose-400"
-                        title="Eliminar propuesta"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    {!isEditing && (
+                      <div className="flex items-center border-l border-slate-800 px-1 gap-0.5">
+                        <button
+                          onClick={() => {
+                            setEditingDraftId(draft.id);
+                            setDraftNameInput(draft.name);
+                          }}
+                          className="p-1 text-slate-500 hover:text-slate-300"
+                          title="Renombrar propuesta"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => duplicateDraft(draft.id)}
+                          className="p-1 text-slate-500 hover:text-slate-300"
+                          title="Duplicar propuesta"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => deleteDraft(draft.id)}
+                          className="p-1 text-slate-500 hover:text-rose-400"
+                          title="Eliminar propuesta"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
 
-            {scheduleDrafts.length < 5 && (
-              <button
-                onClick={() => {
-                  const name = prompt('Nombre para esta propuesta (ej. Plan B):', `Plan ${String.fromCharCode(65 + scheduleDrafts.length)}`);
-                  if (name) saveDraft(name, scheduleTerm);
-                }}
-                className="px-2.5 py-1.5 rounded-xl border border-dashed border-slate-700 hover:border-indigo-400 text-slate-400 hover:text-white transition-all flex items-center gap-1 shrink-0"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Guardar propuesta</span>
-              </button>
-            )}
-          </div>
+              {scheduleDrafts.length < 5 && (
+                <button
+                  onClick={() => {
+                    const name = prompt('Nombre para esta propuesta (ej. Plan B):', `Plan ${String.fromCharCode(65 + scheduleDrafts.length)}`);
+                    if (name) saveDraft(name, scheduleTerm);
+                  }}
+                  className="px-2.5 py-1.5 rounded-xl border border-dashed border-slate-700 hover:border-indigo-400 text-slate-400 hover:text-white transition-all flex items-center gap-1 shrink-0"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Guardar propuesta</span>
+                </button>
+              )}
+            </div>
 
-          <div className="text-[11px] text-slate-400 font-mono">
-            {Object.keys(scheduleSelections).length} materias en esta propuesta
+            <div className="text-[11px] text-slate-400 font-mono">
+              {Object.keys(scheduleSelections).length} materias en esta propuesta
+            </div>
           </div>
         </div>
-      </div>
       )}
 
       {/* Main Layout: Desktop 3-Column vs Mobile Single Tab */}
@@ -689,6 +695,8 @@ export const ScheduleBuilder: React.FC = () => {
             onViewInGrid={(sId) => {
               if (sId) setFocusedSubjectId(sId);
             }}
+            resolveProfessorRating={getRatingForProfessor}
+            onOpenProfessorDetail={setDetailProfessorId}
           />
 
           {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
@@ -718,6 +726,7 @@ export const ScheduleBuilder: React.FC = () => {
                 onClearAll={handleClearWithHistory}
                 onSelectConflict={setFocusedConflictId}
                 onNavigateToTab={(tab) => setMobileTab(tab)}
+                resolveProfessorRating={getRatingForProfessor}
               />
             </div>
           </div>
@@ -741,6 +750,8 @@ export const ScheduleBuilder: React.FC = () => {
                   if (sId) setFocusedSubjectId(sId);
                   setMobileTab('grilla');
                 }}
+                resolveProfessorRating={getRatingForProfessor}
+                onOpenProfessorDetail={setDetailProfessorId}
               />
 
               {/* Floating action pill above bottom navigation */}
@@ -797,6 +808,7 @@ export const ScheduleBuilder: React.FC = () => {
                 setMobileTab('grilla');
               }}
               onNavigateToTab={(tab) => setMobileTab(tab)}
+              resolveProfessorRating={getRatingForProfessor}
             />
           )}
         </div>
@@ -819,6 +831,7 @@ export const ScheduleBuilder: React.FC = () => {
         }}
         subjectNamesMap={subjectNamesMap}
         term={scheduleTerm}
+        resolveProfessorRating={getRatingForProfessor}
       />
 
       <ScheduleImportModal
@@ -832,6 +845,24 @@ export const ScheduleBuilder: React.FC = () => {
         }}
         hasCustomSchedules={Boolean(customSchedules && customSchedules.length > 0)}
         knownSubjectIds={knownSubjectIds}
+      />
+
+      {/* Professor Detail & Review Modals accessible directly inside Schedule Builder */}
+      <ProfessorDetailModal
+        professorId={detailProfessorId}
+        onClose={() => setDetailProfessorId(null)}
+        onWriteReview={(profId) => {
+          setDetailProfessorId(null);
+          setReviewFromScheduleProfId(profId);
+        }}
+        onRatingsChanged={reloadRatings}
+      />
+
+      <ReviewFormModal
+        isOpen={Boolean(reviewFromScheduleProfId)}
+        onClose={() => setReviewFromScheduleProfId(null)}
+        initialProfessorId={reviewFromScheduleProfId}
+        onSaved={reloadRatings}
       />
     </div>
   );

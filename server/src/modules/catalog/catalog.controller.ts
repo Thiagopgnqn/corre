@@ -18,6 +18,7 @@ import {
   commissionSlots,
   reservedElectiveSlots,
   electiveOfferings,
+  electiveOfferingProfessors,
   users,
 } from '../../db/schema.js';
 
@@ -297,19 +298,50 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
 
     const commIds = commList.map((c) => c.id);
 
-    // 7. Cargar profesores y slots
-    const allProfs = commIds.length > 0
-      ? await db.select().from(commissionProfessors)
-      : [];
-    const allSlots = commIds.length > 0
-      ? await db.select().from(commissionSlots)
-      : [];
+    // 7. Cargar profesores y slots (con fallback seguro si aún no corrió la migración 0001 en Neon)
+    let allProfs: Array<{
+      commissionId: string;
+      professorId: string | null;
+      professorName: string;
+    }> = [];
+
+    if (commIds.length > 0) {
+      try {
+        const rows = await db
+          .select({
+            commissionId: commissionProfessors.commissionId,
+            professorId: commissionProfessors.professorId,
+            professorName: commissionProfessors.professorName,
+          })
+          .from(commissionProfessors);
+        allProfs = rows;
+      } catch (err: any) {
+        if (err?.code === '42703' || err?.code === '42P01') {
+          const legacyRows = await db
+            .select({
+              commissionId: commissionProfessors.commissionId,
+              professorName: commissionProfessors.professorName,
+            })
+            .from(commissionProfessors);
+          allProfs = legacyRows.map((r) => ({ ...r, professorId: null }));
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const allSlots = commIds.length > 0 ? await db.select().from(commissionSlots) : [];
 
     const profMap = new Map<string, string[]>();
+    const profRefMap = new Map<string, Array<{ id: string | null; name: string }>>();
     allProfs.forEach((p) => {
       const list = profMap.get(p.commissionId) || [];
       list.push(p.professorName);
       profMap.set(p.commissionId, list);
+
+      const refList = profRefMap.get(p.commissionId) || [];
+      refList.push({ id: p.professorId || null, name: p.professorName });
+      profRefMap.set(p.commissionId, refList);
     });
 
     const slotMap = new Map<string, any[]>();
@@ -339,6 +371,7 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
         courseCode,
         turno: TURNO_REVERSE[c.turno] || 'mañana',
         professors: profMap.get(c.id) || [],
+        professorRefs: profRefMap.get(c.id) || [],
         slots: slotMap.get(c.id) || [],
       };
 
@@ -385,11 +418,36 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
       .from(electiveOfferings)
       .where(eq(electiveOfferings.scheduleTermId, termRecord.id));
 
+    const offProfRefMap = new Map<string, Array<{ id: string | null; name: string }>>();
+    if (offList.length > 0) {
+      try {
+        const offProfRows = await db
+          .select({
+            electiveOfferingId: electiveOfferingProfessors.electiveOfferingId,
+            professorId: electiveOfferingProfessors.professorId,
+            professorName: electiveOfferingProfessors.professorName,
+          })
+          .from(electiveOfferingProfessors);
+        offProfRows.forEach((op) => {
+          const list = offProfRefMap.get(op.electiveOfferingId) || [];
+          list.push({ id: op.professorId || null, name: op.professorName });
+          offProfRefMap.set(op.electiveOfferingId, list);
+        });
+      } catch (err: any) {
+        if (err?.code !== '42703' && err?.code !== '42P01') {
+          throw err;
+        }
+      }
+    }
+
     const canonicalOfferings = offList.map((off) => ({
       courseCode: courseGroupMap.get(off.courseGroupId) || '',
       subjectCode: uuidToCode.get(off.subjectId) || 0,
       subjectName: uuidToName.get(off.subjectId) || '',
       professors: off.professors || [],
+      professorRefs:
+        offProfRefMap.get(off.id) ||
+        (off.professors || []).map((name) => ({ id: null, name })),
     }));
 
     res.json({

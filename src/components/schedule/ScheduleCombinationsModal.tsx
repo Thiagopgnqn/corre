@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  Star,
 } from 'lucide-react';
 import type {
   SubjectSchedule,
@@ -17,6 +18,11 @@ import type {
 } from '../../types/schedule';
 import type { Subject } from '../../types/career';
 import { generateScheduleCombinations } from '../../utils/scheduleLogic';
+import {
+  computeCommissionCombinedRating,
+  formatRatingDecimal,
+  type ProfessorRatingResolver,
+} from '../../utils/professorRatingsLogic';
 
 interface ScheduleCombinationsModalProps {
   isOpen: boolean;
@@ -27,6 +33,7 @@ interface ScheduleCombinationsModalProps {
   onApplyCombination: (selections: Record<number, Commission>) => void;
   subjectNamesMap: Map<number, string>;
   term: '1C' | '2C';
+  resolveProfessorRating?: ProfessorRatingResolver;
 }
 
 export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps> = ({
@@ -38,6 +45,7 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
   onApplyCombination,
   subjectNamesMap,
   term,
+  resolveProfessorRating,
 }) => {
   // Pool of candidate subjects that have commissions loaded in this term
   const subjectsWithSchedule = useMemo(() => {
@@ -61,6 +69,7 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
 
   const [sortBy, setSortBy] = useState<CombinationCriteria['sortBy']>('fewer-days');
   const [preferShift, setPreferShift] = useState<Shift | 'cualquiera'>('cualquiera');
+  const [preferBestProfessors, setPreferBestProfessors] = useState<boolean>(true);
 
   const toggleSubject = (id: number) => {
     setSelectedSubjectIds((prev) =>
@@ -73,16 +82,31 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
       return { hasConflictFree: true, combinations: [] };
     }
 
+    const commissionRatingResolver = resolveProfessorRating
+      ? (comm: Commission) => computeCommissionCombinedRating(comm, resolveProfessorRating).combinedAverage
+      : undefined;
+
     return generateScheduleCombinations(
       selectedSubjectIds,
       schedulesMap,
       {
         sortBy,
         preferShift,
+        preferBestProfessors,
       },
-      subjectNamesMap
+      subjectNamesMap,
+      commissionRatingResolver
     );
-  }, [isOpen, selectedSubjectIds, schedulesMap, sortBy, preferShift, subjectNamesMap]);
+  }, [
+    isOpen,
+    selectedSubjectIds,
+    schedulesMap,
+    sortBy,
+    preferShift,
+    preferBestProfessors,
+    subjectNamesMap,
+    resolveProfessorRating,
+  ]);
 
   if (!isOpen) return null;
 
@@ -141,9 +165,9 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
             </div>
           </div>
 
-          {/* Sort & Shift preference */}
+          {/* Sort, Shift preference & Best Professors tie-breaker */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/60 text-xs">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-slate-400 font-semibold">2. Priorizar:</span>
               <div className="inline-flex rounded-xl bg-slate-900 p-0.5 border border-slate-800 font-semibold">
                 <button
@@ -171,6 +195,24 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
                   Preferencia de turno
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={() => setPreferBestProfessors(!preferBestProfessors)}
+                className={`px-2.5 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                  preferBestProfessors
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+                title="Usar la valoración de los profesores como criterio de desempate entre combinaciones"
+              >
+                <Star
+                  className={`w-3.5 h-3.5 ${
+                    preferBestProfessors ? 'text-amber-400 fill-amber-400' : 'text-slate-500'
+                  }`}
+                />
+                <span>Preferir mejores profesores</span>
+              </button>
             </div>
 
             {sortBy === 'preferred-shift' && (
@@ -238,7 +280,12 @@ export const ScheduleCombinationsModal: React.FC<ScheduleCombinationsModalProps>
                             Opción #{idx + 1}
                           </span>
 
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {combo.averageRating !== null && combo.averageRating !== undefined && (
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                                <span>★ {formatRatingDecimal(combo.averageRating, 1)}</span>
+                              </span>
+                            )}
                             {combo.conflictCount === 0 ? (
                               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex items-center gap-1">
                                 <CheckCircle2 className="w-3 h-3" />

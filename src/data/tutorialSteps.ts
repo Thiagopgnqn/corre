@@ -160,7 +160,20 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Clock',
   },
 
-  // 12. Dashboard de Estadísticas
+  // 12. Reseñas de Profesores
+  {
+    id: 'professors-reviews-tour',
+    title: 'Reseñas de Profesores en Horarios',
+    description:
+      'Consultá puntuaciones y opiniones 100% anónimas por docente y materia, filtrá comisiones mejor valoradas directamente en el Armador de Horarios y puntuá a tus profesores en materias regularizadas o aprobadas.',
+    badge: 'Comunidad & Elección',
+    targetSelector: '[data-tour="professors-directory"]',
+    targetView: 'professors',
+    placement: 'bottom',
+    iconName: 'Star',
+  },
+
+  // 13. Dashboard de Estadísticas
   {
     id: 'stats-tour',
     title: 'Estadísticas & Camino Crítico',
@@ -173,12 +186,12 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'BarChart3',
   },
 
-  // 12. Guardado y Respaldo
+  // 14. Guardado y Respaldo
   {
     id: 'persistence-tour',
     title: 'Tus Datos 100% Tuyos',
     description:
-      'Todo tu progreso se guarda automáticamente en este navegador. Desde el menú podés exportar un respaldo JSON descargable para llevarlo a otra computadora o celular.',
+      'Todo tu progreso se sincroniza con tu cuenta y podés exportar un respaldo JSON descargable desde el menú para llevarlo a otra computadora o celular.',
     badge: 'Privacidad & Respaldo',
     targetSelector: '[data-tour="more-menu-btn"]',
     targetView: 'graph',
@@ -186,7 +199,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Download',
   },
 
-  // 13. Finalización
+  // 15. Finalización
   {
     id: 'finish',
     title: '¡Todo Listo para Arrancar!',

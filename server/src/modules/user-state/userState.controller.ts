@@ -13,6 +13,7 @@ import {
   subjects,
   scheduleTerms,
 } from '../../db/schema.js';
+import { defaultReviewsStore } from '../reviews/reviews.store.js';
 
 export async function getUserState(req: Request, res: Response): Promise<void> {
   const userId = req.user?.id;
@@ -970,8 +971,16 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
   }
 
   try {
-    // ON DELETE CASCADE en PostgreSQL elimina todas las filas asociadas
+    // Identificar profesores reseñados por este usuario antes del borrado en cascada
+    const affectedProfessorIds = await defaultReviewsStore.getAffectedProfessorIdsByUser(userId);
+
+    // ON DELETE CASCADE en PostgreSQL elimina todas las filas asociadas (incluyendo professor_reviews)
     await db.delete(users).where(eq(users.id, userId));
+
+    // Recalcular agregados de los profesores cuyas reseñas fueron eliminadas
+    for (const profId of affectedProfessorIds) {
+      await defaultReviewsStore.recalculateProfessorStats(profId).catch(() => undefined);
+    }
 
     res.clearCookie('accessToken');
     res.clearCookie('refreshToken');

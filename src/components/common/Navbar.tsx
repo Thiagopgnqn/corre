@@ -19,6 +19,7 @@ import {
   HelpCircle,
   Clock,
   LogOut,
+  Star,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
@@ -26,7 +27,14 @@ import { SyncStatusBadge } from './SyncStatusBadge';
 import { UserMenu } from './UserMenu';
 import { PlanSelectorModal } from './PlanSelectorModal';
 
-export type AppView = 'graph' | 'kanban' | 'planner' | 'schedule' | 'electives' | 'stats';
+export type AppView =
+  | 'graph'
+  | 'kanban'
+  | 'planner'
+  | 'schedule'
+  | 'professors'
+  | 'electives'
+  | 'stats';
 
 interface NavbarProps {
   currentView: AppView;
@@ -112,6 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     { id: 'kanban', label: 'Niveles', fullLabel: 'Niveles & Tablero', icon: Kanban },
     { id: 'planner', label: 'Cuatrimestre', fullLabel: 'Armá tu Cuatrimestre', icon: CalendarDays },
     { id: 'schedule', label: 'Horarios', fullLabel: 'Armador de Horarios', icon: Clock },
+    { id: 'professors', label: 'Profesores', fullLabel: 'Reseñas de Profesores', icon: Star },
     { id: 'electives', label: 'Electivas', fullLabel: 'Catálogo de Electivas', icon: Sparkles },
     { id: 'stats', label: 'Estadísticas', fullLabel: 'Estadísticas & Camino Crítico', icon: BarChart3 },
   ];
@@ -147,10 +156,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             </div>
           </div>
 
-          {/* Desktop Nav Tabs: icon + label at >= 1440px, icon-only below 1440px */}
+          {/* Desktop Nav Tabs: icon + label at >= 1500px, icon-only below 1500px so 7 tabs never overflow */}
           <nav
             data-tour="nav-tabs"
-            className="hidden md:flex items-center gap-0.5 lg:gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
+            className="hidden md:flex items-center gap-0.5 bg-slate-900/60 p-1 rounded-xl border border-slate-800 shrink-0"
           >
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -160,14 +169,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
                   title={item.fullLabel}
-                  className={`flex items-center gap-1.5 px-2 lg:px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
                   <Icon className="w-4 h-4 shrink-0" />
-                  <span className="hidden min-[1440px]:inline whitespace-nowrap">{item.label}</span>
+                  <span className="hidden min-[1500px]:inline whitespace-nowrap">{item.label}</span>
                 </button>
               );
             })}
@@ -175,8 +184,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
           {/* Actions & Utilities */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Secondary Actions (Visible only on ultra-wide screens >= 1850px, otherwise in More Menu) */}
-            <div className="hidden min-[1850px]:flex items-center gap-2 shrink-0">
+            {/* Secondary Actions (Visible only on ultra-wide screens >= 1900px, otherwise in More Menu) */}
+            <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
               {/* Analista / Seminario Toggle Button */}
               <button
                 data-tour="analista-button"
@@ -238,8 +247,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               title="Buscar materias (Ctrl+K)"
             >
               <Search className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="hidden 2xl:inline whitespace-nowrap">Buscar</span>
-              <kbd className="hidden 2xl:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
+              <span className="hidden min-[1720px]:inline whitespace-nowrap">Buscar</span>
+              <kbd className="hidden min-[1720px]:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
                 Ctrl K
               </kbd>
             </button>
@@ -250,10 +259,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             {/* User Profile & Account Menu */}
             <UserMenu currentPlanName={currentPlanName} onOpenPlanSelector={() => setIsPlanSelectorOpen(true)} />
 
-            {/* Tutorial Launcher Button: Visible on xl+ (also in More menu on all screens) */}
+            {/* Tutorial Launcher Button: Visible on wide screens >= 1650px (also in More menu on all screens) */}
             <button
               onClick={() => startTutorial(0)}
-              className="hidden xl:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm"
+              className="hidden min-[1650px]:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm"
               title="Ver tutorial guiado interactivo"
             >
               <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -465,7 +474,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
       {/* Mobile Bottom Navigation Bar (Fixed at bottom on screens < md) */}
       <nav
         data-tour="nav-tabs-mobile"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-1 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 px-0.5 py-1.5 flex items-center justify-around shadow-2xl safe-area-pb"
       >
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -474,14 +483,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
-              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-1 py-1 rounded-xl text-[10px] font-semibold transition-all ${
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 rounded-xl text-[10px] font-semibold transition-all ${
                 isActive
                   ? 'text-indigo-400 font-bold bg-indigo-500/10'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
-              <span className="leading-tight text-[9px] truncate max-w-full text-center">{item.label}</span>
+              <span className="leading-tight text-[8.5px] truncate max-w-full text-center">{item.label}</span>
             </button>
           );
         })}

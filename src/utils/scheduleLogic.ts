@@ -2,6 +2,7 @@ import type {
   DayOfWeek,
   Slot,
   Commission,
+  ProfessorRef,
   SubjectSchedule,
   ScheduleConflict,
   ConsecutiveWarning,
@@ -399,7 +400,7 @@ export function validateScheduleData(
         return;
       }
 
-      const { id, code, turno, professors, slots, notes } = comm as Record<string, unknown>;
+      const { id, code, turno, professors, professorRefs, slots, notes } = comm as Record<string, unknown>;
 
       if (!id || typeof id !== 'string') {
         errors.push(`Materia ID ${subjectId}, comisión #${commIdx + 1}: "id" requerido.`);
@@ -464,11 +465,22 @@ export function validateScheduleData(
         });
       });
 
+      const sanitizedProfessorRefs: ProfessorRef[] | undefined = Array.isArray(professorRefs)
+        ? professorRefs
+            .filter((pr): pr is Record<string, unknown> => Boolean(pr && typeof pr === 'object'))
+            .map((pr) => ({
+              id: typeof pr.id === 'string' ? pr.id : null,
+              name: typeof pr.name === 'string' ? pr.name : '',
+            }))
+            .filter((pr) => pr.name.length > 0)
+        : undefined;
+
       sanitizedCommissions.push({
         id,
         code,
         turno: turno === 'mañana' || turno === 'tarde' || turno === 'noche' ? turno : undefined,
         professors: Array.isArray(professors) ? professors.map(String) : [],
+        ...(sanitizedProfessorRefs ? { professorRefs: sanitizedProfessorRefs } : {}),
         notes: notes ? String(notes) : undefined,
         slots: sanitizedSlots,
       });
@@ -504,7 +516,8 @@ export function generateScheduleCombinations(
   targetSubjectIds: number[],
   schedulesMap: Map<number, SubjectSchedule>,
   options: CombinationCriteria,
-  subjectNamesMap?: Map<number, string>
+  subjectNamesMap?: Map<number, string>,
+  commissionRatingResolver?: (commission: Commission) => number | null
 ): {
   hasConflictFree: boolean;
   combinations: SuggestedCombination[];
@@ -557,9 +570,24 @@ export function generateScheduleCombinations(
     const gapMinutes = calculateGapMinutes(commList);
 
     const shiftCounts: Record<Shift, number> = { mañana: 0, tarde: 0, noche: 0 };
+    let ratingSum = 0;
+    let ratedCommissionsCount = 0;
+
     commList.forEach((c) => {
       if (c.turno) shiftCounts[c.turno]++;
+      if (commissionRatingResolver) {
+        const commRating = commissionRatingResolver(c);
+        if (commRating !== null && !Number.isNaN(commRating)) {
+          ratingSum += commRating;
+          ratedCommissionsCount++;
+        }
+      }
     });
+
+    const averageRating =
+      ratedCommissionsCount > 0
+        ? Math.round((ratingSum / ratedCommissionsCount) * 100) / 100
+        : null;
 
     return {
       id: `combo-${idx + 1}`,
@@ -571,12 +599,25 @@ export function generateScheduleCombinations(
       shiftCounts,
       earliestStart: summary.globalEarliest,
       latestEnd: summary.globalLatest,
+      averageRating,
+      ratedCommissionsCount,
     };
   });
 
   const conflictFree = scoredCombos.filter((c) => c.conflictCount === 0);
   const pool = conflictFree.length > 0 ? conflictFree : scoredCombos;
   const hasConflictFree = conflictFree.length > 0;
+
+  const compareRatingsTieBreaker = (a: SuggestedCombination, b: SuggestedCombination): number => {
+    if (!options.preferBestProfessors) return 0;
+    const rA = a.averageRating ?? -1;
+    const rB = b.averageRating ?? -1;
+    if (rB !== rA) return rB - rA;
+    const cA = a.ratedCommissionsCount ?? 0;
+    const cB = b.ratedCommissionsCount ?? 0;
+    if (cB !== cA) return cB - cA;
+    return 0;
+  };
 
   // Sorting based on criteria
   pool.sort((a, b) => {
@@ -585,19 +626,25 @@ export function generateScheduleCombinations(
       return a.conflictCount - b.conflictCount;
     }
 
-    // 2. User chosen sort criterion
+    // 2. User chosen sort criterion (+ optional professor rating tie-breaker)
     if (options.sortBy === 'fewer-days') {
       if (a.distinctDaysCount !== b.distinctDaysCount) {
         return a.distinctDaysCount - b.distinctDaysCount;
       }
-      return a.totalGapMinutes - b.totalGapMinutes;
+      if (a.totalGapMinutes !== b.totalGapMinutes) {
+        return a.totalGapMinutes - b.totalGapMinutes;
+      }
+      return compareRatingsTieBreaker(a, b);
     }
 
     if (options.sortBy === 'fewer-gaps') {
       if (a.totalGapMinutes !== b.totalGapMinutes) {
         return a.totalGapMinutes - b.totalGapMinutes;
       }
-      return a.distinctDaysCount - b.distinctDaysCount;
+      if (a.distinctDaysCount !== b.distinctDaysCount) {
+        return a.distinctDaysCount - b.distinctDaysCount;
+      }
+      return compareRatingsTieBreaker(a, b);
     }
 
     if (options.sortBy === 'preferred-shift' && options.preferShift && options.preferShift !== 'cualquiera') {
@@ -607,9 +654,13 @@ export function generateScheduleCombinations(
       if (countA !== countB) {
         return countB - countA; // more matching shifts first
       }
+      const ratingDiff = compareRatingsTieBreaker(a, b);
+      if (ratingDiff !== 0) return ratingDiff;
       return a.distinctDaysCount - b.distinctDaysCount;
     }
 
+    const ratingDiff = compareRatingsTieBreaker(a, b);
+    if (ratingDiff !== 0) return ratingDiff;
     return a.distinctDaysCount - b.distinctDaysCount;
   });
 

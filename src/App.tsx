@@ -8,6 +8,7 @@ import { CorrelativeGraph } from './components/graph/CorrelativeGraph';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { SemesterPlanner } from './components/planner/SemesterPlanner';
 import { ScheduleBuilder } from './components/schedule/ScheduleBuilder';
+import { ProfessorsDirectory } from './components/professors/ProfessorsDirectory';
 import { ElectivesPicker } from './components/electives/ElectivesPicker';
 import { StatsDashboard } from './components/stats/StatsDashboard';
 import { QuickStatusModal } from './components/common/QuickStatusModal';
@@ -18,7 +19,15 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { LocalStorageMigrationModal } from './components/migration/LocalStorageMigrationModal';
 import { Loader2 } from 'lucide-react';
 
-const VALID_VIEWS: AppView[] = ['graph', 'kanban', 'planner', 'schedule', 'electives', 'stats'];
+const VALID_VIEWS: AppView[] = [
+  'graph',
+  'kanban',
+  'planner',
+  'schedule',
+  'professors',
+  'electives',
+  'stats',
+];
 
 const getInitialView = (): AppView => {
   if (typeof window !== 'undefined') {
@@ -80,6 +89,7 @@ const AppContent: React.FC = () => {
               <SemesterPlanner onNavigateToSchedule={() => handleSetView('schedule')} />
             )}
             {currentView === 'schedule' && <ScheduleBuilder />}
+            {currentView === 'professors' && <ProfessorsDirectory />}
             {currentView === 'electives' && <ElectivesPicker />}
             {currentView === 'stats' && <StatsDashboard />}
           </motion.div>

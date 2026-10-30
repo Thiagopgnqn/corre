@@ -17,7 +17,7 @@ setInterval(() => {
   for (const [key, record] of emailAttempts.entries()) {
     if (now > record.resetAt) emailAttempts.delete(key);
   }
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000).unref();
 
 function getClientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];

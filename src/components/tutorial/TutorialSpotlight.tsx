@@ -18,6 +18,7 @@ import {
   X,
   HelpCircle,
   Clock,
+  Star,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { TUTORIAL_STEPS } from '../../data/tutorialSteps';
@@ -51,6 +52,7 @@ const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   CheckCircle2,
   HelpCircle,
   Clock,
+  Star,
 };
 
 function getElementRect(selector?: string): SpotlightRect | null {

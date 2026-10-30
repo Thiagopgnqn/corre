@@ -9,9 +9,15 @@ import {
   Calendar,
   CheckCircle2,
   CalendarPlus,
+  Star,
 } from 'lucide-react';
 import type { Commission, ScheduleConflict, DayOfWeek } from '../../types/schedule';
 import { calculateScheduleSummary, DAY_LABELS } from '../../utils/scheduleLogic';
+import {
+  computeScheduleAverageRating,
+  formatRatingDecimal,
+  type ProfessorRatingResolver,
+} from '../../utils/professorRatingsLogic';
 
 interface ScheduleSummaryPanelProps {
   selections: Record<number, Commission>;
@@ -22,6 +28,7 @@ interface ScheduleSummaryPanelProps {
   onClearAll: () => void;
   onSelectConflict: (conflictId: string) => void;
   onNavigateToTab?: (tab: 'oferta' | 'grilla' | 'resumen') => void;
+  resolveProfessorRating?: ProfessorRatingResolver;
 }
 
 export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
@@ -33,6 +40,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   onClearAll,
   onSelectConflict,
   onNavigateToTab,
+  resolveProfessorRating,
 }) => {
   const [copied, setCopied] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
@@ -44,6 +52,11 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   const summary = useMemo(() => {
     return calculateScheduleSummary(selectedCommissions);
   }, [selectedCommissions]);
+
+  const scheduleRating = useMemo(() => {
+    const resolver: ProfessorRatingResolver = resolveProfessorRating || (() => null);
+    return computeScheduleAverageRating(selectedCommissions, resolver);
+  }, [selectedCommissions, resolveProfessorRating]);
 
   // Copy plain text summary to clipboard
   const handleCopyText = () => {
@@ -66,6 +79,9 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
     });
 
     text += `⏱️ Carga horaria semanal: ${summary.totalHours} hs\n`;
+    if (scheduleRating.averageRating !== null) {
+      text += `⭐ Valoración docente promedio: ${formatRatingDecimal(scheduleRating.averageRating, 1)} / 5\n`;
+    }
     text += `🌴 Días libres: ${summary.freeDays.map((d) => DAY_LABELS[d]).join(', ') || 'Ninguno'}\n`;
 
     navigator.clipboard.writeText(text);
@@ -195,6 +211,37 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Average professor rating for selected schedule */}
+        {selectedCount > 0 && (
+          <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                <Star className="w-3.5 h-3.5 fill-amber-400/30" />
+              </span>
+              <div className="min-w-0">
+                <span className="text-[10px] font-semibold uppercase text-slate-400 block">
+                  Valoración docente
+                </span>
+                <span className="text-[10px] text-slate-500 block truncate">
+                  {scheduleRating.ratedCommissionsCount > 0
+                    ? `${scheduleRating.ratedCommissionsCount}/${scheduleRating.totalCommissionsCount} com. con promedio`
+                    : 'Sin comisiones con ≥3 reseñas'}
+                </span>
+              </div>
+            </div>
+
+            {scheduleRating.averageRating !== null ? (
+              <span className="text-sm font-black text-amber-300 shrink-0">
+                ★ {formatRatingDecimal(scheduleRating.averageRating, 1)}
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold text-slate-500 shrink-0">
+                Sin datos
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Active & Free days */}
         <div className="space-y-1.5 text-xs">
