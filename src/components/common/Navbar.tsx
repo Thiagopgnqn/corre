@@ -20,6 +20,9 @@ import {
   Clock,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { SyncStatusBadge } from './SyncStatusBadge';
+import { UserMenu } from './UserMenu';
+import { PlanSelectorModal } from './PlanSelectorModal';
 
 export type AppView = 'graph' | 'kanban' | 'planner' | 'schedule' | 'electives' | 'stats';
 
@@ -44,10 +47,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     settings,
     updateSettings,
     startTutorial,
+    syncStatus,
+    currentPlanName,
   } = useCareer();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -123,9 +129,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <h1 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white m-0 p-0 leading-none whitespace-nowrap">
                   Mi Carrera
                 </h1>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 whitespace-nowrap">
-                  Plan 2023
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsPlanSelectorOpen(true)}
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap"
+                  title="Cambiar carrera o plan de estudios"
+                >
+                  {currentPlanName}
+                </button>
               </div>
               <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden sm:block">
                 UTN • Ing. en Sistemas de Información
@@ -184,7 +195,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
                 }`}>
                   {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                </span>
+                </button>
               </button>
 
               {/* Simulation Mode Toggle Button */}
@@ -230,6 +241,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               </kbd>
             </button>
 
+            {/* Cloud Sync Status */}
+            <SyncStatusBadge status={syncStatus} />
+
+            {/* User Profile & Account Menu */}
+            <UserMenu currentPlanName={currentPlanName} onOpenPlanSelector={() => setIsPlanSelectorOpen(true)} />
+
             {/* Tutorial Launcher Button: Always visible */}
             <button
               onClick={() => startTutorial(0)}
@@ -273,7 +290,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                      </span>
+                      </button>
                     </button>
 
                     {/* Simulation toggle in dropdown */}
@@ -292,7 +309,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         isSimulationMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {isSimulationMode ? 'ON' : 'OFF'}
-                      </span>
+                      </button>
                     </button>
 
                     {/* Sound toggle in dropdown */}
@@ -312,7 +329,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         soundEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
                       }`}>
                         {soundEnabled ? 'ON' : 'OFF'}
-                      </span>
+                      </button>
                     </button>
                   </div>
 
@@ -400,7 +417,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             />
           </div>
         </div>
-      </header>
+        <PlanSelectorModal isOpen={isPlanSelectorOpen} onClose={() => setIsPlanSelectorOpen(false)} />
+    </header>
 
       {/* Mobile Bottom Navigation Bar (Fixed at bottom on screens < md) */}
       <nav

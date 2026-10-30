@@ -1,6 +1,6 @@
 # Reporte de Importación de Horarios
 
-Generado automáticamente por `scripts/importSchedule.ts` el 28/10/2026, 02:38:22.
+Generado automáticamente por `scripts/importSchedule.ts` el 29/10/2026, 08:22:29.
 
 ## 1. Resumen Ejecutivo
 - **Archivos procesados:** 5 (`1er año.xlsx`, `2do año.xlsx`, `3er año.xlsx`, `4to año.xlsx`, `5to año.xlsx`)

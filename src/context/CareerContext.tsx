@@ -37,13 +37,11 @@ import {
   type AppSettings,
   loadAssignedElectives,
   saveAssignedElectives,
-  INITIAL_ASSIGNED_ELECTIVES,
   clearCareerData,
   exportCareerToJson,
   importCareerFromJson,
   getSample3rdYearStudent,
   shouldAutoStartTutorial,
-  markTutorialCompleted,
   loadScheduleSelections,
   saveScheduleSelections,
   loadScheduleDrafts,
@@ -54,6 +52,10 @@ import {
   loadScheduleTerm,
   saveScheduleTerm,
 } from '../utils/storage';
+import { useAuth } from './AuthContext';
+import { userStateApi } from '../api/userState.api';
+import { catalogApi } from '../api/catalog.api';
+import type { SyncStatus } from '../components/common/SyncStatusBadge';
 
 interface CareerContextType {
   userState: UserCareerState;
@@ -132,11 +134,20 @@ interface CareerContextType {
   importData: (json: string) => { success: boolean; error?: string };
   resetAll: () => void;
   loadSample: () => void;
+
+  // Full-Stack & Sync features
+  syncStatus: SyncStatus;
+  showMigrationModal: boolean;
+  setShowMigrationModal: (show: boolean) => void;
+  currentPlanName: string;
+  reloadServerState: () => Promise<void>;
 }
 
 const CareerContext = createContext<CareerContextType | undefined>(undefined);
 
 export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated } = useAuth();
+
   const [userState, setUserState] = useState<UserCareerState>(() => loadUserState());
   const [simulationState, setSimulationState] = useState<UserCareerState | null>(null);
   const [assignedElectives, setAssignedElectives] = useState<AssignedElectivesByYear>(() => loadAssignedElectives());
@@ -154,6 +165,69 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [scheduleDrafts, setScheduleDrafts] = useState<ScheduleDraft[]>(() => loadScheduleDrafts());
   const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(() => loadCustomSchedules());
   const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>(() => loadScheduleTerm());
+
+  // Full Stack sync state
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('saved');
+  const [showMigrationModal, setShowMigrationModal] = useState<boolean>(false);
+  const [currentPlanName, setCurrentPlanName] = useState<string>('Plan 2023');
+
+  const hasHydratedRef = useRef(false);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load server state when authenticated
+  const reloadServerState = useCallback(async () => {
+    if (!isAuthenticated) return;
+
+    try {
+      setSyncStatus('saving');
+
+      // 1. Cargar plan activo
+      const planRes = await catalogApi.getPlan('current').catch(() => null);
+      if (planRes?.success && planRes.data?.plan) {
+        setCurrentPlanName(planRes.data.plan.name);
+      }
+
+      // 2. Cargar estado de usuario
+      const stateRes = await userStateApi.getState();
+      if (stateRes.success && stateRes.data) {
+        const d = stateRes.data;
+        setUserState(d.progress || {});
+        setSettings(d.settings);
+        setAssignedElectives(d.assignedElectives);
+        setSemesterBasket(d.basket || []);
+        setScheduleSelections(d.scheduleSelections || {});
+        if (d.scheduleProposals) {
+          setScheduleDrafts(d.scheduleProposals);
+        }
+
+        // Si la cuenta en la nube es virgen pero el navegador tiene datos locales
+        const localState = loadUserState();
+        if (!d.hasSavedData && Object.keys(localState).length > 0) {
+          setShowMigrationModal(true);
+        }
+
+        hasHydratedRef.current = true;
+        setSyncStatus('saved');
+      }
+
+      // 3. Cargar oferta de horarios desde la API de catálogo
+      const schedRes = await catalogApi.getSchedule().catch(() => null);
+      if (schedRes?.success && schedRes.data?.schedule && schedRes.data.schedule.length > 0) {
+        setCustomSchedules(schedRes.data.schedule);
+      }
+    } catch (e) {
+      console.error('Error hydrating from server:', e);
+      setSyncStatus('offline');
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      reloadServerState();
+    } else {
+      hasHydratedRef.current = false;
+    }
+  }, [isAuthenticated, reloadServerState]);
 
   const activeSchedules = useMemo(() => {
     return customSchedules && customSchedules.length > 0
@@ -243,8 +317,17 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSimulationState(null);
       soundManager.playMilestone();
       fireConfetti();
+
+      // Sincronizar simulación confirmada a la nube
+      if (isAuthenticated) {
+        setSyncStatus('saving');
+        userStateApi
+          .importLegacyData({ userState: simulationState })
+          .then(() => setSyncStatus('saved'))
+          .catch(() => setSyncStatus('error'));
+      }
     }
-  }, [simulationState]);
+  }, [simulationState, isAuthenticated]);
 
   const resetSimulation = useCallback(() => {
     setSimulationState({ ...userState });
@@ -280,6 +363,20 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setSimulationState(nextTargetState);
       } else {
         setUserState(nextTargetState);
+
+        // Sync debounced to backend
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+          syncTimeoutRef.current = setTimeout(async () => {
+            try {
+              await userStateApi.updateProgress(id, status, nextSubjectState.grade);
+              setSyncStatus('saved');
+            } catch {
+              setSyncStatus('error');
+            }
+          }, 400);
+        }
       }
 
       // Audio and celebratory effects
@@ -292,7 +389,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         soundManager.playClick();
       }
     },
-    [isSimulationMode, simulationState, userState]
+    [isSimulationMode, simulationState, userState, isAuthenticated]
   );
 
   const batchUpdateStatus = useCallback(
@@ -311,79 +408,157 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setSimulationState(targetState);
       } else {
         setUserState(targetState);
+
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .importLegacyData({ userState: targetState })
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
       }
       soundManager.playApproval();
       fireConfetti();
     },
-    [isSimulationMode, simulationState, userState]
+    [isSimulationMode, simulationState, userState, isAuthenticated]
   );
 
   // Elective assignment handlers (strictly prevent duplication across years)
-  const addElectiveToYear = useCallback((electiveId: number, targetYear: number) => {
-    const validYear = Math.max(1, Math.min(5, targetYear));
-    setAssignedElectives((prev) => {
-      const next: AssignedElectivesByYear = {
-        1: prev[1].filter((id) => id !== electiveId),
-        2: prev[2].filter((id) => id !== electiveId),
-        3: prev[3].filter((id) => id !== electiveId),
-        4: prev[4].filter((id) => id !== electiveId),
-        5: prev[5].filter((id) => id !== electiveId),
-      };
-      next[validYear].push(electiveId);
-      return next;
-    });
-    soundManager.playClick();
-  }, []);
+  const addElectiveToYear = useCallback(
+    (electiveId: number, targetYear: number) => {
+      const validYear = Math.max(1, Math.min(5, targetYear));
+      setAssignedElectives((prev) => {
+        const next: AssignedElectivesByYear = {
+          1: prev[1].filter((id) => id !== electiveId),
+          2: prev[2].filter((id) => id !== electiveId),
+          3: prev[3].filter((id) => id !== electiveId),
+          4: prev[4].filter((id) => id !== electiveId),
+          5: prev[5].filter((id) => id !== electiveId),
+        };
+        next[validYear].push(electiveId);
 
-  const removeElectiveFromYear = useCallback((electiveId: number, year: number) => {
-    setAssignedElectives((prev) => {
-      const yearList = prev[year] || [];
-      return {
-        ...prev,
-        [year]: yearList.filter((id) => id !== electiveId),
-      };
-    });
-    soundManager.playClick();
-  }, []);
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .updateElectives(next)
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
 
-  const moveElectiveYear = useCallback((electiveId: number, _fromYear: number, toYear: number) => {
-    const validToYear = Math.max(1, Math.min(5, toYear));
-    setAssignedElectives((prev) => {
-      const next: AssignedElectivesByYear = {
-        1: prev[1].filter((id) => id !== electiveId),
-        2: prev[2].filter((id) => id !== electiveId),
-        3: prev[3].filter((id) => id !== electiveId),
-        4: prev[4].filter((id) => id !== electiveId),
-        5: prev[5].filter((id) => id !== electiveId),
-      };
-      next[validToYear].push(electiveId);
-      return next;
-    });
-    soundManager.playClick();
-  }, []);
+        return next;
+      });
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
 
-  const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
-  }, []);
+  const removeElectiveFromYear = useCallback(
+    (electiveId: number, year: number) => {
+      setAssignedElectives((prev) => {
+        const yearList = prev[year] || [];
+        const next = {
+          ...prev,
+          [year]: yearList.filter((id) => id !== electiveId),
+        };
+
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .updateElectives(next)
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
+
+        return next;
+      });
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
+
+  const moveElectiveYear = useCallback(
+    (electiveId: number, _fromYear: number, toYear: number) => {
+      const validToYear = Math.max(1, Math.min(5, toYear));
+      setAssignedElectives((prev) => {
+        const next: AssignedElectivesByYear = {
+          1: prev[1].filter((id) => id !== electiveId),
+          2: prev[2].filter((id) => id !== electiveId),
+          3: prev[3].filter((id) => id !== electiveId),
+          4: prev[4].filter((id) => id !== electiveId),
+          5: prev[5].filter((id) => id !== electiveId),
+        };
+        next[validToYear].push(electiveId);
+
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .updateElectives(next)
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
+
+        return next;
+      });
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
+
+  const updateSettings = useCallback(
+    (newSettings: Partial<AppSettings>) => {
+      setSettings((prev) => {
+        const next = { ...prev, ...newSettings };
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .updateSettings(next)
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
+        return next;
+      });
+    },
+    [isAuthenticated]
+  );
 
   const toggleSound = useCallback(() => {
     const isNowOn = soundManager.toggleMute();
     setSoundEnabled(isNowOn);
   }, []);
 
-  const toggleBasketSubject = useCallback((id: number) => {
-    setSemesterBasket((prev) => {
-      const exists = prev.includes(id);
-      const next = exists ? prev.filter((item) => item !== id) : [...prev, id];
-      soundManager.playClick();
-      return next;
-    });
-  }, []);
+  const toggleBasketSubject = useCallback(
+    (id: number) => {
+      setSemesterBasket((prev) => {
+        const exists = prev.includes(id);
+        const next = exists ? prev.filter((item) => item !== id) : [...prev, id];
+        soundManager.playClick();
+
+        if (isAuthenticated && hasHydratedRef.current) {
+          setSyncStatus('saving');
+          userStateApi
+            .updateBasket(next)
+            .then(() => setSyncStatus('saved'))
+            .catch(() => setSyncStatus('error'));
+        }
+
+        return next;
+      });
+    },
+    [isAuthenticated]
+  );
 
   const clearBasket = useCallback(() => {
     setSemesterBasket([]);
     soundManager.playClick();
-  }, []);
+
+    if (isAuthenticated && hasHydratedRef.current) {
+      setSyncStatus('saving');
+      userStateApi
+        .updateBasket([])
+        .then(() => setSyncStatus('saved'))
+        .catch(() => setSyncStatus('error'));
+    }
+  }, [isAuthenticated]);
 
   const selectedSubject = useMemo(() => {
     if (!selectedSubjectId) return null;
@@ -525,106 +700,157 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       missingElectiveCreditsForDegree,
       missingCoreForDegree,
       isAnalistaEligible: analistaCheck.eligible,
-      missingForAnalista: analistaCheck,
+      missingForAnalista: {
+        missingCoreIds: analistaCheck.missingCoreIds,
+        seminarioApproved: analistaCheck.seminarioApproved,
+        electiveCredits: analistaCheck.electiveCredits,
+      },
       isPPSEligible: ppsCheck.eligible,
       isDegreeEligible,
     };
   }, [activeState, settings]);
 
-  const criticalPath = useMemo(() => {
+  const criticalPath = useMemo<CriticalPathResult>(() => {
     return calculateCriticalPath(activeState, settings.includeAnalistaTrack);
   }, [activeState, settings.includeAnalistaTrack]);
 
-  const selectCommission = useCallback((subjectId: number, commissionId: string) => {
-    setScheduleSelections((prev) => ({
-      ...prev,
-      [subjectId]: commissionId,
-    }));
-    soundManager.playClick();
-  }, []);
+  // Schedule Builder Actions
+  const selectCommission = useCallback(
+    (subjectId: number, commissionId: string) => {
+      setScheduleSelections((prev) => {
+        const next = { ...prev, [subjectId]: commissionId };
+        if (isAuthenticated && hasHydratedRef.current) {
+          userStateApi.saveScheduleSelections(next).catch(() => {});
+        }
+        return next;
+      });
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
 
-  const removeCommission = useCallback((subjectId: number) => {
-    setScheduleSelections((prev) => {
-      const next = { ...prev };
-      delete next[subjectId];
-      return next;
-    });
-    soundManager.playClick();
-  }, []);
+  const removeCommission = useCallback(
+    (subjectId: number) => {
+      setScheduleSelections((prev) => {
+        const next = { ...prev };
+        delete next[subjectId];
+        if (isAuthenticated && hasHydratedRef.current) {
+          userStateApi.saveScheduleSelections(next).catch(() => {});
+        }
+        return next;
+      });
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
 
   const clearScheduleSelections = useCallback(() => {
     setScheduleSelections({});
+    if (isAuthenticated && hasHydratedRef.current) {
+      userStateApi.saveScheduleSelections({}).catch(() => {});
+    }
     soundManager.playClick();
-  }, []);
+  }, [isAuthenticated]);
 
-  const saveDraft = useCallback((name: string, term: '1C' | '2C') => {
-    const newDraft: ScheduleDraft = {
-      id: `draft-${Date.now()}`,
-      name: name.trim() || `Plan ${scheduleDrafts.length + 1}`,
-      term,
-      selections: { ...scheduleSelections },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setScheduleDrafts((prev) => {
-      const next = [newDraft, ...prev.filter((d) => d.name !== newDraft.name)].slice(0, 5);
-      return next;
-    });
-    soundManager.playMilestone();
-    return newDraft;
-  }, [scheduleSelections, scheduleDrafts]);
+  const saveDraft = useCallback(
+    (name: string, term: '1C' | '2C'): ScheduleDraft => {
+      const now = Date.now();
+      const draft: ScheduleDraft = {
+        id: `draft_${now}`,
+        name: name.trim() || `Propuesta ${scheduleDrafts.length + 1}`,
+        term,
+        selections: { ...scheduleSelections },
+        createdAt: now,
+        updatedAt: now,
+      };
+      setScheduleDrafts((prev) => [draft, ...prev]);
 
-  const loadDraft = useCallback((draftId: string) => {
-    const draft = scheduleDrafts.find((d) => d.id === draftId);
-    if (draft) {
-      setScheduleSelections(draft.selections);
+      if (isAuthenticated && hasHydratedRef.current) {
+        userStateApi
+          .saveScheduleProposal({
+            name: draft.name,
+            selections: draft.selections as any,
+          })
+          .catch(() => {});
+      }
+
+      soundManager.playClick();
+      return draft;
+    },
+    [scheduleSelections, scheduleDrafts.length, isAuthenticated]
+  );
+
+  const loadDraft = useCallback(
+    (draftId: string) => {
+      const draft = scheduleDrafts.find((d) => d.id === draftId);
+      if (!draft) return;
+      setScheduleSelections({ ...draft.selections });
       setScheduleTerm(draft.term);
       soundManager.playClick();
-    }
-  }, [scheduleDrafts]);
+    },
+    [scheduleDrafts]
+  );
 
-  const deleteDraft = useCallback((draftId: string) => {
-    setScheduleDrafts((prev) => prev.filter((d) => d.id !== draftId));
-    soundManager.playClick();
-  }, []);
+  const deleteDraft = useCallback(
+    (draftId: string) => {
+      setScheduleDrafts((prev) => prev.filter((d) => d.id !== draftId));
+      if (isAuthenticated && hasHydratedRef.current) {
+        userStateApi.deleteScheduleProposal(draftId).catch(() => {});
+      }
+      soundManager.playClick();
+    },
+    [isAuthenticated]
+  );
 
   const renameDraft = useCallback((draftId: string, newName: string) => {
     setScheduleDrafts((prev) =>
-      prev.map((d) => (d.id === draftId ? { ...d, name: newName.trim() || d.name, updatedAt: Date.now() } : d))
+      prev.map((d) =>
+        d.id === draftId ? { ...d, name: newName.trim(), updatedAt: Date.now() } : d
+      )
     );
+    soundManager.playClick();
   }, []);
 
-  const duplicateDraft = useCallback((draftId: string) => {
-    const draft = scheduleDrafts.find((d) => d.id === draftId);
-    if (!draft) return;
-    const duplicated: ScheduleDraft = {
-      id: `draft-${Date.now()}`,
-      name: `${draft.name} (Copia)`,
-      term: draft.term,
-      selections: { ...draft.selections },
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    setScheduleDrafts((prev) => [duplicated, ...prev].slice(0, 5));
-    soundManager.playClick();
-  }, [scheduleDrafts]);
+  const duplicateDraft = useCallback(
+    (draftId: string) => {
+      const src = scheduleDrafts.find((d) => d.id === draftId);
+      if (!src) return;
+      const now = Date.now();
+      const copy: ScheduleDraft = {
+        ...src,
+        id: `draft_${now}`,
+        name: `${src.name} (Copia)`,
+        createdAt: now,
+        updatedAt: now,
+      };
+      setScheduleDrafts((prev) => [copy, ...prev]);
+      soundManager.playClick();
+    },
+    [scheduleDrafts]
+  );
 
-  const applyScheduleToEnrolled = useCallback(() => {
-    const selectedIds = Object.keys(scheduleSelections).map(Number);
-    if (selectedIds.length === 0) {
+  const applyScheduleToEnrolled = useCallback((): { success: boolean; enrolledCount: number } => {
+    const selectedSubjectIds = Object.keys(scheduleSelections).map((k) => Number(k));
+    if (selectedSubjectIds.length === 0) {
       return { success: false, enrolledCount: 0 };
     }
-    const updates = selectedIds.map((id) => ({
-      id,
-      status: 'cursando' as SubjectStatus,
-    }));
-    batchUpdateStatus(updates);
-    soundManager.playMilestone();
-    fireConfetti();
-    return { success: true, enrolledCount: selectedIds.length };
-  }, [scheduleSelections, batchUpdateStatus]);
 
-  const exportData = useCallback(() => {
+    const updates: Array<{ id: number; status: SubjectStatus }> = [];
+    selectedSubjectIds.forEach((id) => {
+      const current = userState[id]?.status;
+      if (current !== 'aprobada' && current !== 'promocionada') {
+        updates.push({ id, status: 'cursando' });
+      }
+    });
+
+    if (updates.length > 0) {
+      batchUpdateStatus(updates);
+    }
+
+    return { success: true, enrolledCount: updates.length };
+  }, [scheduleSelections, userState, batchUpdateStatus]);
+
+  const exportData = useCallback((): string => {
     return exportCareerToJson(userState, settings, semesterBasket, assignedElectives, {
       scheduleDrafts,
       scheduleSelections,
@@ -633,70 +859,94 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   }, [userState, settings, semesterBasket, assignedElectives, scheduleDrafts, scheduleSelections, customSchedules, scheduleTerm]);
 
-  const importData = useCallback((json: string) => {
-    const res = importCareerFromJson(json);
-    if (res.success && res.userState) {
-      setUserState(res.userState);
-      if (res.settings) setSettings(res.settings);
-      if (res.basket) setSemesterBasket(res.basket);
-      if (res.assignedElectives) setAssignedElectives(res.assignedElectives);
-      if (res.scheduleDrafts) setScheduleDrafts(res.scheduleDrafts);
-      if (res.scheduleSelections) setScheduleSelections(res.scheduleSelections);
-      if (res.customSchedules) setCustomSchedules(res.customSchedules);
-      if (res.scheduleTerm) setScheduleTerm(res.scheduleTerm);
-      soundManager.playMilestone();
-      fireConfetti();
-      return { success: true };
-    }
-    return { success: false, error: res.error };
-  }, []);
+  const importData = useCallback(
+    (json: string): { success: boolean; error?: string } => {
+      const result = importCareerFromJson(json);
+      if (result.success) {
+        if (result.userState) setUserState(result.userState);
+        if (result.settings) setSettings(result.settings);
+        if (result.basket) setSemesterBasket(result.basket);
+        if (result.assignedElectives) setAssignedElectives(result.assignedElectives);
+        if (result.scheduleDrafts) setScheduleDrafts(result.scheduleDrafts);
+        if (result.scheduleSelections) setScheduleSelections(result.scheduleSelections);
+        if (result.customSchedules) setCustomSchedules(result.customSchedules);
+        if (result.scheduleTerm) setScheduleTerm(result.scheduleTerm);
+
+        // Si está autenticado, sincronizar a Neon en una sola transacción
+        if (isAuthenticated) {
+          setSyncStatus('saving');
+          try {
+            const parsed = JSON.parse(json);
+            userStateApi
+              .importLegacyData(parsed)
+              .then(() => setSyncStatus('saved'))
+              .catch(() => setSyncStatus('error'));
+          } catch {
+            // Ignorar
+          }
+        }
+
+        soundManager.playMilestone();
+        fireConfetti();
+        return { success: true };
+      }
+      return { success: false, error: result.error };
+    },
+    [isAuthenticated]
+  );
 
   const resetAll = useCallback(() => {
     clearCareerData();
     setUserState({});
     setSemesterBasket([]);
-    setAssignedElectives({ ...INITIAL_ASSIGNED_ELECTIVES });
+    setAssignedElectives({ 1: [], 2: [], 3: [], 4: [], 5: [] });
     setScheduleSelections({});
     setScheduleDrafts([]);
     setCustomSchedules(null);
-    setSimulationState(null);
+    setSettings(loadSettings());
     soundManager.playClick();
-  }, []);
+
+    if (isAuthenticated) {
+      setSyncStatus('saving');
+      userStateApi
+        .importLegacyData({ userState: {}, basket: [], assignedElectives: { 1: [], 2: [], 3: [], 4: [], 5: [] }, scheduleSelections: {} })
+        .then(() => setSyncStatus('saved'))
+        .catch(() => setSyncStatus('error'));
+    }
+  }, [isAuthenticated]);
 
   const loadSample = useCallback(() => {
     const sample = getSample3rdYearStudent();
     setUserState(sample.userState);
+    setSemesterBasket([]);
     setAssignedElectives(sample.assignedElectives);
-    setSimulationState(null);
     soundManager.playMilestone();
     fireConfetti();
-  }, []);
 
-  const startTutorial = useCallback(
-    (fromStep = 0) => {
-      realUserStateBackupRef.current = { ...userState };
-      setCurrentTutorialStep(fromStep);
-      setIsTutorialOpen(true);
-      soundManager.playClick();
-    },
-    [userState]
-  );
+    if (isAuthenticated) {
+      setSyncStatus('saving');
+      userStateApi
+        .importLegacyData(sample)
+        .then(() => setSyncStatus('saved'))
+        .catch(() => setSyncStatus('error'));
+    }
+  }, [isAuthenticated]);
 
-  const closeTutorial = useCallback((options?: { openOnboarding?: boolean }) => {
-    // Restore userState from real backup if sandbox modifications happened
+  // Interactive Tour controls
+  const startTutorial = useCallback((fromStep: number = 0) => {
+    realUserStateBackupRef.current = { ...userState };
+    setCurrentTutorialStep(fromStep);
+    setIsTutorialOpen(true);
+    soundManager.playClick();
+  }, [userState]);
+
+  const closeTutorial = useCallback((_options?: { openOnboarding?: boolean }) => {
+    setIsTutorialOpen(false);
     if (realUserStateBackupRef.current !== null) {
       setUserState(realUserStateBackupRef.current);
       realUserStateBackupRef.current = null;
     }
-    markTutorialCompleted();
-    setIsTutorialOpen(false);
-    setSelectedSubjectId(null);
-    setStatusModalSubjectId(null);
     soundManager.playClick();
-
-    if (options?.openOnboarding) {
-      setIsOnboardingOpen(true);
-    }
   }, []);
 
   const nextTutorialStep = useCallback(() => {
@@ -798,6 +1048,11 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         importData,
         resetAll,
         loadSample,
+        syncStatus,
+        showMigrationModal,
+        setShowMigrationModal,
+        currentPlanName,
+        reloadServerState,
       }}
     >
       {children}

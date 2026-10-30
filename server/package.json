@@ -14,7 +14,8 @@
     "seed:generate": "tsx tools/generateSeedData.ts",
     "seed": "tsx src/scripts/seed.ts",
     "make-admin": "tsx src/scripts/makeAdmin.ts",
-    "import:schedule": "tsx src/scripts/importScheduleDb.ts"
+    "import:schedule": "tsx src/scripts/importScheduleDb.ts",
+    "test": "tsx test/integration.test.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",

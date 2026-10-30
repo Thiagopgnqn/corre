@@ -174,6 +174,17 @@ async function runScheduleImport() {
     }> = scheduleData.reservedElectiveSlots || [];
 
     // 5. Crear o buscar schedule_term para este período
+    const shouldBeCurrent = params.isCurrent !== undefined
+      ? params.isCurrent === 'true'
+      : (termStr === '1C');
+
+    if (shouldBeCurrent) {
+      await db
+        .update(scheduleTerms)
+        .set({ isCurrent: false })
+        .where(eq(scheduleTerms.facultyId, faculty.id));
+    }
+
     let [termRecord] = await db
       .select()
       .from(scheduleTerms)
@@ -194,12 +205,19 @@ async function runScheduleImport() {
           academicYear,
           term: termStr,
           label: `${termStr === '1C' ? '1°' : '2°'} Cuatrimestre ${academicYear}`,
-          isCurrent: true,
+          isCurrent: shouldBeCurrent,
         })
         .returning();
-      console.log(`✨ Período de horarios creado: ${termRecord.label} (ID: ${termRecord.id})`);
+      console.log(`✨ Período de horarios creado: ${termRecord.label} (ID: ${termRecord.id}, isCurrent: ${shouldBeCurrent})`);
     } else {
-      console.log(`🔄 Actualizando oferta existente para: ${termRecord.label}`);
+      if (params.isCurrent !== undefined) {
+        await db
+          .update(scheduleTerms)
+          .set({ isCurrent: shouldBeCurrent })
+          .where(eq(scheduleTerms.id, termRecord.id));
+        termRecord.isCurrent = shouldBeCurrent;
+      }
+      console.log(`🔄 Actualizando oferta existente para: ${termRecord.label} (isCurrent: ${termRecord.isCurrent})`);
     }
 
     // 6. Transacción: Reemplazo limpio e idempotente para el período

@@ -154,23 +154,100 @@ Los tests verifican:
 
 ---
 
-## 🌐 Cómo Desplegarlo en la Web
+## 🌐 Arquitectura Full Stack & Base de Datos (Neon PostgreSQL)
 
-### Opción 1: Despliegue en Vercel (Recomendado)
-
-1. Subí tu proyecto a un repositorio en **GitHub** o **GitLab**.
-2. Entrá en [Vercel](https://vercel.com/) e iniciá sesión.
-3. Hacé click en **"Add New Project"** y seleccioná el repositorio de `correlativas`.
-4. Vercel detectará automáticamente que es un proyecto **Vite**:
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-5. Hacé click en **"Deploy"**. En menos de 1 minuto tendrás tu enlace público HTTPS listo.
+La aplicación cuenta con una arquitectura Full Stack completa:
+- **Frontend**: React 19 + Vite + Tailwind CSS desplegado en **Vercel**.
+- **Backend**: Node.js + TypeScript + Express desplegado en **Render** (Root directory: `server/`).
+- **Base de Datos**: PostgreSQL serverless en **Neon** con pooler de conexiones y SSL (`node-postgres` con soporte transaccional ACID).
+- **Autenticación Segura**: Cookies HttpOnly con rotación de refresh tokens (ventana de gracia de 20s y detección de reutilización), Argon2id para contraseñas, validación con Zod y protección CSRF (`X-Requested-With` + `Origin`).
+- **Login Obligatorio**: Sin sesión iniciada solo se muestran las pantallas de autenticación (Login y Registro). Una vez autenticado, si el usuario posee datos en `localStorage`, se ofrece una migración guiada en un click hacia la base de datos.
+- **Sincronización Optimista**: La UI responde instantáneamente (60 FPS) y sincroniza los cambios en segundo plano con un debounce de 400ms y un indicador de estado (*Guardado* / *Guardando...* / *Sin conexión*).
 
 ---
 
-### Opción 2: Build estático manual
-Si querés subir los archivos a cualquier servidor web tradicional (Apache, Nginx, GitHub Pages, Firebase Hosting):
+## 💻 Ejecución Local y Comandos del Servidor
+
+### 1. Backend (`server/`)
+
+Entrá en la carpeta del backend:
 ```bash
-npm run build
+cd server
+npm install
 ```
-La carpeta generada `dist/` contiene los archivos estáticos optimizados y minificados listos para servir.
+
+Configurá tu archivo `.env` basado en `.env.example`:
+```env
+PORT=3000
+NODE_ENV=development
+CLIENT_ORIGIN=http://localhost:5173
+DATABASE_URL=postgres://usuario:password@ep-xyz-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
+DIRECT_URL=postgres://usuario:password@ep-xyz.us-east-2.aws.neon.tech/neondb?sslmode=require
+JWT_SECRET=tu_jwt_secret_super_seguro
+REFRESH_SECRET=tu_refresh_secret_super_seguro
+```
+
+#### Comandos de Base de Datos y CLI:
+- **Correr migraciones**:
+  ```bash
+  npm run db:migrate
+  ```
+- **Cargar catálogo de materias (Seed inicial)**:
+  Lee de forma autónoma desde `server/seed-data/plan2023-catalog.json`:
+  ```bash
+  npm run seed
+  ```
+- **Importar oferta horaria a Neon**:
+  Carga grupos de curso, comisiones, slots, franjas reservadas y electivas con docentes:
+  ```bash
+  npm run import:schedule -- --faculty FRC --plan "Plan 2023" --year 2026 --term 1C
+  ```
+- **Promover usuario a Administrador**:
+  ```bash
+  npm run make-admin -- --email tu-correo@ejemplo.com
+  ```
+- **Compilar e iniciar servidor**:
+  ```bash
+  npm run build
+  npm run start
+  ```
+
+---
+
+### 2. Frontend (Raíz)
+
+En la raíz del proyecto:
+```bash
+npm install
+npm run dev
+```
+
+---
+
+## 🚀 Despliegue en Producción
+
+### 1. Render (Backend `server/`)
+- Tipo: **Web Service**.
+- **Root Directory**: `server`
+- **Build Command**: `npm install && npm run build && npm run db:migrate`
+- **Start Command**: `npm run start`
+- **Health Check Path**: `/api/health`
+- **Variables de Entorno**: `DATABASE_URL` (pooled), `DIRECT_URL` (directa para migraciones), `JWT_SECRET`, `REFRESH_SECRET`, `CLIENT_ORIGIN` (URL de Vercel), `NODE_ENV=production`.
+
+### 2. Vercel (Frontend)
+- El archivo `vercel.json` ya incluye el rewrite que envía `/api/*` a Render:
+  ```json
+  {
+    "rewrites": [
+      {
+        "source": "/api/:path*",
+        "destination": "https://TU-BACKEND-EN-RENDER.onrender.com/api/:path*"
+      },
+      {
+        "source": "/(.*)",
+        "destination": "/index.html"
+      }
+    ]
+  }
+  ```
+- Gracias a este rewrite, el navegador envía y recibe las cookies HttpOnly en el mismo dominio, eliminando problemas de cross-origin cookies entre Vercel y Render.
