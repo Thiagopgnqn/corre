@@ -8,9 +8,11 @@ import {
   timestamp,
   jsonb,
   unique,
+  uniqueIndex,
+  primaryKey,
   index,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 // Helper para timestamps automáticos
 const timestamps = {
@@ -550,6 +552,7 @@ export const professorReviews = pgTable(
     comment: text('comment'), // máx 600 chars
     status: text('status').notNull().default('published'), // 'published' | 'hidden' | 'removed'
     helpfulCount: integer('helpful_count').notNull().default(0),
+    attendedDeclared: boolean('attended_declared').notNull().default(false),
     ...timestamps,
   },
   (table) => [
@@ -656,6 +659,80 @@ export const professorSubjectStats = pgTable(
   (table) => [
     unique('uq_prof_subject_stats').on(table.professorId, table.subjectId),
     index('idx_prof_sub_stats_prof').on(table.professorId),
+  ]
+);
+
+// ==========================================
+// 2C. CURSADAS REGISTRADAS Y RECOMENDACIONES DE RESEÑAS
+// ==========================================
+
+export const subjectEnrollments = pgTable(
+  'subject_enrollments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    commissionId: uuid('commission_id').references(() => commissions.id, {
+      onDelete: 'set null',
+    }),
+    academicYear: integer('academic_year'),
+    term: text('term'), // '1C' | '2C' | 'A' | null
+    source: text('source').notNull().default('manual'), // 'manual' | 'schedule_builder'
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('uq_subject_enrollment_period')
+      .on(table.userId, table.subjectId, table.academicYear, table.term)
+      .where(sql`${table.academicYear} IS NOT NULL AND ${table.term} IS NOT NULL`),
+    index('idx_subject_enrollments_user').on(table.userId),
+    index('idx_subject_enrollments_user_subject').on(table.userId, table.subjectId),
+  ]
+);
+
+export const enrollmentProfessors = pgTable(
+  'enrollment_professors',
+  {
+    enrollmentId: uuid('enrollment_id')
+      .notNull()
+      .references(() => subjectEnrollments.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.enrollmentId, table.professorId],
+      name: 'pk_enrollment_professors',
+    }),
+    index('idx_enrollment_professors_prof').on(table.professorId),
+  ]
+);
+
+export const reviewRecommendationDismissals = pgTable(
+  'review_recommendation_dismissals',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.userId, table.professorId, table.subjectId],
+      name: 'pk_review_rec_dismissals',
+    }),
+    index('idx_review_rec_dismissals_user').on(table.userId),
+    index('idx_review_rec_dismissals_prof').on(table.professorId),
   ]
 );
 
@@ -784,6 +861,33 @@ export const professorReviewsRelations = relations(professorReviews, ({ one, man
   }),
   reports: many(reviewReports),
   helpfulVotes: many(reviewHelpfulVotes),
+}));
+
+export const subjectEnrollmentsRelations = relations(subjectEnrollments, ({ one, many }) => ({
+  user: one(users, {
+    fields: [subjectEnrollments.userId],
+    references: [users.id],
+  }),
+  subject: one(subjects, {
+    fields: [subjectEnrollments.subjectId],
+    references: [subjects.id],
+  }),
+  commission: one(commissions, {
+    fields: [subjectEnrollments.commissionId],
+    references: [commissions.id],
+  }),
+  enrollmentProfessors: many(enrollmentProfessors),
+}));
+
+export const enrollmentProfessorsRelations = relations(enrollmentProfessors, ({ one }) => ({
+  enrollment: one(subjectEnrollments, {
+    fields: [enrollmentProfessors.enrollmentId],
+    references: [subjectEnrollments.id],
+  }),
+  professor: one(professors, {
+    fields: [enrollmentProfessors.professorId],
+    references: [professors.id],
+  }),
 }));
 
 

@@ -5,6 +5,7 @@ import {
   formatRatingDecimal,
   getStarAriaLabel,
   handleStarRatingKeyDown,
+  type CardStarTone,
 } from '../../utils/professorRatingsLogic';
 
 interface StarRatingProps {
@@ -13,6 +14,8 @@ interface StarRatingProps {
   readOnly?: boolean;
   maxStars?: number;
   size?: 'xs' | 'sm' | 'md' | 'lg';
+  tone?: CardStarTone;
+  ariaLabel?: string;
   label?: string;
   allowClear?: boolean;
   onClear?: () => void;
@@ -32,6 +35,8 @@ export const StarRating: React.FC<StarRatingProps> = ({
   readOnly = false,
   maxStars = 5,
   size = 'md',
+  tone = 'full',
+  ariaLabel,
   label = 'Calificación en estrellas',
   allowClear = false,
   onClear,
@@ -44,34 +49,44 @@ export const StarRating: React.FC<StarRatingProps> = ({
   const stars = Array.from({ length: maxStars }, (_, idx) => idx + 1);
   const sizeClass = SIZE_CLASSES[size];
 
-  // Modo solo lectura (soporta relleno fraccionario suave)
+  // Modo solo lectura (soporta relleno fraccionario suave y tres tonos: full, muted, empty)
   if (readOnly || !onChange) {
-    const safeVal = Math.max(0, Math.min(maxStars, value || 0));
-    const ariaText =
-      safeVal > 0
+    const safeVal = tone === 'empty' ? 0 : Math.max(0, Math.min(maxStars, value || 0));
+    const computedAriaText =
+      ariaLabel ??
+      (safeVal > 0
         ? `Valoración: ${formatRatingDecimal(safeVal, 1)} de ${maxStars} estrellas`
-        : 'Sin calificación';
+        : 'Sin valoración');
+
+    const emptyContourClass =
+      tone === 'empty'
+        ? 'text-slate-600/80'
+        : tone === 'muted'
+        ? 'text-slate-700/85'
+        : 'text-slate-700';
+
+    const filledStarClass =
+      tone === 'muted'
+        ? 'text-amber-400/55 fill-amber-400/45'
+        : 'text-amber-400 fill-amber-400';
 
     return (
       <div
         role="img"
-        aria-label={ariaText}
+        aria-label={computedAriaText}
         className={`inline-flex items-center gap-0.5 ${className}`}
       >
         {stars.map((star) => {
           const fillRatio = Math.max(0, Math.min(1, safeVal - (star - 1)));
           return (
             <span key={star} className="relative inline-flex shrink-0">
-              <Star className={`${sizeClass} text-slate-700`} strokeWidth={2} />
+              <Star className={`${sizeClass} ${emptyContourClass}`} strokeWidth={2} />
               {fillRatio > 0 && (
                 <span
                   className="absolute inset-0 overflow-hidden"
                   style={{ width: `${Math.round(fillRatio * 100)}%` }}
                 >
-                  <Star
-                    className={`${sizeClass} text-amber-400 fill-amber-400`}
-                    strokeWidth={2}
-                  />
+                  <Star className={`${sizeClass} ${filledStarClass}`} strokeWidth={2} />
                 </span>
               )}
             </span>
@@ -157,4 +172,3 @@ export const StarRating: React.FC<StarRatingProps> = ({
     </div>
   );
 };
-

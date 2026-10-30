@@ -14,6 +14,12 @@ import {
   scheduleTerms,
 } from '../../db/schema.js';
 import { defaultReviewsStore } from '../reviews/reviews.store.js';
+import {
+  EnrollmentsService,
+  serializeEnrollment,
+} from '../enrollments/enrollments.service.js';
+
+const defaultEnrollmentsService = new EnrollmentsService(defaultReviewsStore);
 
 export async function getUserState(req: Request, res: Response): Promise<void> {
   const userId = req.user?.id;
@@ -155,12 +161,16 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
       updatedAt: p.updatedAt.getTime(),
     }));
 
+    const storedEnrollments = await defaultReviewsStore.listUserEnrollments(userId, planId);
+    const formattedEnrollments = storedEnrollments.map(serializeEnrollment);
+
     // Determinar si el usuario tiene datos guardados (para detectar si la cuenta está virgen)
     const hasSavedData =
       progressRows.length > 0 ||
       electivesRows.length > 0 ||
       basketRows.length > 0 ||
       proposals.length > 0 ||
+      formattedEnrollments.length > 0 ||
       (settingsRow !== undefined && settingsRow.tutorialCompleted);
 
     res.json({
@@ -175,6 +185,7 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
         basket: basketCodes,
         scheduleSelections: scheduleSelectionMap,
         scheduleProposals: formattedProposals,
+        enrollments: formattedEnrollments,
       },
     });
   } catch (error) {
@@ -846,9 +857,43 @@ export async function importData(req: Request, res: Response): Promise<void> {
       return { progressCount, electivesCount, basketCount, proposalsCount };
     });
 
+    let enrollmentsCount = 0;
+    if (Array.isArray(payload.enrollments)) {
+      for (const item of payload.enrollments) {
+        if (!item || typeof item !== 'object') continue;
+        const subjectRef = item.subjectCode ?? item.subjectId;
+        if (subjectRef === undefined || subjectRef === null) continue;
+        try {
+          const profNames = Array.isArray(item.professors)
+            ? item.professors
+                .map((p: any) => (typeof p === 'string' ? p : p?.displayName))
+                .filter((x: any): x is string => typeof x === 'string' && x.trim().length > 0)
+            : Array.isArray(item.professorNames)
+            ? item.professorNames
+            : undefined;
+          const profIds = Array.isArray(item.professorIds) ? item.professorIds : undefined;
+          await defaultEnrollmentsService.upsertEnrollment({
+            userId,
+            planId: user.selectedPlanId,
+            subjectIdOrCode: subjectRef,
+            commissionCode: typeof item.commissionCode === 'string' ? item.commissionCode : null,
+            academicYear: typeof item.academicYear === 'number' ? item.academicYear : null,
+            term:
+              item.term === '1C' || item.term === '2C' || item.term === 'A' ? item.term : null,
+            source: item.source === 'schedule_builder' ? 'schedule_builder' : 'manual',
+            professorIds: profIds,
+            professorNames: profNames,
+          });
+          enrollmentsCount++;
+        } catch {
+          // Ignorar cursadas individuales que no coincidan con el catálogo actual
+        }
+      }
+    }
+
     res.json({
       success: true,
-      data: counts,
+      data: { ...counts, enrollmentsCount },
     });
   } catch (error) {
     console.error('Error importing data:', error);
@@ -923,8 +968,13 @@ export async function exportData(req: Request, res: Response): Promise<void> {
       if (code !== undefined) basket.push(code);
     });
 
+    const storedEnrollments = await defaultReviewsStore.listUserEnrollments(
+      userId,
+      user.selectedPlanId
+    );
+
     const exportPayload = {
-      version: '2.1',
+      version: '2.2',
       exportDate: new Date().toISOString(),
       plan: plan?.name || 'Plan 2023 ISI UTN',
       userState,
@@ -941,6 +991,7 @@ export async function exportData(req: Request, res: Response): Promise<void> {
         : {},
       basket,
       assignedElectives,
+      enrollments: storedEnrollments.map(serializeEnrollment),
       scheduleDrafts: proposals.map((p) => ({
         id: p.id,
         name: p.name,

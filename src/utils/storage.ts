@@ -1,5 +1,6 @@
 import type { UserCareerState, AssignedElectivesByYear } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
+import type { SubjectEnrollment } from '../types/enrollment';
 import { ELECTIVES } from '../data/electives';
 
 const STORAGE_KEY_STATE = 'mi_carrera_user_state_v1';
@@ -12,6 +13,7 @@ export const STORAGE_KEY_SCHEDULE_SELECTIONS = 'mi_carrera_schedule_selections_v
 export const STORAGE_KEY_SCHEDULE_DRAFTS = 'mi_carrera_schedule_drafts_v1';
 export const STORAGE_KEY_CUSTOM_SCHEDULES = 'mi_carrera_custom_schedules_v1';
 export const STORAGE_KEY_SCHEDULE_TERM = 'mi_carrera_schedule_term_v1';
+export const STORAGE_KEY_ENROLLMENTS = 'mi_carrera_enrollments_v1';
 
 export interface AppSettings {
   includePromotionsInGPA: boolean;
@@ -347,6 +349,27 @@ export function saveScheduleTerm(term: '1C' | '2C'): void {
   }
 }
 
+export function loadEnrollments(): SubjectEnrollment[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_ENROLLMENTS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveEnrollments(enrollments: SubjectEnrollment[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY_ENROLLMENTS, JSON.stringify(enrollments));
+  } catch (e) {
+    console.error('Error saving enrollments:', e);
+  }
+}
+
 export function exportCareerToJson(
   userState: UserCareerState,
   settings: AppSettings,
@@ -357,10 +380,11 @@ export function exportCareerToJson(
     scheduleSelections?: Record<number, string>;
     customSchedules?: SubjectSchedule[];
     scheduleTerm?: '1C' | '2C';
+    enrollments?: SubjectEnrollment[];
   }
 ): string {
   const exportPayload = {
-    version: '2.1',
+    version: '2.2',
     exportDate: new Date().toISOString(),
     plan: 'Plan 2023 ISI UTN',
     userState,
@@ -371,6 +395,7 @@ export function exportCareerToJson(
     scheduleSelections: extra?.scheduleSelections || loadScheduleSelections(),
     customSchedules: extra?.customSchedules || loadCustomSchedules(),
     scheduleTerm: extra?.scheduleTerm || loadScheduleTerm(),
+    enrollments: extra?.enrollments || loadEnrollments(),
   };
   return JSON.stringify(exportPayload, null, 2);
 }
@@ -385,6 +410,7 @@ export function importCareerFromJson(jsonString: string): {
   scheduleSelections?: Record<number, string>;
   customSchedules?: SubjectSchedule[];
   scheduleTerm?: '1C' | '2C';
+  enrollments?: SubjectEnrollment[];
   error?: string;
 } {
   try {
@@ -406,6 +432,7 @@ export function importCareerFromJson(jsonString: string): {
       : {};
     const customSchedules = Array.isArray(parsed.customSchedules) ? parsed.customSchedules : null;
     const scheduleTerm = parsed.scheduleTerm === '2C' ? '2C' : '1C';
+    const enrollments = Array.isArray(parsed.enrollments) ? parsed.enrollments : undefined;
 
     saveUserState(userState);
     saveSettings(settings);
@@ -417,6 +444,9 @@ export function importCareerFromJson(jsonString: string): {
       saveCustomSchedules(customSchedules);
     }
     saveScheduleTerm(scheduleTerm);
+    if (enrollments) {
+      saveEnrollments(enrollments);
+    }
 
     return {
       success: true,
@@ -428,6 +458,7 @@ export function importCareerFromJson(jsonString: string): {
       scheduleSelections,
       customSchedules: customSchedules || undefined,
       scheduleTerm,
+      enrollments,
     };
   } catch {
     return { success: false, error: 'El archivo JSON está corrupto o mal formado.' };
@@ -444,6 +475,7 @@ export function clearCareerData(): void {
   localStorage.removeItem(STORAGE_KEY_SCHEDULE_DRAFTS);
   localStorage.removeItem(STORAGE_KEY_CUSTOM_SCHEDULES);
   localStorage.removeItem(STORAGE_KEY_SCHEDULE_TERM);
+  localStorage.removeItem(STORAGE_KEY_ENROLLMENTS);
 }
 
 /**

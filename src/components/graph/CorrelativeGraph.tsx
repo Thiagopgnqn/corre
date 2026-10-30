@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -8,19 +8,34 @@ import {
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Sparkles, X } from 'lucide-react';
+import {
+  BookOpen,
+  CheckCircle2,
+  Clock,
+  PlayCircle,
+  RotateCcw,
+  Sparkles,
+  Users,
+  X,
+} from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus } from '../../utils/correlativas';
+import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
 import { SubjectNode } from './SubjectNode';
 import { SubjectDrawer } from './SubjectDrawer';
 import type { SubjectNodeData } from './SubjectNode';
-import type { Subject } from '../../types/career';
+import type { Subject, SubjectStatus } from '../../types/career';
 
 const nodeTypes = {
   subjectNode: SubjectNode,
 };
+
+interface NodeContextMenuState {
+  subjectId: number;
+  x: number;
+  y: number;
+}
 
 export const CorrelativeGraph: React.FC = () => {
   const {
@@ -28,6 +43,8 @@ export const CorrelativeGraph: React.FC = () => {
     selectedSubjectId,
     setSelectedSubjectId,
     setStatusModalSubjectId,
+    updateSubjectStatus,
+    openEnrollmentModal,
     showElectivesInGraph,
     setShowElectivesInGraph,
     settings,
@@ -35,6 +52,21 @@ export const CorrelativeGraph: React.FC = () => {
   } = useCareer();
 
   const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<NodeContextMenuState | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeMenu = () => setContextMenu(null);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [contextMenu]);
 
   // Active focus is either hovered node or selected node
   const focusedId = hoveredNodeId ?? selectedSubjectId;
@@ -238,11 +270,24 @@ export const CorrelativeGraph: React.FC = () => {
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
+      setContextMenu(null);
       const id = Number(node.id);
       setSelectedSubjectId(selectedSubjectId === id ? null : id);
     },
     [selectedSubjectId, setSelectedSubjectId]
   );
+
+  const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
+    event.preventDefault();
+    const id = Number(node.id);
+    const maxW = typeof window !== 'undefined' ? window.innerWidth - 250 : event.clientX;
+    const maxH = typeof window !== 'undefined' ? window.innerHeight - 290 : event.clientY;
+    setContextMenu({
+      subjectId: id,
+      x: Math.max(12, Math.min(event.clientX, maxW)),
+      y: Math.max(64, Math.min(event.clientY, maxH)),
+    });
+  }, []);
 
   const onNodeMouseEnter = useCallback((_: React.MouseEvent, node: Node) => {
     setHoveredNodeId(Number(node.id));
@@ -251,6 +296,19 @@ export const CorrelativeGraph: React.FC = () => {
   const onNodeMouseLeave = useCallback(() => {
     setHoveredNodeId(null);
   }, []);
+
+  const contextSubject = contextMenu ? ALL_SUBJECTS_MAP.get(contextMenu.subjectId) : null;
+
+  const handleContextQuickStatus = (status: SubjectStatus, needsGrade = false) => {
+    if (!contextMenu) return;
+    const subId = contextMenu.subjectId;
+    setContextMenu(null);
+    if (needsGrade) {
+      setStatusModalSubjectId(subId);
+    } else {
+      updateSubjectStatus(subId, status, undefined, { source: 'map_context' });
+    }
+  };
 
   return (
     <div
@@ -311,9 +369,13 @@ export const CorrelativeGraph: React.FC = () => {
         edges={currentEdges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onNodeContextMenu={onNodeContextMenu}
         onNodeMouseEnter={onNodeMouseEnter}
         onNodeMouseLeave={onNodeMouseLeave}
-        onPaneClick={() => setSelectedSubjectId(null)}
+        onPaneClick={() => {
+          setContextMenu(null);
+          setSelectedSubjectId(null);
+        }}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         minZoom={0.2}
@@ -353,6 +415,85 @@ export const CorrelativeGraph: React.FC = () => {
           className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-xl !bottom-4 !right-4 hidden sm:block"
         />
       </ReactFlow>
+
+      {/* Menú contextual (click derecho sobre una materia en el mapa) */}
+      {contextMenu && contextSubject && (
+        <div
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+          role="menu"
+          className="fixed z-50 w-56 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 shadow-2xl py-1.5 text-xs divide-y divide-slate-800/80"
+        >
+          <div className="px-3 py-2">
+            <span className="font-mono text-[10px] text-slate-400">
+              #{contextSubject.code} · Nivel {contextSubject.level}
+            </span>
+            <p className="font-bold text-white truncate">{contextSubject.name}</p>
+          </div>
+
+          <div className="py-1">
+            <button
+              type="button"
+              onClick={() => handleContextQuickStatus('cursando')}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-cyan-300 font-semibold flex items-center gap-2 cursor-pointer"
+            >
+              <PlayCircle className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Marcar Cursando</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleContextQuickStatus('regularizada')}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-amber-300 font-semibold flex items-center gap-2 cursor-pointer"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Marcar Regularizada</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleContextQuickStatus('aprobada', true)}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-emerald-300 font-semibold flex items-center gap-2 cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Aprobada / Promocionada...</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleContextQuickStatus('disponible')}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+              <span>Restablecer pendiente</span>
+            </button>
+          </div>
+
+          <div className="py-1">
+            <button
+              type="button"
+              onClick={() => {
+                const subId = contextMenu.subjectId;
+                setContextMenu(null);
+                openEnrollmentModal(subId);
+              }}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-indigo-300 font-semibold flex items-center gap-2 cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Indicar comisión / docentes</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const subId = contextMenu.subjectId;
+                setContextMenu(null);
+                setSelectedSubjectId(subId);
+              }}
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-slate-400" />
+              <span>Abrir detalle lateral</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Drawer with details for selected node */}
       <SubjectDrawer />

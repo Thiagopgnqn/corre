@@ -5,8 +5,10 @@ import {
   careers,
   commissionProfessors,
   commissions,
+  commissionSlots,
   electiveOfferingProfessors,
   electiveOfferings,
+  enrollmentProfessors,
   faculties,
   professorAliases,
   professorReviews,
@@ -15,12 +17,15 @@ import {
   professorSubjectLinks,
   professorSubjectStats,
   reviewHelpfulVotes,
+  reviewRecommendationDismissals,
   reviewReports,
   scheduleTerms,
   studyPlans,
+  subjectEnrollments,
   subjectProgress,
   subjects,
   users,
+  userSettings,
 } from '../../db/schema.js';
 import {
   cleanDisplayName,
@@ -110,6 +115,78 @@ export interface StoredReview {
   comment: string | null;
   status: ReviewStatus;
   helpfulCount: number;
+  attendedDeclared: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export type EnrollmentSource = 'manual' | 'schedule_builder';
+export type EnrollmentTerm = '1C' | '2C' | 'A';
+
+export interface CommissionSlotBrief {
+  day: number;
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+  mode: string | null;
+}
+
+export interface SubjectCommissionOption {
+  id: string;
+  code: string;
+  turno: string;
+  termOffer: '1C' | '2C' | 'A';
+  scheduleTermId: string;
+  academicYear: number;
+  term: '1C' | '2C';
+  periodLabel: string;
+  isCurrent: boolean;
+  slots: CommissionSlotBrief[];
+  professors: Array<{
+    professorId: string;
+    displayName: string;
+  }>;
+}
+
+export interface SubjectProfessorOption {
+  professorId: string;
+  displayName: string;
+  isCurrentTerm: boolean;
+  isHistoricalLink: boolean;
+  termLabels: string[];
+}
+
+export interface CommissionEnrollmentMeta {
+  id: string;
+  subjectId: string;
+  code: string;
+  turno: string;
+  termOffer: '1C' | '2C' | 'A';
+  academicYear: number;
+  scheduleTerm: '1C' | '2C';
+  isCurrent: boolean;
+  professorIds: string[];
+}
+
+export interface StoredEnrollment {
+  id: string;
+  userId: string;
+  subjectId: string;
+  subjectCode: number;
+  subjectName: string;
+  subjectShortName: string;
+  subjectLevel: number;
+  commissionId: string | null;
+  commissionCode: string | null;
+  turno: string | null;
+  academicYear: number | null;
+  term: EnrollmentTerm | null;
+  source: EnrollmentSource;
+  professors: Array<{
+    professorId: string;
+    displayName: string;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -358,9 +435,57 @@ export interface ReviewsStore {
     targetProfessor: ProfessorEntity;
     movedCommissions: number;
     movedElectives: number;
+    movedEnrollments: number;
+    movedDismissals: number;
     movedReviews: number;
     deduplicatedReviews: number;
   }>;
+
+  // Cursadas (enrollments), recomendaciones y attended_declared
+  hasUserDeclaredAttendance(
+    userId: string,
+    professorId: string,
+    subjectUuid: string
+  ): Promise<boolean>;
+  recalculateAttendedDeclaredForUserSubject(userId: string, subjectUuid: string): Promise<void>;
+  recalculateAttendedDeclaredForProfessor(professorId: string): Promise<void>;
+
+  getSubjectEnrollmentOptions(
+    planId: string,
+    facultyId: string,
+    subjectUuid: string
+  ): Promise<{
+    commissions: SubjectCommissionOption[];
+    professors: SubjectProfessorOption[];
+  }>;
+  getCommissionForEnrollment(commissionId: string): Promise<CommissionEnrollmentMeta | null>;
+  findSubjectCommissionByCode(params: {
+    subjectUuid: string;
+    code: string;
+    academicYear?: number | null;
+    term?: string | null;
+  }): Promise<CommissionEnrollmentMeta | null>;
+  listUserEnrollments(userId: string, planId?: string | null): Promise<StoredEnrollment[]>;
+  getEnrollmentById(enrollmentId: string): Promise<StoredEnrollment | null>;
+  saveUserEnrollment(params: {
+    enrollmentId?: string | null;
+    userId: string;
+    subjectId: string;
+    commissionId: string | null;
+    academicYear: number | null;
+    term: EnrollmentTerm | null;
+    source: EnrollmentSource;
+    professorIds: string[];
+  }): Promise<StoredEnrollment>;
+  deleteUserEnrollment(
+    userId: string,
+    enrollmentId: string
+  ): Promise<{ deleted: boolean; subjectId?: string }>;
+
+  listUserDismissedRecommendations(userId: string): Promise<Set<string>>;
+  dismissRecommendation(userId: string, professorId: string, subjectUuid: string): Promise<void>;
+  getUserSeenRecommendationKeys(userId: string): Promise<Set<string>>;
+  markRecommendationsSeen(userId: string, keys: string[]): Promise<void>;
 
   listModerationQueue(): Promise<{
     openReports: AdminModerationReportItem[];
@@ -423,6 +548,15 @@ function mapDbStatsRow(row: {
   };
 }
 
+const DAY_LABELS: Record<number, string> = {
+  1: 'LUN',
+  2: 'MAR',
+  3: 'MIE',
+  4: 'JUE',
+  5: 'VIE',
+  6: 'SAB',
+};
+
 function mapDbReviewRow(r: typeof professorReviews.$inferSelect): StoredReview {
   return {
     id: r.id,
@@ -440,6 +574,7 @@ function mapDbReviewRow(r: typeof professorReviews.$inferSelect): StoredReview {
     comment: r.comment ?? null,
     status: r.status as ReviewStatus,
     helpfulCount: r.helpfulCount,
+    attendedDeclared: Boolean(r.attendedDeclared),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -1039,6 +1174,11 @@ export class DrizzleReviewsStore implements ReviewsStore {
     wouldRecommend: boolean | null;
     comment: string | null;
   }): Promise<StoredReview> {
+    const attendedDeclared = await this.hasUserDeclaredAttendance(
+      input.userId,
+      input.professorId,
+      input.subjectId
+    );
     const [inserted] = await db
       .insert(professorReviews)
       .values({
@@ -1055,6 +1195,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         wouldRecommend: input.wouldRecommend,
         comment: input.comment,
         status: 'published',
+        attendedDeclared,
       })
       .returning();
 
@@ -1076,6 +1217,19 @@ export class DrizzleReviewsStore implements ReviewsStore {
       comment: string | null;
     }
   ): Promise<StoredReview> {
+    const [existingRow] = await db
+      .select()
+      .from(professorReviews)
+      .where(eq(professorReviews.id, reviewId))
+      .limit(1);
+    const attendedDeclared = existingRow
+      ? await this.hasUserDeclaredAttendance(
+          existingRow.userId,
+          existingRow.professorId,
+          existingRow.subjectId
+        )
+      : false;
+
     const [updated] = await db
       .update(professorReviews)
       .set({
@@ -1088,6 +1242,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         difficulty: input.difficulty,
         wouldRecommend: input.wouldRecommend,
         comment: input.comment,
+        attendedDeclared,
         updatedAt: new Date(),
       })
       .where(eq(professorReviews.id, reviewId))
@@ -1403,6 +1558,46 @@ export class DrizzleReviewsStore implements ReviewsStore {
         })
         .onConflictDoNothing();
 
+      // 4B. Mover enrollment_professors sin duplicados (PK compuesta enrollment_id, professor_id)
+      const sourceEnrollProfs = await tx
+        .select()
+        .from(enrollmentProfessors)
+        .where(eq(enrollmentProfessors.professorId, source.id));
+
+      for (const ep of sourceEnrollProfs) {
+        await tx
+          .insert(enrollmentProfessors)
+          .values({
+            enrollmentId: ep.enrollmentId,
+            professorId: target.id,
+          })
+          .onConflictDoNothing();
+      }
+      await tx
+        .delete(enrollmentProfessors)
+        .where(eq(enrollmentProfessors.professorId, source.id));
+
+      // 4C. Mover review_recommendation_dismissals sin duplicados (PK compuesta user_id, professor_id, subject_id)
+      const sourceDismissals = await tx
+        .select()
+        .from(reviewRecommendationDismissals)
+        .where(eq(reviewRecommendationDismissals.professorId, source.id));
+
+      for (const dm of sourceDismissals) {
+        await tx
+          .insert(reviewRecommendationDismissals)
+          .values({
+            userId: dm.userId,
+            professorId: target.id,
+            subjectId: dm.subjectId,
+            createdAt: dm.createdAt,
+          })
+          .onConflictDoNothing();
+      }
+      await tx
+        .delete(reviewRecommendationDismissals)
+        .where(eq(reviewRecommendationDismissals.professorId, source.id));
+
       // 5. Mover reseñas cuidando unicidad (user_id, professor_id, subject_id)
       const sourceReviews = await tx
         .select()
@@ -1446,10 +1641,13 @@ export class DrizzleReviewsStore implements ReviewsStore {
         targetProfessor: freshTarget,
         movedCommissions: movedCommRows.length,
         movedElectives: movedElecRows.length,
+        movedEnrollments: sourceEnrollProfs.length,
+        movedDismissals: sourceDismissals.length,
         movedReviews,
         deduplicatedReviews,
       };
     }).then(async (res) => {
+      await this.recalculateAttendedDeclaredForProfessor(res.targetProfessor.id);
       await this.recalculateProfessorStats(res.targetProfessor.id);
       return res;
     });
@@ -1731,6 +1929,742 @@ export class DrizzleReviewsStore implements ReviewsStore {
       });
     }
   }
+
+  // ==========================================================================
+  // CURSADAS (ENROLLMENTS), ATTENDED_DECLARED Y RECOMENDACIONES
+  // ==========================================================================
+
+  private isValidUuid(val: string | null | undefined): boolean {
+    if (!val) return false;
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+  }
+
+  async hasUserDeclaredAttendance(
+    userId: string,
+    professorId: string,
+    subjectUuid: string
+  ): Promise<boolean> {
+    try {
+      const [row] = await db
+        .select({ enrollmentId: enrollmentProfessors.enrollmentId })
+        .from(enrollmentProfessors)
+        .innerJoin(subjectEnrollments, eq(enrollmentProfessors.enrollmentId, subjectEnrollments.id))
+        .where(
+          and(
+            eq(subjectEnrollments.userId, userId),
+            eq(subjectEnrollments.subjectId, subjectUuid),
+            eq(enrollmentProfessors.professorId, professorId)
+          )
+        )
+        .limit(1);
+      return Boolean(row);
+    } catch (err) {
+      if (isMissingMigrationError(err)) return false;
+      throw err;
+    }
+  }
+
+  async recalculateAttendedDeclaredForUserSubject(
+    userId: string,
+    subjectUuid: string
+  ): Promise<void> {
+    try {
+      const reviews = await db
+        .select({
+          id: professorReviews.id,
+          professorId: professorReviews.professorId,
+          attendedDeclared: professorReviews.attendedDeclared,
+        })
+        .from(professorReviews)
+        .where(
+          and(
+            eq(professorReviews.userId, userId),
+            eq(professorReviews.subjectId, subjectUuid)
+          )
+        );
+      if (reviews.length === 0) return;
+
+      const declaredRows = await db
+        .select({ professorId: enrollmentProfessors.professorId })
+        .from(enrollmentProfessors)
+        .innerJoin(subjectEnrollments, eq(enrollmentProfessors.enrollmentId, subjectEnrollments.id))
+        .where(
+          and(
+            eq(subjectEnrollments.userId, userId),
+            eq(subjectEnrollments.subjectId, subjectUuid)
+          )
+        );
+
+      const declaredSet = new Set(declaredRows.map((r) => r.professorId));
+      for (const rev of reviews) {
+        const nextVal = declaredSet.has(rev.professorId);
+        if (Boolean(rev.attendedDeclared) !== nextVal) {
+          await db
+            .update(professorReviews)
+            .set({ attendedDeclared: nextVal })
+            .where(eq(professorReviews.id, rev.id));
+        }
+      }
+    } catch (err) {
+      if (isMissingMigrationError(err)) return;
+      throw err;
+    }
+  }
+
+  async recalculateAttendedDeclaredForProfessor(professorId: string): Promise<void> {
+    try {
+      const reviews = await db
+        .select({
+          id: professorReviews.id,
+          userId: professorReviews.userId,
+          subjectId: professorReviews.subjectId,
+          attendedDeclared: professorReviews.attendedDeclared,
+        })
+        .from(professorReviews)
+        .where(eq(professorReviews.professorId, professorId));
+      if (reviews.length === 0) return;
+
+      const declaredPairs = await db
+        .select({
+          userId: subjectEnrollments.userId,
+          subjectId: subjectEnrollments.subjectId,
+        })
+        .from(enrollmentProfessors)
+        .innerJoin(subjectEnrollments, eq(enrollmentProfessors.enrollmentId, subjectEnrollments.id))
+        .where(eq(enrollmentProfessors.professorId, professorId));
+
+      const declaredKeySet = new Set(declaredPairs.map((p) => `${p.userId}::${p.subjectId}`));
+      for (const rev of reviews) {
+        const nextVal = declaredKeySet.has(`${rev.userId}::${rev.subjectId}`);
+        if (Boolean(rev.attendedDeclared) !== nextVal) {
+          await db
+            .update(professorReviews)
+            .set({ attendedDeclared: nextVal })
+            .where(eq(professorReviews.id, rev.id));
+        }
+      }
+    } catch (err) {
+      if (isMissingMigrationError(err)) return;
+      throw err;
+    }
+  }
+
+  async getSubjectEnrollmentOptions(
+    planId: string,
+    facultyId: string,
+    subjectUuid: string
+  ): Promise<{
+    commissions: SubjectCommissionOption[];
+    professors: SubjectProfessorOption[];
+  }> {
+    const commRows = await db
+      .select({
+        id: commissions.id,
+        code: commissions.code,
+        turno: commissions.turno,
+        termOffer: commissions.termOffer,
+        scheduleTermId: commissions.scheduleTermId,
+        academicYear: scheduleTerms.academicYear,
+        term: scheduleTerms.term,
+        periodLabel: scheduleTerms.label,
+        isCurrent: scheduleTerms.isCurrent,
+      })
+      .from(commissions)
+      .innerJoin(scheduleTerms, eq(commissions.scheduleTermId, scheduleTerms.id))
+      .where(eq(commissions.subjectId, subjectUuid));
+
+    const commIds = commRows.map((c) => c.id);
+    const slotsByComm = new Map<string, CommissionSlotBrief[]>();
+    const profsByComm = new Map<string, Array<{ professorId: string; displayName: string }>>();
+
+    if (commIds.length > 0) {
+      const slotRows = await db
+        .select()
+        .from(commissionSlots)
+        .where(inArray(commissionSlots.commissionId, commIds));
+      for (const sr of slotRows) {
+        const list = slotsByComm.get(sr.commissionId) || [];
+        list.push({
+          day: sr.day,
+          dayLabel: DAY_LABELS[sr.day] || String(sr.day),
+          startTime: sr.startTime,
+          endTime: sr.endTime,
+          room: sr.room ?? null,
+          mode: sr.mode ?? null,
+        });
+        slotsByComm.set(sr.commissionId, list);
+      }
+
+      const cpRows = await db
+        .select({
+          commissionId: commissionProfessors.commissionId,
+          professorId: professors.id,
+          displayName: professors.displayName,
+        })
+        .from(commissionProfessors)
+        .innerJoin(professors, eq(commissionProfessors.professorId, professors.id))
+        .where(inArray(commissionProfessors.commissionId, commIds));
+
+      for (const cp of cpRows) {
+        const list = profsByComm.get(cp.commissionId) || [];
+        if (!list.some((x) => x.professorId === cp.professorId)) {
+          list.push({ professorId: cp.professorId, displayName: cp.displayName });
+        }
+        profsByComm.set(cp.commissionId, list);
+      }
+    }
+
+    const commissionOptions: SubjectCommissionOption[] = commRows
+      .map((c) => ({
+        id: c.id,
+        code: c.code,
+        turno: c.turno,
+        termOffer: (c.termOffer as '1C' | '2C' | 'A') || (c.term as '1C' | '2C'),
+        scheduleTermId: c.scheduleTermId,
+        academicYear: c.academicYear,
+        term: c.term as '1C' | '2C',
+        periodLabel: c.periodLabel || `${c.academicYear} · ${c.term}`,
+        isCurrent: c.isCurrent,
+        slots: (slotsByComm.get(c.id) || []).sort(
+          (a, b) => a.day - b.day || a.startTime.localeCompare(b.startTime)
+        ),
+        professors: (profsByComm.get(c.id) || []).sort((a, b) =>
+          a.displayName.localeCompare(b.displayName, 'es')
+        ),
+      }))
+      .sort(
+        (a, b) =>
+          Number(b.isCurrent) - Number(a.isCurrent) ||
+          b.academicYear - a.academicYear ||
+          a.term.localeCompare(b.term) ||
+          a.code.localeCompare(b.code, 'es')
+      );
+
+    const [teachingPairs, allProfs] = await Promise.all([
+      this.getTeachingPairsForPlan(planId, facultyId),
+      this.listFacultyProfessors(facultyId),
+    ]);
+    const profMap = new Map(allProfs.map((p) => [p.id, p]));
+
+    const professorOptions: SubjectProfessorOption[] = teachingPairs
+      .filter((tp) => tp.subjectId === subjectUuid && profMap.has(tp.professorId))
+      .map((tp) => ({
+        professorId: tp.professorId,
+        displayName: profMap.get(tp.professorId)!.displayName,
+        isCurrentTerm: tp.isCurrentTerm,
+        isHistoricalLink: tp.isHistoricalLink,
+        termLabels: tp.termLabels,
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+
+    return {
+      commissions: commissionOptions,
+      professors: professorOptions,
+    };
+  }
+
+  async getCommissionForEnrollment(commissionId: string): Promise<CommissionEnrollmentMeta | null> {
+    if (!this.isValidUuid(commissionId)) return null;
+    const [row] = await db
+      .select({
+        id: commissions.id,
+        subjectId: commissions.subjectId,
+        code: commissions.code,
+        turno: commissions.turno,
+        termOffer: commissions.termOffer,
+        academicYear: scheduleTerms.academicYear,
+        scheduleTerm: scheduleTerms.term,
+        isCurrent: scheduleTerms.isCurrent,
+      })
+      .from(commissions)
+      .innerJoin(scheduleTerms, eq(commissions.scheduleTermId, scheduleTerms.id))
+      .where(eq(commissions.id, commissionId))
+      .limit(1);
+
+    if (!row) return null;
+
+    const cpRows = await db
+      .select({ professorId: commissionProfessors.professorId })
+      .from(commissionProfessors)
+      .where(eq(commissionProfessors.commissionId, row.id));
+
+    const professorIds = Array.from(
+      new Set(cpRows.map((r) => r.professorId).filter((pid): pid is string => Boolean(pid)))
+    );
+
+    return {
+      id: row.id,
+      subjectId: row.subjectId,
+      code: row.code,
+      turno: row.turno,
+      termOffer: row.termOffer as '1C' | '2C' | 'A',
+      academicYear: row.academicYear,
+      scheduleTerm: row.scheduleTerm as '1C' | '2C',
+      isCurrent: row.isCurrent,
+      professorIds,
+    };
+  }
+
+  async findSubjectCommissionByCode(params: {
+    subjectUuid: string;
+    code: string;
+    academicYear?: number | null;
+    term?: string | null;
+  }): Promise<CommissionEnrollmentMeta | null> {
+    const cleanCode = params.code.trim().toUpperCase();
+    if (!cleanCode) return null;
+
+    const rows = await db
+      .select({
+        id: commissions.id,
+        subjectId: commissions.subjectId,
+        code: commissions.code,
+        turno: commissions.turno,
+        termOffer: commissions.termOffer,
+        academicYear: scheduleTerms.academicYear,
+        scheduleTerm: scheduleTerms.term,
+        isCurrent: scheduleTerms.isCurrent,
+      })
+      .from(commissions)
+      .innerJoin(scheduleTerms, eq(commissions.scheduleTermId, scheduleTerms.id))
+      .where(eq(commissions.subjectId, params.subjectUuid));
+
+    const matching = rows.filter((r) => r.code.trim().toUpperCase() === cleanCode);
+    if (matching.length === 0) return null;
+
+    matching.sort((a, b) => {
+      const aExactPeriod =
+        (params.academicYear ? a.academicYear === params.academicYear : false) &&
+        (params.term ? a.scheduleTerm === params.term || a.termOffer === params.term : true);
+      const bExactPeriod =
+        (params.academicYear ? b.academicYear === params.academicYear : false) &&
+        (params.term ? b.scheduleTerm === params.term || b.termOffer === params.term : true);
+      if (aExactPeriod !== bExactPeriod) return Number(bExactPeriod) - Number(aExactPeriod);
+      if (a.isCurrent !== b.isCurrent) return Number(b.isCurrent) - Number(a.isCurrent);
+      return b.academicYear - a.academicYear;
+    });
+
+    const chosen = matching[0];
+    const cpRows = await db
+      .select({ professorId: commissionProfessors.professorId })
+      .from(commissionProfessors)
+      .where(eq(commissionProfessors.commissionId, chosen.id));
+
+    const professorIds = Array.from(
+      new Set(cpRows.map((r) => r.professorId).filter((pid): pid is string => Boolean(pid)))
+    );
+
+    return {
+      id: chosen.id,
+      subjectId: chosen.subjectId,
+      code: chosen.code,
+      turno: chosen.turno,
+      termOffer: chosen.termOffer as '1C' | '2C' | 'A',
+      academicYear: chosen.academicYear,
+      scheduleTerm: chosen.scheduleTerm as '1C' | '2C',
+      isCurrent: chosen.isCurrent,
+      professorIds,
+    };
+  }
+
+  private async hydrateEnrollmentRows(
+    rows: Array<typeof subjectEnrollments.$inferSelect>
+  ): Promise<StoredEnrollment[]> {
+    if (rows.length === 0) return [];
+
+    const enrollIds = rows.map((r) => r.id);
+    const subjectIds = Array.from(new Set(rows.map((r) => r.subjectId)));
+    const commIds = Array.from(
+      new Set(rows.map((r) => r.commissionId).filter((id): id is string => Boolean(id)))
+    );
+
+    const [subMap, commRows, epRows] = await Promise.all([
+      this.getSubjectsByIds(subjectIds),
+      commIds.length > 0
+        ? db
+            .select({ id: commissions.id, code: commissions.code, turno: commissions.turno })
+            .from(commissions)
+            .where(inArray(commissions.id, commIds))
+        : Promise.resolve([]),
+      db
+        .select({
+          enrollmentId: enrollmentProfessors.enrollmentId,
+          professorId: professors.id,
+          displayName: professors.displayName,
+        })
+        .from(enrollmentProfessors)
+        .innerJoin(professors, eq(enrollmentProfessors.professorId, professors.id))
+        .where(inArray(enrollmentProfessors.enrollmentId, enrollIds)),
+    ]);
+
+    const commMap = new Map(commRows.map((c) => [c.id, c]));
+    const profsByEnroll = new Map<string, Array<{ professorId: string; displayName: string }>>();
+    for (const ep of epRows) {
+      const list = profsByEnroll.get(ep.enrollmentId) || [];
+      list.push({ professorId: ep.professorId, displayName: ep.displayName });
+      profsByEnroll.set(ep.enrollmentId, list);
+    }
+
+    return rows.map((r) => {
+      const sub = subMap.get(r.subjectId);
+      const comm = r.commissionId ? commMap.get(r.commissionId) : undefined;
+      const profs = (profsByEnroll.get(r.id) || []).sort((a, b) =>
+        a.displayName.localeCompare(b.displayName, 'es')
+      );
+      return {
+        id: r.id,
+        userId: r.userId,
+        subjectId: r.subjectId,
+        subjectCode: sub?.codeInPlan || 0,
+        subjectName: sub?.name || 'Materia',
+        subjectShortName: sub?.shortName || 'Materia',
+        subjectLevel: sub?.level || 1,
+        commissionId: r.commissionId ?? null,
+        commissionCode: comm?.code ?? null,
+        turno: comm?.turno ?? null,
+        academicYear: r.academicYear ?? null,
+        term: (r.term as EnrollmentTerm | null) ?? null,
+        source: (r.source as EnrollmentSource) || 'manual',
+        professors: profs,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      };
+    });
+  }
+
+  async listUserEnrollments(userId: string, planId?: string | null): Promise<StoredEnrollment[]> {
+    try {
+      const rows = await db
+        .select()
+        .from(subjectEnrollments)
+        .where(eq(subjectEnrollments.userId, userId))
+        .orderBy(desc(subjectEnrollments.updatedAt));
+
+      let hydrated = await this.hydrateEnrollmentRows(rows);
+      if (planId) {
+        const planSubs = await this.getPlanSubjects(planId);
+        if (planSubs.length > 0) {
+          const validIds = new Set(planSubs.map((s) => s.id));
+          hydrated = hydrated.filter((e) => validIds.has(e.subjectId));
+        }
+      }
+      return hydrated;
+    } catch (err) {
+      if (isMissingMigrationError(err)) return [];
+      throw err;
+    }
+  }
+
+  async getEnrollmentById(enrollmentId: string): Promise<StoredEnrollment | null> {
+    if (!this.isValidUuid(enrollmentId)) return null;
+    try {
+      const [row] = await db
+        .select()
+        .from(subjectEnrollments)
+        .where(eq(subjectEnrollments.id, enrollmentId))
+        .limit(1);
+      if (!row) return null;
+      const [hydrated] = await this.hydrateEnrollmentRows([row]);
+      return hydrated || null;
+    } catch (err) {
+      if (isMissingMigrationError(err)) return null;
+      throw err;
+    }
+  }
+
+  async saveUserEnrollment(params: {
+    enrollmentId?: string | null;
+    userId: string;
+    subjectId: string;
+    commissionId: string | null;
+    academicYear: number | null;
+    term: EnrollmentTerm | null;
+    source: EnrollmentSource;
+    professorIds: string[];
+  }): Promise<StoredEnrollment> {
+    const uniqueProfIds = Array.from(new Set(params.professorIds));
+
+    const targetId = await db.transaction(async (tx) => {
+      const existingRows = await tx
+        .select()
+        .from(subjectEnrollments)
+        .where(
+          and(
+            eq(subjectEnrollments.userId, params.userId),
+            eq(subjectEnrollments.subjectId, params.subjectId)
+          )
+        );
+
+      const existingIds = existingRows.map((r) => r.id);
+      const profCountMap = new Map<string, number>();
+      if (existingIds.length > 0) {
+        const epRows = await tx
+          .select()
+          .from(enrollmentProfessors)
+          .where(inArray(enrollmentProfessors.enrollmentId, existingIds));
+        for (const ep of epRows) {
+          profCountMap.set(ep.enrollmentId, (profCountMap.get(ep.enrollmentId) || 0) + 1);
+        }
+      }
+
+      const isEmptyPlaceholder = (r: typeof subjectEnrollments.$inferSelect) =>
+        r.academicYear === null &&
+        r.term === null &&
+        r.commissionId === null &&
+        (profCountMap.get(r.id) || 0) === 0;
+
+      let chosenId: string | null = null;
+      let skipProfReplace = false;
+
+      if (params.enrollmentId) {
+        const target = existingRows.find((r) => r.id === params.enrollmentId);
+        if (!target) {
+          const err = new Error('Cursada no encontrada');
+          (err as any).status = 404;
+          throw err;
+        }
+        if (params.academicYear !== null && params.term !== null) {
+          const conflict = existingRows.find(
+            (r) =>
+              r.id !== params.enrollmentId &&
+              r.academicYear === params.academicYear &&
+              r.term === params.term
+          );
+          if (conflict) {
+            const err = new Error(
+              'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
+            );
+            (err as any).status = 409;
+            (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
+            throw err;
+          }
+        }
+        await tx
+          .update(subjectEnrollments)
+          .set({
+            commissionId: params.commissionId,
+            academicYear: params.academicYear,
+            term: params.term,
+            source: params.source,
+            updatedAt: new Date(),
+          })
+          .where(eq(subjectEnrollments.id, target.id));
+        chosenId = target.id;
+      } else if (params.academicYear !== null && params.term !== null) {
+        const samePeriod = existingRows.find(
+          (r) => r.academicYear === params.academicYear && r.term === params.term
+        );
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        const toUpdate = samePeriod || placeholder;
+        if (toUpdate) {
+          await tx
+            .update(subjectEnrollments)
+            .set({
+              commissionId: params.commissionId,
+              academicYear: params.academicYear,
+              term: params.term,
+              source: params.source,
+              updatedAt: new Date(),
+            })
+            .where(eq(subjectEnrollments.id, toUpdate.id));
+          chosenId = toUpdate.id;
+        } else {
+          const [inserted] = await tx
+            .insert(subjectEnrollments)
+            .values({
+              userId: params.userId,
+              subjectId: params.subjectId,
+              commissionId: params.commissionId,
+              academicYear: params.academicYear,
+              term: params.term,
+              source: params.source,
+            })
+            .returning({ id: subjectEnrollments.id });
+          chosenId = inserted.id;
+        }
+      } else if (params.commissionId === null && uniqueProfIds.length === 0) {
+        // Caso "No lo sé" sin período ni docentes: no pisar cursadas reales previas
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          await tx
+            .update(subjectEnrollments)
+            .set({ updatedAt: new Date() })
+            .where(eq(subjectEnrollments.id, placeholder.id));
+          chosenId = placeholder.id;
+          skipProfReplace = true;
+        } else if (existingRows.length > 0) {
+          chosenId = existingRows[0].id;
+          skipProfReplace = true;
+        } else {
+          const [inserted] = await tx
+            .insert(subjectEnrollments)
+            .values({
+              userId: params.userId,
+              subjectId: params.subjectId,
+              commissionId: null,
+              academicYear: null,
+              term: null,
+              source: params.source,
+            })
+            .returning({ id: subjectEnrollments.id });
+          chosenId = inserted.id;
+        }
+      } else {
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          await tx
+            .update(subjectEnrollments)
+            .set({
+              commissionId: params.commissionId,
+              academicYear: params.academicYear,
+              term: params.term,
+              source: params.source,
+              updatedAt: new Date(),
+            })
+            .where(eq(subjectEnrollments.id, placeholder.id));
+          chosenId = placeholder.id;
+        } else {
+          const [inserted] = await tx
+            .insert(subjectEnrollments)
+            .values({
+              userId: params.userId,
+              subjectId: params.subjectId,
+              commissionId: params.commissionId,
+              academicYear: params.academicYear,
+              term: params.term,
+              source: params.source,
+            })
+            .returning({ id: subjectEnrollments.id });
+          chosenId = inserted.id;
+        }
+      }
+
+      if (!skipProfReplace && chosenId) {
+        await tx
+          .delete(enrollmentProfessors)
+          .where(eq(enrollmentProfessors.enrollmentId, chosenId));
+        if (uniqueProfIds.length > 0) {
+          await tx.insert(enrollmentProfessors).values(
+            uniqueProfIds.map((pid) => ({
+              enrollmentId: chosenId!,
+              professorId: pid,
+            }))
+          );
+        }
+      }
+
+      return chosenId!;
+    });
+
+    await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+    const saved = await this.getEnrollmentById(targetId);
+    return saved!;
+  }
+
+  async deleteUserEnrollment(
+    userId: string,
+    enrollmentId: string
+  ): Promise<{ deleted: boolean; subjectId?: string }> {
+    if (!this.isValidUuid(enrollmentId)) return { deleted: false };
+    const [existing] = await db
+      .select()
+      .from(subjectEnrollments)
+      .where(and(eq(subjectEnrollments.id, enrollmentId), eq(subjectEnrollments.userId, userId)))
+      .limit(1);
+
+    if (!existing) {
+      return { deleted: false };
+    }
+
+    await db
+      .delete(subjectEnrollments)
+      .where(and(eq(subjectEnrollments.id, enrollmentId), eq(subjectEnrollments.userId, userId)));
+
+    await this.recalculateAttendedDeclaredForUserSubject(userId, existing.subjectId);
+    return { deleted: true, subjectId: existing.subjectId };
+  }
+
+  async listUserDismissedRecommendations(userId: string): Promise<Set<string>> {
+    try {
+      const rows = await db
+        .select({
+          professorId: reviewRecommendationDismissals.professorId,
+          subjectId: reviewRecommendationDismissals.subjectId,
+        })
+        .from(reviewRecommendationDismissals)
+        .where(eq(reviewRecommendationDismissals.userId, userId));
+      return new Set(rows.map((r) => `${r.professorId}::${r.subjectId}`));
+    } catch (err) {
+      if (isMissingMigrationError(err)) return new Set();
+      throw err;
+    }
+  }
+
+  async dismissRecommendation(
+    userId: string,
+    professorId: string,
+    subjectUuid: string
+  ): Promise<void> {
+    await db
+      .insert(reviewRecommendationDismissals)
+      .values({
+        userId,
+        professorId,
+        subjectId: subjectUuid,
+      })
+      .onConflictDoNothing();
+  }
+
+  async getUserSeenRecommendationKeys(userId: string): Promise<Set<string>> {
+    try {
+      const [row] = await db
+        .select({ extraSettings: userSettings.extraSettings })
+        .from(userSettings)
+        .where(eq(userSettings.userId, userId))
+        .limit(1);
+      const raw = (row?.extraSettings as Record<string, unknown> | null)?.seenRecommendationKeys;
+      if (Array.isArray(raw)) {
+        return new Set(raw.filter((x): x is string => typeof x === 'string'));
+      }
+      return new Set();
+    } catch {
+      return new Set();
+    }
+  }
+
+  async markRecommendationsSeen(userId: string, keys: string[]): Promise<void> {
+    if (keys.length === 0) return;
+    const [existing] = await db
+      .select()
+      .from(userSettings)
+      .where(eq(userSettings.userId, userId))
+      .limit(1);
+
+    const prevExtra =
+      existing?.extraSettings && typeof existing.extraSettings === 'object'
+        ? (existing.extraSettings as Record<string, unknown>)
+        : {};
+    const prevList = Array.isArray(prevExtra.seenRecommendationKeys)
+      ? prevExtra.seenRecommendationKeys.filter((x): x is string => typeof x === 'string')
+      : [];
+    const merged = Array.from(new Set([...prevList, ...keys])).slice(-500);
+    const nextExtra = {
+      ...prevExtra,
+      seenRecommendationKeys: merged,
+    };
+
+    if (existing) {
+      await db
+        .update(userSettings)
+        .set({ extraSettings: nextExtra, updatedAt: new Date() })
+        .where(eq(userSettings.userId, userId));
+    } else {
+      await db.insert(userSettings).values({
+        userId,
+        extraSettings: nextExtra,
+      });
+    }
+  }
 }
 
 // ============================================================================
@@ -1776,6 +2710,96 @@ export class InMemoryReviewsStore implements ReviewsStore {
   }> = [];
   public statsMap = new Map<string, ComputedAggregate>();
   public subjectStatsMap = new Map<string, Map<string, ComputedAggregate>>();
+  public commissionsMap = new Map<
+    string,
+    {
+      id: string;
+      subjectId: string;
+      code: string;
+      turno: string;
+      termOffer: '1C' | '2C' | 'A';
+      scheduleTermId: string;
+      academicYear: number;
+      term: '1C' | '2C';
+      periodLabel: string;
+      isCurrent: boolean;
+      slots: CommissionSlotBrief[];
+      professorIds: string[];
+    }
+  >();
+  public enrollmentsMap = new Map<
+    string,
+    {
+      id: string;
+      userId: string;
+      subjectId: string;
+      commissionId: string | null;
+      academicYear: number | null;
+      term: EnrollmentTerm | null;
+      source: EnrollmentSource;
+      professorIds: string[];
+      createdAt: Date;
+      updatedAt: Date;
+    }
+  >();
+  public dismissedRecommendations = new Map<string, Set<string>>();
+  public seenRecommendationKeys = new Map<string, Set<string>>();
+
+  seedCommission(input: {
+    id?: string;
+    subjectId: string;
+    code: string;
+    turno?: string;
+    termOffer?: '1C' | '2C' | 'A';
+    academicYear?: number;
+    term?: '1C' | '2C';
+    isCurrent?: boolean;
+    professorIds: string[];
+    slots?: Array<{
+      day: number;
+      startTime: string;
+      endTime: string;
+      room?: string | null;
+      mode?: string | null;
+    }>;
+  }) {
+    const id = input.id || crypto.randomUUID();
+    const academicYear = input.academicYear ?? 2026;
+    const term = input.term ?? '1C';
+    const isCurrent = input.isCurrent ?? true;
+    const termOffer = input.termOffer ?? term;
+    const comm = {
+      id,
+      subjectId: input.subjectId,
+      code: input.code,
+      turno: input.turno ?? 'M',
+      termOffer,
+      scheduleTermId: `${academicYear}-${term}`,
+      academicYear,
+      term,
+      periodLabel: `${academicYear} · ${term}`,
+      isCurrent,
+      slots: (input.slots || []).map((s) => ({
+        day: s.day,
+        dayLabel: DAY_LABELS[s.day] || String(s.day),
+        startTime: s.startTime,
+        endTime: s.endTime,
+        room: s.room ?? null,
+        mode: s.mode ?? null,
+      })),
+      professorIds: Array.from(new Set(input.professorIds)),
+    };
+    this.commissionsMap.set(id, comm);
+    for (const pid of comm.professorIds) {
+      this.commissionTeachings.push({
+        professorId: pid,
+        subjectId: input.subjectId,
+        termLabel: `${academicYear} ${term}`,
+        isCurrent,
+      });
+    }
+    return comm;
+  }
 
   seedSubject(input: {
     codeInPlan: number;
@@ -2093,6 +3117,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     comment: string | null;
   }): Promise<StoredReview> {
     const now = new Date();
+    const attendedDeclared = await this.hasUserDeclaredAttendance(
+      input.userId,
+      input.professorId,
+      input.subjectId
+    );
     const record: StoredReview = {
       id: crypto.randomUUID(),
       userId: input.userId,
@@ -2109,6 +3138,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
       comment: input.comment,
       status: 'published',
       helpfulCount: 0,
+      attendedDeclared,
       createdAt: now,
       updatedAt: now,
     };
@@ -2132,6 +3162,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     }
   ): Promise<StoredReview> {
     const existing = this.reviewsMap.get(reviewId)!;
+    const attendedDeclared = await this.hasUserDeclaredAttendance(
+      existing.userId,
+      existing.professorId,
+      existing.subjectId
+    );
     const updated: StoredReview = {
       ...existing,
       academicYear: input.academicYear,
@@ -2143,6 +3178,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
       difficulty: input.difficulty,
       wouldRecommend: input.wouldRecommend,
       comment: input.comment,
+      attendedDeclared,
       updatedAt: new Date(),
     };
     this.reviewsMap.set(reviewId, updated);
@@ -2320,6 +3356,13 @@ export class InMemoryReviewsStore implements ReviewsStore {
         movedCommissions++;
       }
     }
+    for (const comm of this.commissionsMap.values()) {
+      if (comm.professorIds.includes(source.id)) {
+        comm.professorIds = Array.from(
+          new Set(comm.professorIds.map((pid) => (pid === source.id ? target.id : pid)))
+        );
+      }
+    }
 
     let movedElectives = 0;
     for (const e of this.electiveTeachings) {
@@ -2358,6 +3401,30 @@ export class InMemoryReviewsStore implements ReviewsStore {
       });
     }
 
+    // Reasignar enrollment_professors sin duplicados
+    let movedEnrollments = 0;
+    for (const enr of this.enrollmentsMap.values()) {
+      if (enr.professorIds.includes(source.id)) {
+        movedEnrollments++;
+        enr.professorIds = Array.from(
+          new Set(enr.professorIds.map((pid) => (pid === source.id ? target.id : pid)))
+        );
+      }
+    }
+
+    // Reasignar review_recommendation_dismissals sin duplicados
+    let movedDismissals = 0;
+    for (const set of this.dismissedRecommendations.values()) {
+      for (const entry of Array.from(set)) {
+        const [pid, sid] = entry.split('::');
+        if (pid === source.id) {
+          set.delete(entry);
+          set.add(`${target.id}::${sid}`);
+          movedDismissals++;
+        }
+      }
+    }
+
     const targetKeys = new Set<string>();
     for (const r of this.reviewsMap.values()) {
       if (r.professorId === target.id) {
@@ -2386,12 +3453,15 @@ export class InMemoryReviewsStore implements ReviewsStore {
     this.statsMap.delete(source.id);
     this.subjectStatsMap.delete(source.id);
 
+    await this.recalculateAttendedDeclaredForProfessor(target.id);
     await this.recalculateProfessorStats(target.id);
 
     return {
       targetProfessor: target,
       movedCommissions,
       movedElectives,
+      movedEnrollments,
+      movedDismissals,
       movedReviews,
       deduplicatedReviews,
     };
@@ -2555,6 +3625,410 @@ export class InMemoryReviewsStore implements ReviewsStore {
       subMap.set(subId, computeAggregatesFromReviews(list));
     }
     this.subjectStatsMap.set(professorId, subMap);
+  }
+
+  // ==========================================================================
+  // CURSADAS (ENROLLMENTS), ATTENDED_DECLARED Y RECOMENDACIONES EN MEMORIA
+  // ==========================================================================
+
+  async hasUserDeclaredAttendance(
+    userId: string,
+    professorId: string,
+    subjectUuid: string
+  ): Promise<boolean> {
+    for (const enr of this.enrollmentsMap.values()) {
+      if (
+        enr.userId === userId &&
+        enr.subjectId === subjectUuid &&
+        enr.professorIds.includes(professorId)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async recalculateAttendedDeclaredForUserSubject(
+    userId: string,
+    subjectUuid: string
+  ): Promise<void> {
+    const declaredSet = new Set<string>();
+    for (const enr of this.enrollmentsMap.values()) {
+      if (enr.userId === userId && enr.subjectId === subjectUuid) {
+        for (const pid of enr.professorIds) declaredSet.add(pid);
+      }
+    }
+    for (const rev of this.reviewsMap.values()) {
+      if (rev.userId === userId && rev.subjectId === subjectUuid) {
+        rev.attendedDeclared = declaredSet.has(rev.professorId);
+      }
+    }
+  }
+
+  async recalculateAttendedDeclaredForProfessor(professorId: string): Promise<void> {
+    const declaredPairs = new Set<string>();
+    for (const enr of this.enrollmentsMap.values()) {
+      if (enr.professorIds.includes(professorId)) {
+        declaredPairs.add(`${enr.userId}::${enr.subjectId}`);
+      }
+    }
+    for (const rev of this.reviewsMap.values()) {
+      if (rev.professorId === professorId) {
+        rev.attendedDeclared = declaredPairs.has(`${rev.userId}::${rev.subjectId}`);
+      }
+    }
+  }
+
+  async getSubjectEnrollmentOptions(
+    planId: string,
+    facultyId: string,
+    subjectUuid: string
+  ): Promise<{
+    commissions: SubjectCommissionOption[];
+    professors: SubjectProfessorOption[];
+  }> {
+    const commissionOptions: SubjectCommissionOption[] = Array.from(this.commissionsMap.values())
+      .filter((c) => c.subjectId === subjectUuid)
+      .map((c) => ({
+        id: c.id,
+        code: c.code,
+        turno: c.turno,
+        termOffer: c.termOffer,
+        scheduleTermId: c.scheduleTermId,
+        academicYear: c.academicYear,
+        term: c.term,
+        periodLabel: c.periodLabel,
+        isCurrent: c.isCurrent,
+        slots: [...c.slots].sort(
+          (a, b) => a.day - b.day || a.startTime.localeCompare(b.startTime)
+        ),
+        professors: c.professorIds
+          .map((pid) => {
+            const p = this.professorsMap.get(pid);
+            return p ? { professorId: p.id, displayName: p.displayName } : null;
+          })
+          .filter((x): x is { professorId: string; displayName: string } => Boolean(x))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es')),
+      }))
+      .sort(
+        (a, b) =>
+          Number(b.isCurrent) - Number(a.isCurrent) ||
+          b.academicYear - a.academicYear ||
+          a.term.localeCompare(b.term) ||
+          a.code.localeCompare(b.code, 'es')
+      );
+
+    const teachingPairs = await this.getTeachingPairsForPlan(planId, facultyId);
+    const professorOptions: SubjectProfessorOption[] = teachingPairs
+      .filter((tp) => tp.subjectId === subjectUuid && this.professorsMap.has(tp.professorId))
+      .map((tp) => ({
+        professorId: tp.professorId,
+        displayName: this.professorsMap.get(tp.professorId)!.displayName,
+        isCurrentTerm: tp.isCurrentTerm,
+        isHistoricalLink: tp.isHistoricalLink,
+        termLabels: tp.termLabels,
+      }))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+
+    return {
+      commissions: commissionOptions,
+      professors: professorOptions,
+    };
+  }
+
+  async getCommissionForEnrollment(commissionId: string): Promise<CommissionEnrollmentMeta | null> {
+    const c = this.commissionsMap.get(commissionId);
+    if (!c) return null;
+    return {
+      id: c.id,
+      subjectId: c.subjectId,
+      code: c.code,
+      turno: c.turno,
+      termOffer: c.termOffer,
+      academicYear: c.academicYear,
+      scheduleTerm: c.term,
+      isCurrent: c.isCurrent,
+      professorIds: [...c.professorIds],
+    };
+  }
+
+  async findSubjectCommissionByCode(params: {
+    subjectUuid: string;
+    code: string;
+    academicYear?: number | null;
+    term?: string | null;
+  }): Promise<CommissionEnrollmentMeta | null> {
+    const cleanCode = params.code.trim().toUpperCase();
+    const matching = Array.from(this.commissionsMap.values()).filter(
+      (c) => c.subjectId === params.subjectUuid && c.code.trim().toUpperCase() === cleanCode
+    );
+    if (matching.length === 0) return null;
+
+    matching.sort((a, b) => {
+      const aExact =
+        (params.academicYear ? a.academicYear === params.academicYear : false) &&
+        (params.term ? a.term === params.term || a.termOffer === params.term : true);
+      const bExact =
+        (params.academicYear ? b.academicYear === params.academicYear : false) &&
+        (params.term ? b.term === params.term || b.termOffer === params.term : true);
+      if (aExact !== bExact) return Number(bExact) - Number(aExact);
+      if (a.isCurrent !== b.isCurrent) return Number(b.isCurrent) - Number(a.isCurrent);
+      return b.academicYear - a.academicYear;
+    });
+
+    const chosen = matching[0];
+    return {
+      id: chosen.id,
+      subjectId: chosen.subjectId,
+      code: chosen.code,
+      turno: chosen.turno,
+      termOffer: chosen.termOffer,
+      academicYear: chosen.academicYear,
+      scheduleTerm: chosen.term,
+      isCurrent: chosen.isCurrent,
+      professorIds: [...chosen.professorIds],
+    };
+  }
+
+  private hydrateInMemoryEnrollment(raw: {
+    id: string;
+    userId: string;
+    subjectId: string;
+    commissionId: string | null;
+    academicYear: number | null;
+    term: EnrollmentTerm | null;
+    source: EnrollmentSource;
+    professorIds: string[];
+    createdAt: Date;
+    updatedAt: Date;
+  }): StoredEnrollment {
+    const sub = this.subjectsMap.get(raw.subjectId);
+    const comm = raw.commissionId ? this.commissionsMap.get(raw.commissionId) : undefined;
+    const profs = raw.professorIds
+      .map((pid) => {
+        const p = this.professorsMap.get(pid);
+        return p ? { professorId: p.id, displayName: p.displayName } : null;
+      })
+      .filter((x): x is { professorId: string; displayName: string } => Boolean(x))
+      .sort((a, b) => a.displayName.localeCompare(b.displayName, 'es'));
+
+    return {
+      id: raw.id,
+      userId: raw.userId,
+      subjectId: raw.subjectId,
+      subjectCode: sub?.codeInPlan || 0,
+      subjectName: sub?.name || 'Materia',
+      subjectShortName: sub?.shortName || 'Materia',
+      subjectLevel: sub?.level || 1,
+      commissionId: raw.commissionId,
+      commissionCode: comm?.code ?? null,
+      turno: comm?.turno ?? null,
+      academicYear: raw.academicYear,
+      term: raw.term,
+      source: raw.source,
+      professors: profs,
+      createdAt: raw.createdAt,
+      updatedAt: raw.updatedAt,
+    };
+  }
+
+  async listUserEnrollments(userId: string, planId?: string | null): Promise<StoredEnrollment[]> {
+    const list = Array.from(this.enrollmentsMap.values())
+      .filter((e) => {
+        if (e.userId !== userId) return false;
+        if (planId) {
+          const sub = this.subjectsMap.get(e.subjectId);
+          if (sub && sub.planId !== planId) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+
+    return list.map((e) => this.hydrateInMemoryEnrollment(e));
+  }
+
+  async getEnrollmentById(enrollmentId: string): Promise<StoredEnrollment | null> {
+    const raw = this.enrollmentsMap.get(enrollmentId);
+    return raw ? this.hydrateInMemoryEnrollment(raw) : null;
+  }
+
+  async saveUserEnrollment(params: {
+    enrollmentId?: string | null;
+    userId: string;
+    subjectId: string;
+    commissionId: string | null;
+    academicYear: number | null;
+    term: EnrollmentTerm | null;
+    source: EnrollmentSource;
+    professorIds: string[];
+  }): Promise<StoredEnrollment> {
+    const uniqueProfIds = Array.from(new Set(params.professorIds));
+    const existingRows = Array.from(this.enrollmentsMap.values()).filter(
+      (r) => r.userId === params.userId && r.subjectId === params.subjectId
+    );
+    const isEmptyPlaceholder = (r: (typeof existingRows)[number]) =>
+      r.academicYear === null &&
+      r.term === null &&
+      r.commissionId === null &&
+      r.professorIds.length === 0;
+
+    const now = new Date();
+    let targetId: string;
+
+    if (params.enrollmentId) {
+      const target = existingRows.find((r) => r.id === params.enrollmentId);
+      if (!target) {
+        const err = new Error('Cursada no encontrada');
+        (err as any).status = 404;
+        throw err;
+      }
+      if (params.academicYear !== null && params.term !== null) {
+        const conflict = existingRows.find(
+          (r) =>
+            r.id !== params.enrollmentId &&
+            r.academicYear === params.academicYear &&
+            r.term === params.term
+        );
+        if (conflict) {
+          const err = new Error(
+            'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
+          );
+          (err as any).status = 409;
+          (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
+          throw err;
+        }
+      }
+      target.commissionId = params.commissionId;
+      target.academicYear = params.academicYear;
+      target.term = params.term;
+      target.source = params.source;
+      target.professorIds = uniqueProfIds;
+      target.updatedAt = now;
+      targetId = target.id;
+    } else if (params.academicYear !== null && params.term !== null) {
+      const samePeriod = existingRows.find(
+        (r) => r.academicYear === params.academicYear && r.term === params.term
+      );
+      if (samePeriod) {
+        const err = new Error(
+          'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
+        );
+        (err as any).status = 409;
+        (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
+        throw err;
+      }
+      const placeholder = existingRows.find(isEmptyPlaceholder);
+      if (placeholder) {
+        placeholder.commissionId = params.commissionId;
+        placeholder.academicYear = params.academicYear;
+        placeholder.term = params.term;
+        placeholder.source = params.source;
+        placeholder.professorIds = uniqueProfIds;
+        placeholder.updatedAt = now;
+        targetId = placeholder.id;
+      } else {
+        targetId = crypto.randomUUID();
+        this.enrollmentsMap.set(targetId, {
+          id: targetId,
+          userId: params.userId,
+          subjectId: params.subjectId,
+          commissionId: params.commissionId,
+          academicYear: params.academicYear,
+          term: params.term,
+          source: params.source,
+          professorIds: uniqueProfIds,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else if (params.commissionId === null && uniqueProfIds.length === 0) {
+      const placeholder = existingRows.find(isEmptyPlaceholder);
+      if (placeholder) {
+        placeholder.updatedAt = now;
+        targetId = placeholder.id;
+      } else if (existingRows.length > 0) {
+        targetId = existingRows[0].id;
+      } else {
+        targetId = crypto.randomUUID();
+        this.enrollmentsMap.set(targetId, {
+          id: targetId,
+          userId: params.userId,
+          subjectId: params.subjectId,
+          commissionId: null,
+          academicYear: null,
+          term: null,
+          source: params.source,
+          professorIds: [],
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    } else {
+      const placeholder = existingRows.find(isEmptyPlaceholder);
+      if (placeholder) {
+        placeholder.commissionId = params.commissionId;
+        placeholder.academicYear = params.academicYear;
+        placeholder.term = params.term;
+        placeholder.source = params.source;
+        placeholder.professorIds = uniqueProfIds;
+        placeholder.updatedAt = now;
+        targetId = placeholder.id;
+      } else {
+        targetId = crypto.randomUUID();
+        this.enrollmentsMap.set(targetId, {
+          id: targetId,
+          userId: params.userId,
+          subjectId: params.subjectId,
+          commissionId: params.commissionId,
+          academicYear: params.academicYear,
+          term: params.term,
+          source: params.source,
+          professorIds: uniqueProfIds,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
+    await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+    return this.hydrateInMemoryEnrollment(this.enrollmentsMap.get(targetId)!);
+  }
+
+  async deleteUserEnrollment(
+    userId: string,
+    enrollmentId: string
+  ): Promise<{ deleted: boolean; subjectId?: string }> {
+    const existing = this.enrollmentsMap.get(enrollmentId);
+    if (!existing || existing.userId !== userId) {
+      return { deleted: false };
+    }
+    this.enrollmentsMap.delete(enrollmentId);
+    await this.recalculateAttendedDeclaredForUserSubject(userId, existing.subjectId);
+    return { deleted: true, subjectId: existing.subjectId };
+  }
+
+  async listUserDismissedRecommendations(userId: string): Promise<Set<string>> {
+    return new Set(this.dismissedRecommendations.get(userId) || []);
+  }
+
+  async dismissRecommendation(
+    userId: string,
+    professorId: string,
+    subjectUuid: string
+  ): Promise<void> {
+    const set = this.dismissedRecommendations.get(userId) || new Set<string>();
+    set.add(`${professorId}::${subjectUuid}`);
+    this.dismissedRecommendations.set(userId, set);
+  }
+
+  async getUserSeenRecommendationKeys(userId: string): Promise<Set<string>> {
+    return new Set(this.seenRecommendationKeys.get(userId) || []);
+  }
+
+  async markRecommendationsSeen(userId: string, keys: string[]): Promise<void> {
+    const set = this.seenRecommendationKeys.get(userId) || new Set<string>();
+    for (const k of keys) set.add(k);
+    this.seenRecommendationKeys.set(userId, set);
   }
 }
 

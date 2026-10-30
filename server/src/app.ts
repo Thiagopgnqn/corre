@@ -18,14 +18,22 @@ import {
 } from './modules/reviews/reviews.routes.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
 import { defaultReviewsStore, ReviewsStore } from './modules/reviews/reviews.store.js';
+import { createEnrollmentsRouter } from './modules/enrollments/enrollments.routes.js';
+import {
+  dismissRecommendationBodySchema,
+  markRecommendationsSeenBodySchema,
+} from './modules/enrollments/enrollments.schemas.js';
+import { EnrollmentsService } from './modules/enrollments/enrollments.service.js';
 import { requireAuth } from './middlewares/auth.middleware.js';
 import { csrfProtection } from './middlewares/csrf.middleware.js';
+import { validate } from './middlewares/validate.middleware.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 
 export function createApp(options?: { reviewsStore?: ReviewsStore }) {
   const instance = express();
   const reviewsStore = options?.reviewsStore || defaultReviewsStore;
   const reviewsService = new ReviewsService(reviewsStore);
+  const enrollmentsService = new EnrollmentsService(reviewsStore);
 
   // Confianza total en proxies inversos encadenados (Vercel -> Render)
   // Permite que req.ip y req.protocol reflejen la IP y protocolo del cliente real
@@ -91,12 +99,50 @@ export function createApp(options?: { reviewsStore?: ReviewsStore }) {
       next(err);
     }
   });
+  instance.post(
+    '/api/me/reviewable/dismiss',
+    requireAuth,
+    csrfProtection,
+    validate({ body: dismissRecommendationBodySchema }),
+    async (req, res, next) => {
+      try {
+        const data = await reviewsService.dismissRecommendation({
+          userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
+          professorId: req.body.professorId,
+          subjectId: req.body.subjectId,
+        });
+        res.json({ success: true, data });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
+  instance.post(
+    '/api/me/reviewable/seen',
+    requireAuth,
+    csrfProtection,
+    validate({ body: markRecommendationsSeenBodySchema }),
+    async (req, res, next) => {
+      try {
+        const data = await reviewsService.markRecommendationsSeen({
+          userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
+          keys: req.body.keys,
+        });
+        res.json({ success: true, data });
+      } catch (err) {
+        next(err);
+      }
+    }
+  );
 
   // 6. Módulos de la API
   instance.use('/api/auth', authRouter);
   instance.use('/api/catalog', catalogRouter);
   instance.use('/api/professors', createProfessorsRouter(reviewsService));
   instance.use('/api/reviews', createReviewsRouter(reviewsService));
+  instance.use('/api/enrollments', createEnrollmentsRouter(enrollmentsService));
   instance.use('/api/admin', adminRouter);
   instance.use('/api/admin', createAdminReviewsRouter(reviewsService));
   instance.use('/api', userStateRouter);

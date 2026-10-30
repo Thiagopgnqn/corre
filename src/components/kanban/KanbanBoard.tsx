@@ -8,6 +8,8 @@ import {
   Clock,
   CheckCircle2,
   BookOpen,
+  Users,
+  X,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
@@ -22,6 +24,10 @@ export const KanbanBoard: React.FC = () => {
     setStatusModalSubjectId,
     setSelectedSubjectId,
     settings,
+    kanbanEnrollmentHint,
+    dismissKanbanEnrollmentHint,
+    openEnrollmentModal,
+    getSubjectEnrollments,
   } = useCareer();
 
   const [mode, setMode] = useState<'kanban' | 'levels'>('kanban');
@@ -99,7 +105,7 @@ export const KanbanBoard: React.FC = () => {
     if (targetColStatus === 'aprobada') {
       setStatusModalSubjectId(id); // Open grade selection modal
     } else {
-      updateSubjectStatus(id, targetColStatus);
+      updateSubjectStatus(id, targetColStatus, undefined, { source: 'kanban' });
     }
   };
 
@@ -163,6 +169,41 @@ export const KanbanBoard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Aviso discreto no bloqueante al soltar una tarjeta en Cursando o Regularizada */}
+      {kanbanEnrollmentHint && (
+        <div className="bg-indigo-950/40 border border-indigo-500/35 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-slate-200">
+            <Users className="w-4 h-4 text-indigo-400 shrink-0" />
+            <span>
+              Moviste <strong className="text-white">{kanbanEnrollmentHint.subjectName}</strong> a{' '}
+              <strong className="capitalize text-indigo-300">{kanbanEnrollmentHint.status}</strong>.
+              ¿Querés registrar con qué comisión y docentes la cursaste?
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() =>
+                openEnrollmentModal(kanbanEnrollmentHint.subjectCode, {
+                  targetStatus: kanbanEnrollmentHint.status,
+                })
+              }
+              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-sm transition-colors cursor-pointer"
+            >
+              Indicar comisión
+            </button>
+            <button
+              type="button"
+              onClick={dismissKanbanEnrollmentHint}
+              aria-label="Cerrar aviso"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mode 1: Kanban Board */}
       {mode === 'kanban' && (
@@ -234,6 +275,10 @@ export const KanbanBoard: React.FC = () => {
                         colSubjects.map((subject) => {
                           const status = getSubjectStatus(subject, activeState);
                           const grade = activeState[subject.id]?.grade;
+                          const hasEnrollment = getSubjectEnrollments(subject.id).length > 0;
+                          const canSuggestCommission =
+                            !hasEnrollment &&
+                            (status === 'cursando' || status === 'regularizada');
 
                           return (
                             <div
@@ -261,6 +306,23 @@ export const KanbanBoard: React.FC = () => {
                               <h4 className="font-bold text-xs sm:text-[13px] text-white leading-snug break-words group-hover:text-indigo-300 transition-colors">
                                 {subject.name}
                               </h4>
+
+                              {canSuggestCommission && (
+                                <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      openEnrollmentModal(subject.id, {
+                                        targetStatus: status,
+                                      })
+                                    }
+                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/25 text-indigo-300 flex items-center gap-1 transition-colors cursor-pointer"
+                                  >
+                                    <Users className="w-2.5 h-2.5" />
+                                    <span>Indicar comisión</span>
+                                  </button>
+                                </div>
+                              )}
 
                               <div className="flex flex-wrap items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] gap-2">
                                 <span className="text-slate-400 flex items-center gap-1 shrink-0">

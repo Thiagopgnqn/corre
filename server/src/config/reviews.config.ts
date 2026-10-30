@@ -18,10 +18,18 @@ export type AllowedReviewSubjectStatus = (typeof ALLOWED_REVIEW_SUBJECT_STATUSES
 
 /**
  * Umbral mínimo de reseñas publicadas para mostrar el promedio numérico como dato firme/confiable.
- * Con menos de este valor se muestra "Pocas reseñas" (o "Sin reseñas" si es 0),
- * aunque igualmente se muestran la cantidad y los comentarios publicados.
+ * Con menos de este valor se marca estado `'pocas_resenas'` (o `'sin_resenas'` si es 0).
  */
 export const MIN_REVIEWS_FOR_RELIABLE_AVERAGE = 3;
+
+/**
+ * Controla si en el directorio y detalle se expone el promedio numérico provisorio cuando
+ * un docente tiene entre 1 y `MIN_REVIEWS_FOR_RELIABLE_AVERAGE - 1` reseñas (`ratingStatus = 'pocas_resenas'`).
+ * - `true`: `averageOverall` incluye el promedio provisorio (se muestra en tarjetas con estrellas
+ *   atenuadas y la etiqueta `"Provisorio"`), mientras `hasReliableAverage` sigue siendo `false`.
+ * - `false`: `averageOverall` se devuelve como `null` hasta alcanzar el umbral firme de 3 reseñas.
+ */
+export const SHOW_PROVISIONAL_AVERAGE_BELOW_THRESHOLD = true;
 
 /**
  * Umbral mínimo de reseñas publicadas de un profesor para exponer el período de cursada

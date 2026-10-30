@@ -60,6 +60,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     startTutorial,
     syncStatus,
     currentPlanName,
+    unseenRecommendationsCount,
   } = useCareer();
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -169,13 +170,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
                   title={item.fullLabel}
-                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer relative ${
                     isActive
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
-                  <Icon className="w-4 h-4 shrink-0" />
+                  <div className="relative">
+                    <Icon className="w-4 h-4 shrink-0" />
+                    {item.id === 'professors' && unseenRecommendationsCount > 0 && (
+                      <span
+                        aria-label="Recomendaciones de reseñas pendientes"
+                        className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+                      />
+                    )}
+                  </div>
                   <span className="hidden min-[1500px]:inline whitespace-nowrap">{item.label}</span>
                 </button>
               );
@@ -483,13 +492,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id)}
-              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 rounded-xl text-[10px] font-semibold transition-all ${
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 px-0.5 py-1 rounded-xl text-[10px] font-semibold transition-all relative ${
                 isActive
                   ? 'text-indigo-400 font-bold bg-indigo-500/10'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+              <div className="relative">
+                <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                {item.id === 'professors' && unseenRecommendationsCount > 0 && (
+                  <span
+                    aria-label="Recomendaciones de reseñas pendientes"
+                    className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+                  />
+                )}
+              </div>
               <span className="leading-tight text-[8.5px] truncate max-w-full text-center">{item.label}</span>
             </button>
           );

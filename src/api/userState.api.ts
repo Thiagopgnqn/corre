@@ -2,6 +2,7 @@ import { apiFetch } from './client';
 import type { UserSubjectState, AssignedElectivesByYear } from '../types/career';
 import type { AppSettings } from '../utils/storage';
 import type { ScheduleDraft } from '../types/schedule';
+import type { SubjectEnrollment } from '../types/enrollment';
 
 export interface ConsolidatedUserState {
   selectedPlanId: string | null;
@@ -13,6 +14,7 @@ export interface ConsolidatedUserState {
   basket: number[];
   scheduleSelections: Record<number, string>;
   scheduleProposals: ScheduleDraft[];
+  enrollments?: SubjectEnrollment[];
 }
 
 export const userStateApi = {
@@ -91,6 +93,7 @@ export const userStateApi = {
       electivesCount: number;
       basketCount: number;
       proposalsCount: number;
+      enrollmentsCount?: number;
     };
   }> {
     return apiFetch('/api/import', {

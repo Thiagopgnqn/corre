@@ -14,6 +14,7 @@ export interface RatingDistribution {
 
 export interface ReviewsThresholdsMeta {
   minReviewsForReliableAverage: number;
+  showProvisionalAverageBelowThreshold?: boolean;
   minReviewsToShowAttendedPeriod: number;
   bayesianPriorGlobalMean: number;
   bayesianPriorWeight: number;
@@ -58,6 +59,7 @@ export interface PublicProfessorReview {
   helpfulCount: number;
   viewerHasVotedHelpful: boolean;
   viewerHasReported: boolean;
+  attendedDeclared?: boolean;
   publishedMonthYear: string;
   publishedLabel: string;
 }
@@ -130,6 +132,12 @@ export interface ReviewablePair {
   isHistoricalLink: boolean;
   alreadyReviewed: boolean;
   existingReviewId: string | null;
+  recommended?: boolean;
+  dismissed?: boolean;
+  seen?: boolean;
+  enrollmentAcademicYear?: number | null;
+  enrollmentTerm?: '1C' | '2C' | 'A' | null;
+  enrollmentCommissionCode?: string | null;
 }
 
 export interface BlockedReviewablePair {
@@ -140,6 +148,7 @@ export interface BlockedReviewablePair {
   subjectName: string;
   subjectLevel: number;
   userSubjectStatus: string;
+  recommended?: boolean;
   blockedReason: string;
 }
 
@@ -161,6 +170,7 @@ export interface OwnReviewItem {
   comment: string | null;
   status: ReviewStatus;
   helpfulCount: number;
+  attendedDeclared?: boolean;
   publishedMonthYear: string;
   publishedLabel: string;
 }
@@ -169,6 +179,8 @@ export interface ReviewableData {
   eligible: ReviewablePair[];
   blocked: BlockedReviewablePair[];
   myReviews: OwnReviewItem[];
+  recommendedPendingCount?: number;
+  unseenRecommendedCount?: number;
   allowedStatuses: string[];
   dailyLimit: {
     maxPerDay: number;

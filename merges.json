@@ -1,0 +1,62 @@
+{
+  "merges": [
+    {
+      "keep": "Botta, Oscar Ernesto",
+      "remove": "Oscar, Botta"
+    },
+    {
+      "keep": "Bett, Gustavo Federico",
+      "remove": "Bett, Gustavo"
+    },
+    {
+      "keep": "Careto, Fernando Javier",
+      "remove": "Careto, Fernando"
+    },
+    {
+      "keep": "Fermanelli, Carla Soledad",
+      "remove": "Fermanelli, Carla"
+    },
+    {
+      "keep": "Meloni, Brenda Elizabeth",
+      "remove": "Meloni, Brenda"
+    },
+    {
+      "keep": "Molina Recabarren, Francisco José",
+      "remove": "Molina Recabarren, Francisco"
+    },
+    {
+      "keep": "Rodriguez, Diego Oscar",
+      "remove": "Rodriguez, Diego"
+    },
+    {
+      "keep": "Romoli, Irene Esther",
+      "remove": "Romoli, Irene"
+    },
+    {
+      "keep": "Savorgnano, Marcela Alejandra",
+      "remove": "Savorgnano, Marcela"
+    },
+    {
+      "keep": "Perez, Ramiro Ernesto",
+      "remove": "Perez, Ramiro"
+    },
+    {
+      "keep": "Turanzas, Susana Beatriz",
+      "remove": "Turanzas, Susana"
+    },
+    {
+      "keep": "Frittelli, Valerio",
+      "remove": "Fritelli, Valerio"
+    },
+    {
+      "keep": "Rodriguez, Patricia Elizabeth",
+      "remove": "Rodriguez, Patricia Elizabet"
+    }
+  ],
+  "renames": [],
+  "inspect": [
+    "Zanatta, Valentin; Santiago",
+    "D´Agostino, José Luis"
+  ]
+}
+

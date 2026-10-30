@@ -78,6 +78,82 @@ export function formatProfessorBadgeState(
   };
 }
 
+export type CardStarTone = 'empty' | 'muted' | 'full';
+
+export interface ProfessorCardStarsState {
+  status: RatingStatus;
+  starTone: CardStarTone;
+  starValue: number;
+  averageLabel: string | null;
+  provisionalBadge: boolean;
+  countLabel: string;
+  ariaLabel: string;
+}
+
+/**
+ * Construye los tres estados visuales y accesibles de la fila de 5 estrellas
+ * siempre visible en cada tarjeta del directorio de profesores (Mejora 2):
+ * - >= 3 reseñas (`confiable`): 5 estrellas a color pleno + promedio ("4,6") + "(23 reseñas)"
+ * - 1..2 reseñas (`pocas_resenas`): 5 estrellas con relleno parcial en tono atenuado + promedio provisorio
+ *   (si está disponible) + insignia "Provisorio" + "(1 reseña)" / "(2 reseñas)"
+ * - 0 reseñas (`sin_resenas`): 5 estrellas vacías (solo contorno) + "Sin reseñas"
+ */
+export function formatProfessorCardStarsState(
+  professor: Pick<
+    ProfessorBatchRating,
+    'reviewCount' | 'hasReliableAverage' | 'ratingStatus' | 'averageOverall'
+  > | null | undefined,
+  options?: { showProvisionalAverage?: boolean }
+): ProfessorCardStarsState {
+  const showProvisional = options?.showProvisionalAverage ?? true;
+
+  if (!professor || professor.reviewCount <= 0 || professor.ratingStatus === 'sin_resenas') {
+    return {
+      status: 'sin_resenas',
+      starTone: 'empty',
+      starValue: 0,
+      averageLabel: null,
+      provisionalBadge: false,
+      countLabel: 'Sin reseñas',
+      ariaLabel: 'Sin valoración',
+    };
+  }
+
+  const countNoun = professor.reviewCount === 1 ? 'reseña' : 'reseñas';
+
+  if (professor.hasReliableAverage && professor.averageOverall !== null) {
+    const formattedAvg = formatRatingDecimal(professor.averageOverall, 1);
+    return {
+      status: 'confiable',
+      starTone: 'full',
+      starValue: professor.averageOverall,
+      averageLabel: formattedAvg,
+      provisionalBadge: false,
+      countLabel: `(${professor.reviewCount} ${countNoun})`,
+      ariaLabel: `Valoración ${formattedAvg} de 5, ${professor.reviewCount} ${countNoun}`,
+    };
+  }
+
+  // 1 o 2 reseñas (bajo el umbral confiable)
+  const hasProvisionalNum = showProvisional && professor.averageOverall !== null;
+  const formattedProv =
+    hasProvisionalNum && professor.averageOverall !== null
+      ? formatRatingDecimal(professor.averageOverall, 1)
+      : null;
+
+  return {
+    status: 'pocas_resenas',
+    starTone: 'muted',
+    starValue: hasProvisionalNum && professor.averageOverall !== null ? professor.averageOverall : 0,
+    averageLabel: formattedProv,
+    provisionalBadge: true,
+    countLabel: `(${professor.reviewCount} ${countNoun})`,
+    ariaLabel: formattedProv
+      ? `Valoración provisoria ${formattedProv} de 5, ${professor.reviewCount} ${countNoun}`
+      : `Valoración provisoria, ${professor.reviewCount} ${countNoun}`,
+  };
+}
+
 export type ProfessorRatingResolver = (ref: {
   id?: string | null;
   name: string;

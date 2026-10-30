@@ -8,6 +8,13 @@ import type {
   AssignedElectivesByYear,
 } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
+import type {
+  EnrollmentTerm,
+  PendingCommissionPrompt,
+  PendingReviewPromptItem,
+  SubjectEnrollment,
+  UpsertEnrollmentInput,
+} from '../types/enrollment';
 import { DEFAULT_SCHEDULES, SAMPLE_SCHEDULES } from '../data/schedule';
 import { CORE_SUBJECTS } from '../data/plan2023';
 import {
@@ -23,7 +30,13 @@ import {
   isPPSEligible,
   getNewlyUnlockedOnStateChange,
   calculateProgressBreakdown,
+  ALL_SUBJECTS_MAP,
 } from '../utils/correlativas';
+import {
+  evaluateCommissionPromptOnStatusChange,
+  getReviewPromptsOnRegularizeTransition,
+  type StatusChangeTriggerSource,
+} from '../utils/enrollmentLogic';
 import { calculateCriticalPath } from '../utils/criticalPath';
 import { soundManager } from '../utils/audio';
 import { fireConfetti } from '../utils/confetti';
@@ -51,11 +64,30 @@ import {
   clearCustomSchedules,
   loadScheduleTerm,
   saveScheduleTerm,
+  loadEnrollments,
+  saveEnrollments,
 } from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { userStateApi } from '../api/userState.api';
 import { catalogApi } from '../api/catalog.api';
+import { enrollmentsApi } from '../api/enrollments.api';
+import { professorsApi } from '../api/professors.api';
 import type { SyncStatus } from '../components/common/SyncStatusBadge';
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface GlobalReviewModalTarget {
+  professorId: string;
+  subjectId?: string | null;
+  academicYear?: number | null;
+  term?: EnrollmentTerm | null;
+}
+
+export interface KanbanEnrollmentHint {
+  subjectCode: number;
+  subjectName: string;
+  status: SubjectStatus;
+}
 
 interface CareerContextType {
   userState: UserCareerState;
@@ -66,7 +98,12 @@ interface CareerContextType {
   applySimulation: () => void;
   resetSimulation: () => void;
 
-  updateSubjectStatus: (id: number, status: SubjectStatus, grade?: number) => void;
+  updateSubjectStatus: (
+    id: number,
+    status: SubjectStatus,
+    grade?: number,
+    options?: { source?: StatusChangeTriggerSource }
+  ) => void;
   batchUpdateStatus: (updates: Array<{ id: number; status: SubjectStatus; grade?: number }>) => void;
 
   assignedElectives: AssignedElectivesByYear;
@@ -130,6 +167,41 @@ interface CareerContextType {
   setScheduleTerm: (term: '1C' | '2C') => void;
   applyScheduleToEnrolled: () => { success: boolean; enrolledCount: number };
 
+  // Enrollments ("Mi cursada") & Review Recommendations
+  enrollments: SubjectEnrollment[];
+  getSubjectEnrollments: (subjectCode: number) => SubjectEnrollment[];
+  saveSubjectEnrollment: (
+    subjectCode: number,
+    input: UpsertEnrollmentInput
+  ) => Promise<SubjectEnrollment>;
+  deleteSubjectEnrollment: (enrollmentId: string) => Promise<void>;
+  pendingCommissionPrompt: PendingCommissionPrompt | null;
+  setPendingCommissionPrompt: (prompt: PendingCommissionPrompt | null) => void;
+  openEnrollmentModal: (
+    subjectCode: number,
+    options?: {
+      targetStatus?: SubjectStatus;
+      editingEnrollment?: SubjectEnrollment | null;
+    }
+  ) => void;
+  kanbanEnrollmentHint: KanbanEnrollmentHint | null;
+  dismissKanbanEnrollmentHint: () => void;
+  pendingReviewPrompts: PendingReviewPromptItem[];
+  dismissPendingReviewPrompt: (
+    item: PendingReviewPromptItem,
+    persistInAccount?: boolean
+  ) => Promise<void>;
+  unseenRecommendationsCount: number;
+  refreshReviewableSummary: () => Promise<void>;
+  markReviewRecommendationsSeen: (keys?: string[]) => Promise<void>;
+  dismissReviewRecommendation: (
+    professorId: string,
+    subjectId: string | number
+  ) => Promise<void>;
+  globalReviewModalTarget: GlobalReviewModalTarget | null;
+  openGlobalReviewModal: (target: GlobalReviewModalTarget) => void;
+  closeGlobalReviewModal: () => void;
+
   exportData: () => string;
   importData: (json: string) => { success: boolean; error?: string };
   resetAll: () => void;
@@ -166,6 +238,20 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(() => loadCustomSchedules());
   const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>(() => loadScheduleTerm());
 
+  // Enrollments & Recommendations state
+  const [enrollments, setEnrollments] = useState<SubjectEnrollment[]>(() => loadEnrollments());
+  const [pendingCommissionPrompt, setPendingCommissionPrompt] =
+    useState<PendingCommissionPrompt | null>(null);
+  const [kanbanEnrollmentHint, setKanbanEnrollmentHint] =
+    useState<KanbanEnrollmentHint | null>(null);
+  const [pendingReviewPrompts, setPendingReviewPrompts] = useState<PendingReviewPromptItem[]>([]);
+  const [unseenRecommendationsCount, setUnseenRecommendationsCount] = useState<number>(0);
+  const [globalReviewModalTarget, setGlobalReviewModalTarget] =
+    useState<GlobalReviewModalTarget | null>(null);
+
+  const reviewedPairsRef = useRef<Set<string>>(new Set());
+  const dismissedPairsRef = useRef<Set<string>>(new Set());
+
   // Full Stack sync state
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('saved');
   const [showMigrationModal, setShowMigrationModal] = useState<boolean>(false);
@@ -173,6 +259,33 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const hasHydratedRef = useRef(false);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const refreshReviewableSummary = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const res = await professorsApi.getReviewable();
+      if (res.success && res.data) {
+        const reviewedSet = new Set<string>();
+        const dismissedSet = new Set<string>();
+        for (const rev of res.data.myReviews) {
+          reviewedSet.add(`${rev.professorId}::${rev.subjectId}`);
+        }
+        for (const pair of res.data.eligible) {
+          if (pair.alreadyReviewed) {
+            reviewedSet.add(`${pair.professorId}::${pair.subjectId}`);
+          }
+          if (pair.dismissed) {
+            dismissedSet.add(`${pair.professorId}::${pair.subjectId}`);
+          }
+        }
+        reviewedPairsRef.current = reviewedSet;
+        dismissedPairsRef.current = dismissedSet;
+        setUnseenRecommendationsCount(res.data.unseenRecommendedCount ?? 0);
+      }
+    } catch {
+      // Silencioso en caso offline
+    }
+  }, [isAuthenticated]);
 
   // Load server state when authenticated
   const reloadServerState = useCallback(async () => {
@@ -199,6 +312,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (d.scheduleProposals) {
           setScheduleDrafts(d.scheduleProposals);
         }
+        if (Array.isArray(d.enrollments)) {
+          setEnrollments(d.enrollments);
+        }
 
         // Si la cuenta en la nube es virgen pero el navegador tiene datos locales
         const localState = loadUserState();
@@ -215,17 +331,21 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (schedRes?.success && schedRes.data?.schedule && schedRes.data.schedule.length > 0) {
         setCustomSchedules(schedRes.data.schedule);
       }
+
+      // 4. Cargar resumen de recomendaciones de reseñas
+      await refreshReviewableSummary();
     } catch (e) {
       console.error('Error hydrating from server:', e);
       setSyncStatus('offline');
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshReviewableSummary]);
 
   useEffect(() => {
     if (isAuthenticated) {
       reloadServerState();
     } else {
       hasHydratedRef.current = false;
+      setUnseenRecommendationsCount(0);
     }
   }, [isAuthenticated, reloadServerState]);
 
@@ -285,8 +405,148 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     saveScheduleTerm(scheduleTerm);
   }, [scheduleTerm]);
 
+  useEffect(() => {
+    saveEnrollments(enrollments);
+  }, [enrollments]);
+
   const isSimulationMode = simulationState !== null;
   const activeState = simulationState ?? userState;
+
+  const getSubjectEnrollments = useCallback(
+    (subjectCode: number): SubjectEnrollment[] => {
+      return enrollments.filter((enr) => enr.subjectCode === subjectCode);
+    },
+    [enrollments]
+  );
+
+  const openEnrollmentModal = useCallback(
+    (
+      subjectCode: number,
+      options?: {
+        targetStatus?: SubjectStatus;
+        editingEnrollment?: SubjectEnrollment | null;
+      }
+    ) => {
+      const sub = ALL_SUBJECTS_MAP.get(subjectCode);
+      const currentStatus =
+        options?.targetStatus ||
+        (sub ? getSubjectStatus(sub, activeState) : 'cursando');
+      setPendingCommissionPrompt({
+        subjectCode,
+        subjectName: sub?.name || `Materia #${subjectCode}`,
+        targetStatus: currentStatus,
+        editingEnrollment: options?.editingEnrollment ?? null,
+      });
+      setKanbanEnrollmentHint(null);
+    },
+    [activeState]
+  );
+
+  const dismissKanbanEnrollmentHint = useCallback(() => {
+    setKanbanEnrollmentHint(null);
+  }, []);
+
+  const saveSubjectEnrollment = useCallback(
+    async (
+      subjectCode: number,
+      input: UpsertEnrollmentInput
+    ): Promise<SubjectEnrollment> => {
+      setSyncStatus('saving');
+      try {
+        const res = await enrollmentsApi.upsertEnrollment(subjectCode, input);
+        const saved = res.data;
+        setEnrollments((prev) => {
+          const filtered = prev.filter((e) => e.id !== saved.id);
+          return [saved, ...filtered];
+        });
+        setSyncStatus('saved');
+        await refreshReviewableSummary();
+        return saved;
+      } catch (err) {
+        setSyncStatus('error');
+        throw err;
+      }
+    },
+    [refreshReviewableSummary]
+  );
+
+  const deleteSubjectEnrollment = useCallback(
+    async (enrollmentId: string): Promise<void> => {
+      setSyncStatus('saving');
+      try {
+        await enrollmentsApi.deleteEnrollment(enrollmentId);
+        setEnrollments((prev) => prev.filter((e) => e.id !== enrollmentId));
+        setSyncStatus('saved');
+        await refreshReviewableSummary();
+      } catch (err) {
+        setSyncStatus('error');
+        throw err;
+      }
+    },
+    [refreshReviewableSummary]
+  );
+
+  const dismissReviewRecommendation = useCallback(
+    async (professorId: string, subjectId: string | number): Promise<void> => {
+      await professorsApi.dismissRecommendation({ professorId, subjectId });
+      dismissedPairsRef.current.add(`${professorId}::${subjectId}`);
+      setPendingReviewPrompts((prev) =>
+        prev.filter(
+          (p) =>
+            !(
+              p.professorId === professorId &&
+              (p.subjectId === String(subjectId) || p.subjectCode === Number(subjectId))
+            )
+        )
+      );
+      await refreshReviewableSummary();
+    },
+    [refreshReviewableSummary]
+  );
+
+  const dismissPendingReviewPrompt = useCallback(
+    async (item: PendingReviewPromptItem, persistInAccount = false): Promise<void> => {
+      setPendingReviewPrompts((prev) =>
+        prev.filter(
+          (p) => !(p.professorId === item.professorId && p.subjectId === item.subjectId)
+        )
+      );
+      if (persistInAccount && isAuthenticated) {
+        try {
+          await professorsApi.dismissRecommendation({
+            professorId: item.professorId,
+            subjectId: item.subjectId,
+          });
+          dismissedPairsRef.current.add(`${item.professorId}::${item.subjectId}`);
+          await refreshReviewableSummary();
+        } catch {
+          // Silencioso
+        }
+      }
+    },
+    [isAuthenticated, refreshReviewableSummary]
+  );
+
+  const markReviewRecommendationsSeen = useCallback(
+    async (keys?: string[]): Promise<void> => {
+      if (!isAuthenticated) return;
+      setUnseenRecommendationsCount(0);
+      try {
+        await professorsApi.markRecommendationsSeen(keys);
+      } catch {
+        // Silencioso
+      }
+    },
+    [isAuthenticated]
+  );
+
+  const openGlobalReviewModal = useCallback((target: GlobalReviewModalTarget) => {
+    setGlobalReviewModalTarget(target);
+  }, []);
+
+  const closeGlobalReviewModal = useCallback(() => {
+    setGlobalReviewModalTarget(null);
+  }, []);
 
   const simulationChangedCount = useMemo(() => {
     if (!simulationState) return 0;
@@ -323,11 +583,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setSyncStatus('saving');
         userStateApi
           .importLegacyData({ userState: simulationState })
-          .then(() => setSyncStatus('saved'))
+          .then(() => {
+            setSyncStatus('saved');
+            refreshReviewableSummary();
+          })
           .catch(() => setSyncStatus('error'));
       }
     }
-  }, [simulationState, isAuthenticated]);
+  }, [simulationState, isAuthenticated, refreshReviewableSummary]);
 
   const resetSimulation = useCallback(() => {
     setSimulationState({ ...userState });
@@ -335,9 +598,18 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [userState]);
 
   const updateSubjectStatus = useCallback(
-    (id: number, status: SubjectStatus, grade?: number) => {
+    (
+      id: number,
+      status: SubjectStatus,
+      grade?: number,
+      options?: { source?: StatusChangeTriggerSource }
+    ) => {
       const targetState = isSimulationMode ? simulationState! : userState;
       const prevSubState = targetState[id];
+      const subjectObj = ALL_SUBJECTS_MAP.get(id);
+      const prevStatus = subjectObj
+        ? getSubjectStatus(subjectObj, targetState)
+        : prevSubState?.status;
 
       // Check if newly unlocked subjects appear
       const newlyUnlocked = getNewlyUnlockedOnStateChange(id, status, targetState);
@@ -350,7 +622,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       };
 
       if (status === 'bloqueada' || status === 'disponible') {
-        // If resetting back to pending, clear grade
+        // Si vuelve a pendiente, limpiar la nota (las cursadas registradas no se borran automáticamente)
         delete nextSubjectState.grade;
       }
 
@@ -364,18 +636,70 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } else {
         setUserState(nextTargetState);
 
-        // Sync debounced to backend
+        // Sincronizar estado al backend inmediatamente para que elegibilidad y recomendaciones estén al día
         if (isAuthenticated && hasHydratedRef.current) {
           setSyncStatus('saving');
           if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-          syncTimeoutRef.current = setTimeout(async () => {
-            try {
-              await userStateApi.updateProgress(id, status, nextSubjectState.grade);
+          userStateApi
+            .updateProgress(id, status, nextSubjectState.grade)
+            .then(() => {
               setSyncStatus('saved');
-            } catch {
+              refreshReviewableSummary();
+            })
+            .catch(() => {
               setSyncStatus('error');
-            }
-          }, 400);
+            });
+        }
+
+        // Paso opcional de comisión o aviso de reseñas al regularizar/aprobar (fuera del tutorial)
+        if (!isTutorialOpen) {
+          const subjectEnrollments = enrollments.filter((enr) => enr.subjectCode === id);
+          const source = options?.source ?? 'status_change';
+
+          const promptDecision = evaluateCommissionPromptOnStatusChange({
+            prevStatus,
+            nextStatus: status,
+            existingSubjectEnrollments: subjectEnrollments,
+            isSimulationMode: false,
+            source,
+          });
+
+          if (promptDecision.shouldOpenModal) {
+            setPendingCommissionPrompt({
+              subjectCode: id,
+              subjectName: subjectObj?.name || `Materia #${id}`,
+              targetStatus: status,
+              editingEnrollment: null,
+            });
+            setKanbanEnrollmentHint(null);
+          } else if (promptDecision.shouldShowKanbanHint) {
+            setKanbanEnrollmentHint({
+              subjectCode: id,
+              subjectName: subjectObj?.name || `Materia #${id}`,
+              status,
+            });
+          }
+
+          // Aviso discreto al pasar de cursando -> regularizada / aprobada / promocionada
+          const reviewPrompts = getReviewPromptsOnRegularizeTransition({
+            prevStatus,
+            nextStatus: status,
+            existingSubjectEnrollments: subjectEnrollments,
+            reviewedPairKeys: reviewedPairsRef.current,
+            dismissedPairKeys: dismissedPairsRef.current,
+          });
+
+          if (reviewPrompts.length > 0) {
+            setPendingReviewPrompts((prev) => {
+              const existingKeys = new Set(
+                prev.map((p) => `${p.professorId}::${p.subjectId}`)
+              );
+              const additions = reviewPrompts.filter(
+                (p) => !existingKeys.has(`${p.professorId}::${p.subjectId}`)
+              );
+              return [...additions, ...prev];
+            });
+          }
         }
       }
 
@@ -389,7 +713,15 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         soundManager.playClick();
       }
     },
-    [isSimulationMode, simulationState, userState, isAuthenticated]
+    [
+      isSimulationMode,
+      simulationState,
+      userState,
+      isAuthenticated,
+      isTutorialOpen,
+      enrollments,
+      refreshReviewableSummary,
+    ]
   );
 
   const batchUpdateStatus = useCallback(
@@ -413,14 +745,17 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setSyncStatus('saving');
           userStateApi
             .importLegacyData({ userState: targetState })
-            .then(() => setSyncStatus('saved'))
+            .then(() => {
+              setSyncStatus('saved');
+              refreshReviewableSummary();
+            })
             .catch(() => setSyncStatus('error'));
         }
       }
       soundManager.playApproval();
       fireConfetti();
     },
-    [isSimulationMode, simulationState, userState, isAuthenticated]
+    [isSimulationMode, simulationState, userState, isAuthenticated, refreshReviewableSummary]
   );
 
   // Elective assignment handlers (strictly prevent duplication across years)
@@ -847,8 +1182,74 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       batchUpdateStatus(updates);
     }
 
+    // Guardar automáticamente cada comisión seleccionada y sus profesores como cursada (source = 'schedule_builder')
+    if (isAuthenticated && !isSimulationMode) {
+      const schedulesBySubject = new Map<number, SubjectSchedule>();
+      activeSchedules.forEach((s) => schedulesBySubject.set(Number(s.subjectId), s));
+      const currentYear = new Date().getFullYear();
+
+      const enrollmentPromises = updates.map(async ({ id }) => {
+        const commKey = scheduleSelections[id];
+        const sched = schedulesBySubject.get(id);
+        const comm = sched?.commissions.find((c) => c.id === commKey);
+        if (!comm) return null;
+
+        const isCommissionUuid = UUID_REGEX.test(comm.id);
+        const refProfUuids = (comm.professorRefs || [])
+          .map((r) => r.id)
+          .filter((pid): pid is string => Boolean(pid && UUID_REGEX.test(pid)));
+        const subjectObj = ALL_SUBJECTS_MAP.get(id);
+        const effectiveTerm: EnrollmentTerm =
+          subjectObj?.modality === 'A' ? 'A' : scheduleTerm;
+
+        const payload: UpsertEnrollmentInput = isCommissionUuid
+          ? {
+              commissionId: comm.id,
+              source: 'schedule_builder',
+            }
+          : {
+              commissionCode: comm.code,
+              academicYear: currentYear,
+              term: effectiveTerm,
+              ...(refProfUuids.length > 0
+                ? { professorIds: refProfUuids }
+                : { professorNames: comm.professors }),
+              source: 'schedule_builder',
+            };
+
+        try {
+          const res = await enrollmentsApi.upsertEnrollment(id, payload);
+          return res.data;
+        } catch {
+          return null;
+        }
+      });
+
+      Promise.all(enrollmentPromises)
+        .then((savedList) => {
+          const validSaved = savedList.filter((item): item is SubjectEnrollment => Boolean(item));
+          if (validSaved.length > 0) {
+            setEnrollments((prev) => {
+              const savedIds = new Set(validSaved.map((s) => s.id));
+              return [...validSaved, ...prev.filter((p) => !savedIds.has(p.id))];
+            });
+            refreshReviewableSummary();
+          }
+        })
+        .catch(() => {});
+    }
+
     return { success: true, enrolledCount: updates.length };
-  }, [scheduleSelections, userState, batchUpdateStatus]);
+  }, [
+    scheduleSelections,
+    userState,
+    batchUpdateStatus,
+    isAuthenticated,
+    isSimulationMode,
+    activeSchedules,
+    scheduleTerm,
+    refreshReviewableSummary,
+  ]);
 
   const exportData = useCallback((): string => {
     return exportCareerToJson(userState, settings, semesterBasket, assignedElectives, {
@@ -856,8 +1257,19 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       scheduleSelections,
       customSchedules: customSchedules || undefined,
       scheduleTerm,
+      enrollments,
     });
-  }, [userState, settings, semesterBasket, assignedElectives, scheduleDrafts, scheduleSelections, customSchedules, scheduleTerm]);
+  }, [
+    userState,
+    settings,
+    semesterBasket,
+    assignedElectives,
+    scheduleDrafts,
+    scheduleSelections,
+    customSchedules,
+    scheduleTerm,
+    enrollments,
+  ]);
 
   const importData = useCallback(
     (json: string): { success: boolean; error?: string } => {
@@ -871,6 +1283,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (result.scheduleSelections) setScheduleSelections(result.scheduleSelections);
         if (result.customSchedules) setCustomSchedules(result.customSchedules);
         if (result.scheduleTerm) setScheduleTerm(result.scheduleTerm);
+        if (result.enrollments) setEnrollments(result.enrollments);
 
         // Si está autenticado, sincronizar a Neon en una sola transacción
         if (isAuthenticated) {
@@ -879,7 +1292,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             const parsed = JSON.parse(json);
             userStateApi
               .importLegacyData(parsed)
-              .then(() => setSyncStatus('saved'))
+              .then(() => {
+                setSyncStatus('saved');
+                reloadServerState();
+              })
               .catch(() => setSyncStatus('error'));
           } catch {
             // Ignorar
@@ -892,7 +1308,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       return { success: false, error: result.error };
     },
-    [isAuthenticated]
+    [isAuthenticated, reloadServerState]
   );
 
   const resetAll = useCallback(() => {
@@ -903,13 +1319,19 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setScheduleSelections({});
     setScheduleDrafts([]);
     setCustomSchedules(null);
+    setEnrollments([]);
     setSettings(loadSettings());
     soundManager.playClick();
 
     if (isAuthenticated) {
       setSyncStatus('saving');
       userStateApi
-        .importLegacyData({ userState: {}, basket: [], assignedElectives: { 1: [], 2: [], 3: [], 4: [], 5: [] }, scheduleSelections: {} })
+        .importLegacyData({
+          userState: {},
+          basket: [],
+          assignedElectives: { 1: [], 2: [], 3: [], 4: [], 5: [] },
+          scheduleSelections: {},
+        })
         .then(() => setSyncStatus('saved'))
         .catch(() => setSyncStatus('error'));
     }
@@ -927,10 +1349,13 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setSyncStatus('saving');
       userStateApi
         .importLegacyData(sample)
-        .then(() => setSyncStatus('saved'))
+        .then(() => {
+          setSyncStatus('saved');
+          refreshReviewableSummary();
+        })
         .catch(() => setSyncStatus('error'));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshReviewableSummary]);
 
   // Interactive Tour controls
   const startTutorial = useCallback((fromStep: number = 0) => {
@@ -940,11 +1365,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     soundManager.playClick();
   }, [userState]);
 
-  const closeTutorial = useCallback((_options?: { openOnboarding?: boolean }) => {
+  const closeTutorial = useCallback((options?: { openOnboarding?: boolean }) => {
     setIsTutorialOpen(false);
     if (realUserStateBackupRef.current !== null) {
       setUserState(realUserStateBackupRef.current);
       realUserStateBackupRef.current = null;
+    }
+    if (options?.openOnboarding) {
+      setIsOnboardingOpen(true);
     }
     soundManager.playClick();
   }, []);
@@ -1044,6 +1472,24 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         scheduleTerm,
         setScheduleTerm,
         applyScheduleToEnrolled,
+        enrollments,
+        getSubjectEnrollments,
+        saveSubjectEnrollment,
+        deleteSubjectEnrollment,
+        pendingCommissionPrompt,
+        setPendingCommissionPrompt,
+        openEnrollmentModal,
+        kanbanEnrollmentHint,
+        dismissKanbanEnrollmentHint,
+        pendingReviewPrompts,
+        dismissPendingReviewPrompt,
+        unseenRecommendationsCount,
+        refreshReviewableSummary,
+        markReviewRecommendationsSeen,
+        dismissReviewRecommendation,
+        globalReviewModalTarget,
+        openGlobalReviewModal,
+        closeGlobalReviewModal,
         exportData,
         importData,
         resetAll,

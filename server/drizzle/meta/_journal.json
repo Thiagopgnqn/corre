@@ -15,6 +15,13 @@
       "when": 1793325492197,
       "tag": "0001_professor_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793393024769,
+      "tag": "0002_enrollments_and_declared_reviews",
+      "breakpoints": true
     }
   ]
 }

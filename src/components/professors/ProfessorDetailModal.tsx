@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
+  UserCheck,
   X,
 } from 'lucide-react';
 import { professorsApi } from '../../api/professors.api';
@@ -22,7 +23,10 @@ import type {
   PublicProfessorReview,
   ReviewsThresholdsMeta,
 } from '../../types/professor';
-import { formatRatingDecimal } from '../../utils/professorRatingsLogic';
+import {
+  formatProfessorCardStarsState,
+  formatRatingDecimal,
+} from '../../utils/professorRatingsLogic';
 import { StarRating } from './StarRating';
 import { ReportReviewModal } from './ReportReviewModal';
 
@@ -264,46 +268,90 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
                 <>
                   {/* Panel superior: Puntaje + Histograma + Submétricas */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 bg-slate-950/60 border border-slate-800 rounded-2xl p-4">
-                    {/* Columna 1: Promedio general */}
+                    {/* Columna 1: Promedio general (coherente con los 3 estados de estrellas del directorio) */}
                     <div className="lg:col-span-4 flex flex-col justify-center items-center text-center p-3 rounded-xl bg-slate-900/70 border border-slate-800/80 space-y-2">
-                      {professor.hasReliableAverage && professor.averageOverall !== null ? (
-                        <>
-                          <div className="text-4xl font-black text-amber-300 tracking-tight leading-none">
-                            {formatRatingDecimal(professor.averageOverall, 1)}
-                          </div>
-                          <StarRating value={professor.averageOverall} readOnly size="md" />
-                          <p className="text-xs text-slate-300 font-semibold">
-                            Basado en {professor.reviewCount} reseñas
-                          </p>
-                          {professor.recommendPercent !== null && (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
-                              <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>{Math.round(professor.recommendPercent)}% lo recomienda</span>
+                      {(() => {
+                        const detailStars = formatProfessorCardStarsState(professor, {
+                          showProvisionalAverage:
+                            thresholds?.showProvisionalAverageBelowThreshold ?? true,
+                        });
+
+                        if (detailStars.status === 'confiable' && professor.averageOverall !== null) {
+                          return (
+                            <>
+                              <div className="text-4xl font-black text-amber-300 tracking-tight leading-none">
+                                {detailStars.averageLabel}
+                              </div>
+                              <StarRating
+                                value={detailStars.starValue}
+                                tone="full"
+                                ariaLabel={detailStars.ariaLabel}
+                                readOnly
+                                size="md"
+                              />
+                              <p className="text-xs text-slate-300 font-semibold">
+                                Basado en {professor.reviewCount} reseñas
+                              </p>
+                              {professor.recommendPercent !== null && (
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold">
+                                  <ThumbsUp className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>{Math.round(professor.recommendPercent)}% lo recomienda</span>
+                                </span>
+                              )}
+                            </>
+                          );
+                        }
+
+                        if (detailStars.status === 'pocas_resenas') {
+                          return (
+                            <>
+                              <div className="flex items-center gap-2">
+                                {detailStars.averageLabel !== null && (
+                                  <span className="text-3xl font-black text-amber-200/75 tracking-tight leading-none">
+                                    {detailStars.averageLabel}
+                                  </span>
+                                )}
+                                <span className="px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-[11px] font-extrabold">
+                                  Provisorio
+                                </span>
+                              </div>
+                              <StarRating
+                                value={detailStars.starValue}
+                                tone="muted"
+                                ariaLabel={detailStars.ariaLabel}
+                                readOnly
+                                size="md"
+                              />
+                              <p className="text-xs text-slate-300 font-semibold">
+                                {detailStars.countLabel}
+                              </p>
+                              <p className="text-[11px] text-slate-400 leading-relaxed max-w-[235px]">
+                                El promedio consolidado se activa al reunir al menos{' '}
+                                <strong className="text-slate-200">{minReliable} reseñas</strong>.
+                              </p>
+                            </>
+                          );
+                        }
+
+                        return (
+                          <>
+                            <StarRating
+                              value={0}
+                              tone="empty"
+                              ariaLabel={detailStars.ariaLabel}
+                              readOnly
+                              size="md"
+                            />
+                            <span className="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold">
+                              Sin reseñas todavía
                             </span>
-                          )}
-                        </>
-                      ) : professor.reviewCount > 0 ? (
-                        <>
-                          <span className="px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 text-xs font-extrabold">
-                            Pocas reseñas ({professor.reviewCount})
-                          </span>
-                          <p className="text-[11px] text-slate-400 leading-relaxed max-w-[230px]">
-                            El promedio numérico se habilita al alcanzar al menos{' '}
-                            <strong className="text-slate-200">{minReliable} reseñas</strong> para
-                            evitar sesgos.
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <span className="px-3 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-xs font-bold">
-                            Sin reseñas todavía
-                          </span>
-                          <p className="text-[11px] text-slate-400 leading-relaxed max-w-[230px]">
-                            Si ya regularizaste o aprobaste una materia con este docente, ¡sé la
-                            primera persona en opinar!
-                          </p>
-                        </>
-                      )}
+                            <p className="text-[11px] text-slate-400 leading-relaxed max-w-[230px]">
+                              Si ya regularizaste o aprobaste una materia con este docente, ¡sé la
+                              primera persona en opinar!
+                            </p>
+                          </>
+                        );
+                      })()}
                     </div>
 
                     {/* Columna 2: Distribución 5 a 1 estrellas */}
@@ -508,6 +556,12 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
                                 <span className="text-xs font-bold text-white">
                                   {rev.studentLabel}
                                 </span>
+                                {rev.attendedDeclared && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                                    <UserCheck className="w-2.5 h-2.5 text-teal-400" />
+                                    <span>Cursó con este docente</span>
+                                  </span>
+                                )}
                                 {rev.attendedPeriod && (
                                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
                                     Cursada {rev.attendedPeriod}

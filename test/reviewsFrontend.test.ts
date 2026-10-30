@@ -6,8 +6,18 @@ import {
   filterAndSortCommissionsByRating,
   getStarAriaLabel,
   handleStarRatingKeyDown,
+  formatProfessorCardStarsState,
   type ProfessorRatingResolver,
 } from '../src/utils/professorRatingsLogic';
+import {
+  evaluateCommissionPromptOnStatusChange,
+  getReviewPromptsOnRegularizeTransition,
+  getActiveRecommendedReviewPairs,
+  getSubjectsMissingDeclaredProfessors,
+} from '../src/utils/enrollmentLogic';
+import type { SubjectEnrollment } from '../src/types/enrollment';
+import type { Subject } from '../src/types/career';
+import type { ReviewableResponse } from '../src/types/professor';
 import { generateScheduleCombinations } from '../src/utils/scheduleLogic';
 import type { ProfessorBatchRating } from '../src/types/professor';
 import type { Commission, SubjectSchedule } from '../src/types/schedule';
@@ -297,6 +307,221 @@ assert(handleStarRatingKeyDown('Home', 4, 1, 5) === 1, 'Home debe saltar a 1');
 assert(handleStarRatingKeyDown('End', 2, 1, 5) === 5, 'End debe saltar a 5');
 assert(handleStarRatingKeyDown('5', 0, 1, 5) === 5, 'Tecla "5" debe seleccionar 5 estrellas');
 assert(handleStarRatingKeyDown('Tab', 3, 1, 5) === null, 'Tab no debe ser interceptado');
+
+// 7. Tres estados visuales de la fila de 5 estrellas en las tarjetas de profesores (ProfessorCard)
+// Estado A: >= 3 reseñas (confiable) -> 5 estrellas ámbar plenas + promedio + (N reseñas)
+const starsReliable = formatProfessorCardStarsState({
+  reviewCount: 8,
+  hasReliableAverage: true,
+  ratingStatus: 'confiable',
+  averageOverall: 4.6,
+});
+assert(starsReliable.status === 'confiable', 'Estado debe ser confiable');
+assert(starsReliable.starTone === 'full', 'Tono de estrellas confiable debe ser "full"');
+assert(starsReliable.starValue === 4.6, 'Valor de relleno debe ser 4.6');
+assert(starsReliable.provisionalBadge === false, 'No debe mostrar insignia provisoria');
+assert(starsReliable.countLabel === '(8 reseñas)', 'Debe mostrar "(8 reseñas)"');
+assert(starsReliable.averageLabel === '4,6', 'Promedio formateado debe ser "4,6"');
+assert(starsReliable.ariaLabel.includes('4,6 de 5'), 'Aria label debe indicar 4,6 de 5');
+
+// Estado B: 1–2 reseñas (pocas_resenas) -> 5 estrellas atenuadas + promedio provisorio + badge Provisorio + (N reseñas)
+const starsProvisional = formatProfessorCardStarsState({
+  reviewCount: 2,
+  hasReliableAverage: false,
+  ratingStatus: 'pocas_resenas',
+  averageOverall: 4.0,
+});
+assert(starsProvisional.status === 'pocas_resenas', 'Estado debe ser pocas_resenas');
+assert(starsProvisional.starTone === 'muted', 'Tono de estrellas provisorias debe ser "muted"');
+assert(starsProvisional.starValue === 4.0, 'Valor de relleno debe ser 4.0');
+assert(starsProvisional.provisionalBadge === true, 'Debe mostrar insignia provisoria');
+assert(starsProvisional.countLabel === '(2 reseñas)', 'Debe mostrar "(2 reseñas)"');
+assert(starsProvisional.averageLabel === '4,0', 'Promedio provisorio formateado debe ser "4,0"');
+assert(starsProvisional.ariaLabel.includes('provisoria'), 'Aria label debe incluir la palabra provisoria');
+
+// Estado C: 0 reseñas (sin_resenas) -> 5 estrellas de contorno vacías + texto "Sin reseñas"
+const starsZero = formatProfessorCardStarsState({
+  reviewCount: 0,
+  hasReliableAverage: false,
+  ratingStatus: 'sin_resenas',
+  averageOverall: null,
+});
+assert(starsZero.status === 'sin_resenas', 'Estado debe ser sin_resenas');
+assert(starsZero.starTone === 'empty', 'Tono de estrellas vacías debe ser "empty"');
+assert(starsZero.starValue === 0, 'Valor de relleno debe ser 0');
+assert(starsZero.provisionalBadge === false, 'No debe mostrar insignia provisoria');
+assert(starsZero.countLabel === 'Sin reseñas', 'Texto debe ser "Sin reseñas"');
+assert(starsZero.ariaLabel.includes('Sin valoración'), 'Aria label debe indicar Sin valoración');
+
+// 8. Disparo del modal de comisión "¿Con qué comisión la cursaste?" al cambiar de estado
+const dummyEnrollments: SubjectEnrollment[] = [
+  {
+    id: 'enr-1',
+    subjectId: '1',
+    subjectCode: 1,
+    subjectName: 'Análisis Matemático 1',
+    subjectShortName: 'AM1',
+    subjectLevel: 1,
+    commissionId: 'comm-1',
+    commissionCode: '1K1',
+    turno: 'mañana',
+    academicYear: 2024,
+    term: '1C',
+    source: 'manual',
+    professors: [{ professorId: 'p-1', displayName: 'Botta, Oscar' }],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+// Pasar a 'cursando' sin cursada registrada -> debe solicitar comisión
+assert(
+  evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'disponible',
+    nextStatus: 'cursando',
+    existingSubjectEnrollments: [],
+  }).shouldOpenModal === true,
+  'Pasar a cursando sin cursada registrada debe abrir el modal de comisión'
+);
+
+// Pasar a 'cursando' cuando YA tiene cursada registrada -> no debe solicitar
+assert(
+  evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'disponible',
+    nextStatus: 'cursando',
+    existingSubjectEnrollments: dummyEnrollments,
+  }).shouldOpenModal === false,
+  'Si ya tiene cursada registrada no debe volver a pedir comisión'
+);
+
+// Pasar a 'disponible' o 'bloqueada' -> no debe solicitar comisión
+assert(
+  evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'cursando',
+    nextStatus: 'disponible',
+    existingSubjectEnrollments: [],
+  }).shouldOpenModal === false,
+  'Resetear a disponible no debe abrir modal de comisión'
+);
+
+// En tablero Kanban nunca abre modal bloqueante, solo hint
+assert(
+  evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'disponible',
+    nextStatus: 'cursando',
+    existingSubjectEnrollments: [],
+    source: 'kanban',
+  }).shouldOpenModal === false &&
+    evaluateCommissionPromptOnStatusChange({
+      prevStatus: 'disponible',
+      nextStatus: 'cursando',
+      existingSubjectEnrollments: [],
+      source: 'kanban',
+    }).shouldShowKanbanHint === true,
+  'En Kanban debe devolver shouldShowKanbanHint: true y shouldOpenModal: false'
+);
+
+// 9. Toast de recomendación al regularizar ("Cursaste X con Y: ¿querés dejar una reseña?")
+const promptsOnRegularize = getReviewPromptsOnRegularizeTransition({
+  prevStatus: 'cursando',
+  nextStatus: 'regularizada',
+  existingSubjectEnrollments: dummyEnrollments,
+});
+assert(promptsOnRegularize.length === 1, 'Debe generar 1 prompt para el docente de la cursada');
+assert(
+  promptsOnRegularize[0].professorName === 'Botta, Oscar',
+  'El prompt debe corresponder al docente registrado en la cursada'
+);
+assert(
+  promptsOnRegularize[0].subjectName === 'Análisis Matemático 1',
+  'El prompt debe incluir el nombre de la materia'
+);
+
+// Transición repetida de regularizada a regularizada -> no debe disparar toast nuevo
+const promptsNoChange = getReviewPromptsOnRegularizeTransition({
+  prevStatus: 'regularizada',
+  nextStatus: 'regularizada',
+  existingSubjectEnrollments: dummyEnrollments,
+});
+assert(promptsNoChange.length === 0, 'Si ya estaba regularizada no debe disparar avisos nuevos');
+
+// 10. Filtrado de pares recomendados activos (tarjetas "Profesores que podés reseñar")
+const mockReviewable: ReviewableResponse = {
+  eligible: [
+    {
+      professorId: 'p-1',
+      professorName: 'Botta, Oscar',
+      subjectId: '1',
+      subjectName: 'Análisis Matemático 1',
+      recommended: true,
+      dismissed: false,
+      alreadyReviewed: false,
+      academicYear: 2024,
+      term: '1C',
+    },
+    {
+      professorId: 'p-2',
+      professorName: 'Romoli, Irene',
+      subjectId: '1',
+      subjectName: 'Análisis Matemático 1',
+      recommended: true,
+      dismissed: true, // descartado con "Ahora no"
+      alreadyReviewed: false,
+    },
+    {
+      professorId: 'p-3',
+      professorName: 'Gómez, Lucas',
+      subjectId: '2',
+      subjectName: 'Álgebra',
+      recommended: false, // elegible histórico pero no cursó con él
+      dismissed: false,
+      alreadyReviewed: false,
+    },
+  ],
+  myReviews: [],
+};
+
+const activeRecs = getActiveRecommendedReviewPairs(mockReviewable);
+assert(activeRecs.length === 1, 'Solo debe incluir el profesor recomendado no descartado');
+assert(activeRecs[0].professorId === 'p-1', 'El docente recomendado debe ser p-1');
+
+// 11. Detección de materias sin comisiones declaradas (banner "Contanos con quién cursaste")
+const mockSubjects: Subject[] = [
+  {
+    id: '1',
+    code: 1,
+    name: 'Análisis Matemático 1',
+    level: 1,
+    term: '1C',
+    weeklyHours: 5,
+    status: 'regularizada',
+    correlatives: [],
+  },
+  {
+    id: '2',
+    code: 2,
+    name: 'Álgebra y Geometría Analítica',
+    level: 1,
+    term: '1C',
+    weeklyHours: 5,
+    status: 'cursando',
+    correlatives: [],
+  },
+  {
+    id: '3',
+    code: 3,
+    name: 'Física 1',
+    level: 1,
+    term: '2C',
+    weeklyHours: 5,
+    status: 'disponible',
+    correlatives: [],
+  },
+];
+
+const missing = getSubjectsMissingDeclaredProfessors(mockSubjects, dummyEnrollments);
+assert(missing.length === 1, 'Solo debe detectar 1 materia cursando/regularizada sin inscripción');
+assert(missing[0].subjectId === '2', 'La materia faltante debe ser Álgebra (id 2)');
 
 console.log('TODAS LAS PRUEBAS DE RESEÑAS FRONTEND, INSIGNIAS, FILTROS Y ACCESIBILIDAD PASARON CON ÉXITO!');
 

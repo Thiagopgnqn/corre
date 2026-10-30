@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   ThumbsDown,
   ThumbsUp,
+  UserCheck,
   X,
 } from 'lucide-react';
 import { professorsApi } from '../../api/professors.api';
@@ -28,6 +29,9 @@ interface ReviewFormModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialProfessorId?: string | null;
+  initialSubjectId?: string | null;
+  initialAcademicYear?: number | null;
+  initialTerm?: '1C' | '2C' | 'A' | null;
   editingReview?: OwnReviewItem | null;
   onSaved: () => void;
 }
@@ -46,6 +50,9 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
   isOpen,
   onClose,
   initialProfessorId,
+  initialSubjectId,
+  initialAcademicYear,
+  initialTerm,
   editingReview,
   onSaved,
 }) => {
@@ -111,8 +118,8 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
     setAvailability(0);
     setDifficulty(0);
     setWouldRecommend(null);
-    setAcademicYear('');
-    setTerm('');
+    setAcademicYear(initialAcademicYear ? String(initialAcademicYear) : '');
+    setTerm(initialTerm ?? '');
     setComment('');
     setSelectedPairKey('');
 
@@ -132,12 +139,26 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
           setShowGuidelinesStep(false);
         }
 
-        // Si viene preseleccionado un profesor, elegir su primer par disponible no reseñado
+        // Si viene preseleccionado profesor (y opcionalmente materia), elegir ese par
         const availableEligible = d.eligible.filter((p) => !p.alreadyReviewed);
         if (initialProfessorId) {
-          const match = availableEligible.find((p) => p.professorId === initialProfessorId);
+          const match = initialSubjectId
+            ? availableEligible.find(
+                (p) =>
+                  p.professorId === initialProfessorId &&
+                  (p.subjectId === initialSubjectId ||
+                    String(p.subjectCode) === String(initialSubjectId))
+              ) || availableEligible.find((p) => p.professorId === initialProfessorId)
+            : availableEligible.find((p) => p.professorId === initialProfessorId);
+
           if (match) {
             setSelectedPairKey(`${match.professorId}::${match.subjectId}`);
+            if (!initialAcademicYear && match.enrollmentAcademicYear) {
+              setAcademicYear(String(match.enrollmentAcademicYear));
+            }
+            if (!initialTerm && match.enrollmentTerm) {
+              setTerm(match.enrollmentTerm);
+            }
             setShowBlockedList(false);
           } else {
             const hasBlocked = d.blocked.some((b) => b.professorId === initialProfessorId);
@@ -146,6 +167,12 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
         } else if (availableEligible.length === 1) {
           const only = availableEligible[0];
           setSelectedPairKey(`${only.professorId}::${only.subjectId}`);
+          if (only.enrollmentAcademicYear) {
+            setAcademicYear(String(only.enrollmentAcademicYear));
+          }
+          if (only.enrollmentTerm) {
+            setTerm(only.enrollmentTerm);
+          }
         }
       })
       .catch((err: any) => {
@@ -158,7 +185,7 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
     return () => {
       active = false;
     };
-  }, [isOpen, editingReview, initialProfessorId]);
+  }, [isOpen, editingReview, initialProfessorId, initialSubjectId, initialAcademicYear, initialTerm]);
 
   const unreviewedEligible = useMemo(() => {
     if (!reviewable) return [];
@@ -446,7 +473,21 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
                         <select
                           id="review-pair-select"
                           value={selectedPairKey}
-                          onChange={(e) => setSelectedPairKey(e.target.value)}
+                          onChange={(e) => {
+                            const nextKey = e.target.value;
+                            setSelectedPairKey(nextKey);
+                            const chosen = unreviewedEligible.find(
+                              (p) => `${p.professorId}::${p.subjectId}` === nextKey
+                            );
+                            if (chosen) {
+                              if (chosen.enrollmentAcademicYear) {
+                                setAcademicYear(String(chosen.enrollmentAcademicYear));
+                              }
+                              if (chosen.enrollmentTerm) {
+                                setTerm(chosen.enrollmentTerm);
+                              }
+                            }
+                          }}
                           className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
                         >
                           <option value="">Seleccioná docente y materia...</option>
@@ -454,7 +495,9 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
                             const key = `${p.professorId}::${p.subjectId}`;
                             return (
                               <option key={key} value={key}>
+                                {p.recommended ? '★ ' : ''}
                                 {p.professorName} — {p.subjectName} ({p.userSubjectStatus})
+                                {p.recommended ? ' · Tu cursada' : ''}
                               </option>
                             );
                           })}
@@ -705,10 +748,18 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
                       <div className="p-3.5 rounded-2xl bg-slate-950/90 border border-indigo-500/30 space-y-2">
                         <div className="flex items-center justify-between gap-2">
                           <div>
-                            <span className="text-xs font-bold text-white block">
-                              Estudiante de {targetSubjectName}
-                            </span>
-                            <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-white">
+                                Estudiante de {targetSubjectName}
+                              </span>
+                              {(editingReview?.attendedDeclared || selectedPair?.recommended) && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/30">
+                                  <UserCheck className="w-2.5 h-2.5 text-teal-400" />
+                                  <span>Cursó con este docente</span>
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
                               <Calendar className="w-2.5 h-2.5" />
                               <span>Publicado en {nowMonthLabel}</span>
                             </span>

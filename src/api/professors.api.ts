@@ -84,6 +84,29 @@ export const professorsApi = {
     return apiFetch('/api/me/reviewable');
   },
 
+  async dismissRecommendation(input: {
+    professorId: string;
+    subjectId: string | number;
+  }): Promise<{
+    success: boolean;
+    data: { dismissed: boolean; professorId: string; subjectId: string };
+  }> {
+    return apiFetch('/api/me/reviewable/dismiss', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  async markRecommendationsSeen(keys?: string[]): Promise<{
+    success: boolean;
+    data: { markedCount: number };
+  }> {
+    return apiFetch('/api/me/reviewable/seen', {
+      method: 'POST',
+      body: JSON.stringify(keys ? { keys } : {}),
+    });
+  },
+
   async createReview(
     input: CreateReviewInput
   ): Promise<{ success: boolean; data: PublicProfessorReview }> {

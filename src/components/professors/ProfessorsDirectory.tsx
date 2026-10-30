@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
+  BookOpen,
   Edit2,
   Filter,
   MessageSquarePlus,
@@ -15,11 +16,18 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { professorsApi } from '../../api/professors.api';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
-import type { OwnReviewItem, ProfessorListItem } from '../../types/professor';
+import type { OwnReviewItem, ProfessorListItem, ReviewableData } from '../../types/professor';
+import type { EnrollmentTerm } from '../../types/enrollment';
+import {
+  getActiveRecommendedReviewPairs,
+  getSubjectsMissingDeclaredProfessors,
+  formatEnrollmentPeriodLabel,
+} from '../../utils/enrollmentLogic';
 import { ProfessorCard } from './ProfessorCard';
 import { ProfessorDetailModal } from './ProfessorDetailModal';
 import { ReviewFormModal } from './ReviewFormModal';
@@ -28,6 +36,14 @@ import { StarRating } from './StarRating';
 
 export const ProfessorsDirectory: React.FC = () => {
   const { user } = useAuth();
+  const {
+    activeState,
+    enrollments,
+    openEnrollmentModal,
+    markReviewRecommendationsSeen,
+    dismissReviewRecommendation,
+    refreshReviewableSummary,
+  } = useCareer();
   const { reloadRatings } = useProfessorRatings(true);
   const shouldReduceMotion = useReducedMotion();
 
@@ -47,6 +63,7 @@ export const ProfessorsDirectory: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Mis reseñas & elegibilidad
+  const [reviewableData, setReviewableData] = useState<ReviewableData | null>(null);
   const [myReviews, setMyReviews] = useState<OwnReviewItem[]>([]);
   const [eligibleCount, setEligibleCount] = useState<number>(0);
   const [showMyReviews, setShowMyReviews] = useState<boolean>(false);
@@ -56,9 +73,36 @@ export const ProfessorsDirectory: React.FC = () => {
   const [selectedProfessorId, setSelectedProfessorId] = useState<string | null>(null);
   const [reviewModalOpen, setReviewModalOpen] = useState<boolean>(false);
   const [preselectedProfForReview, setPreselectedProfForReview] = useState<string | null>(null);
+  const [preselectedSubjectForReview, setPreselectedSubjectForReview] = useState<string | null>(null);
+  const [preselectedYearForReview, setPreselectedYearForReview] = useState<number | null>(null);
+  const [preselectedTermForReview, setPreselectedTermForReview] = useState<EnrollmentTerm | null>(null);
   const [editingReview, setEditingReview] = useState<OwnReviewItem | null>(null);
   const [moderationModalOpen, setModerationModalOpen] = useState<boolean>(false);
   const [openReportsBadge, setOpenReportsBadge] = useState<number>(0);
+
+  const allPlanSubjects = useMemo(() => {
+    return [...CORE_SUBJECTS, ...ELECTIVES].sort(
+      (a, b) => a.level - b.level || a.name.localeCompare(b.name, 'es')
+    );
+  }, []);
+
+  // Recomendaciones y materias sin comisiones registradas
+  const recommendedPairs = useMemo(() => {
+    return getActiveRecommendedReviewPairs(reviewableData);
+  }, [reviewableData]);
+
+  const missingEnrollmentSubjects = useMemo(() => {
+    return getSubjectsMissingDeclaredProfessors({
+      subjects: allPlanSubjects,
+      userState: activeState,
+      enrollments,
+    });
+  }, [allPlanSubjects, activeState, enrollments]);
+
+  // Al entrar al directorio, marcar recomendaciones como vistas para limpiar el badge del navbar
+  useEffect(() => {
+    markReviewRecommendationsSeen().catch(() => {});
+  }, [markReviewRecommendationsSeen]);
 
   // Debounce búsqueda de texto
   useEffect(() => {
@@ -67,12 +111,6 @@ export const ProfessorsDirectory: React.FC = () => {
     }, 220);
     return () => clearTimeout(t);
   }, [searchInput]);
-
-  const allPlanSubjects = useMemo(() => {
-    return [...CORE_SUBJECTS, ...ELECTIVES].sort(
-      (a, b) => a.level - b.level || a.name.localeCompare(b.name, 'es')
-    );
-  }, []);
 
   const loadDirectory = useCallback(async () => {
     setIsLoading(true);
@@ -99,6 +137,7 @@ export const ProfessorsDirectory: React.FC = () => {
     try {
       const res = await professorsApi.getReviewable();
       if (res.success && res.data) {
+        setReviewableData(res.data);
         setMyReviews(res.data.myReviews);
         setEligibleCount(res.data.eligible.filter((p) => !p.alreadyReviewed).length);
       }
@@ -134,17 +173,29 @@ export const ProfessorsDirectory: React.FC = () => {
       loadMyReviewsSummary(),
       reloadRatings(),
       loadAdminBadge(),
+      refreshReviewableSummary(),
     ]);
-  }, [loadDirectory, loadMyReviewsSummary, reloadRatings, loadAdminBadge]);
+  }, [loadDirectory, loadMyReviewsSummary, reloadRatings, loadAdminBadge, refreshReviewableSummary]);
 
-  const handleOpenWriteReview = (profId?: string | null) => {
+  const handleOpenWriteReview = (
+    profId?: string | null,
+    subjectId?: string | null,
+    academicYear?: number | null,
+    term?: EnrollmentTerm | null
+  ) => {
     setEditingReview(null);
     setPreselectedProfForReview(profId || null);
+    setPreselectedSubjectForReview(subjectId || null);
+    setPreselectedYearForReview(academicYear ?? null);
+    setPreselectedTermForReview(term ?? null);
     setReviewModalOpen(true);
   };
 
   const handleOpenEditReview = (rev: OwnReviewItem) => {
     setPreselectedProfForReview(null);
+    setPreselectedSubjectForReview(null);
+    setPreselectedYearForReview(null);
+    setPreselectedTermForReview(null);
     setEditingReview(rev);
     setReviewModalOpen(true);
   };
@@ -352,6 +403,113 @@ export const ProfessorsDirectory: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Banner amable: Contanos con quién cursaste */}
+      {missingEnrollmentSubjects.length > 0 && (
+        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-3.5 sm:p-4 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
+              <BookOpen className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-slate-200">
+                Contanos con quién cursaste tus materias
+              </h4>
+              <p className="text-[11px] text-slate-400">
+                Registrá tu comisión y docentes para recibir sugerencias de reseñas y ayudar a otros estudiantes a elegir comisiones.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {missingEnrollmentSubjects.slice(0, 3).map((item) => (
+              <button
+                key={item.subjectId}
+                type="button"
+                onClick={() => openEnrollmentModal(item.subjectCode)}
+                className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-indigo-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <span>+ {item.subjectName}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sección: Profesores que podés reseñar */}
+      {recommendedPairs.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/25 bg-amber-950/15 p-4 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-amber-300">
+                Profesores que podés reseñar
+              </h3>
+              <span className="text-[11px] text-slate-400 hidden sm:inline">
+                (según las comisiones que cursaste)
+              </span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {recommendedPairs.map((pair) => (
+              <div
+                key={`${pair.professorId}-${pair.subjectId}`}
+                className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between gap-2.5 shadow-sm"
+              >
+                <div>
+                  <div className="text-xs font-extrabold text-white">{pair.professorName}</div>
+                  <div className="text-[11px] text-slate-400">
+                    {pair.subjectName}
+                    {(pair.enrollmentAcademicYear || pair.enrollmentTerm) && (
+                      <span>
+                        {' '}
+                        · {formatEnrollmentPeriodLabel(pair.enrollmentAcademicYear, pair.enrollmentTerm)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-slate-800/60">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await dismissReviewRecommendation(pair.professorId, pair.subjectId);
+                      setReviewableData((prev) => {
+                        if (!prev) return prev;
+                        return {
+                          ...prev,
+                          eligible: prev.eligible.map((p) =>
+                            p.professorId === pair.professorId &&
+                            String(p.subjectId) === String(pair.subjectId)
+                              ? { ...p, dismissed: true }
+                              : p
+                          ),
+                        };
+                      });
+                    }}
+                    className="px-2 py-1 rounded-lg text-slate-400 hover:text-slate-200 text-xs font-medium cursor-pointer transition-colors"
+                  >
+                    Ahora no
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleOpenWriteReview(
+                        pair.professorId,
+                        pair.subjectId,
+                        pair.enrollmentAcademicYear,
+                        pair.enrollmentTerm
+                      )
+                    }
+                    className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1 shadow transition-colors cursor-pointer"
+                  >
+                    <Star className="w-3.5 h-3.5 fill-slate-950" />
+                    <span>Reseñar</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Barra de búsqueda, filtros y ordenamiento */}
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-3 sm:p-4 backdrop-blur-md flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         {/* Buscador */}
@@ -475,11 +633,17 @@ export const ProfessorsDirectory: React.FC = () => {
                     <div className="h-2.5 bg-slate-800/70 rounded w-1/2" />
                   </div>
                 </div>
+                {/* 5 estrellas en esqueleto de carga */}
+                <div className="flex items-center gap-1 py-1">
+                  {Array.from({ length: 5 }).map((_, sIdx) => (
+                    <div key={sIdx} className="w-3.5 h-3.5 rounded bg-slate-800/80" />
+                  ))}
+                  <div className="w-12 h-3 bg-slate-800/60 rounded ml-1.5" />
+                </div>
                 <div className="flex gap-2">
                   <div className="h-5 bg-slate-800/80 rounded-lg w-20" />
                   <div className="h-5 bg-slate-800/80 rounded-lg w-24" />
                 </div>
-                <div className="h-5 bg-slate-800/60 rounded-lg w-2/3" />
               </div>
               <div className="h-3 bg-slate-800/60 rounded w-1/3" />
             </div>
@@ -551,8 +715,14 @@ export const ProfessorsDirectory: React.FC = () => {
           setReviewModalOpen(false);
           setEditingReview(null);
           setPreselectedProfForReview(null);
+          setPreselectedSubjectForReview(null);
+          setPreselectedYearForReview(null);
+          setPreselectedTermForReview(null);
         }}
         initialProfessorId={preselectedProfForReview}
+        initialSubjectId={preselectedSubjectForReview}
+        initialAcademicYear={preselectedYearForReview}
+        initialTerm={preselectedTermForReview}
         editingReview={editingReview}
         onSaved={refreshEverything}
       />

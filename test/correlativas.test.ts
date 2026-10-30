@@ -360,7 +360,7 @@ randomScenarios.forEach((sc, i) => {
 
 // 17. Interactive Welcome Tutorial Configuration
 assert(Array.isArray(TUTORIAL_STEPS), 'TUTORIAL_STEPS must be an array');
-assert(TUTORIAL_STEPS.length === 15, `TUTORIAL_STEPS must have exactly 15 steps, got ${TUTORIAL_STEPS.length}`);
+assert(TUTORIAL_STEPS.length === 16, `TUTORIAL_STEPS must have exactly 16 steps, got ${TUTORIAL_STEPS.length}`);
 
 const expectedStepIds = [
   'welcome',
@@ -375,6 +375,7 @@ const expectedStepIds = [
   'app-views',
   'schedule-builder-tour',
   'professors-reviews-tour',
+  'enrollments-and-recommendations-tour',
   'stats-tour',
   'persistence-tour',
   'finish',

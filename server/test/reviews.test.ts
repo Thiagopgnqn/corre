@@ -130,13 +130,17 @@ async function main() {
     const headers: Record<string, string> = {};
     if (includeCsrf) headers['X-Requested-With'] = 'XMLHttpRequest';
     if (token) headers['Cookie'] = `accessToken=${token}`;
-    if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(`${baseUrl}${endpoint}`, {
+    const fetchOptions: RequestInit = {
       method,
       headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    };
+    if (method !== 'GET' && method !== 'HEAD' && body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      fetchOptions.body = JSON.stringify(body);
+    }
+
+    const res = await fetch(`${baseUrl}${endpoint}`, fetchOptions);
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     return { status: res.status, data, rawText: text };
@@ -749,8 +753,8 @@ async function main() {
       itemOneFive?.reviewCount === 1 &&
         itemOneFive?.ratingStatus === 'pocas_resenas' &&
         itemOneFive?.hasReliableAverage === false &&
-        itemOneFive?.averageOverall === null,
-      'Con < 3 reseñas (1 reseña): estado "pocas_resenas" y no muestra promedio como dato firme (averageOverall = null)'
+        itemOneFive?.averageOverall === 5,
+      'Con < 3 reseñas (1 reseña): estado "pocas_resenas" y promedio provisorio = 5'
     );
 
     assert(
@@ -766,6 +770,374 @@ async function main() {
     assert(
       idxVeteran !== -1 && idxOneFive !== -1 && idxVeteran < idxOneFive,
       `Ranking Bayesiano: 40 reseñas de 4.8 (score ${itemVeteran48?.bayesianScore}) supera a 1 reseña de 5.0 (score ${itemOneFive?.bayesianScore})`
+    );
+
+    // =========================================================================
+    // 10. SCRIPT CLI merge-professors Y ARCHIVO merges.json
+    // =========================================================================
+    console.log('\n📌 10. Script CLI merge-professors y Validación de merges.json');
+
+    const fs = await import('fs');
+    const {
+      validateMergeConfig,
+      resolveInputFilePath,
+      loadOfflineProfessorSnapshots,
+      resolveSnapshotByQuery,
+    } = await import('../src/scripts/mergeProfessors.js');
+
+    const mergesJsonPath = resolveInputFilePath('merges.json');
+    const mergesConfig = validateMergeConfig(
+      JSON.parse(fs.readFileSync(mergesJsonPath, 'utf8'))
+    );
+
+    assert(
+      mergesConfig.merges.length === 13 && mergesConfig.renames.length === 0,
+      'merges.json contiene los 13 pares de fusión solicitados y 0 renombres activos'
+    );
+
+    const mentionsArrua = mergesConfig.merges.some(
+      (p) =>
+        p.keep.toLowerCase().includes('arrua') ||
+        p.keep.toLowerCase().includes('arrúa') ||
+        p.remove.toLowerCase().includes('arrua') ||
+        p.remove.toLowerCase().includes('arrúa')
+    );
+    assert(!mentionsArrua, 'merges.json deja afuera a "Arrua, Karina" y "Arrúa, Ruth Carina"');
+
+    const { snapshots } = loadOfflineProfessorSnapshots();
+    const allPairsResolved = mergesConfig.merges.every((pair) => {
+      const k = resolveSnapshotByQuery(snapshots, pair.keep);
+      const r = resolveSnapshotByQuery(snapshots, pair.remove);
+      return Boolean(k.match && r.match && k.match.id !== r.match.id);
+    });
+    assert(
+      allPairsResolved,
+      'Los 13 pares { keep, remove } de merges.json resuelven sin ambigüedad en el catálogo'
+    );
+
+    const zanattaRes = resolveSnapshotByQuery(snapshots, 'Zanatta, Valentin; Santiago');
+    const dagostinoRes = resolveSnapshotByQuery(snapshots, 'D´Agostino, José Luis');
+    assert(
+      zanattaRes.match?.subjects.some((s) => s.subjectCode === 24) === true &&
+        zanattaRes.match?.commissions.some((c) => c.commissionCode === '4K2') === true,
+      'Inspección de "Zanatta, Valentin; Santiago" localiza Legislación (24) comisión 4K2'
+    );
+    assert(
+      dagostinoRes.match?.subjects.some((s) => s.subjectCode === 36) === true &&
+        dagostinoRes.match?.commissions.some((c) => c.commissionCode === '5K4') === true,
+      'Inspección de "D´Agostino, José Luis" localiza Proyecto Final (36) comisión 5K4'
+    );
+
+    let rejectedSelfMerge = false;
+    try {
+      validateMergeConfig({
+        merges: [{ keep: 'Botta, Oscar Ernesto', remove: 'Botta, Oscar Ernesto' }],
+        renames: [],
+      });
+    } catch {
+      rejectedSelfMerge = true;
+    }
+    assert(rejectedSelfMerge, 'validateMergeConfig rechaza par inválido con keep === remove');
+
+    // =========================================================================
+    // 11. REGISTRO DE CURSADAS (ENROLLMENTS), RECOMENDACIONES Y ATTENDED_DECLARED
+    // =========================================================================
+    console.log('\n📌 11. Registro de Cursadas (Enrollments), Recomendaciones y Attended Declared');
+
+    // Sembrar una comisión para la Materia 1 con el profesor Botta
+    const seededComm1 = store.seedCommission({
+      subjectId: subjects[0].id,
+      code: '1K1',
+      turno: 'mañana',
+      academicYear: 2026,
+      term: '1C',
+      isCurrent: true,
+      professorIds: [profBotta1.id],
+    });
+
+    // Sembrar una comisión para la Materia 2
+    const seededComm2 = store.seedCommission({
+      subjectId: subjects[1].id,
+      code: '1K2',
+      turno: 'tarde',
+      academicYear: 2026,
+      term: '1C',
+      isCurrent: true,
+      professorIds: [profBotta2.id],
+    });
+
+    // 11.1 Opciones de inscripción para la materia
+    const resOpts = await api('GET', `/api/enrollments/options/${subjects[0].id}`, tokenA);
+    assert(resOpts.status === 200, 'GET /api/enrollments/options/:id devuelve 200');
+    const optsData = resOpts.data?.data || resOpts.data;
+    assert(
+      optsData.commissions.some((c: any) => c.id === seededComm1.id),
+      'Las opciones de comisiones incluyen la comisión sembrada 1K1'
+    );
+    assert(
+      optsData.professors.some((p: any) => p.professorId === profBotta1.id),
+      'Las opciones de docentes de la materia incluyen al profesor Botta'
+    );
+
+    // 11.2 Validaciones 400: comisión ajena y docente que no dicta la materia
+    const resBadComm = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenA,
+      {
+        commissionId: seededComm2.id, // Pertenece a Materia 2, no a Materia 1
+      }
+    );
+    assert(
+      resBadComm.status === 400,
+      'Rechaza con 400 registrar una comisión que pertenece a otra materia'
+    );
+
+    const resBadProf = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenA,
+      {
+        academicYear: 2026,
+        term: '1C',
+        professorIds: [profUnrelated.id], // profUnrelated solo dicta Materia 12
+      }
+    );
+    assert(
+      resBadProf.status === 400,
+      'Rechaza con 400 registrar un docente que no pertenece a la materia'
+    );
+
+    // 11.3 Cursada con comisión: autocompleta docentes automáticamente
+    const resEnrComm = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenA,
+      {
+        commissionId: seededComm1.id,
+      }
+    );
+    assert(resEnrComm.status === 200, 'PUT /api/enrollments/:subjectId crea la cursada exitosamente (200)');
+    const enrA1 = resEnrComm.data?.data || resEnrComm.data;
+    assert(
+      enrA1.commissionId === seededComm1.id &&
+        enrA1.professors.length === 1 &&
+        enrA1.professors[0].professorId === profBotta1.id,
+      'La cursada con comisión autocompleta al docente asociado a dicha comisión'
+    );
+
+    // 11.4 Cursada manual de un período no cargado
+    const resEnrManual = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenA,
+      {
+        academicYear: 2023,
+        term: '2C',
+        professorIds: [profBotta1.id],
+      }
+    );
+    assert(resEnrManual.status === 200, 'Crea cursada manual de un ciclo anterior no cargado');
+    const enrA2 = resEnrManual.data?.data || resEnrManual.data;
+    assert(
+      enrA2.academicYear === 2023 && enrA2.term === '2C' && enrA2.source === 'manual',
+      'La cursada manual conserva el año 2023 y cuatrimestre 2C indicados'
+    );
+
+    // 11.5 Recursadas permitidas y rechazo de duplicado exacto (409)
+    const resListA = await api('GET', '/api/enrollments', tokenA);
+    const listAData = resListA.data?.data || resListA.data;
+    assert(
+      listAData.enrollments.filter((e: any) => e.subjectId === subjects[0].id).length === 2,
+      'Se permiten múltiples cursadas por materia (recursadas en distintos períodos)'
+    );
+
+    const resDup = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenA,
+      {
+        academicYear: 2023,
+        term: '2C',
+        professorIds: [profBotta1.id],
+      }
+    );
+    assert(
+      resDup.status === 409,
+      'Rechaza con 409 registrar dos veces el mismo período para un usuario en la misma materia'
+    );
+
+    // 11.6 Aislamiento estricto entre usuarios
+    const resBUpdate = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenB,
+      {
+        enrollmentId: enrA1.id,
+        academicYear: 2025,
+      }
+    );
+    assert(resBUpdate.status === 404, 'Usuario B no puede modificar cursadas de Usuario A (404)');
+
+    const resBDelete = await api('DELETE', `/api/enrollments/${enrA1.id}`, tokenB);
+    assert(resBDelete.status === 404, 'Usuario B no puede eliminar cursadas de Usuario A (404)');
+
+    const resListB = await api('GET', '/api/enrollments', tokenB);
+    const listBData = resListB.data?.data || resListB.data;
+    assert(
+      !listBData.enrollments.some((e: any) => e.id === enrA1.id),
+      'El listado de Usuario B no incluye cursadas de Usuario A'
+    );
+
+    // 11.7 Recomendaciones activas, descarte (dismiss) y marca de visto
+    const resRecsInitial = await api('GET', '/api/me/reviewable', tokenA);
+    const initialEligible = resRecsInitial.data?.data?.eligible || resRecsInitial.data?.eligible || [];
+    const recBotta = initialEligible.find(
+      (e: any) => e.professorId === profBotta1.id && e.subjectId === subjects[0].id
+    );
+    assert(
+      recBotta && recBotta.recommended === true && recBotta.dismissed === false,
+      'El docente con cursada registrada aparece como recomendado para reseñar'
+    );
+
+    const resDismiss = await api(
+      'POST',
+      '/api/me/reviewable/dismiss',
+      tokenA,
+      { professorId: profBotta1.id, subjectId: subjects[0].id }
+    );
+    assert(resDismiss.status === 200, 'POST /api/me/reviewable/dismiss responde 200');
+
+    const resRecsAfterDismiss = await api('GET', '/api/me/reviewable', tokenA);
+    const afterDismissEligible =
+      resRecsAfterDismiss.data?.data?.eligible || resRecsAfterDismiss.data?.eligible || [];
+    const recBottaDismissed = afterDismissEligible.find(
+      (e: any) => e.professorId === profBotta1.id && e.subjectId === subjects[0].id
+    );
+    assert(
+      recBottaDismissed && recBottaDismissed.dismissed === true,
+      'Tras descartar con "Ahora no", la recomendación figura como dismissed = true'
+    );
+
+    const resSeen = await api('POST', '/api/me/reviewable/seen', tokenA, {});
+    assert(resSeen.status === 200, 'POST /api/me/reviewable/seen responde 200');
+
+    // 11.8 attended_declared recalculado dinámicamente y anonimato público
+    // Student C aprueba Materia 1 y registra cursada con profBotta1
+    store.seedUserProgress(studentC.id, subjects[0].id, 'aprobada', 10);
+    const resEnrC = await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenC,
+      {
+        commissionId: seededComm1.id,
+      }
+    );
+    assert(resEnrC.status === 200, 'Usuario C registra cursada exitosamente (200)');
+    const enrC1 = resEnrC.data?.data || resEnrC.data;
+
+    const resCreateReview = await api(
+      'POST',
+      '/api/reviews',
+      tokenC,
+      {
+        professorId: profBotta1.id,
+        subjectId: subjects[0].id,
+        overall: 5,
+        comment: 'Docente excelente y muy claro con las explicaciones.',
+      }
+    );
+    assert(resCreateReview.status === 201, 'Usuario C publica reseña exitosamente (201)');
+    const createdRevId = (resCreateReview.data?.data || resCreateReview.data?.review || resCreateReview.data).id;
+
+    // Usuario B consulta la ficha pública de profBotta1
+    const resPublicProf = await api('GET', `/api/professors/${profBotta1.id}`, tokenB);
+    const publicReviews = resPublicProf.data?.data?.reviewsPage?.items || [];
+    const publicReview = publicReviews.find((r: any) => r.id === createdRevId);
+    assert(publicReview, 'La reseña es visible públicamente en el perfil del docente');
+    assert(
+      publicReview.attendedDeclared === true,
+      'attendedDeclared es true porque el usuario tiene cursada registrada con este docente'
+    );
+    assert(
+      !publicReview.userId && !publicReview.email && !publicReview.userEmail && !publicReview.author,
+      'La API pública NUNCA expone id, email ni datos identificatorios del autor'
+    );
+    assert(
+      typeof publicReview.publishedMonthYear === 'string' &&
+        /^\d{4}-\d{2}$/.test(publicReview.publishedMonthYear),
+      `La fecha pública solo expone mes y año ("${publicReview.publishedMonthYear}"), sin hora ni segundos`
+    );
+
+    // Usuario C elimina su cursada en la Materia 1
+    await api('DELETE', `/api/enrollments/${enrC1.id}`, tokenC);
+
+    // Usuario B vuelve a consultar la ficha pública
+    const resPublicProfAfterDel = await api('GET', `/api/professors/${profBotta1.id}`, tokenB);
+    const revAfterDel = (
+      resPublicProfAfterDel.data?.data?.reviewsPage?.items || []
+    ).find((r: any) => r.id === createdRevId);
+    assert(
+      revAfterDel && revAfterDel.attendedDeclared === false,
+      'Al borrar la cursada, attendedDeclared se recalcula dinámicamente a false'
+    );
+
+    // Usuario C vuelve a registrar la cursada con profBotta1
+    await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenC,
+      {
+        commissionId: seededComm1.id,
+      }
+    );
+
+    const resPublicProfRecreated = await api('GET', `/api/professors/${profBotta1.id}`, tokenB);
+    const revRecreated = (
+      resPublicProfRecreated.data?.data?.reviewsPage?.items || []
+    ).find((r: any) => r.id === createdRevId);
+    assert(
+      revRecreated && revRecreated.attendedDeclared === true,
+      'Al volver a crear la cursada, attendedDeclared se recalcula dinámicamente a true'
+    );
+
+    // 11.9 mergeProfessors: reasignación de enrollments y recálculo de attended_declared
+    const profMergeSource = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Botta, Oscar E.',
+    });
+    const seededCommMerge = store.seedCommission({
+      subjectId: subjects[0].id,
+      code: '1K9',
+      turno: 'noche',
+      academicYear: 2022,
+      term: '1C',
+      isCurrent: false,
+      professorIds: [profMergeSource.id],
+    });
+    await api(
+      'PUT',
+      `/api/enrollments/${subjects[0].id}`,
+      tokenC,
+      {
+        commissionId: seededCommMerge.id,
+        academicYear: 2022,
+        term: '1C',
+      }
+    );
+
+    const targetMerged = await store.mergeProfessors(profMergeSource.id, profBotta1.id);
+    assert(
+      targetMerged.targetProfessor.id === profBotta1.id,
+      'mergeProfessors fusiona exitosamente profMergeSource en profBotta1'
+    );
+    const resPublicTarget = await api('GET', `/api/professors/${profBotta1.id}`, tokenB);
+    const revTarget = (
+      resPublicTarget.data?.data?.reviewsPage?.items || []
+    ).find((r: any) => r.id === createdRevId);
+    assert(
+      revTarget && revTarget.attendedDeclared === true,
+      'Tras mergeProfessors, attendedDeclared se mantiene correctamente recalculado'
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -173,7 +173,20 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Star',
   },
 
-  // 13. Dashboard de Estadísticas
+  // 13. Mi Cursada & Recomendaciones
+  {
+    id: 'enrollments-and-recommendations-tour',
+    title: 'Mi Cursada & Recomendaciones',
+    description:
+      'Indicá con qué comisión y docentes cursaste cada materia desde su ficha o al pasar tu horario a cursando. El sistema te sugerirá automáticamente a quiénes reseñar y tus opiniones llevarán el distintivo "Cursó con este docente".',
+    badge: 'Mi Cursada',
+    targetSelector: '[data-tour="professors-directory"]',
+    targetView: 'professors',
+    placement: 'bottom',
+    iconName: 'UserCheck',
+  },
+
+  // 14. Dashboard de Estadísticas
   {
     id: 'stats-tour',
     title: 'Estadísticas & Camino Crítico',

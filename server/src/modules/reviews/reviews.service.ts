@@ -6,6 +6,7 @@ import {
   MAX_NEW_REVIEWS_PER_USER_PER_DAY,
   MIN_REVIEWS_FOR_RELIABLE_AVERAGE,
   MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD,
+  SHOW_PROVISIONAL_AVERAGE_BELOW_THRESHOLD,
 } from '../../config/reviews.config.js';
 import {
   analyzeProfessorNames,
@@ -91,7 +92,10 @@ export interface PublicAggregatePayload {
   };
 }
 
-export function formatPublicAggregate(agg: ComputedAggregate): PublicAggregatePayload {
+export function formatPublicAggregate(
+  agg: ComputedAggregate,
+  showProvisionalAverage: boolean = SHOW_PROVISIONAL_AVERAGE_BELOW_THRESHOLD
+): PublicAggregatePayload {
   const hasReliableAverage = agg.reviewCount >= MIN_REVIEWS_FOR_RELIABLE_AVERAGE;
   const ratingStatus: 'sin_resenas' | 'pocas_resenas' | 'confiable' =
     agg.reviewCount === 0
@@ -100,11 +104,14 @@ export function formatPublicAggregate(agg: ComputedAggregate): PublicAggregatePa
       ? 'confiable'
       : 'pocas_resenas';
 
+  const canExposeOverallAverage =
+    agg.reviewCount > 0 && (hasReliableAverage || showProvisionalAverage);
+
   return {
     reviewCount: agg.reviewCount,
     hasReliableAverage,
     ratingStatus,
-    averageOverall: hasReliableAverage ? agg.avgOverall : null,
+    averageOverall: canExposeOverallAverage ? agg.avgOverall : null,
     bayesianScore: calculateBayesianScore(agg.reviewCount, agg.avgOverall),
     averageClarity: hasReliableAverage ? agg.avgClarity : null,
     averageTreatment: hasReliableAverage ? agg.avgTreatment : null,
@@ -127,6 +134,7 @@ export interface PublicReviewPayload {
   academicYear: number | null;
   term: '1C' | '2C' | 'A' | null;
   attendedPeriod: string | null;
+  attendedDeclared: boolean;
   overall: number;
   clarity: number | null;
   treatment: number | null;
@@ -187,6 +195,7 @@ export function serializePublicReview(params: {
     academicYear: safeYear,
     term: safeTerm,
     attendedPeriod,
+    attendedDeclared: Boolean(review.attendedDeclared),
     overall: review.overall,
     clarity: review.clarity,
     treatment: review.treatment,
@@ -307,10 +316,7 @@ export class ReviewsService {
 
     if (params.minRating !== undefined && !Number.isNaN(params.minRating) && params.minRating > 0) {
       items = items.filter(
-        (item) =>
-          item.hasReliableAverage &&
-          item.averageOverall !== null &&
-          item.averageOverall >= params.minRating!
+        (item) => item.averageOverall !== null && item.averageOverall >= params.minRating!
       );
     }
 
@@ -599,6 +605,8 @@ export class ReviewsService {
         eligible: [],
         blocked: [],
         myReviews: [],
+        recommendedPendingCount: 0,
+        unseenRecommendedCount: 0,
         allowedStatuses: [...ALLOWED_REVIEW_SUBJECT_STATUSES],
         dailyLimit: {
           maxPerDay: MAX_NEW_REVIEWS_PER_USER_PER_DAY,
@@ -609,18 +617,55 @@ export class ReviewsService {
     }
 
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const [allProfs, teachingPairs, progressMap, ownReviews, usedLast24h] = await Promise.all([
+    const [
+      allProfs,
+      teachingPairs,
+      progressMap,
+      ownReviews,
+      usedLast24h,
+      userEnrollments,
+      dismissedSet,
+      seenSet,
+    ] = await Promise.all([
       this.store.listFacultyProfessors(ctx.facultyId),
       this.store.getTeachingPairsForPlan(ctx.planId, ctx.facultyId),
       this.store.getUserSubjectProgressMap(params.userId),
       this.store.listUserOwnReviews(params.userId),
       this.store.countUserNewReviewsSince(params.userId, since24h),
+      this.store.listUserEnrollments(params.userId, ctx.planId),
+      this.store.listUserDismissedRecommendations(params.userId),
+      this.store.getUserSeenRecommendationKeys(params.userId),
     ]);
 
     const profMap = new Map(allProfs.map((p) => [p.id, p]));
     const ownByPair = new Map<string, StoredReview>();
     for (const r of ownReviews) {
       ownByPair.set(`${r.professorId}::${r.subjectId}`, r);
+    }
+
+    const enrolledMap = new Map<
+      string,
+      {
+        academicYear: number | null;
+        term: '1C' | '2C' | 'A' | null;
+        commissionCode: string | null;
+      }
+    >();
+    for (const enr of userEnrollments) {
+      for (const ep of enr.professors) {
+        const key = `${ep.professorId}::${enr.subjectId}`;
+        const prev = enrolledMap.get(key);
+        if (
+          !prev ||
+          (enr.academicYear !== null && (prev.academicYear === null || enr.academicYear > prev.academicYear))
+        ) {
+          enrolledMap.set(key, {
+            academicYear: enr.academicYear,
+            term: enr.term,
+            commissionCode: enr.commissionCode,
+          });
+        }
+      }
     }
 
     const allowedSet = new Set<string>(ALLOWED_REVIEW_SUBJECT_STATUSES);
@@ -633,9 +678,14 @@ export class ReviewsService {
 
       const prog = progressMap.get(pair.subjectId);
       const currentStatus = prog?.status || 'pendiente';
-      const existingReview = ownByPair.get(`${pair.professorId}::${pair.subjectId}`);
+      const pairKey = `${pair.professorId}::${pair.subjectId}`;
+      const existingReview = ownByPair.get(pairKey);
+      const enrollInfo = enrolledMap.get(pairKey);
 
       if (allowedSet.has(currentStatus)) {
+        const recommended = Boolean(enrollInfo);
+        const dismissed = dismissedSet.has(pairKey);
+        const seen = seenSet.has(pairKey);
         eligible.push({
           professorId: prof.id,
           professorName: prof.displayName,
@@ -648,6 +698,12 @@ export class ReviewsService {
           isHistoricalLink: pair.isHistoricalLink,
           alreadyReviewed: Boolean(existingReview),
           existingReviewId: existingReview?.id || null,
+          recommended,
+          dismissed,
+          seen,
+          enrollmentAcademicYear: enrollInfo?.academicYear ?? null,
+          enrollmentTerm: enrollInfo?.term ?? null,
+          enrollmentCommissionCode: enrollInfo?.commissionCode ?? null,
         });
       } else {
         const statusHuman =
@@ -662,14 +718,23 @@ export class ReviewsService {
           subjectName: pair.subjectName,
           subjectLevel: pair.subjectLevel,
           userSubjectStatus: currentStatus,
+          recommended: false,
           blockedReason: `Debés tener "${pair.subjectName}" regularizada, aprobada o promocionada para reseñar a este docente (estado actual: ${statusHuman}).`,
         });
       }
     }
 
+    const priorityScore = (item: any) => {
+      if (!item.alreadyReviewed && item.recommended && !item.dismissed) return 0;
+      if (!item.alreadyReviewed && item.recommended && item.dismissed) return 1;
+      if (!item.alreadyReviewed) return 2;
+      if (item.recommended) return 3;
+      return 4;
+    };
+
     eligible.sort(
       (a, b) =>
-        Number(a.alreadyReviewed) - Number(b.alreadyReviewed) ||
+        priorityScore(a) - priorityScore(b) ||
         a.professorName.localeCompare(b.professorName, 'es') ||
         a.subjectName.localeCompare(b.subjectName, 'es')
     );
@@ -679,6 +744,12 @@ export class ReviewsService {
         a.professorName.localeCompare(b.professorName, 'es') ||
         a.subjectName.localeCompare(b.subjectName, 'es')
     );
+
+    const activeRecommended = eligible.filter(
+      (e) => e.recommended && !e.alreadyReviewed && !e.dismissed
+    );
+    const recommendedPendingCount = activeRecommended.length;
+    const unseenRecommendedCount = activeRecommended.filter((e) => !e.seen).length;
 
     const ownSubIds = Array.from(new Set(ownReviews.map((r) => r.subjectId)));
     const ownSubMap = await this.store.getSubjectsByIds(ownSubIds);
@@ -696,6 +767,7 @@ export class ReviewsService {
         subjectName: sub?.name || 'Materia',
         academicYear: r.academicYear,
         term: r.term,
+        attendedDeclared: Boolean(r.attendedDeclared),
         overall: r.overall,
         clarity: r.clarity,
         treatment: r.treatment,
@@ -714,12 +786,77 @@ export class ReviewsService {
       eligible,
       blocked,
       myReviews,
+      recommendedPendingCount,
+      unseenRecommendedCount,
       allowedStatuses: [...ALLOWED_REVIEW_SUBJECT_STATUSES],
       dailyLimit: {
         maxPerDay: MAX_NEW_REVIEWS_PER_USER_PER_DAY,
         usedLast24h,
         remainingToday: Math.max(0, MAX_NEW_REVIEWS_PER_USER_PER_DAY - usedLast24h),
       },
+    };
+  }
+
+  async dismissRecommendation(params: {
+    userId: string;
+    planId?: string | null;
+    professorId: string;
+    subjectId: string | number;
+  }) {
+    const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
+    if (!ctx) {
+      throw appError('No se encontró un plan de estudios activo', 400);
+    }
+    const [profData, subject] = await Promise.all([
+      this.store.getProfessorById(params.professorId),
+      this.store.getSubjectByIdOrCode(ctx.planId, params.subjectId),
+    ]);
+    if (!profData) {
+      throw appError('Profesor no encontrado', 404);
+    }
+    if (!subject) {
+      throw appError('Materia no encontrada en tu plan de estudios', 404);
+    }
+
+    await this.store.dismissRecommendation(params.userId, profData.professor.id, subject.id);
+    await this.store.markRecommendationsSeen(params.userId, [
+      `${profData.professor.id}::${subject.id}`,
+    ]);
+
+    return {
+      dismissed: true,
+      professorId: profData.professor.id,
+      subjectId: subject.id,
+      subjectCode: subject.codeInPlan,
+    };
+  }
+
+  async markRecommendationsSeen(params: {
+    userId: string;
+    planId?: string | null;
+    keys?: string[];
+  }) {
+    let keysToMark = (params.keys || []).filter(
+      (k): k is string => typeof k === 'string' && k.includes('::')
+    );
+
+    if (keysToMark.length === 0) {
+      const reviewable = await this.getReviewableForUser({
+        userId: params.userId,
+        planId: params.planId,
+      });
+      keysToMark = reviewable.eligible
+        .filter((e: any) => e.recommended && !e.alreadyReviewed && !e.dismissed)
+        .map((e: any) => `${e.professorId}::${e.subjectId}`);
+    }
+
+    if (keysToMark.length > 0) {
+      await this.store.markRecommendationsSeen(params.userId, keysToMark);
+    }
+
+    return {
+      seenCount: keysToMark.length,
+      unseenRecommendedCount: 0,
     };
   }
 
@@ -1114,6 +1251,7 @@ export class ReviewsService {
   private getThresholdsMeta() {
     return {
       minReviewsForReliableAverage: MIN_REVIEWS_FOR_RELIABLE_AVERAGE,
+      showProvisionalAverageBelowThreshold: SHOW_PROVISIONAL_AVERAGE_BELOW_THRESHOLD,
       minReviewsToShowAttendedPeriod: MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD,
       bayesianPriorGlobalMean: BAYESIAN_PRIOR_GLOBAL_MEAN,
       bayesianPriorWeight: BAYESIAN_PRIOR_WEIGHT,

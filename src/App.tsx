@@ -17,6 +17,9 @@ import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { LocalStorageMigrationModal } from './components/migration/LocalStorageMigrationModal';
+import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
+import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
+import { ReviewFormModal } from './components/professors/ReviewFormModal';
 import { Loader2 } from 'lucide-react';
 
 const VALID_VIEWS: AppView[] = [
@@ -39,7 +42,14 @@ const getInitialView = (): AppView => {
 
 const AppContent: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
-  const { showMigrationModal, setShowMigrationModal, reloadServerState } = useCareer();
+  const {
+    showMigrationModal,
+    setShowMigrationModal,
+    reloadServerState,
+    globalReviewModalTarget,
+    closeGlobalReviewModal,
+    refreshReviewableSummary,
+  } = useCareer();
   const [currentView, setCurrentView] = useState<AppView>(getInitialView);
 
   const handleSetView = (view: AppView) => {
@@ -108,6 +118,19 @@ const AppContent: React.FC = () => {
       )}
 
       {/* Global Modals & Interactive Tour */}
+      <EnrollmentModal />
+      <ReviewRecommendationToast />
+      {globalReviewModalTarget && (
+        <ReviewFormModal
+          isOpen={true}
+          onClose={closeGlobalReviewModal}
+          initialProfessorId={globalReviewModalTarget.professorId}
+          initialSubjectId={globalReviewModalTarget.subjectId}
+          initialAcademicYear={globalReviewModalTarget.academicYear}
+          initialTerm={globalReviewModalTarget.term}
+          onSaved={refreshReviewableSummary}
+        />
+      )}
       <QuickStatusModal />
       <SearchModal />
       <OnboardingModal />

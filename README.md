@@ -68,18 +68,32 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento de la carr
 
 9. **⭐ Reseñas de Profesores (100% Anónimas & Moderadas)**:
    - **Directorio completo de docentes**: búsqueda por apellido, nombre o materia, filtros por materia, valoración mínima y docentes con reseñas, y ordenamiento por ranking bayesiano (`Mejor valorados`), `Más reseñas` o `Nombre (A-Z)`.
+   - **Fila de 5 estrellas siempre visible**: cada tarjeta del directorio muestra una fila de 5 estrellas consistente en los 3 estados:
+     - `≥ 3` reseñas (`confiable`): estrellas doradas rellenas en tono pleno, promedio numérico y total de reseñas.
+     - `1–2` reseñas (`pocas_resenas`): estrellas en tono atenuado/translúcido, promedio provisorio, etiqueta distintiva `"Provisorio"` y total de reseñas.
+     - `0` reseñas (`sin_resenas`): 5 estrellas en contorno sutil y etiqueta `"Sin reseñas"`.
    - **Ficha detallada por profesor**: promedio general y estrellas (habilitado a partir de **3 reseñas** para evitar sesgos), histograma animado de 5 a 1 estrellas, barras de claridad, trato, disponibilidad y exigencia, `% que lo recomienda`, desglose y filtro por materia, votos de utilidad y paginación.
+   - **Insignia "Cursó con este docente" (`attended_declared`)**: indica con una etiqueta discreta cuando el autor registró haber cursado la materia con ese docente en sus cursadas. Se recalcula automáticamente en tiempo real al crear, editar o eliminar cursadas, y al fusionar docentes.
    - **Elegibilidad verificada en backend**: solo se puede reseñar un par `(profesor, materia)` si `(a)` el profesor dicta o dictó la materia en **cualquier período cargado** (o mediante vínculo histórico manual) y `(b)` el estudiante tiene esa materia en estado `regularizada`, `aprobada` o `promocionada`. Máximo 1 reseña por `(usuario, profesor, materia)`, editable o eliminable desde **"Mis reseñas"**.
    - **Anonimato estricto**: la API pública jamás expone `userId`, correo ni fecha/hora exactas; solo publica *"Estudiante de [Materia]"* con **mes y año**, y oculta el período de cursada (`academicYear` / `term`) mientras el profesor tenga **menos de 5 reseñas**.
    - **Convivencia y moderación**: guía rápida antes de la primera reseña, filtro automático contra insultos y datos personales (teléfonos, emails, URLs), tope de 10 reseñas nuevas por usuario/día, botón **"Reportar"** con ocultamiento preventivo automático al llegar a **3 reportes abiertos**, y panel mínimo de moderación exclusivo para administradores (`Ocultar`, `Restaurar`, `Descartar reporte`).
 
-10. **📊 Dashboard de Estadísticas & Camino Crítico**:
+10. **📝 "Mi Cursada" (Registro de Comisión y Docentes) & Recomendaciones Inteligentes**:
+    - **Registro de cursada al cambiar de estado**: al marcar una materia como *Cursando*, *Regularizada*, *Aprobada* o *Promocionada* (desde el grafo, menú contextual, panel lateral *Drawer*, o tablero Kanban), se puede indicar la comisión cursada o cargar el ciclo/año y docentes a mano.
+    - **Autocompletado desde horarios**: al elegir una comisión cargada en la oferta académica, el sistema autocompleta automáticamente a los profesores correspondientes, permitiendo editarlos o sumar otros.
+    - **Sincronización con el Armador de Horarios**: al presionar *"Aplicar al cursado"* en el armador de horarios, además de pasar las materias a cursando, se registran automáticamente sus comisiones y docentes asociados.
+    - **Soporte de recursadas**: permite registrar múltiples cursadas por materia (diferentes años o cuatrimestres).
+    - **Aviso discreto al regularizar**: si una materia en curso pasa a *Regularizada*, *Aprobada* o *Promocionada*, aparece un toast sutil invitando a reseñar a los docentes con quienes se cursó.
+    - **Banners y recomendaciones en el Directorio**: sección *"Contanos con quién cursaste"* para materias sin comisiones registradas y lista de *"Profesores que podés reseñar"* según tus comisiones, con opción *"Ahora no"* (descarte persistente).
+    - **Punto indicador en Navbar**: un punto ámbar discreto sobre *"Profesores"* avisa cuando hay nuevas recomendaciones de reseñas generadas por tus cursadas hasta que se visita la sección.
+
+11. **📊 Dashboard de Estadísticas & Camino Crítico**:
     - **Selector de Modo de Cálculo de Avance**: *Solo obligatorias* o *Con electivas*.
     - Anillos de progreso de carrera (% por materias y % por horas semanales).
     - Panel de **Requisitos para el Título de Ingeniero/a**, promedio general ponderado, distribución de notas y **Camino Crítico Algorítmico**.
 
-11. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
-    - **15 pasos guiados** (incluyendo el directorio de Reseñas de Profesores y su integración con el Armador de Horarios) con entorno Sandbox seguro y navegación completa por teclado.
+12. **🌟 Tutorial Interactivo de Bienvenida (Visita Guiada con Spotlight)**:
+    - **16 pasos guiados** (incluyendo el registro de comisiones y docentes de "Mi Cursada", el directorio de Reseñas de Profesores y su integración con el Armador de Horarios) con entorno Sandbox seguro y navegación completa por teclado.
 
 ---
 
@@ -137,25 +151,50 @@ Todas las constantes de negocio están documentadas en `server/src/config/review
    npm --prefix server run migrate:professors -- --apply
    ```
 
-### Endpoints del Módulo de Profesores y Reseñas
+### Fusión y renombre por lote (`merge-professors`)
+Permite fusionar pares `{ "keep", "remove" }` y aplicar renombres `{ "from", "to" }` desde un archivo JSON sin usar `curl`:
+1. **Previsualización segura (`--dry-run` por defecto, sin tocar Neon)**:
+   Muestra materias, comisiones y cantidad de reseñas de cada docente involucrado:
+   ```bash
+   npm --prefix server run merge-professors -- --file merges.json
+   ```
+   *(Una vez migrada la base, podés sumar `--from-db` al dry-run para consultar el conteo real de reseñas en PostgreSQL sin escribir cambios).*
+2. **Ejecución transaccional (`--apply`)**:
+   Ejecuta todas las fusiones, alias, renombres y recálculo de estadísticas dentro de una única transacción PostgreSQL:
+   ```bash
+   npm --prefix server run merge-professors -- --file merges.json --apply
+   ```
+
+### Endpoints del Módulo de Profesores, Reseñas y Cursadas
 - **Públicos (requieren sesión iniciada)**:
   - `GET /api/professors` — Directorio con búsqueda, filtros (`subjectId`, `minRating`, `withReviews`) y orden (`rating`, `reviews`, `name`).
   - `GET /api/professors/ratings` — Lote liviano cacheable (`byId` + `byNormalizedName` + `recentReviews`) para el Armador de Horarios.
   - `GET /api/professors/:id` y `GET /api/professors/:id/reviews` — Ficha completa, desglose por materia y reseñas paginadas.
-  - `GET /api/me/reviewable` — Pares `(profesor, materia)` habilitados, bloqueados (con motivo) y reseñas propias.
+  - `GET /api/me/reviewable` — Pares `(profesor, materia)` habilitados, bloqueados (con motivo), recomendaciones activas y reseñas propias.
+  - `POST /api/me/reviewable/dismiss` — Descartar recomendación ("Ahora no") para un par profesor/materia.
+  - `POST /api/me/reviewable/seen` — Marcar recomendaciones como vistas para apagar el indicador ámbar del navbar.
   - `POST /api/reviews`, `PUT /api/reviews/:id`, `DELETE /api/reviews/:id` — Crear, editar o borrar reseña propia.
   - `POST /api/reviews/:id/helpful` — Votar utilidad (toggle).
   - `POST /api/reviews/:id/report` — Reportar reseña (`ofensiva`, `datos personales`, `falsa o spam`, `otra`).
+  - `GET /api/enrollments` — Listado de cursadas registradas del usuario.
+  - `GET /api/enrollments/options/:subjectId` — Opciones de comisiones del período y docentes históricos/cargados para registrar cursada.
+  - `PUT /api/enrollments/:subjectId` — Crear o actualizar cursada (comisión, año, cuatrimestre, lista de docentes).
+  - `DELETE /api/enrollments/:id` — Eliminar registro de cursada.
 - **Administración (requieren `role = 'admin'`)**:
   - `GET /api/admin/professors` — Listado de entidades y candidatos a duplicados detectados.
   - `POST /api/admin/professors` — Crear profesor histórico (y vincularlo opcionalmente a una materia).
   - `POST /api/admin/professors/:id/subjects` — Vincular manualmente un profesor histórico a una materia.
-  - `POST /api/admin/professors/merge` — Fusionar dos profesores (reasigna comisiones, ofertas electivas, vínculos, reseñas, guarda alias y recalcula estadísticas).
+  - `POST /api/admin/professors/merge` — Fusionar dos profesores (reasigna comisiones, cursadas, recomendaciones descartadas, ofertas electivas, vínculos, reseñas, guarda alias y recalcula estadísticas y `attended_declared`).
   - `PATCH /api/admin/professors/:id` — Corregir `display_name`.
   - `GET /api/admin/reviews/reports` — Cola de moderación (reportes abiertos y reseñas ocultas).
   - `PATCH /api/admin/reviews/:id/status` — Cambiar estado (`published`, `hidden`, `removed`).
   - `PATCH /api/admin/reviews/reports/:reportId` — Resolver o descartar reporte (`dismissed`, `actioned`).
   - `GET /api/admin/reviews/stats` — Resumen estadístico general de reseñas y moderación.
+
+### Migraciones Drizzle en PostgreSQL / Neon
+1. `0000_massive_thunderball.sql`: Tablas base de usuarios, sesiones OAuth/credenciales, estados de carrera, horarios y comisiones.
+2. `0001_professor_reviews.sql`: Entidades `professors`, `professor_aliases`, `professor_subjects`, `commission_professors`, `professor_reviews`, `review_reports` y `review_helpful_votes`.
+3. `0002_enrollments_and_declared_reviews.sql`: Tablas de cursadas `subject_enrollments` y `enrollment_professors`, descartes de recomendaciones `review_recommendation_dismissals` y columna `attended_declared` en `professor_reviews`. *(Se aplica con el deploy normal sin ejecuciones manuales previas)*.
 
 ---
 

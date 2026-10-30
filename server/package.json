@@ -16,6 +16,7 @@
     "make-admin": "tsx src/scripts/makeAdmin.ts",
     "import:schedule": "tsx src/scripts/importScheduleDb.ts",
     "migrate:professors": "tsx src/scripts/migrateProfessors.ts",
+    "merge-professors": "tsx src/scripts/mergeProfessors.ts",
     "test": "tsx test/reviews.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },
