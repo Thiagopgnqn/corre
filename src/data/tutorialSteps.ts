@@ -220,8 +220,9 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       '¿Querés configurar rápidamente las materias que ya tenés aprobadas de años anteriores con la Carga Rápida, o preferís explorar libremente por tu cuenta?',
     badge: 'Fin del Tour',
-    placement: 'center',
+    targetSelector: '[data-tour="onboarding-button"]',
     targetView: 'graph',
+    placement: 'bottom',
     iconName: 'CheckCircle2',
   },
 ];

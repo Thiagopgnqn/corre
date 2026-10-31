@@ -39,58 +39,86 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
     onOpenStatusModal,
   } = nodeData;
 
-  // Status visual configurations
+  // Status visual configurations - optimized for instant high-contrast recognition at any zoom level
   const statusStyles: Record<
     SubjectStatus,
     {
       border: string;
       glow: string;
       bg: string;
+      stripe: string;
+      pillBg: string;
+      pillLabel: string;
       icon: React.ComponentType<{ className?: string }>;
       color: string;
+      titleColor: string;
     }
   > = {
     bloqueada: {
-      border: 'border-slate-800/90',
+      border: 'border-slate-800/90 border-2',
       glow: '',
-      bg: 'bg-slate-900/80',
+      bg: 'bg-slate-950/85',
+      stripe: 'bg-slate-700/60',
+      pillBg: 'bg-slate-800/80 text-slate-400 border border-slate-700/60',
+      pillLabel: 'Bloqueada',
       icon: Lock,
       color: 'text-slate-500',
+      titleColor: 'text-slate-300',
     },
     disponible: {
-      border: 'border-emerald-500/60',
-      glow: 'shadow-[0_0_18px_rgba(16,185,129,0.35)] animate-pulse',
-      bg: 'bg-slate-900/95',
+      border: 'border-emerald-500/70 border-2',
+      glow: 'shadow-[0_0_18px_rgba(16,185,129,0.3)] animate-pulse',
+      bg: 'bg-gradient-to-r from-emerald-950/35 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-emerald-500',
+      pillBg: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+      pillLabel: 'Disponible',
       icon: Sparkles,
       color: 'text-emerald-400',
+      titleColor: 'text-white',
     },
     cursando: {
-      border: 'border-cyan-500/70',
-      glow: 'shadow-[0_0_18px_rgba(6,182,212,0.4)]',
-      bg: 'bg-slate-900/95',
+      border: 'border-cyan-400 border-2',
+      glow: 'shadow-[0_0_22px_rgba(6,182,212,0.45)]',
+      bg: 'bg-gradient-to-r from-cyan-950/50 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-cyan-400',
+      pillBg: 'bg-cyan-500/25 text-cyan-200 border border-cyan-400/50',
+      pillLabel: 'Cursando',
       icon: PlayCircle,
-      color: 'text-cyan-400',
+      color: 'text-cyan-300',
+      titleColor: 'text-cyan-50',
     },
     regularizada: {
-      border: 'border-amber-500/70',
-      glow: 'shadow-[0_0_16px_rgba(245,158,11,0.3)]',
-      bg: 'bg-slate-900/95',
+      border: 'border-amber-400 border-2',
+      glow: 'shadow-[0_0_20px_rgba(245,158,11,0.35)]',
+      bg: 'bg-gradient-to-r from-amber-950/45 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-amber-400',
+      pillBg: 'bg-amber-500/25 text-amber-200 border border-amber-400/50',
+      pillLabel: 'Regular',
       icon: Clock,
-      color: 'text-amber-400',
+      color: 'text-amber-300',
+      titleColor: 'text-amber-50',
     },
     aprobada: {
-      border: 'border-green-500/80',
-      glow: 'shadow-[0_0_18px_rgba(34,197,94,0.35)]',
-      bg: 'bg-slate-900/95',
+      border: 'border-green-400 border-2',
+      glow: 'shadow-[0_0_20px_rgba(34,197,94,0.35)]',
+      bg: 'bg-gradient-to-r from-green-950/45 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-green-400',
+      pillBg: 'bg-green-500/25 text-green-200 border border-green-400/50',
+      pillLabel: 'Aprobada',
       icon: CheckCircle2,
-      color: 'text-green-400',
+      color: 'text-green-300',
+      titleColor: 'text-white',
     },
     promocionada: {
-      border: 'border-purple-500/80',
-      glow: 'shadow-[0_0_20px_rgba(168,85,247,0.45)]',
-      bg: 'bg-slate-900/95',
+      border: 'border-purple-400 border-2',
+      glow: 'shadow-[0_0_22px_rgba(168,85,247,0.45)]',
+      bg: 'bg-gradient-to-r from-purple-950/45 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-purple-400',
+      pillBg: 'bg-purple-500/25 text-purple-200 border border-purple-400/50',
+      pillLabel: 'Promocionada',
       icon: Award,
       color: 'text-purple-300',
+      titleColor: 'text-white',
     },
   };
 
@@ -116,14 +144,17 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
   return (
     <div
       data-tour={subject.id === 1 ? 'sample-subject' : undefined}
-      className={`relative w-[230px] sm:w-[245px] rounded-xl border backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
+      className={`relative w-[230px] sm:w-[245px] rounded-xl overflow-hidden backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
         style.bg
       } ${
         isElective
-          ? 'border-dashed border-amber-400/70 shadow-[0_0_12px_rgba(251,191,36,0.25)]'
+          ? 'border-dashed border-amber-400/80 border-2 shadow-[0_0_14px_rgba(251,191,36,0.3)]'
           : style.border
       } ${style.glow} ${highlightClass} ${dimClass}`}
     >
+      {/* High-visibility colored stripe on left edge (immediately identifiable without zoom) */}
+      <div className={`absolute left-0 top-0 bottom-0 w-2 ${style.stripe}`} />
+
       {/* Target Handle on the Left (prerequisites come here) */}
       <Handle
         type="target"
@@ -131,7 +162,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
         className="!w-2.5 !h-2.5 !bg-indigo-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
       />
 
-      <div className="p-3 flex flex-col justify-between min-h-[110px]">
+      <div className="py-2.5 pl-3.5 pr-2.5 flex flex-col justify-between min-h-[110px]">
         {/* Top bar: Code, Level, Modality, Status Icon */}
         <div className="flex items-center justify-between gap-1 mb-1.5">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -162,18 +193,18 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
               onOpenStatusModal?.(subject.id);
             }}
             className={`p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 ${style.color}`}
-            title="Cambiar estado"
+            title={`Cambiar estado (${style.pillLabel})`}
           >
             <Icon className="w-4 h-4" />
           </button>
         </div>
 
         {/* Subject Name: Fully readable, no line clipping */}
-        <h3 className="font-bold text-xs sm:text-[13px] text-white leading-snug break-words my-1">
+        <h3 className={`font-bold text-xs sm:text-[13px] leading-snug break-words my-1 ${style.titleColor}`}>
           {subject.name}
         </h3>
 
-        {/* Bottom bar: Hours / Credits & Grade */}
+        {/* Bottom bar: Hours / Credits & Status Badge */}
         <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-[11px]">
           <span className="text-slate-400 flex items-center gap-1 shrink-0">
             <BookOpen className="w-3 h-3 text-slate-500 shrink-0" />
@@ -185,17 +216,19 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
 
           {grade !== undefined && (status === 'aprobada' || status === 'promocionada') ? (
             <span
-              className={`px-1.5 py-0.2 rounded font-mono font-bold text-xs whitespace-nowrap shrink-0 ${
+              className={`px-1.5 py-0.5 rounded font-mono font-bold text-xs whitespace-nowrap shrink-0 ${
                 status === 'promocionada'
-                  ? 'bg-purple-900/60 text-purple-200 border border-purple-500/40'
-                  : 'bg-emerald-900/60 text-emerald-200 border border-emerald-500/40'
+                  ? 'bg-purple-900/80 text-purple-200 border border-purple-400/60'
+                  : 'bg-emerald-900/80 text-emerald-200 border border-emerald-400/60'
               }`}
             >
               Nota: {grade}
             </span>
           ) : (
-            <span className={`text-[10px] capitalize font-medium whitespace-nowrap shrink-0 ${style.color}`}>
-              {status}
+            <span
+              className={`text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.2 rounded whitespace-nowrap shrink-0 ${style.pillBg}`}
+            >
+              {style.pillLabel}
             </span>
           )}
         </div>

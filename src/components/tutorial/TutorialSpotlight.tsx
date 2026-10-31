@@ -62,6 +62,25 @@ function getElementRect(selector?: string): SpotlightRect | null {
   const el = document.querySelector(selector);
   if (!el) return null;
   const b = el.getBoundingClientRect();
+
+  // If element is not rendered, hidden in closed menu, or has zero dimensions, fallback gracefully to center
+  if (
+    b.width <= 0 ||
+    b.height <= 0 ||
+    (b.top === 0 && b.left === 0 && b.width <= 16 && b.height <= 16)
+  ) {
+    return null;
+  }
+
+  const computedStyle = window.getComputedStyle(el);
+  if (
+    computedStyle.display === 'none' ||
+    computedStyle.visibility === 'hidden' ||
+    computedStyle.opacity === '0'
+  ) {
+    return null;
+  }
+
   const pad = 8;
   return {
     top: Math.max(0, b.top - pad),

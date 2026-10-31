@@ -179,71 +179,66 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
           {/* Actions & Utilities */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Secondary Actions (Visible only on ultra-wide screens >= 1900px, otherwise in More Menu) */}
-            <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
-              {/* Analista / Seminario Toggle Button */}
-              <button
-                data-tour="analista-button"
-                onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shrink-0 ${
-                  settings.includeAnalistaTrack
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                    : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
-                }`}
-                title={
-                  settings.includeAnalistaTrack
-                    ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
-                    : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
-                }
-              >
-                <Award className="w-3.5 h-3.5 text-amber-400" />
-                <span>Analista (99)</span>
-                <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
-                  settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                </span>
-              </button>
+            {/* Simulation Mode Toggle Button ("¿Y si...?") - Visible directly on the navbar */}
+            <button
+              data-tour="simulation-button"
+              onClick={toggleSimulationMode}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shrink-0 cursor-pointer ${
+                isSimulationMode
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
+                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
+              }`}
+              title="Modo simulación hipotética"
+            >
+              <FlaskConical className="w-3.5 h-3.5 text-amber-400" />
+              <span className="whitespace-nowrap">¿Y si...?</span>
+            </button>
 
-              {/* Simulation Mode Toggle Button */}
-              <button
-                data-tour="simulation-button"
-                onClick={toggleSimulationMode}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border shrink-0 ${
-                  isSimulationMode
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
-                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
-                }`}
-                title="Modo simulación hipotética"
-              >
-                <FlaskConical className="w-3.5 h-3.5" />
-                <span>¿Y si...?</span>
-              </button>
+            {/* Carga Rápida Button - Visible directly on navbar on md+ */}
+            <button
+              data-tour="onboarding-button"
+              onClick={() => setIsOnboardingOpen(true)}
+              className="hidden md:flex px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 hover:border-amber-500/40 transition-all items-center gap-1.5 shrink-0 cursor-pointer"
+              title="Carga rápida inicial de materias por nivel"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="hidden xl:inline whitespace-nowrap">Carga Rápida</span>
+            </button>
 
-              {/* Sound toggle */}
-              <button
-                onClick={toggleSound}
-                className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 transition-colors shrink-0"
-                title={soundEnabled ? 'Sonido activado (click para silenciar)' : 'Sonido silenciado'}
-              >
-                {soundEnabled ? (
-                  <Volume2 className="w-4 h-4 text-emerald-400" />
-                ) : (
-                  <VolumeX className="w-4 h-4 text-slate-500" />
-                )}
-              </button>
-            </div>
+            {/* Analista / Seminario Toggle Button - Visible on xl+ */}
+            <button
+              data-tour="analista-button"
+              onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+              className={`hidden xl:flex px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all items-center gap-1.5 border shrink-0 cursor-pointer ${
+                settings.includeAnalistaTrack
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                  : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
+              }`}
+              title={
+                settings.includeAnalistaTrack
+                  ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
+                  : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
+              }
+            >
+              <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="whitespace-nowrap">Analista (99)</span>
+              <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+              </span>
+            </button>
 
             {/* Quick Search */}
             <button
               data-tour="search-button"
               onClick={() => setIsSearchOpen(true)}
-              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5 shrink-0"
+              className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
               title="Buscar materias (Ctrl+K)"
             >
               <Search className="w-4 h-4 text-indigo-400 shrink-0" />
-              <span className="hidden min-[1720px]:inline whitespace-nowrap">Buscar</span>
-              <kbd className="hidden min-[1720px]:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
+              <span className="hidden 2xl:inline whitespace-nowrap">Buscar</span>
+              <kbd className="hidden 2xl:inline px-1.5 py-0.2 text-[10px] bg-slate-800 rounded border border-slate-700 text-slate-400">
                 Ctrl K
               </kbd>
             </button>

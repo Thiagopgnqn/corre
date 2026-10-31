@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   BookOpen,
+  ChevronDown,
+  ChevronUp,
   Edit2,
   Filter,
   MessageSquarePlus,
@@ -79,6 +81,23 @@ export const ProfessorsDirectory: React.FC = () => {
   const [editingReview, setEditingReview] = useState<OwnReviewItem | null>(null);
   const [moderationModalOpen, setModerationModalOpen] = useState<boolean>(false);
   const [openReportsBadge, setOpenReportsBadge] = useState<number>(0);
+  const [isRecommendationsCollapsed, setIsRecommendationsCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('stack_recommendations_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleRecommendationsCollapse = () => {
+    setIsRecommendationsCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('stack_recommendations_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   const allPlanSubjects = useMemo(() => {
     return [...CORE_SUBJECTS, ...ELECTIVES].sort(
@@ -436,77 +455,107 @@ export const ProfessorsDirectory: React.FC = () => {
 
       {/* Sección: Profesores que podés reseñar */}
       {recommendedPairs.length > 0 && (
-        <div className="rounded-2xl border border-amber-500/25 bg-amber-950/15 p-4 space-y-3 shadow-lg">
+        <div className="rounded-2xl border border-amber-500/25 bg-amber-950/15 p-4 space-y-3 shadow-lg transition-all">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
               <h3 className="text-xs font-black uppercase tracking-wider text-amber-300">
                 Profesores que podés reseñar
               </h3>
+              <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold">
+                {recommendedPairs.length}
+              </span>
               <span className="text-[11px] text-slate-400 hidden sm:inline">
                 (según las comisiones que cursaste)
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={toggleRecommendationsCollapse}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold text-amber-300/90 hover:text-amber-200 hover:bg-amber-500/10 border border-amber-500/20 transition-all flex items-center gap-1 cursor-pointer"
+              title={isRecommendationsCollapsed ? 'Expandir lista de sugerencias' : 'Minimizar lista de sugerencias'}
+            >
+              <span>{isRecommendationsCollapsed ? 'Expandir' : 'Minimizar'}</span>
+              {isRecommendationsCollapsed ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5" />
+              )}
+            </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {recommendedPairs.map((pair) => (
-              <div
-                key={`${pair.professorId}-${pair.subjectId}`}
-                className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between gap-2.5 shadow-sm"
+
+          <AnimatePresence initial={false}>
+            {!isRecommendationsCollapsed && (
+              <motion.div
+                initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={shouldReduceMotion ? undefined : { opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
               >
-                <div>
-                  <div className="text-xs font-extrabold text-white">{pair.professorName}</div>
-                  <div className="text-[11px] text-slate-400">
-                    {pair.subjectName}
-                    {(pair.enrollmentAcademicYear || pair.enrollmentTerm) && (
-                      <span>
-                        {' '}
-                        · {formatEnrollmentPeriodLabel(pair.enrollmentAcademicYear, pair.enrollmentTerm)}
-                      </span>
-                    )}
-                  </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  {recommendedPairs.map((pair) => (
+                    <div
+                      key={`${pair.professorId}-${pair.subjectId}`}
+                      className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between gap-2.5 shadow-sm"
+                    >
+                      <div>
+                        <div className="text-xs font-extrabold text-white">{pair.professorName}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {pair.subjectName}
+                          {(pair.enrollmentAcademicYear || pair.enrollmentTerm) && (
+                            <span>
+                              {' '}
+                              · {formatEnrollmentPeriodLabel(pair.enrollmentAcademicYear, pair.enrollmentTerm)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-slate-800/60">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await dismissReviewRecommendation(pair.professorId, pair.subjectId);
+                            setReviewableData((prev) => {
+                              if (!prev) return prev;
+                              return {
+                                ...prev,
+                                eligible: prev.eligible.map((p) =>
+                                  p.professorId === pair.professorId &&
+                                  String(p.subjectId) === String(pair.subjectId)
+                                    ? { ...p, dismissed: true }
+                                    : p
+                                ),
+                              };
+                            });
+                          }}
+                          className="px-2 py-1 rounded-lg text-slate-400 hover:text-slate-200 text-xs font-medium cursor-pointer transition-colors"
+                        >
+                          Ahora no
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleOpenWriteReview(
+                              pair.professorId,
+                              pair.subjectId,
+                              pair.enrollmentAcademicYear,
+                              pair.enrollmentTerm
+                            )
+                          }
+                          className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1 shadow transition-colors cursor-pointer"
+                        >
+                          <Star className="w-3.5 h-3.5 fill-slate-950" />
+                          <span>Reseñar</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex items-center justify-end gap-2 pt-1.5 border-t border-slate-800/60">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await dismissReviewRecommendation(pair.professorId, pair.subjectId);
-                      setReviewableData((prev) => {
-                        if (!prev) return prev;
-                        return {
-                          ...prev,
-                          eligible: prev.eligible.map((p) =>
-                            p.professorId === pair.professorId &&
-                            String(p.subjectId) === String(pair.subjectId)
-                              ? { ...p, dismissed: true }
-                              : p
-                          ),
-                        };
-                      });
-                    }}
-                    className="px-2 py-1 rounded-lg text-slate-400 hover:text-slate-200 text-xs font-medium cursor-pointer transition-colors"
-                  >
-                    Ahora no
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      handleOpenWriteReview(
-                        pair.professorId,
-                        pair.subjectId,
-                        pair.enrollmentAcademicYear,
-                        pair.enrollmentTerm
-                      )
-                    }
-                    className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold flex items-center gap-1 shadow transition-colors cursor-pointer"
-                  >
-                    <Star className="w-3.5 h-3.5 fill-slate-950" />
-                    <span>Reseñar</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 
