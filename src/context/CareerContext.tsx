@@ -130,6 +130,9 @@ interface CareerContextType {
   isOnboardingOpen: boolean;
   setIsOnboardingOpen: (open: boolean) => void;
 
+  isMoreMenuOpen: boolean;
+  setIsMoreMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
+
   semesterBasket: number[];
   toggleBasketSubject: (id: number) => void;
   clearBasket: () => void;
@@ -229,6 +232,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [statusModalSubjectId, setStatusModalSubjectId] = useState<number | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
+  const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
   const [semesterBasket, setSemesterBasket] = useState<number[]>(() => loadBasket());
   const [showElectivesInGraph, setShowElectivesInGraph] = useState<boolean>(false);
 
@@ -1367,6 +1371,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const closeTutorial = useCallback((options?: { openOnboarding?: boolean }) => {
     setIsTutorialOpen(false);
+    setIsMoreMenuOpen(false);
     if (realUserStateBackupRef.current !== null) {
       setUserState(realUserStateBackupRef.current);
       realUserStateBackupRef.current = null;
@@ -1441,6 +1446,8 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setIsSearchOpen,
         isOnboardingOpen,
         setIsOnboardingOpen,
+        isMoreMenuOpen,
+        setIsMoreMenuOpen,
         semesterBasket,
         toggleBasketSubject,
         clearBasket,

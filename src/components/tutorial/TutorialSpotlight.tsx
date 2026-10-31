@@ -178,6 +178,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     prevTutorialStep,
     selectedSubjectId,
     setSelectedSubjectId,
+    setIsMoreMenuOpen,
   } = useCareer();
 
   const step = TUTORIAL_STEPS[currentTutorialStep];
@@ -262,6 +263,24 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       setSelectedSubjectId(null);
     }
   }, [isTutorialOpen, step?.id, selectedSubjectId, setSelectedSubjectId]);
+
+  // Auto-open more options menu if tutorial step targets an option inside it (e.g. Carga Rápida)
+  useEffect(() => {
+    if (!isTutorialOpen) {
+      setIsMoreMenuOpen(false);
+      return;
+    }
+
+    const targetsMenuItem = Boolean(
+      step?.targetSelector && step.targetSelector.includes('menu-item')
+    );
+
+    if (targetsMenuItem) {
+      setIsMoreMenuOpen(true);
+    } else {
+      setIsMoreMenuOpen(false);
+    }
+  }, [isTutorialOpen, step?.id, step?.targetSelector, setIsMoreMenuOpen]);
 
   // Avoid skipping Step 4 if a subject was already selected before entering Step 4
   const lastStepIdRef = useRef<string | null>(null);

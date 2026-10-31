@@ -51,8 +51,16 @@ const AppContent: React.FC = () => {
     globalReviewModalTarget,
     closeGlobalReviewModal,
     refreshReviewableSummary,
+    startTutorial,
   } = useCareer();
   const [currentView, setCurrentView] = useState<AppView>(getInitialView);
+
+  React.useEffect(() => {
+    (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial = startTutorial;
+    return () => {
+      delete (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial;
+    };
+  }, [startTutorial]);
 
   const handleSetView = (view: AppView) => {
     setCurrentView(view);

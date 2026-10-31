@@ -61,28 +61,31 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     syncStatus,
     currentPlanName,
     unseenRecommendationsCount,
+    isMoreMenuOpen,
+    setIsMoreMenuOpen,
+    isTutorialOpen,
   } = useCareer();
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Close menu on click outside
+  // Close menu on click outside (unless tutorial is currently active)
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
+      if (isTutorialOpen) return;
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setMenuOpen(false);
+        setIsMoreMenuOpen(false);
       }
     }
-    if (menuOpen) {
+    if (isMoreMenuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [menuOpen]);
+  }, [isMoreMenuOpen, isTutorialOpen, setIsMoreMenuOpen]);
 
   const handleExport = () => {
     const json = exportData();
@@ -93,7 +96,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     a.download = `mi-carrera-${currentPlanName.toLowerCase().replace(/\s+/g, '-')}-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    setMenuOpen(false);
+    setIsMoreMenuOpen(false);
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -108,7 +111,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
       }
     };
     reader.readAsText(file);
-    setMenuOpen(false);
+    setIsMoreMenuOpen(false);
   };
 
   const navItems: Array<{
@@ -179,6 +182,33 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
           {/* Actions & Utilities */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {/* Secondary Actions (Visible on ultra-wide screens >= 1900px, otherwise in More Menu) */}
+            <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
+              {/* Analista / Seminario Toggle Button */}
+              <button
+                data-tour="analista-button"
+                onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shrink-0 cursor-pointer ${
+                  settings.includeAnalistaTrack
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                    : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
+                }`}
+                title={
+                  settings.includeAnalistaTrack
+                    ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
+                    : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
+                }
+              >
+                <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="whitespace-nowrap">Analista (99)</span>
+                <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                  settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                </span>
+              </button>
+            </div>
+
             {/* Simulation Mode Toggle Button ("¿Y si...?") - Visible directly on the navbar */}
             <button
               data-tour="simulation-button"
@@ -192,41 +222,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             >
               <FlaskConical className="w-3.5 h-3.5 text-amber-400" />
               <span className="whitespace-nowrap">¿Y si...?</span>
-            </button>
-
-            {/* Carga Rápida Button - Visible directly on navbar on md+ */}
-            <button
-              data-tour="onboarding-button"
-              onClick={() => setIsOnboardingOpen(true)}
-              className="hidden md:flex px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 hover:border-amber-500/40 transition-all items-center gap-1.5 shrink-0 cursor-pointer"
-              title="Carga rápida inicial de materias por nivel"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="hidden xl:inline whitespace-nowrap">Carga Rápida</span>
-            </button>
-
-            {/* Analista / Seminario Toggle Button - Visible on xl+ */}
-            <button
-              data-tour="analista-button"
-              onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
-              className={`hidden xl:flex px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all items-center gap-1.5 border shrink-0 cursor-pointer ${
-                settings.includeAnalistaTrack
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                  : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
-              }`}
-              title={
-                settings.includeAnalistaTrack
-                  ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
-                  : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
-              }
-            >
-              <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="whitespace-nowrap">Analista (99)</span>
-              <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
-                settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-              }`}>
-                {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-              </span>
             </button>
 
             {/* Quick Search */}
@@ -252,7 +247,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             {/* Tutorial Launcher Button: Visible on wide screens >= 1650px (also in More menu on all screens) */}
             <button
               onClick={() => startTutorial(0)}
-              className="hidden min-[1650px]:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm"
+              className="hidden min-[1650px]:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
               title="Ver tutorial guiado interactivo"
             >
               <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -263,9 +258,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <div className="relative shrink-0" ref={menuRef}>
               <button
                 data-tour="more-menu-btn"
-                onClick={() => setMenuOpen(!menuOpen)}
+                onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
                 className={`p-1.5 sm:px-2.5 sm:py-1.5 rounded-xl border transition-all shrink-0 cursor-pointer shadow-sm flex items-center justify-center ${
-                  menuOpen
+                  isMoreMenuOpen
                     ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/40'
                     : 'bg-slate-800/80 hover:bg-slate-700/80 border-slate-700 text-slate-300 hover:text-white'
                 }`}
@@ -274,7 +269,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <MoreVertical className="w-4 h-4" />
               </button>
 
-              {menuOpen && (
+              {isMoreMenuOpen && (
                 <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80 backdrop-blur-xl animate-fade-in">
                   {user && (
                     <div className="px-3.5 py-2.5 bg-slate-950/40">
@@ -323,7 +318,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     <button
                       onClick={() => {
                         toggleSimulationMode();
-                        setMenuOpen(false);
+                        setIsMoreMenuOpen(false);
                       }}
                       className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2"
                     >
@@ -362,9 +357,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   <div className="py-1">
                     {/* Carga rápida por nivel */}
                     <button
+                      data-tour="onboarding-menu-item"
                       onClick={() => {
                         setIsOnboardingOpen(true);
-                        setMenuOpen(false);
+                        setIsMoreMenuOpen(false);
                       }}
                       className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
                     >
@@ -376,7 +372,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     <button
                       onClick={() => {
                         loadSample();
-                        setMenuOpen(false);
+                        setIsMoreMenuOpen(false);
                       }}
                       className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
                     >
@@ -387,7 +383,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     {/* Tutorial */}
                     <button
                       onClick={() => {
-                        setMenuOpen(false);
+                        setIsMoreMenuOpen(false);
                         startTutorial(0);
                       }}
                       className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2"
@@ -421,7 +417,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     {/* Reset */}
                     <button
                       onClick={() => {
-                        setMenuOpen(false);
+                        setIsMoreMenuOpen(false);
                         setResetConfirmOpen(true);
                       }}
                       className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2"
@@ -435,7 +431,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     <div className="py-1">
                       <button
                         onClick={() => {
-                          setMenuOpen(false);
+                          setIsMoreMenuOpen(false);
                           logout();
                         }}
                         className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
