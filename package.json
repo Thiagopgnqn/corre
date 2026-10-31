@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts",
+    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts && tsx test/authFrontend.test.ts",
     "import:schedule": "tsx scripts/importSchedule.ts",
     "preview": "vite preview"
   },

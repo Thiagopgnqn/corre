@@ -17,7 +17,8 @@
     "import:schedule": "tsx src/scripts/importScheduleDb.ts",
     "migrate:professors": "tsx src/scripts/migrateProfessors.ts",
     "merge-professors": "tsx src/scripts/mergeProfessors.ts",
-    "test": "tsx test/reviews.test.ts",
+    "verify-user": "tsx src/scripts/verifyUser.ts",
+    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.40.0",
     "express": "^4.21.2",
+    "google-auth-library": "^11.3.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",

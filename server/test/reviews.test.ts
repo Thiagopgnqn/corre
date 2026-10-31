@@ -107,6 +107,7 @@ async function main() {
     email: string;
     role: 'user' | 'admin';
     selectedPlanId?: string | null;
+    emailVerified?: boolean;
   }) {
     return jwt.sign(
       {
@@ -114,6 +115,7 @@ async function main() {
         email: user.email,
         role: user.role,
         selectedPlanId: user.selectedPlanId ?? store.defaultPlanId,
+        emailVerified: user.emailVerified ?? true,
       },
       env.JWT_SECRET,
       { expiresIn: '1h' }

@@ -1,15 +1,32 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { GraduationCap, Lock, Mail, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { GoogleLoginButton } from './GoogleLoginButton';
 
 export const AuthScreen: React.FC = () => {
-  const { login, register, isWakingServer } = useAuth();
+  const { login, register, loginWithGoogle, isWakingServer } = useAuth();
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleGoogleSuccess = async (credential: string) => {
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      await loginWithGoogle(credential);
+    } catch (err: any) {
+      setError(err?.message || 'Error al iniciar sesión con Google.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleError = (errorMsg: string) => {
+    setError(errorMsg);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +56,12 @@ export const AuthScreen: React.FC = () => {
         await register(normEmail, password);
       }
     } catch (err: any) {
-      setError(err?.message || (mode === 'login' ? 'Email o contraseña incorrectos' : 'Error al registrar usuario'));
+      setError(
+        err?.message ||
+          (mode === 'login'
+            ? 'Email o contraseña incorrectos'
+            : 'Error al registrar usuario')
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -76,7 +98,7 @@ export const AuthScreen: React.FC = () => {
         </div>
 
         {/* Tab switch */}
-        <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl mb-6 border border-slate-800">
+        <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl mb-5 border border-slate-800">
           <button
             type="button"
             onClick={() => { setMode('login'); setError(null); }}
@@ -109,8 +131,28 @@ export const AuthScreen: React.FC = () => {
           </div>
         )}
 
+        {/* Google Authentication Button */}
+        <div className="space-y-4">
+          <GoogleLoginButton
+            onSuccess={handleGoogleSuccess}
+            onError={handleGoogleError}
+            disabled={isSubmitting}
+            mode={mode}
+          />
+
+          {/* Divider */}
+          <div className="relative flex items-center justify-center">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-800" />
+            </div>
+            <div className="relative px-3 bg-slate-900 text-slate-500 text-xs uppercase tracking-wider font-semibold">
+              o
+            </div>
+          </div>
+        </div>
+
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
               Email

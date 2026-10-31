@@ -165,8 +165,17 @@ Permite fusionar pares `{ "keep", "remove" }` y aplicar renombres `{ "from", "to
    npm --prefix server run merge-professors -- --file merges.json --apply
    ```
 
-### Endpoints del Módulo de Profesores, Reseñas y Cursadas
-- **Públicos (requieren sesión iniciada)**:
+### Endpoints del Módulo de Autenticación, Verificación y Cursadas
+- **Autenticación y Cuentas**:
+  - `POST /api/auth/register` — Registro con email y contraseña (genera código criptográfico de 6 dígitos con hash HMAC y lo envía por mail).
+  - `POST /api/auth/login` — Inicio de sesión con credenciales.
+  - `POST /api/auth/google` — Inicio de sesión / registro con ID token de Google Identity Services verificado en backend (`google-auth-library`).
+  - `POST /api/auth/verify-email` — Verificación con código de 6 dígitos (consumo único, tiempo constante y reemisión de tokens de sesión con claim `emailVerified: true`).
+  - `POST /api/auth/resend-code` — Reenvío de código (espera de 60s y tope de 5 envíos por hora).
+  - `POST /api/auth/cancel-registration` — Cancela y elimina la cuenta no verificada si el usuario necesita cambiar de email.
+  - `POST /api/auth/refresh` y `POST /api/auth/logout` — Rotación con ventana de gracia y cierre seguro.
+  - `GET /api/me` — Datos del usuario, estado `emailVerified: boolean` y proveedores (`authProviders`).
+- **Públicos (requieren sesión iniciada y email verificado)**:
   - `GET /api/professors` — Directorio con búsqueda, filtros (`subjectId`, `minRating`, `withReviews`) y orden (`rating`, `reviews`, `name`).
   - `GET /api/professors/ratings` — Lote liviano cacheable (`byId` + `byNormalizedName` + `recentReviews`) para el Armador de Horarios.
   - `GET /api/professors/:id` y `GET /api/professors/:id/reviews` — Ficha completa, desglose por materia y reseñas paginadas.
@@ -194,7 +203,80 @@ Permite fusionar pares `{ "keep", "remove" }` y aplicar renombres `{ "from", "to
 ### Migraciones Drizzle en PostgreSQL / Neon
 1. `0000_massive_thunderball.sql`: Tablas base de usuarios, sesiones OAuth/credenciales, estados de carrera, horarios y comisiones.
 2. `0001_professor_reviews.sql`: Entidades `professors`, `professor_aliases`, `professor_subjects`, `commission_professors`, `professor_reviews`, `review_reports` y `review_helpful_votes`.
-3. `0002_enrollments_and_declared_reviews.sql`: Tablas de cursadas `subject_enrollments` y `enrollment_professors`, descartes de recomendaciones `review_recommendation_dismissals` y columna `attended_declared` en `professor_reviews`. *(Se aplica con el deploy normal sin ejecuciones manuales previas)*.
+3. `0002_enrollments_and_declared_reviews.sql`: Tablas de cursadas `subject_enrollments` y `enrollment_professors`, descartes de recomendaciones `review_recommendation_dismissals` y columna `attended_declared` en `professor_reviews`.
+4. `0003_premium_dakota_north.sql`: Tablas `user_identities` (proveedor Google con `provider_user_id` / `sub`), `email_verification_codes` (código HMAC, expiración y límite de intentos), columna `email_verified_at` y `canonical_email` en `users` con índice único condicional, y `password_hash` nullable. *(Se aplica con el deploy normal)*.
+
+---
+
+## 🔑 Configuración de Google Login y Proveedor de Email
+
+### 1. Configuración de Google Identity Services (Google Cloud Console)
+1. Ingresá a [Google Cloud Console](https://console.cloud.google.com/) y seleccioná o creá un proyecto para **Mi Carrera**.
+2. En **APIs y servicios > Pantalla de consentimiento de OAuth**:
+   - Seleccioná tipo de usuario **Externo**.
+   - Completá el nombre de la app (*Mi Carrera*), correo de soporte y datos de desarrollador.
+   - Publicá la app (estado de publicación **En producción**) para que cualquier cuenta de Google pueda iniciar sesión sin estar agregada manualmente como usuario de prueba.
+3. En **APIs y servicios > Credenciales**:
+   - Creá credenciales de tipo **ID de cliente de OAuth 2.0**.
+   - Tipo de aplicación: **Aplicación web**.
+   - **Orígenes autorizados de JavaScript**:
+     - `http://localhost:5173` (desarrollo local)
+     - `https://corre-ten.vercel.app` (producción en Vercel)
+   - Guardá el Client ID generado (ej: `1234567890-abcdef.apps.googleusercontent.com`).
+4. Configuración de variables:
+   - **Backend (Render)**: `GOOGLE_CLIENT_ID = <tu-client-id>`.
+   - **Frontend (Vercel)**: `VITE_GOOGLE_CLIENT_ID = <tu-client-id>`. *(Al tener prefijo `VITE_`, recordá que se embebe al compilar: requiere un nuevo deploy / redeploy en Vercel para tomar efecto)*.
+
+### 2. Configuración del Proveedor de Email (Resend o Brevo)
+Dado que Render en su plan gratuito bloquea las conexiones SMTP salientes, el backend utiliza la API HTTP oficial:
+- **Opción A — Resend (Recomendado)**:
+  1. Registrate en [Resend](https://resend.com) y generá una API Key con permisos de envío.
+  2. Verificá tu dominio o utilizá el dominio sandbox verificado de pruebas (`onboarding@resend.dev` solo para envíos al correo de tu cuenta).
+  3. En Render configurá:
+     ```env
+     EMAIL_PROVIDER=resend
+     RESEND_API_KEY=re_123456789...
+     EMAIL_FROM=Mi Carrera <noreply@tudominio.com>
+     EMAIL_FROM_NAME=Mi Carrera
+     ```
+- **Opción B — Brevo (Sendinblue)**:
+  1. Registrate en [Brevo](https://brevo.com), ingresá a **SMTP & API** y generá una API Key v3.
+  2. Verificá el remitente (Senders & IP) con el correo que usarás en `EMAIL_FROM`.
+  3. En Render configurá:
+     ```env
+     EMAIL_PROVIDER=brevo
+     BREVO_API_KEY=xkeysib-...
+     EMAIL_FROM=noreply@tudominio.com
+     EMAIL_FROM_NAME=Mi Carrera
+     ```
+- **Secretos del Servidor**:
+  Configurá `VERIFICATION_CODE_PEPPER` con una cadena aleatoria de al menos 16 caracteres para hashear los códigos de verificación con HMAC-SHA256.
+
+### 3. Reglas de Vinculación de Cuentas por Email y Seguridad
+- **Regla (c) — Preservación de datos o reemplazo en cuenta no verificada**: Si un usuario intenta ingresar con Google y ya existía una cuenta registrada con contraseña pero **sin verificar**: si dicha cuenta tiene datos guardados (progreso, electivas, reseñas, cursadas, propuestas, etc.) o fue creada antes de la migración `0003`, **no se elimina**. En su lugar, se borra su `password_hash`, se revocan todos sus refresh tokens y sesiones anteriores, se vincula la identidad de Google, se marca `email_verified_at` y se inicia sesión conservando el 100% de sus datos. Únicamente se elimina la cuenta sin verificar si es una cuenta vacía (sin datos asociados) creada con posterioridad a la migración `0003`.
+- **Cuentas creadas solo con Google**: No poseen contraseña (`password_hash = null`). Si alguien intenta iniciar sesión con contraseña en una cuenta solo-Google, el sistema responde con el mensaje genérico estándar `"Email o contraseña incorrectos"`.
+- **Mitigación Anti-Multicuentas (`canonical_email` & dominios descartables)**:
+  - Para direcciones de `gmail.com` y `googlemail.com`, se ignoran los puntos en la parte local y cualquier etiqueta de alias posterior al signo `+` (por ejemplo, `juan.perez+1@gmail.com` se normaliza a `juanperez@gmail.com`).
+  - No se permite registrar una cuenta si su `canonical_email` coincide con el de una cuenta ya verificada. Si esa cuenta usa Google, el mensaje sugiere amablemente: *"Ya existe una cuenta con este correo, probá con Continuar con Google"*.
+  - Se bloquean dominios de correos descartables/temporales configurados en `server/src/config/disposableDomains.ts`.
+  - *Nota*: Esto mitiga significativamente pero no elimina al 100% las multicuentas si se utilizan proveedores con dominios personalizados o servicios VPN.
+
+### 4. Herramientas CLI y Mantenimiento
+- **Verificar manualmente una cuenta (Fallback de emergencia)**:
+  Si un usuario experimenta problemas con el proveedor de emails o necesita acceso inmediato:
+  ```bash
+  npm --prefix server run verify-user -- --email estudiante@ejemplo.com
+  ```
+- **Limpieza de cuentas huérfanas**:
+  El servidor ejecuta automáticamente cada 12 horas una rutina liviana que elimina cuentas creadas hace más de 7 días que nunca verificaron su correo. También puede ejecutarse a demanda:
+  ```bash
+  npm --prefix server run cleanup-unverified -- --days 7
+  ```
+- **Comando SQL para eliminar cuenta de prueba `prueba@ejemplo.com`**:
+  *(Solo para ejecutar cuando lo consideres necesario en la consola SQL de Neon)*:
+  ```sql
+  DELETE FROM users WHERE email = 'prueba@ejemplo.com' OR canonical_email = 'prueba@ejemplo.com';
+  ```
 
 ---
 

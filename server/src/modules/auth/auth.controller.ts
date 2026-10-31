@@ -34,9 +34,24 @@ function clearAuthCookies(res: Response) {
 export class AuthController {
   static async register(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { user, accessToken, refreshToken } = await AuthService.register(req.body);
+      const { user, accessToken, refreshToken, emailDeliveryFailed } =
+        await AuthService.register(req.body);
       setAuthCookies(res, accessToken, refreshToken);
       res.status(201).json({
+        success: true,
+        user,
+        emailDeliveryFailed,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async google(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { user, accessToken, refreshToken } = await AuthService.googleAuth(req.body);
+      setAuthCookies(res, accessToken, refreshToken);
+      res.json({
         success: true,
         user,
       });
@@ -53,6 +68,53 @@ export class AuthController {
         success: true,
         user,
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async verifyEmail(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'No autenticado' });
+        return;
+      }
+      const { user, accessToken, refreshToken } = await AuthService.verifyEmail(
+        req.user.id,
+        req.body.code
+      );
+      setAuthCookies(res, accessToken, refreshToken);
+      res.json({
+        success: true,
+        user,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async resendCode(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'No autenticado' });
+        return;
+      }
+      const result = await AuthService.resendVerificationCode(req.user.id);
+      res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  static async cancelRegistration(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ success: false, error: 'No autenticado' });
+        return;
+      }
+      const result = await AuthService.cancelRegistration(req.user.id);
+      clearAuthCookies(res);
+      res.json(result);
     } catch (error) {
       next(error);
     }

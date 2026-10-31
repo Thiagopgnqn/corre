@@ -4,10 +4,19 @@ import { authApi, type User } from '../api/auth.api';
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
+  isEmailVerified: boolean;
   isLoading: boolean;
   isWakingServer: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, selectedPlanId?: string) => Promise<void>;
+  loginWithGoogle: (credential: string) => Promise<void>;
+  register: (
+    email: string,
+    password: string,
+    selectedPlanId?: string
+  ) => Promise<{ emailDeliveryFailed?: boolean }>;
+  verifyEmail: (code: string) => Promise<void>;
+  resendVerificationCode: () => Promise<{ emailDeliveryFailed?: boolean }>;
+  cancelRegistration: () => Promise<void>;
   logout: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -58,10 +67,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const loginWithGoogle = async (credential: string) => {
+    const res = await authApi.loginWithGoogle(credential);
+    if (res.success && res.user) {
+      setUser(res.user);
+    }
+  };
+
   const register = async (email: string, password: string, selectedPlanId?: string) => {
     const res = await authApi.register(email, password, selectedPlanId);
     if (res.success && res.user) {
       setUser(res.user);
+    }
+    return { emailDeliveryFailed: Boolean(res.emailDeliveryFailed) };
+  };
+
+  const verifyEmail = async (code: string) => {
+    const res = await authApi.verifyEmail(code);
+    if (res.success && res.user) {
+      setUser(res.user);
+    }
+  };
+
+  const resendVerificationCode = async () => {
+    const res = await authApi.resendVerificationCode();
+    return { emailDeliveryFailed: Boolean(res.emailDeliveryFailed) };
+  };
+
+  const cancelRegistration = async () => {
+    try {
+      await authApi.cancelRegistration();
+    } finally {
+      setUser(null);
     }
   };
 
@@ -94,15 +131,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const isEmailVerified = Boolean(user && user.emailVerified === true);
+
   return (
     <AuthContext.Provider
       value={{
         user,
         isAuthenticated: !!user,
+        isEmailVerified,
         isLoading,
         isWakingServer,
         login,
+        loginWithGoogle,
         register,
+        verifyEmail,
+        resendVerificationCode,
+        cancelRegistration,
         logout,
         deleteAccount,
         refreshUser,

@@ -350,17 +350,63 @@ export const electiveOfferingProfessors = pgTable(
 // 2. DATOS DE CADA USUARIO
 // ==========================================
 
-export const users = pgTable('users', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  role: text('role').notNull().default('user'), // 'user' | 'admin'
-  selectedPlanId: uuid('selected_plan_id').references(() => studyPlans.id, {
-    onDelete: 'set null',
-  }),
-  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
-  ...timestamps,
-});
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    email: text('email').notNull().unique(),
+    canonicalEmail: text('canonical_email'),
+    passwordHash: text('password_hash'),
+    role: text('role').notNull().default('user'), // 'user' | 'admin'
+    selectedPlanId: uuid('selected_plan_id').references(() => studyPlans.id, {
+      onDelete: 'set null',
+    }),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('uq_users_canonical_verified')
+      .on(table.canonicalEmail)
+      .where(sql`${table.emailVerifiedAt} IS NOT NULL`),
+    index('idx_users_canonical_email').on(table.canonicalEmail),
+  ]
+);
+
+export const userIdentities = pgTable(
+  'user_identities',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    provider: text('provider').notNull(), // 'google'
+    providerUserId: text('provider_user_id').notNull(), // 'sub' de Google
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_user_identity_provider_user').on(table.provider, table.providerUserId),
+    index('idx_user_identities_user').on(table.userId),
+  ]
+);
+
+export const emailVerificationCodes = pgTable(
+  'email_verification_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    codeHash: text('code_hash').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_verification_codes_user').on(table.userId),
+  ]
+);
 
 export const refreshTokens = pgTable(
   'refresh_tokens',

@@ -7,6 +7,7 @@ import path from 'path';
 import { env } from './config/env.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { AuthController } from './modules/auth/auth.controller.js';
+import { AuthService } from './modules/auth/auth.service.js';
 import catalogRouter from './modules/catalog/catalog.routes.js';
 import { updateSelectedPlan } from './modules/catalog/catalog.controller.js';
 import adminRouter from './modules/admin/admin.routes.js';
@@ -42,8 +43,20 @@ export function createApp(options?: { reviewsStore?: ReviewsStore }) {
   // 1. Cabeceras de seguridad
   instance.use(
     helmet({
-      contentSecurityPolicy: env.NODE_ENV === 'production',
+      contentSecurityPolicy:
+        env.NODE_ENV === 'production'
+          ? {
+              directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'", 'https://accounts.google.com/gsi/client'],
+                frameSrc: ["'self'", 'https://accounts.google.com/'],
+                connectSrc: ["'self'", 'https://accounts.google.com/'],
+                styleSrc: ["'self'", "'unsafe-inline'", 'https://accounts.google.com/gsi/style'],
+              },
+            }
+          : false,
       crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
     })
   );
 
@@ -167,6 +180,12 @@ export const app = createApp();
 const currentFile = fileURLToPath(import.meta.url);
 const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (process.env.NODE_ENV !== 'test' && currentFile === entryFile) {
+  // Limpieza periódica liviana de cuentas no verificadas de más de 7 días (cada 12h)
+  AuthService.cleanupUnverifiedAccounts(7).catch(() => {});
+  setInterval(() => {
+    AuthService.cleanupUnverifiedAccounts(7).catch(() => {});
+  }, 12 * 60 * 60 * 1000).unref();
+
   app.listen(env.PORT, () => {
     console.log(`🚀 Servidor backend escuchando en puerto ${env.PORT} (${env.NODE_ENV})`);
     console.log(`🌐 CLIENT_ORIGIN configurado: ${env.CLIENT_ORIGIN}`);

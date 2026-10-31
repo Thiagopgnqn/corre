@@ -23,6 +23,20 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'La contraseña es requerida'),
 });
 
+export const googleLoginSchema = z.object({
+  credential: z.string().min(1, 'El ID token de Google es requerido'),
+  selectedPlanId: z.string().uuid('ID de plan inválido').optional(),
+});
+
+export const verifyEmailSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'El código de verificación debe contener exactamente 6 dígitos numéricos'),
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type GoogleLoginInput = z.infer<typeof googleLoginSchema>;
+export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 

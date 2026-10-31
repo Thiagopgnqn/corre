@@ -16,6 +16,7 @@ import { SearchModal } from './components/common/SearchModal';
 import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 import { AuthScreen } from './components/auth/AuthScreen';
+import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { LocalStorageMigrationModal } from './components/migration/LocalStorageMigrationModal';
 import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
@@ -41,7 +42,7 @@ const getInitialView = (): AppView => {
 };
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading } = useAuth();
   const {
     showMigrationModal,
     setShowMigrationModal,
@@ -72,6 +73,10 @@ const AppContent: React.FC = () => {
 
   if (!isAuthenticated) {
     return <AuthScreen />;
+  }
+
+  if (!isEmailVerified) {
+    return <VerifyEmailScreen />;
   }
 
   return (
