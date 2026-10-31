@@ -22,6 +22,7 @@ import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
 import { ReviewFormModal } from './components/professors/ReviewFormModal';
 import { Loader2 } from 'lucide-react';
+import { APP_NAME } from './config/brand';
 
 const VALID_VIEWS: AppView[] = [
   'graph',
@@ -63,10 +64,10 @@ const AppContent: React.FC = () => {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100">
-        <div className="w-12 h-12 rounded-2xl bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center mb-4 text-indigo-400">
-          <Loader2 className="w-6 h-6 animate-spin" />
+        <div className="w-12 h-12 rounded-2xl bg-[#171A52]/60 border border-indigo-500/30 flex items-center justify-center mb-4 text-[#FFB938] shadow-lg shadow-[#171A52]/50">
+          <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
         </div>
-        <p className="text-sm font-medium text-slate-300">Cargando Mi Carrera Cloud...</p>
+        <p className="text-sm font-medium text-slate-300">Cargando {APP_NAME}...</p>
       </div>
     );
   }

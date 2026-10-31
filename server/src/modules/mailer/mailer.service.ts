@@ -12,8 +12,8 @@ export class MailerService {
 
   private initAdapter() {
     // Parse email sender
-    let fromAddress = 'noreply@micarrera.app';
-    let fromName = env.EMAIL_FROM_NAME || 'Mi Carrera';
+    let fromAddress = 'noreply@stack.app';
+    let fromName = env.EMAIL_FROM_NAME || 'Stack';
 
     if (env.EMAIL_FROM) {
       const match = env.EMAIL_FROM.match(/^(?:(.*?)<)?([^<>]+)>?$/);

@@ -13,7 +13,6 @@ import {
   Upload,
   RotateCcw,
   MoreVertical,
-  GraduationCap,
   Layers,
   Award,
   HelpCircle,
@@ -26,6 +25,7 @@ import { useCareer } from '../../context/CareerContext';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { UserMenu } from './UserMenu';
 import { PlanSelectorModal } from './PlanSelectorModal';
+import { BrandLogo } from './BrandLogo';
 
 export type AppView =
   | 'graph'
@@ -132,29 +132,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-4 min-w-0">
           {/* Logo & Plan */}
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
-            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
-              <div className="w-full h-full bg-slate-950 rounded-[9px] sm:rounded-[10px] flex items-center justify-center text-cyan-400">
-                <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-sm sm:text-base md:text-lg font-black tracking-tight text-white m-0 p-0 leading-none whitespace-nowrap">
-                  Mi Carrera
-                </h1>
-                <button
-                  type="button"
-                  onClick={() => setIsPlanSelectorOpen(true)}
-                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-none truncate"
-                  title="Cambiar carrera o plan de estudios"
-                >
-                  {currentPlanName}
-                </button>
-              </div>
-              <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap hidden lg:block">
-                UTN • Ing. en Sistemas de Información
-              </p>
-            </div>
+            <BrandLogo variant="full" size="md" responsiveText />
+            <button
+              type="button"
+              onClick={() => setIsPlanSelectorOpen(true)}
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-none truncate"
+              title="Cambiar carrera o plan de estudios"
+            >
+              {currentPlanName}
+            </button>
           </div>
 
           {/* Desktop Nav Tabs: icon + label at >= 1500px, icon-only below 1500px so 7 tabs never overflow */}
@@ -172,7 +158,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   title={item.fullLabel}
                   className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer relative ${
                     isActive
-                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      ? 'bg-gradient-to-r from-[#2A2E8A] to-[#171A52] text-white shadow-md shadow-[#171A52]/40 border border-indigo-400/25'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
@@ -464,6 +450,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                       </button>
                     </div>
                   )}
+
+                  <div className="mt-1 pt-2 pb-1 border-t border-slate-800/80 px-3 text-center">
+                    <span className="text-[10.5px] text-slate-400 font-medium">
+                      Hecho por estudiantes de la UTN
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

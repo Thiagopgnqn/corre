@@ -54,7 +54,7 @@ export const SimulationBar: React.FC = () => {
               className="px-3 py-1 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 transition-all flex items-center gap-1"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>Guardar en mi carrera</span>
+              <span>Guardar en mi plan</span>
             </button>
 
             <button

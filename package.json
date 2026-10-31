@@ -1,5 +1,5 @@
 {
-  "name": "correlativas",
+  "name": "stack",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts && tsx test/authFrontend.test.ts",
+    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts && tsx test/authFrontend.test.ts && tsx test/brand.test.ts",
+    "generate:brand": "node scripts/generateBrandAssets.mjs",
     "import:schedule": "tsx scripts/importSchedule.ts",
     "preview": "vite preview"
   },
@@ -30,6 +31,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.89.0",
+    "sharp": "^0.35.5",
     "tsx": "^4.23.15",
     "typescript": "~7.0.2",
     "vite": "^8.3.5",

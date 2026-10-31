@@ -5,20 +5,20 @@ export interface EmailTemplateContent {
 }
 
 export function buildVerificationEmail(code: string): EmailTemplateContent {
-  const subject = `Tu código de verificación para Mi Carrera: ${code}`;
+  const subject = `Tu código de verificación de Stack: ${code}`;
 
   const text = `Hola,
 
-Tu código de verificación para Mi Carrera es:
+Tu código de verificación de Stack es:
 
 ${code}
 
 Este código vence en 10 minutos.
 
-Si no intentaste crear una cuenta en Mi Carrera ni solicitaste este código, por favor ignorá este mensaje.
+Si no intentaste crear una cuenta en Stack ni solicitaste este código, por favor ignorá este mensaje.
 
 Saludos,
-El equipo de Mi Carrera`;
+El equipo de Stack`;
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -26,45 +26,42 @@ El equipo de Mi Carrera`;
   <meta charset="UTF-8">
   <title>${subject}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #090d16; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #e2e8f0;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #090d16; padding: 32px 16px;">
+<body style="margin: 0; padding: 0; background-color: #090D16; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Plus Jakarta Sans', Helvetica, Arial, sans-serif; color: #F4F5FB;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #090D16; padding: 32px 16px;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" style="max-width: 520px; background-color: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 32px 24px; text-align: center;">
+        <table role="presentation" width="100%" style="max-width: 520px; background-color: #171A52; border: 1px solid rgba(42, 46, 138, 0.6); border-radius: 20px; padding: 36px 28px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.4);">
           <tr>
             <td>
-              <div style="display: inline-block; width: 48px; height: 48px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 12px; line-height: 48px; font-size: 24px; margin-bottom: 16px;">
-                🎓
-              </div>
-              <h1 style="margin: 0 0 8px 0; font-size: 22px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px;">
-                Mi Carrera
+              <h1 style="margin: 0 0 6px 0; font-size: 28px; font-weight: 900; color: #FFFFFF; letter-spacing: -0.5px;">
+                Stack
               </h1>
-              <p style="margin: 0 0 24px 0; font-size: 14px; color: #94a3b8;">
-                Verificación de correo electrónico
+              <p style="margin: 0 0 24px 0; font-size: 13px; font-weight: 600; color: #FFB938; letter-spacing: 0.5px; text-transform: uppercase;">
+                Tu carrera, materia a materia
               </p>
 
-              <div style="background-color: #020617; border: 1px solid #334155; border-radius: 12px; padding: 24px 16px; margin: 16px 0 24px 0;">
-                <p style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #818cf8; font-weight: 700;">
-                  Tu código de 6 dígitos
+              <div style="background-color: #0E1236; border: 1px solid #2A2E8A; border-radius: 14px; padding: 24px 16px; margin: 16px 0 24px 0;">
+                <p style="margin: 0 0 8px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #CBD5E1; font-weight: 700;">
+                  Tu código de verificación
                 </p>
-                <div style="font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 36px; font-weight: 800; letter-spacing: 8px; color: #38bdf8; padding: 4px 0;">
+                <div style="font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 38px; font-weight: 800; letter-spacing: 8px; color: #FFB938; padding: 6px 0;">
                   ${code}
                 </div>
-                <p style="margin: 8px 0 0 0; font-size: 12px; color: #64748b;">
+                <p style="margin: 8px 0 0 0; font-size: 12px; color: #94A3B8;">
                   Válido por los próximos 10 minutos
                 </p>
               </div>
 
-              <p style="margin: 0 0 16px 0; font-size: 13px; color: #cbd5e1; line-height: 1.5; text-align: left;">
-                Ingresá este código en la pantalla de verificación para confirmar que esta dirección te pertenece y activar tu cuenta.
+              <p style="margin: 0 0 16px 0; font-size: 13px; color: #E2E8F0; line-height: 1.5; text-align: left;">
+                Ingresá este código en la pantalla de verificación para confirmar que esta dirección te pertenece y activar tu cuenta en Stack.
               </p>
 
-              <p style="margin: 0 0 24px 0; font-size: 12px; color: #64748b; line-height: 1.4; text-align: left; border-top: 1px solid #1e293b; padding-top: 16px;">
-                Si no intentaste crear una cuenta en Mi Carrera ni solicitaste este código, podés ignorar este mensaje de forma segura.
+              <p style="margin: 0 0 24px 0; font-size: 12px; color: #94A3B8; line-height: 1.4; text-align: left; border-top: 1px solid rgba(42, 46, 138, 0.5); padding-top: 16px;">
+                Si no intentaste crear una cuenta en Stack ni solicitaste este código, podés ignorar este mensaje de forma segura.
               </p>
 
-              <p style="margin: 0; font-size: 11px; color: #475569;">
-                Mi Carrera · UTN ISI Plan 2023
+              <p style="margin: 0; font-size: 11px; color: #64748B;">
+                Stack · Tu carrera, materia a materia
               </p>
             </td>
           </tr>
@@ -77,4 +74,3 @@ El equipo de Mi Carrera`;
 
   return { subject, html, text };
 }
-

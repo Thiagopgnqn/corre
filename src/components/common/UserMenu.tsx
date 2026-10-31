@@ -158,6 +158,12 @@ export const UserMenu: React.FC<UserMenuProps> = ({
               <span>Eliminar cuenta...</span>
             </button>
           </div>
+
+          <div className="mt-1 pt-2 pb-1 border-t border-slate-800/80 px-4 text-center">
+            <span className="text-[10.5px] text-slate-400 font-medium">
+              Hecho por estudiantes de la UTN
+            </span>
+          </div>
         </div>
       )}
 

@@ -15,8 +15,8 @@ const baseSchema = z.object({
   EMAIL_PROVIDER: z.enum(['resend', 'brevo']).optional(),
   RESEND_API_KEY: z.string().optional(),
   BREVO_API_KEY: z.string().optional(),
-  EMAIL_FROM: z.string().default('Mi Carrera <noreply@micarrera.app>'),
-  EMAIL_FROM_NAME: z.string().default('Mi Carrera'),
+  EMAIL_FROM: z.string().default('Stack <noreply@stack.app>'),
+  EMAIL_FROM_NAME: z.string().default('Stack'),
   VERIFICATION_CODE_PEPPER: z
     .string()
     .default('dev_verification_code_pepper_secret_min_16'),
@@ -86,8 +86,8 @@ export const env = parsed.success
       EMAIL_PROVIDER: process.env.EMAIL_PROVIDER as 'resend' | 'brevo' | undefined,
       RESEND_API_KEY: process.env.RESEND_API_KEY,
       BREVO_API_KEY: process.env.BREVO_API_KEY,
-      EMAIL_FROM: process.env.EMAIL_FROM || 'Mi Carrera <noreply@micarrera.app>',
-      EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || 'Mi Carrera',
+      EMAIL_FROM: process.env.EMAIL_FROM || 'Stack <noreply@stack.app>',
+      EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || 'Stack',
       VERIFICATION_CODE_PEPPER:
         process.env.VERIFICATION_CODE_PEPPER || 'dev_verification_code_pepper_secret_min_16',
     };

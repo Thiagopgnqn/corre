@@ -34,7 +34,7 @@ const processQueue = (error: unknown) => {
 };
 
 /**
- * Cliente HTTP para comunicar con la API REST de Mi Carrera.
+ * Cliente HTTP para comunicar con la API REST de Stack.
  * - Siempre envía credenciales (cookies HttpOnly)
  * - Incluye cabecera CSRF obligatoria 'X-Requested-With'
  * - Manejo transparente de renovación de sesión (refresh token) con reintentos
@@ -126,3 +126,4 @@ export async function apiFetch<T = any>(
     );
   }
 }
+

@@ -1,8 +1,8 @@
 {
-  "name": "mi-carrera-server",
+  "name": "stack-server",
   "version": "1.0.0",
   "private": true,
-  "description": "Backend API para Mi Carrera: gestión multi-carrera, autenticación y persistencia en Neon PostgreSQL",
+  "description": "Backend API para Stack: gestión multi-carrera, autenticación y persistencia en Neon PostgreSQL",
   "type": "module",
   "main": "dist/app.js",
   "scripts": {

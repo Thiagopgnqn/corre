@@ -124,7 +124,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
     const ics = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Mi Carrera UTN ISI//Armador de Horarios//ES',
+      'PRODID:-//Stack//Armador de Horarios//ES',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
     ];
@@ -457,3 +457,4 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
     </div>
   );
 };
+

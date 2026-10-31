@@ -1,4 +1,5 @@
 import type { AppView } from '../components/common/Navbar';
+import { APP_NAME } from '../config/brand';
 
 export interface TutorialStep {
   id: string;
@@ -17,9 +18,9 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
   // 1. Bienvenida
   {
     id: 'welcome',
-    title: '¡Bienvenido a Mi Carrera!',
+    title: `¡Bienvenido a ${APP_NAME}!`,
     description:
-      'Tu constelación académica interactiva para Ingeniería en Sistemas de Información (Plan 2023, UTN). Planificá, simulá correlativas y visualizá tu avance en tiempo real.',
+      'Tu constelación académica interactiva. Planificá tu carrera, simulá correlativas, armá tus horarios y consultá las reseñas de profesores en tiempo real.',
     badge: 'Inicio del Tour',
     placement: 'center',
     targetView: 'graph',

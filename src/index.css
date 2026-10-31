@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+:root {
+  --brand-indigo: #2a2e8a;
+  --brand-indigo-deep: #171a52;
+  --brand-amber: #ffb938;
+  --brand-slate-light: #f4f5fb;
+  --brand-background: #090d16;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
