@@ -1,8 +1,8 @@
-ALTER TABLE "users" ADD COLUMN "status" text DEFAULT 'active' NOT NULL;--> statement-breakpoint
-ALTER TABLE "users" ADD COLUMN "last_seen_at" timestamp with time zone;--> statement-breakpoint
-ALTER TABLE "commissions" ADD COLUMN "is_retired" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-ALTER TABLE "schedule_terms" ADD COLUMN "is_draft" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-CREATE TABLE "admin_audit_log" (
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'active' NOT NULL;--> statement-breakpoint
+ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_seen_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "commissions" ADD COLUMN IF NOT EXISTS "is_retired" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "schedule_terms" ADD COLUMN IF NOT EXISTS "is_draft" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "admin_audit_log" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"admin_user_id" uuid,
 	"admin_email" text NOT NULL,
@@ -15,16 +15,20 @@ CREATE TABLE "admin_audit_log" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "catalog_versions" (
+CREATE TABLE IF NOT EXISTS "catalog_versions" (
 	"id" text PRIMARY KEY DEFAULT 'default' NOT NULL,
 	"version" text NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "admin_audit_log" ADD CONSTRAINT "admin_audit_log_admin_user_id_users_id_fk" FOREIGN KEY ("admin_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "idx_admin_audit_created" ON "admin_audit_log" USING btree ("created_at");--> statement-breakpoint
-CREATE INDEX "idx_admin_audit_admin" ON "admin_audit_log" USING btree ("admin_user_id");--> statement-breakpoint
-CREATE INDEX "idx_admin_audit_action" ON "admin_audit_log" USING btree ("action");--> statement-breakpoint
+DO $$ BEGIN
+  ALTER TABLE "admin_audit_log" ADD CONSTRAINT "admin_audit_log_admin_user_id_users_id_fk" FOREIGN KEY ("admin_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_admin_audit_created" ON "admin_audit_log" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_admin_audit_admin" ON "admin_audit_log" USING btree ("admin_user_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_admin_audit_action" ON "admin_audit_log" USING btree ("action");--> statement-breakpoint
 INSERT INTO "catalog_versions" ("id", "version", "updated_at") VALUES ('default', 'v1.0.0', now()) ON CONFLICT ("id") DO NOTHING;--> statement-breakpoint
 CREATE OR REPLACE FUNCTION prevent_audit_log_modification()
 RETURNS TRIGGER AS $$

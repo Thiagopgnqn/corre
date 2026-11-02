@@ -12,12 +12,12 @@ const __dirname = path.dirname(__filename);
 
 const { Client } = pg;
 
-async function runMigrations() {
+export async function runMigrations(): Promise<void> {
   const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL;
 
   if (!connectionString) {
-    console.error('❌ Error: DIRECT_URL ni DATABASE_URL están configuradas.');
-    process.exit(1);
+    console.warn('⚠️ DIRECT_URL ni DATABASE_URL están configuradas. Omitiendo migraciones.');
+    return;
   }
 
   console.log('🔄 Ejecutando migraciones de base de datos con DIRECT_URL...');
@@ -38,11 +38,15 @@ async function runMigrations() {
     console.log('✅ Migraciones aplicadas exitosamente en Neon.');
   } catch (error) {
     console.error('❌ Error al ejecutar las migraciones:', error);
-    process.exit(1);
+    throw error;
   } finally {
     await client.end();
   }
 }
 
-runMigrations();
+const currentFile = fileURLToPath(import.meta.url);
+const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (currentFile === entryFile) {
+  runMigrations().catch(() => process.exit(1));
+}
 

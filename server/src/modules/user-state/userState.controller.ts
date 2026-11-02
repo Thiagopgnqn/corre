@@ -30,7 +30,11 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
 
   try {
     // 1. Obtener usuario y su plan
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user) {
       res.status(404).json({ success: false, error: 'Usuario no encontrado' });
       return;
@@ -212,7 +216,11 @@ export async function updateProgress(req: Request, res: Response): Promise<void>
 
   try {
     // 1. Obtener usuario para conocer su plan activo
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user || !user.selectedPlanId) {
       res.status(400).json({ success: false, error: 'El usuario no tiene un plan seleccionado' });
       return;
@@ -337,7 +345,11 @@ export async function updateElectives(req: Request, res: Response): Promise<void
   }
 
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user || !user.selectedPlanId) {
       res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
       return;
@@ -415,7 +427,11 @@ export async function updateBasket(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user || !user.selectedPlanId) {
       res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
       return;
@@ -699,7 +715,11 @@ export async function importData(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user || !user.selectedPlanId) {
       res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
       return;
@@ -909,7 +929,11 @@ export async function exportData(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+    const [user] = await db
+      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     if (!user || !user.selectedPlanId) {
       res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
       return;

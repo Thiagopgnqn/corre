@@ -180,6 +180,13 @@ export const app = createApp();
 const currentFile = fileURLToPath(import.meta.url);
 const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (process.env.NODE_ENV !== 'test' && currentFile === entryFile) {
+  // Asegurar que las migraciones pendientes en Neon se apliquen al iniciar el servidor
+  import('./db/migrate.js')
+    .then((m) => m.runMigrations())
+    .catch((err) => {
+      console.warn('⚠️ Nota sobre migraciones automáticas al iniciar:', err?.message || err);
+    });
+
   // Limpieza periódica liviana de cuentas no verificadas de más de 7 días (cada 12h)
   AuthService.cleanupUnverifiedAccounts(7).catch(() => {});
   setInterval(() => {

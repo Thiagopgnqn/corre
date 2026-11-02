@@ -91,6 +91,35 @@ export async function getUserLiveStatus(userId: string): Promise<LiveUserStatusR
     userStatusCache.set(userId, record);
     return record;
   } catch (_err) {
+    // Si la columna status o last_seen_at aún no fue migrada en la base de datos, consultar columnas base existentes
+    try {
+      const [fallbackRow] = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          role: users.role,
+          emailVerifiedAt: users.emailVerifiedAt,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (fallbackRow) {
+        const record: CachedUserRecord = {
+          id: fallbackRow.id,
+          email: fallbackRow.email,
+          role: (fallbackRow.role as 'user' | 'admin') || 'user',
+          status: 'active',
+          emailVerified: Boolean(fallbackRow.emailVerifiedAt),
+          expiresAt: now + 5000,
+        };
+        userStatusCache.set(userId, record);
+        return record;
+      }
+    } catch {
+      // Ignorar fallback si la base no responde
+    }
+
     // Si la base no responde (o en entorno de test sin postgres vivo), se devuelve el último caché si existe
     if (cached) return cached;
     return null;

@@ -29,6 +29,13 @@
       "when": 1793410567201,
       "tag": "0003_premium_dakota_north",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793580000000,
+      "tag": "0004_admin_panel_and_audit",
+      "breakpoints": true
     }
   ]
 }
