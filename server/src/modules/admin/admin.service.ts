@@ -1632,11 +1632,15 @@ export class AdminService {
       .limit(limit)
       .offset(offset);
 
+    const mapped = rows.map((r) => ({
+      ...r,
+      authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
+    }));
+
     return {
-      reviews: rows.map((r) => ({
-        ...r,
-        authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
-      })),
+      // `items` es el formato que consume el panel; `reviews` se mantiene por compatibilidad
+      items: mapped,
+      reviews: mapped,
       total,
       page,
       pageSize: limit,

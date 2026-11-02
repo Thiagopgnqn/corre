@@ -93,7 +93,15 @@ export const AdminReviewsTab: React.FC = () => {
           status: status !== 'all' ? status : undefined,
         });
         if (res.success && res.data) {
-          setAllReviews(Array.isArray(res.data.items) ? res.data.items : (Array.isArray(res.data) ? (res.data as any) : []));
+          const data: any = res.data;
+          const list = Array.isArray(data.items)
+            ? data.items
+            : Array.isArray(data.reviews)
+            ? data.reviews
+            : Array.isArray(data)
+            ? data
+            : [];
+          setAllReviews(list);
           setReviewsTotal(res.data.total ?? 0);
           setReviewsPage(res.data.page ?? 1);
           setReviewsTotalPages(res.data.totalPages ?? 1);
