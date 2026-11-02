@@ -68,15 +68,12 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
         subjectId: subject.id,
         kind: kindParam,
         search: search.trim() || undefined,
+        hasSolution: onlyWithSolution ? true : undefined,
         sort,
       });
 
       if (res.success && res.data) {
-        let list = res.data.files;
-        if (onlyWithSolution) {
-          list = list.filter((f) => f.hasSolution);
-        }
-        setFiles(list);
+        setFiles(res.data.files);
         setTotal(res.data.total);
       }
     } catch (err: any) {

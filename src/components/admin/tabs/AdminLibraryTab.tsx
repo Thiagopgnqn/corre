@@ -170,8 +170,7 @@ export const AdminLibraryTab: React.FC = () => {
   const handleTestStorage = async () => {
     setIsTestingStorage(true);
     try {
-      // Passes empty ticket because session ticket was updated by reauth
-      const res = await adminLibraryApi.testStorage('');
+      const res = await adminLibraryApi.testStorage();
       if (res.success && res.data) {
         setStorageReport(res.data);
         setIsStorageReportOpen(true);
@@ -240,12 +239,22 @@ export const AdminLibraryTab: React.FC = () => {
       'Consultar Identidad de Autor',
       'Esta acción revelará el correo y nombre del estudiante que subió el archivo y quedará registrada en la auditoría inmutable.',
       async () => {
-        const res = await adminLibraryApi.getUploaderIdentity(file.id, '');
+        const res = await adminLibraryApi.getUploaderIdentity(file.id);
         if (res.success && res.data) {
-          setUploaderData({
-            fileTitle: file.title,
-            uploader: res.data.uploader,
-          });
+          if (res.data.hasUploader && res.data.uploader) {
+            setUploaderData({
+              fileTitle: file.title,
+              uploader: {
+                id: res.data.uploader.id,
+                name: res.data.uploader.name || res.data.uploader.email.split('@')[0],
+                email: res.data.uploader.email,
+                createdAt: res.data.uploader.createdAt,
+                status: res.data.uploader.status,
+              },
+            });
+          } else {
+            showFeedback('error', res.data.message || 'El archivo no tiene autor asociado (cuenta eliminada o anónima).');
+          }
         }
       }
     );
@@ -257,7 +266,7 @@ export const AdminLibraryTab: React.FC = () => {
       'Suspender Cuenta de Autor',
       'Se bloqueará el acceso al estudiante autor de este material y se revocarán todas sus sesiones activas.',
       async () => {
-        await adminLibraryApi.suspendAuthor(file.id, '', 'Infracción grave de pautas de la Biblioteca');
+        await adminLibraryApi.suspendAuthor(file.id, 'Infracción grave de pautas de la Biblioteca');
         showFeedback('success', 'Cuenta del autor suspendida con éxito.');
         fetchPending();
       }
@@ -282,7 +291,7 @@ export const AdminLibraryTab: React.FC = () => {
 
     setIsSubmittingActionReport(true);
     try {
-      await adminLibraryApi.actionReport(actioningReport.id, actionReason.trim() || undefined);
+      await adminLibraryApi.actionReport(actioningReport, actionReason.trim() || undefined);
       showFeedback('success', 'Archivo removido de la plataforma y reporte marcado como accionado.');
       setActioningReport(null);
       setActionReason('');

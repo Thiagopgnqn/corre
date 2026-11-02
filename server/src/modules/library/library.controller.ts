@@ -202,7 +202,9 @@ export async function reportFile(req: Request, res: Response): Promise<void> {
 export async function listMyUploads(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
-    const result = await getLibraryService().listMyUploads(userId);
+    // ?peek=1 consulta el estado sin marcar las novedades como vistas (usado por el badge del Navbar)
+    const peek = req.query.peek === '1' || req.query.peek === 'true';
+    const result = await getLibraryService().listMyUploads(userId, !peek);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;

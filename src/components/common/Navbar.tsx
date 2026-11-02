@@ -76,11 +76,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Check for updates in student library uploads
+  // Consulta (sin marcar como vistas) si hay novedades en los aportes del estudiante
   useEffect(() => {
     if (user) {
       libraryApi
-        .getMyUploads()
+        .peekMyUploads()
         .then((res) => {
           if (res.success && res.data?.hasStatusUpdates) {
             setHasLibraryNovelty(true);

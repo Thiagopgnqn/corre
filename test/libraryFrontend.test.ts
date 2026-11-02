@@ -264,6 +264,103 @@ test('Parser de hash soporta rutas de Biblioteca: #library, #library/<id>, #libr
   assert.equal(r4.param, 'terms');
 });
 
+// ---------------------------------------------------------------------
+// 8. Verificación de Contrato de Rutas Frontend vs Backend (Route Guard)
+// ---------------------------------------------------------------------
+test('Todas las rutas de Biblioteca llamadas por el frontend existen en el backend Express', () => {
+  const libRoutesPath = path.resolve(__dirname, '../server/src/modules/library/library.routes.ts');
+  const adminRoutesPath = path.resolve(__dirname, '../server/src/modules/admin/admin.routes.ts');
+  const libContent = fs.readFileSync(libRoutesPath, 'utf-8');
+  const adminContent = fs.readFileSync(adminRoutesPath, 'utf-8');
+
+  // Función para normalizar rutas Express y cliente a un patrón canónico
+  const normalizePattern = (route: string) => {
+    return route
+      .split('?')[0] // remover querystring
+      .replace(/\$\{[^}]+\}/g, ':param') // template literals ${...} -> :param
+      .replace(/:[a-zA-Z0-9_]+/g, ':param') // Express params :id, :fileId -> :param
+      .replace(/\/+/g, '/');
+  };
+
+  const backendRoutes = new Set<string>();
+  const routeRegex = /router\.(get|post|patch|delete)\(\s*['"]([^'"]+)['"]/g;
+
+  // 1. Extraer rutas de library.routes.ts montadas en /api/library
+  for (const m of libContent.matchAll(routeRegex)) {
+    const method = m[1].toUpperCase();
+    const route = normalizePattern('/api/library' + (m[2] === '/' ? '' : m[2]));
+    backendRoutes.add(`${method} ${route}`);
+  }
+
+  // 2. Extraer rutas de admin.routes.ts montadas en /api/admin
+  for (const m of adminContent.matchAll(routeRegex)) {
+    const method = m[1].toUpperCase();
+    if (m[2].startsWith('/library')) {
+      const route = normalizePattern('/api/admin' + m[2]);
+      backendRoutes.add(`${method} ${route}`);
+    }
+  }
+
+  // 3. Extraer todas las peticiones a la biblioteca desde src/api/library.api.ts
+  const apiPath = path.resolve(__dirname, '../src/api/library.api.ts');
+  const apiContent = fs.readFileSync(apiPath, 'utf-8');
+
+  // Extraer cada invocación a apiFetch
+  // Busca apiFetch seguido de ruta que empiece con /api/library o /api/admin/library
+  const lines = apiContent.split('\n');
+  const calls: Array<{ method: string; path: string; raw: string }> = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('apiFetch') || line.includes('/api/library') || line.includes('/api/admin/library')) {
+      const match = line.match(/(['"`])(\/api\/(?:admin\/)?library\/[^'"`\n]+)\1/);
+      // O llamadas multilínea / templates con queries
+      const matchTemplate = line.match(/[`'"](\/api\/(?:admin\/)?library\/[^`'"]+)/);
+      const matchedPath = match ? match[2] : matchTemplate ? matchTemplate[1] : null;
+
+      if (matchedPath) {
+        // Mirar si esta misma llamada apiFetch especifica method: 'POST' | 'PATCH' | 'DELETE'
+        let callBlock = line;
+        for (let j = i + 1; j < Math.min(lines.length, i + 12); j++) {
+          if (lines[j].includes('async ') || lines[j].includes('apiFetch')) break;
+          callBlock += '\n' + lines[j];
+          if (lines[j].includes(');')) break;
+        }
+        const methodMatch = callBlock.match(/method:\s*['"]([A-Z]+)['"]/);
+        const method = methodMatch ? methodMatch[1] : 'GET';
+
+        // Truncar query parameters e interpolaciones de query
+        let cleanPath = matchedPath.split('?')[0];
+        if (cleanPath.includes('${query')) {
+          cleanPath = cleanPath.split('${query')[0];
+        }
+
+        calls.push({
+          method,
+          path: normalizePattern(cleanPath),
+          raw: matchedPath,
+        });
+      }
+    }
+  }
+
+  assert(calls.length >= 15, `Se esperaba extraer al menos 15 llamadas de API, se encontraron ${calls.length}`);
+
+  const missingRoutes: string[] = [];
+  for (const call of calls) {
+    const key = `${call.method} ${call.path}`;
+    if (!backendRoutes.has(key)) {
+      missingRoutes.push(key);
+    }
+  }
+
+  assert.deepEqual(
+    missingRoutes,
+    [],
+    `Error de contrato: Las siguientes rutas del cliente no existen en el backend: ${missingRoutes.join(', ')}`
+  );
+});
+
 console.log('\n======================================================================');
 console.log(` 📊 RESULTADO TESTS FRONTEND BIBLIOTECA: ${passed} pasaron, 0 fallaron`);
 console.log('======================================================================\n');

@@ -41,12 +41,11 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
     setIsLoading(true);
     setError(null);
     try {
+      // GET /my-uploads (sin peek) marca las novedades como vistas en el servidor
       const res = await libraryApi.getMyUploads();
       if (res.success && res.data) {
         setData(res.data);
       }
-      // Marcar novedades como revisadas
-      await libraryApi.markUploadsChecked().catch(() => {});
     } catch (err: any) {
       console.error('Error cargando aportes:', err);
       setError(err?.message || 'Error al cargar tus archivos subidos.');

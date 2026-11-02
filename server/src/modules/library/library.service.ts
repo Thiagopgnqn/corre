@@ -73,7 +73,7 @@ export interface ILibraryService {
   getDownloadUrl(fileId: string, userId: string, isAdmin?: boolean): Promise<any>;
   toggleHelpful(fileId: string, userId: string): Promise<any>;
   reportFile(fileId: string, userId: string, reason: any, note?: string): Promise<any>;
-  listMyUploads(userId: string): Promise<any>;
+  listMyUploads(userId: string, markChecked?: boolean): Promise<any>;
   updateMyFile(userId: string, fileId: string, updates: any): Promise<any>;
   deleteMyFile(userId: string, fileId: string): Promise<any>;
   listPendingFiles(): Promise<any[]>;
@@ -890,7 +890,7 @@ export class PgLibraryService implements ILibraryService {
     };
   }
 
-  async listMyUploads(userId: string) {
+  async listMyUploads(userId: string, markChecked = true) {
     const [user] = await db
       .select({ libraryLastCheckedAt: users.libraryLastCheckedAt })
       .from(users)
@@ -932,10 +932,13 @@ export class PgLibraryService implements ILibraryService {
       .filter((u) => u.status !== 'rejected')
       .reduce((acc, curr) => acc + Number(curr.sizeBytes || 0), 0);
 
-    await db
-      .update(users)
-      .set({ libraryLastCheckedAt: new Date() })
-      .where(eq(users.id, userId));
+    // En modo "peek" (markChecked = false) solo se consulta, sin consumir la novedad
+    if (markChecked) {
+      await db
+        .update(users)
+        .set({ libraryLastCheckedAt: new Date() })
+        .where(eq(users.id, userId));
+    }
 
     return {
       uploads,
@@ -2116,7 +2119,7 @@ export class InMemoryLibraryService implements ILibraryService {
     };
   }
 
-  async listMyUploads(userId: string) {
+  async listMyUploads(userId: string, markChecked = true) {
     const u = this.users.get(userId);
     const lastChecked = u?.libraryLastCheckedAt || new Date(0);
 
@@ -2152,7 +2155,7 @@ export class InMemoryLibraryService implements ILibraryService {
       .filter((up) => up.status !== 'rejected')
       .reduce((sum, up) => sum + up.sizeBytes, 0);
 
-    if (u) {
+    if (u && markChecked) {
       u.libraryLastCheckedAt = new Date();
     }
 

@@ -68,11 +68,11 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
     try {
       const [sumRes, myUpRes] = await Promise.all([
         libraryApi.getSubjectsSummary(),
-        libraryApi.getMyUploads().catch(() => null),
+        libraryApi.peekMyUploads().catch(() => null),
       ]);
 
       if (sumRes.success && sumRes.data) {
-        setSubjects(sumRes.data as SubjectItem[]);
+        setSubjects(sumRes.data);
       }
 
       if (myUpRes && myUpRes.success && myUpRes.data) {

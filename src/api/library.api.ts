@@ -9,98 +9,188 @@ import type {
   LibraryReportReason,
   LibrarySubjectSummary,
   StorageTestReport,
+  StorageTestStep,
   UploadInitPayload,
   UploadInitResponse,
 } from '../types/library';
 
+/**
+ * Cliente HTTP de la Biblioteca.
+ * Las rutas y formatos reflejan exactamente server/src/modules/library/library.routes.ts
+ * y server/src/modules/admin/admin.routes.ts (sección 8). Las respuestas del backend se
+ * normalizan acá a los tipos de src/types/library.ts para que los componentes no dependan
+ * de los nombres internos de los campos.
+ */
+
+// ---------------------------------------------------------------------
+// Normalizadores (respuesta backend -> tipos frontend)
+// ---------------------------------------------------------------------
+
+function toPublicFile(raw: any): LibraryFilePublic {
+  return {
+    id: raw.id,
+    subjectId: raw.subjectId,
+    kind: raw.kind,
+    academicYear: raw.academicYear ?? null,
+    term: raw.term ?? null,
+    examInstance: raw.examInstance ?? null,
+    hasSolution: Boolean(raw.hasSolution),
+    title: raw.title,
+    description: raw.description ?? null,
+    originalFilename: raw.originalFilename,
+    mimeType: raw.mimeType,
+    sizeBytes: Number(raw.sizeBytes || 0),
+    downloadCount: Number(raw.downloadCount || 0),
+    helpfulCount: Number(raw.helpfulCount || 0),
+    hasVotedHelpful: Boolean(raw.userHasVotedHelpful ?? raw.hasVotedHelpful),
+    professorNames: Array.isArray(raw.professors)
+      ? raw.professors.map((p: any) => p.displayName || p.name).filter(Boolean)
+      : raw.professorNames || [],
+    createdAt: String(raw.createdAt),
+  };
+}
+
+function toUserFile(raw: any): LibraryFileUser {
+  return {
+    ...toPublicFile(raw),
+    status: raw.status,
+    rejectionReason: raw.rejectionReason ?? null,
+    updatedAt: String(raw.updatedAt ?? raw.createdAt),
+  };
+}
+
+function toAdminFile(raw: any): AdminLibraryFile {
+  return {
+    ...toUserFile(raw),
+    storageKey: raw.storageKey ?? '',
+    sha256: raw.sha256 ?? null,
+    uploaderUserId: raw.uploaderUserId ?? null,
+    reviewedBy: raw.reviewedBy ?? null,
+    reviewedAt: raw.reviewedAt ?? null,
+    subjectName: raw.subjectName,
+  };
+}
+
+function toMyUploads(raw: any): LibraryMyUploadsResponse {
+  return {
+    files: (raw?.uploads || []).map(toUserFile),
+    usedBytes: Number(raw?.quota?.usedBytes || 0),
+    maxBytes: Number(raw?.quota?.maxBytes || 0),
+    hasStatusUpdates: Boolean(raw?.hasStatusUpdates),
+  };
+}
+
+const STEP_LABELS: Record<'upload' | 'read' | 'delete', string> = {
+  upload: 'Subida de objeto de prueba (PUT)',
+  read: 'Lectura del objeto (GET)',
+  delete: 'Borrado del objeto (DELETE)',
+};
+
+function toStorageReport(raw: any): StorageTestReport {
+  const steps = raw?.steps || {};
+  const stepsCompleted: StorageTestStep[] = (['upload', 'read', 'delete'] as const).map((k) => ({
+    name: STEP_LABELS[k],
+    success: Boolean(steps[k]?.ok),
+    message: steps[k]?.message,
+  }));
+  const stepMap = { upload: 'put', read: 'get', delete: 'delete' } as const;
+  return {
+    success: Boolean(raw?.success),
+    step: raw?.errorStep ? stepMap[raw.errorStep as 'upload' | 'read' | 'delete'] : 'complete',
+    message: raw?.message || '',
+    stepsCompleted,
+    details: { isMock: Boolean(raw?.isMock) },
+  };
+}
+
+// ---------------------------------------------------------------------
+// Estudiantes: /api/library/*
+// ---------------------------------------------------------------------
+
 export const libraryApi = {
-  /**
-   * Obtiene el estado de aceptación de los términos de la biblioteca.
-   */
   async getTermsStatus(): Promise<{
     success: boolean;
-    data: { accepted: boolean; version: string | null; acceptedAt: string | null };
+    data: { accepted: boolean; version: string | null; acceptedAt: string | null; currentVersion: string };
   }> {
     return apiFetch('/api/library/terms-status');
   },
 
-  /**
-   * Registra la aceptación de los términos y condiciones de la biblioteca.
-   */
-  async acceptTerms(): Promise<{
-    success: boolean;
-    data: { accepted: boolean; version: string };
-  }> {
+  async acceptTerms(version?: string): Promise<{ success: boolean; data: any }> {
     return apiFetch('/api/library/accept-terms', {
       method: 'POST',
+      body: JSON.stringify(version ? { version } : {}),
     });
   },
 
-  /**
-   * Obtiene la cantidad de archivos aprobados por materia para badges en el grafo.
-   */
-  async getSubjectsSummary(): Promise<{
-    success: boolean;
-    data: LibrarySubjectSummary[];
-  }> {
-    return apiFetch('/api/library/subjects-summary');
+  /** GET /api/library/subjects — materias del plan con cantidad de archivos aprobados. */
+  async getSubjectsSummary(): Promise<{ success: boolean; data: LibrarySubjectSummary[] }> {
+    const res = await apiFetch<{ success: boolean; data: any[] }>('/api/library/subjects');
+    return {
+      success: res.success,
+      data: (res.data || []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        codeInPlan: Number(s.codeInPlan),
+        level: Number(s.level),
+        kind: s.kind,
+        approvedFilesCount: Number(s.approvedFilesCount || 0),
+      })),
+    };
   },
 
-  /**
-   * Lista archivos aprobados con filtros aplicados.
-   */
-  async listFiles(params?: LibraryFilterParams): Promise<{
+  /** GET /api/library/files — catálogo de archivos aprobados. */
+  async listFiles(params?: LibraryFilterParams & { hasSolution?: boolean }): Promise<{
     success: boolean;
-    data: {
-      files: LibraryFilePublic[];
-      total: number;
-      page: number;
-      pageSize: number;
-      totalPages: number;
-    };
+    data: { files: LibraryFilePublic[]; total: number; page: number; pageSize: number; totalPages: number };
   }> {
     const qs = new URLSearchParams();
     if (params?.subjectId) qs.set('subjectId', params.subjectId);
     if (params?.kind) qs.set('kind', params.kind);
-    if (params?.academicYear) qs.set('academicYear', String(params.academicYear));
+    if (params?.academicYear) qs.set('year', String(params.academicYear));
     if (params?.term) qs.set('term', params.term);
-    if (params?.examInstance) qs.set('examInstance', params.examInstance);
     if (params?.professorId) qs.set('professorId', params.professorId);
+    if (params?.hasSolution !== undefined) qs.set('hasSolution', String(params.hasSolution));
     if (params?.search) qs.set('search', params.search);
     if (params?.sort) qs.set('sort', params.sort);
     if (params?.page) qs.set('page', String(params.page));
     if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
-
     const query = qs.toString();
-    return apiFetch(`/api/library/files${query ? `?${query}` : ''}`);
+
+    const res = await apiFetch<{ success: boolean; data: any }>(
+      `/api/library/files${query ? `?${query}` : ''}`
+    );
+    const d = res.data || {};
+    return {
+      success: res.success,
+      data: {
+        files: (d.items || []).map(toPublicFile),
+        total: Number(d.total || 0),
+        page: Number(d.page || 1),
+        pageSize: Number(d.pageSize || 0),
+        totalPages: Number(d.totalPages || 0),
+      },
+    };
   },
 
   /**
-   * Obtiene los archivos subidos por el usuario actual y el estado de su cuota.
+   * GET /api/library/my-uploads — marca las novedades como vistas.
+   * Usar solo al abrir "Mis Aportes".
    */
-  async getMyUploads(): Promise<{
-    success: boolean;
-    data: LibraryMyUploadsResponse;
-  }> {
-    return apiFetch('/api/library/my-uploads');
+  async getMyUploads(): Promise<{ success: boolean; data: LibraryMyUploadsResponse }> {
+    const res = await apiFetch<{ success: boolean; data: any }>('/api/library/my-uploads');
+    return { success: res.success, data: toMyUploads(res.data) };
   },
 
   /**
-   * Marca las notificaciones de moderación de los aportes como revisadas.
+   * GET /api/library/my-uploads?peek=1 — consulta si hay novedades SIN marcarlas como vistas.
+   * Usado por el badge del Navbar y la portada de la Biblioteca.
    */
-  async markUploadsChecked(): Promise<{ success: boolean }> {
-    return apiFetch('/api/library/my-uploads/mark-checked', {
-      method: 'POST',
-    });
+  async peekMyUploads(): Promise<{ success: boolean; data: LibraryMyUploadsResponse }> {
+    const res = await apiFetch<{ success: boolean; data: any }>('/api/library/my-uploads?peek=1');
+    return { success: res.success, data: toMyUploads(res.data) };
   },
 
-  /**
-   * Inicia el proceso de subida y obtiene la URL prefirmada para Cloudflare R2.
-   */
-  async initUpload(payload: UploadInitPayload): Promise<{
-    success: boolean;
-    data: UploadInitResponse;
-  }> {
+  async initUpload(payload: UploadInitPayload): Promise<{ success: boolean; data: UploadInitResponse }> {
     return apiFetch('/api/library/uploads/init', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -108,8 +198,8 @@ export const libraryApi = {
   },
 
   /**
-   * Sube el archivo directamente a Cloudflare R2 mediante PUT.
-   * Requiere enviar obligatoriamente el Content-Type firmado.
+   * PUT directo a Cloudflare R2. Envía exactamente el Content-Type con el que se firmó la URL
+   * (si difiere, R2 responde SignatureDoesNotMatch). Content-Length lo fija el navegador.
    */
   async uploadDirectToR2(
     uploadUrl: string,
@@ -125,8 +215,7 @@ export const libraryApi = {
       if (xhr.upload && onProgress) {
         xhr.upload.onprogress = (evt) => {
           if (evt.lengthComputable) {
-            const percent = Math.round((evt.loaded / evt.total) * 100);
-            onProgress(percent);
+            onProgress(Math.round((evt.loaded / evt.total) * 100));
           }
         };
       }
@@ -137,7 +226,7 @@ export const libraryApi = {
         } else {
           reject(
             new ApiError(
-              `Error al subir archivo a R2 (${xhr.status}): ${xhr.statusText || 'Rechazado por storage'}`,
+              `Error al subir archivo al almacenamiento (${xhr.status}).`,
               xhr.status,
               'STORAGE_UPLOAD_ERROR'
             )
@@ -148,7 +237,7 @@ export const libraryApi = {
       xhr.onerror = () => {
         reject(
           new ApiError(
-            'Error de red o CORS al transferir archivo a R2',
+            'Error de red o CORS al transferir el archivo al almacenamiento.',
             0,
             'STORAGE_NETWORK_ERROR'
           )
@@ -159,151 +248,163 @@ export const libraryApi = {
     });
   },
 
-  /**
-   * Notifica la finalización de la subida para validación y cambio de estado a pending.
-   */
-  async completeUpload(fileId: string): Promise<{
-    success: boolean;
-    data: LibraryFilePublic;
-  }> {
+  async completeUpload(fileId: string): Promise<{ success: boolean; data: any }> {
     return apiFetch(`/api/library/uploads/${encodeURIComponent(fileId)}/complete`, {
       method: 'POST',
     });
   },
 
-  /**
-   * Obtiene la URL de descarga prefirmada para un archivo aprobado.
-   */
   async getDownloadUrl(fileId: string): Promise<{
     success: boolean;
-    data: {
-      downloadUrl: string;
-      filename: string;
-      mimeType: string;
-      sizeBytes: number;
-    };
+    data: { downloadUrl: string; filename: string; mimeType: string; sizeBytes: number };
   }> {
     return apiFetch(`/api/library/files/${encodeURIComponent(fileId)}/download`);
   },
 
-  /**
-   * Vota si un archivo es útil (toggle).
-   */
   async toggleHelpful(fileId: string): Promise<{
     success: boolean;
     data: { helpfulCount: number; hasVoted: boolean };
   }> {
-    return apiFetch(`/api/library/files/${encodeURIComponent(fileId)}/helpful`, {
-      method: 'POST',
-    });
+    const res = await apiFetch<{ success: boolean; data: any }>(
+      `/api/library/files/${encodeURIComponent(fileId)}/helpful`,
+      { method: 'POST' }
+    );
+    return {
+      success: res.success,
+      data: { helpfulCount: Number(res.data?.helpfulCount || 0), hasVoted: Boolean(res.data?.voted) },
+    };
   },
 
-  /**
-   * Envía un reporte sobre un archivo.
-   */
   async reportFile(
     fileId: string,
     reason: LibraryReportReason,
     note?: string
   ): Promise<{ success: boolean; message: string }> {
-    return apiFetch(`/api/library/files/${encodeURIComponent(fileId)}/report`, {
-      method: 'POST',
-      body: JSON.stringify({ reason, note }),
-    });
+    const res = await apiFetch<{ success: boolean; data: any }>(
+      `/api/library/files/${encodeURIComponent(fileId)}/report`,
+      { method: 'POST', body: JSON.stringify({ reason, note }) }
+    );
+    return { success: res.success, message: res.data?.message || 'Reporte recibido.' };
   },
 
-  /**
-   * Modifica la metadata de un archivo propio.
-   */
   async updateMyUpload(
     fileId: string,
-    data: { title?: string; description?: string; professorIds?: string[] }
-  ): Promise<{ success: boolean; data: LibraryFileUser }> {
+    data: { title?: string; description?: string }
+  ): Promise<{ success: boolean; data: any }> {
     return apiFetch(`/api/library/my-uploads/${encodeURIComponent(fileId)}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
     });
   },
 
-  /**
-   * Elimina un archivo propio.
-   */
-  async deleteMyUpload(fileId: string): Promise<{ success: boolean; message: string }> {
+  async deleteMyUpload(fileId: string): Promise<{ success: boolean; data: any }> {
     return apiFetch(`/api/library/my-uploads/${encodeURIComponent(fileId)}`, {
       method: 'DELETE',
     });
   },
 };
 
+// ---------------------------------------------------------------------
+// Administración: /api/admin/library/*
+// La reautenticación viaja en la cookie HttpOnly admin_reauth_token que setea
+// POST /api/admin/reauth (AdminReauthModal); no hace falta enviarla en el body.
+// ---------------------------------------------------------------------
+
+export interface AdminLibraryStats {
+  approvedCount: number;
+  pendingCount: number;
+  openReportsCount: number;
+  totalSizeBytes: number;
+  totalSizeFormatted: string;
+  storageWarning: boolean;
+}
+
 export const adminLibraryApi = {
-  /**
-   * Obtiene la cola de materiales pendientes de moderación.
-   */
-  async getPendingFiles(): Promise<{
-    success: boolean;
-    data: { files: AdminLibraryFile[]; total: number };
-  }> {
-    return apiFetch('/api/admin/library/pending');
+  async getStats(): Promise<{ success: boolean; data: AdminLibraryStats }> {
+    return apiFetch('/api/admin/library/stats');
   },
 
-  /**
-   * Aprueba un archivo de la biblioteca.
-   */
-  async approveFile(fileId: string): Promise<{ success: boolean; message: string }> {
+  async getPendingFiles(): Promise<{ success: boolean; data: { files: AdminLibraryFile[]; total: number } }> {
+    const res = await apiFetch<{ success: boolean; data: any[] }>('/api/admin/library/pending');
+    const files = (res.data || []).map(toAdminFile);
+    return { success: res.success, data: { files, total: files.length } };
+  },
+
+  async approveFile(fileId: string): Promise<{ success: boolean; message?: string }> {
     return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/approve`, {
-      method: 'POST',
+      method: 'PATCH',
     });
   },
 
-  /**
-   * Rechaza un archivo de la biblioteca indicando el motivo.
-   */
-  async rejectFile(
-    fileId: string,
-    rejectionReason: string
-  ): Promise<{ success: boolean; message: string }> {
+  async rejectFile(fileId: string, reason: string): Promise<{ success: boolean; message?: string }> {
     return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/reject`, {
-      method: 'POST',
-      body: JSON.stringify({ rejectionReason }),
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
     });
   },
 
-  /**
-   * Lista los reportes enviados por estudiantes.
-   */
-  async getReports(status?: 'open' | 'dismissed' | 'actioned'): Promise<{
+  /** Baja definitiva del archivo (borra el objeto en R2). Requiere reautenticación. */
+  async removeFile(fileId: string, reason?: string): Promise<{ success: boolean; message?: string }> {
+    return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/remove`, {
+      method: 'PATCH',
+      body: JSON.stringify({ reason }),
+    });
+  },
+
+  async getReports(status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open'): Promise<{
     success: boolean;
     data: { reports: AdminLibraryReport[]; total: number };
   }> {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-    return apiFetch(`/api/admin/library/reports${qs}`);
+    const res = await apiFetch<{ success: boolean; data: any[] }>(
+      `/api/admin/library/reports?status=${encodeURIComponent(status)}`
+    );
+    const reports: AdminLibraryReport[] = (res.data || []).map((r) => ({
+      id: r.id,
+      fileId: r.fileId,
+      reporterUserId: r.reporterUserId,
+      reason: r.reason,
+      note: r.note ?? null,
+      status: r.status,
+      createdAt: String(r.createdAt),
+      file: {
+        id: r.fileId,
+        title: r.fileTitle,
+        kind: r.fileKind,
+        subjectId: r.subjectId,
+        status: r.fileStatus,
+      },
+    }));
+    return { success: res.success, data: { reports, total: reports.length } };
   },
 
-  /**
-   * Desestima un reporte.
-   */
-  async dismissReport(reportId: string): Promise<{ success: boolean; message: string }> {
-    return apiFetch(`/api/admin/library/reports/${encodeURIComponent(reportId)}/dismiss`, {
-      method: 'POST',
-    });
-  },
-
-  /**
-   * Toma acción sobre un reporte (remueve el archivo asociado).
-   */
-  async actionReport(
+  async updateReportStatus(
     reportId: string,
-    rejectionReason?: string
-  ): Promise<{ success: boolean; message: string }> {
-    return apiFetch(`/api/admin/library/reports/${encodeURIComponent(reportId)}/action`, {
-      method: 'POST',
-      body: JSON.stringify({ rejectionReason }),
+    status: 'open' | 'dismissed' | 'actioned'
+  ): Promise<{ success: boolean }> {
+    return apiFetch(`/api/admin/library/reports/${encodeURIComponent(reportId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
     });
   },
 
-  /**
-   * Lista el catálogo completo de archivos para administradores.
-   */
+  async dismissReport(reportId: string): Promise<{ success: boolean }> {
+    return adminLibraryApi.updateReportStatus(reportId, 'dismissed');
+  },
+
+  /** Da de baja el archivo denunciado (requiere reauth) y marca el reporte como accionado. */
+  async actionReport(
+    reportOrId: AdminLibraryReport | string,
+    reason?: string,
+    fileId?: string
+  ): Promise<{ success: boolean }> {
+    const reportId = typeof reportOrId === 'string' ? reportOrId : reportOrId.id;
+    const targetFileId = typeof reportOrId === 'string' ? fileId : reportOrId.fileId;
+    if (targetFileId) {
+      await adminLibraryApi.removeFile(targetFileId, reason);
+    }
+    return adminLibraryApi.updateReportStatus(reportId, 'actioned');
+  },
+
   async getCatalog(params?: {
     status?: string;
     subjectId?: string;
@@ -313,13 +414,7 @@ export const adminLibraryApi = {
     pageSize?: number;
   }): Promise<{
     success: boolean;
-    data: {
-      files: AdminLibraryFile[];
-      total: number;
-      page: number;
-      pageSize: number;
-      totalPages: number;
-    };
+    data: { files: AdminLibraryFile[]; total: number; page: number; pageSize: number; totalPages: number };
   }> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
@@ -328,70 +423,72 @@ export const adminLibraryApi = {
     if (params?.search) qs.set('search', params.search);
     if (params?.page) qs.set('page', String(params.page));
     if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
-
     const query = qs.toString();
-    return apiFetch(`/api/admin/library/files${query ? `?${query}` : ''}`);
+
+    const res = await apiFetch<{ success: boolean; data: any }>(
+      `/api/admin/library/files${query ? `?${query}` : ''}`
+    );
+    const d = res.data || {};
+    return {
+      success: res.success,
+      data: {
+        files: (d.items || []).map(toAdminFile),
+        total: Number(d.total || 0),
+        page: Number(d.page || 1),
+        pageSize: Number(d.pageSize || 0),
+        totalPages: Number(d.totalPages || 0),
+      },
+    };
   },
 
-  /**
-   * Obtiene la URL de vista previa prefirmada para administradores (en cualquier estado).
-   */
   async getPreviewUrl(fileId: string): Promise<{
     success: boolean;
     data: { previewUrl: string; mimeType: string; filename: string };
   }> {
-    return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/preview-url`);
+    const res = await apiFetch<{ success: boolean; data: any }>(
+      `/api/admin/library/files/${encodeURIComponent(fileId)}/preview-url`
+    );
+    return {
+      success: res.success,
+      data: {
+        previewUrl: res.data?.previewUrl,
+        mimeType: res.data?.mimeType,
+        filename: res.data?.originalFilename,
+      },
+    };
   },
 
-  /**
-   * Consulta la identidad del uploader (requiere ticket de reautenticación).
-   */
+  /** GET con reautenticación reciente; queda registrado como library.view_uploader. */
   async getUploaderIdentity(
     fileId: string,
-    reauthTicket: string
+    _reauthTicket?: string
   ): Promise<{
     success: boolean;
     data: {
-      uploader: {
-        id: string;
-        name: string;
-        email: string;
-        createdAt: string;
-        status: string;
-      };
+      hasUploader: boolean;
+      message?: string;
+      uploader?: { id: string; email: string; name?: string; status: string; role: string; createdAt: string };
     };
   }> {
-    return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/uploader`, {
-      method: 'POST',
-      body: JSON.stringify({ reauthTicket }),
-    });
+    return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/uploader`);
   },
 
-  /**
-   * Suspende la cuenta del autor de un archivo (requiere reauth).
-   */
   async suspendAuthor(
     fileId: string,
-    reauthTicket: string,
-    reason: string
-  ): Promise<{ success: boolean; message: string }> {
+    reasonOrTicket: string,
+    maybeReason?: string
+  ): Promise<{ success: boolean; data: any }> {
+    const reason = maybeReason !== undefined ? maybeReason : reasonOrTicket;
     return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/suspend-author`, {
       method: 'POST',
-      body: JSON.stringify({ reauthTicket, reason }),
+      body: JSON.stringify({ reason }),
     });
   },
 
-  /**
-   * Prueba la conexión de lectura/escritura/borrado con Cloudflare R2 (requiere reauth).
-   */
-  async testStorage(reauthTicket: string): Promise<{
-    success: boolean;
-    data: StorageTestReport;
-  }> {
-    return apiFetch('/api/admin/library/test-storage', {
+  async testStorage(_reauthTicket?: string): Promise<{ success: boolean; data: StorageTestReport }> {
+    const res = await apiFetch<{ success: boolean; data: any }>('/api/admin/library/test-storage', {
       method: 'POST',
-      body: JSON.stringify({ reauthTicket }),
     });
+    return { success: res.success, data: toStorageReport(res.data) };
   },
 };
-

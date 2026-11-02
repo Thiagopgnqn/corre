@@ -29,6 +29,7 @@ router.post('/accept-terms', csrfProtection, acceptTerms);
 
 // 2. Navegación y consulta de catálogo público
 router.get('/subjects', listSubjects);
+router.get('/subjects-summary', listSubjects);
 router.get('/subjects/:subjectId/files', listFiles);
 router.get('/files', listFiles);
 router.get('/files/:id', getFileDetail);
@@ -36,6 +37,7 @@ router.get('/files/:id', getFileDetail);
 // 3. Subidas directas a Cloudflare R2
 router.post('/uploads/init', csrfProtection, initUpload);
 router.post('/uploads/:id/complete', csrfProtection, completeUpload);
+router.post('/uploads/complete', csrfProtection, completeUpload);
 
 // 4. Descargas protegidas
 router.get('/files/:id/download', downloadFile);
