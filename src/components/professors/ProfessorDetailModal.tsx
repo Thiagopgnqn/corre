@@ -556,6 +556,11 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
                                 <span className="text-xs font-bold text-white">
                                   {rev.studentLabel}
                                 </span>
+                                {rev.authorEmail && (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                                    Autor: {rev.authorEmail}
+                                  </span>
+                                )}
                                 {rev.attendedDeclared && (
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/30">
                                     <UserCheck className="w-2.5 h-2.5 text-teal-400" />

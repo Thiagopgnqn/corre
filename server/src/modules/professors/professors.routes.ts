@@ -100,6 +100,7 @@ export function createProfessorsRouter(service: ReviewsService): Router {
         page,
         pageSize,
         sort,
+        viewerIsAdmin: req.user?.role === 'admin',
       });
 
       res.json({ success: true, data });

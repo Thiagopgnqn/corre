@@ -62,6 +62,8 @@ export interface PublicProfessorReview {
   attendedDeclared?: boolean;
   publishedMonthYear: string;
   publishedLabel: string;
+  authorUserId?: string | null;
+  authorEmail?: string | null;
 }
 
 export interface ProfessorSubjectTag {
@@ -223,6 +225,10 @@ export interface AdminModerationReportItem {
   reportStatus: 'open' | 'dismissed' | 'actioned';
   reportedMonthYear: string;
   openReportsOnReview: number;
+  reporterUserId?: string | null;
+  reporterEmail?: string | null;
+  authorUserId?: string | null;
+  authorEmail?: string | null;
   review: {
     id: string;
     professorId: string;
@@ -234,6 +240,8 @@ export interface AdminModerationReportItem {
     comment: string | null;
     status: ReviewStatus;
     publishedMonthYear: string;
+    authorUserId?: string | null;
+    authorEmail?: string | null;
   };
 }
 
@@ -249,6 +257,32 @@ export interface AdminHiddenReviewItem {
   status: ReviewStatus;
   openReportsCount: number;
   publishedMonthYear: string;
+  authorUserId?: string | null;
+  authorEmail?: string | null;
+}
+
+export interface AdminReviewCatalogItem {
+  id: string;
+  professorId: string;
+  professorName: string;
+  subjectId: string;
+  subjectCode: number;
+  subjectName: string;
+  authorUserId: string;
+  authorEmail: string;
+  overall: number;
+  clarity: number | null;
+  treatment: number | null;
+  availability: number | null;
+  difficulty: number | null;
+  wouldRecommend: boolean | null;
+  comment: string | null;
+  status: ReviewStatus;
+  helpfulCount: number;
+  attendedDeclared: boolean;
+  academicYear: number | null;
+  term: string | null;
+  createdAt: string;
 }
 
 export interface AdminModerationQueueData {

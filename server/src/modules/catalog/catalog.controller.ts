@@ -21,6 +21,7 @@ import {
   electiveOfferingProfessors,
   users,
 } from '../../db/schema.js';
+import { getCatalogVersion } from '../admin/admin.service.js';
 
 const DAY_REVERSE: Record<number, 'LUN' | 'MAR' | 'MIE' | 'JUE' | 'VIE' | 'SAB'> = {
   1: 'LUN',
@@ -182,10 +183,11 @@ export async function getPlan(req: Request, res: Response): Promise<void> {
       acronyms: acronymsMap,
     };
 
-    // Soporte para ETag y caché HTTP
+    // Soporte para ETag y caché HTTP dependiente de catalog_versions (Ajuste 10)
+    const catalogVer = await getCatalogVersion();
     const hash = crypto
       .createHash('sha256')
-      .update(JSON.stringify(responseData))
+      .update(catalogVer + ':' + JSON.stringify(responseData))
       .digest('hex');
     const etag = `"${hash}"`;
 
@@ -241,17 +243,23 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
         and(
           eq(scheduleTerms.facultyId, career.facultyId),
           eq(scheduleTerms.academicYear, academicYear),
-          eq(scheduleTerms.term, termStr)
+          eq(scheduleTerms.term, termStr),
+          eq(scheduleTerms.isDraft, false)
         )
       )
       .limit(1);
 
-    // Si no encuentra exacto, tomar el término marcado como isCurrent
+    // Si no encuentra exacto, tomar el término actual activo (que no sea borrador)
     if (!termRecord) {
       [termRecord] = await db
         .select()
         .from(scheduleTerms)
-        .where(eq(scheduleTerms.isCurrent, true))
+        .where(
+          and(
+            eq(scheduleTerms.isCurrent, true),
+            eq(scheduleTerms.isDraft, false)
+          )
+        )
         .limit(1);
     }
 
@@ -450,24 +458,46 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
         (off.professors || []).map((name) => ({ id: null, name })),
     }));
 
+    const responsePayload = {
+      schedule: canonicalSchedule,
+      reservedElectiveSlots: Array.from(groupedReservedMap.values()),
+      electiveOfferings: canonicalOfferings,
+      term: {
+        id: termRecord.id,
+        label: termRecord.label,
+        academicYear: termRecord.academicYear,
+        term: termRecord.term,
+      },
+    };
+
+    // Soporte para ETag y caché HTTP dependiente de catalog_versions (Ajuste 10)
+    const catalogVer = await getCatalogVersion();
+    const hash = crypto
+      .createHash('sha256')
+      .update(catalogVer + ':' + JSON.stringify(responsePayload))
+      .digest('hex');
+    const etag = `"${hash}"`;
+
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+
+    res.setHeader('ETag', etag);
+    res.setHeader('Cache-Control', 'public, max-age=1800, stale-while-revalidate=86400');
     res.json({
       success: true,
-      data: {
-        schedule: canonicalSchedule,
-        reservedElectiveSlots: Array.from(groupedReservedMap.values()),
-        electiveOfferings: canonicalOfferings,
-        term: {
-          id: termRecord.id,
-          label: termRecord.label,
-          academicYear: termRecord.academicYear,
-          term: termRecord.term,
-        },
-      },
+      data: responsePayload,
     });
   } catch (error) {
     console.error('Error in getSchedule:', error);
     res.status(500).json({ success: false, error: 'Error al obtener la oferta horaria' });
   }
+}
+
+export async function getCatalogVersionHandler(_req: Request, res: Response): Promise<void> {
+  const version = await getCatalogVersion();
+  res.json({ success: true, version });
 }
 
 export async function updateSelectedPlan(req: Request, res: Response): Promise<void> {

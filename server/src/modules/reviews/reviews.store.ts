@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../../db/index.js';
 import {
   careers,
@@ -199,6 +200,10 @@ export interface AdminModerationReportItem {
   reportStatus: ReportStatus;
   reportedMonthYear: string;
   openReportsOnReview: number;
+  reporterUserId?: string | null;
+  reporterEmail?: string | null;
+  authorUserId?: string | null;
+  authorEmail?: string | null;
   review: {
     id: string;
     professorId: string;
@@ -210,6 +215,8 @@ export interface AdminModerationReportItem {
     comment: string | null;
     status: ReviewStatus;
     publishedMonthYear: string;
+    authorUserId?: string | null;
+    authorEmail?: string | null;
   };
 }
 
@@ -225,6 +232,32 @@ export interface AdminHiddenReviewItem {
   status: ReviewStatus;
   openReportsCount: number;
   publishedMonthYear: string;
+  authorUserId?: string | null;
+  authorEmail?: string | null;
+}
+
+export interface AdminReviewCatalogItem {
+  id: string;
+  professorId: string;
+  professorName: string;
+  subjectId: string;
+  subjectCode: number;
+  subjectName: string;
+  authorUserId: string;
+  authorEmail: string;
+  overall: number;
+  clarity: number | null;
+  treatment: number | null;
+  availability: number | null;
+  difficulty: number | null;
+  wouldRecommend: boolean | null;
+  comment: string | null;
+  status: ReviewStatus;
+  helpfulCount: number;
+  attendedDeclared: boolean;
+  academicYear: number | null;
+  term: string | null;
+  createdAt: Date;
 }
 
 export function emptyAggregate(): ComputedAggregate {
@@ -490,6 +523,18 @@ export interface ReviewsStore {
   listModerationQueue(): Promise<{
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
+  }>;
+  listAllReviewsForAdmin(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: ReviewStatus | 'all';
+  }): Promise<{
+    items: AdminReviewCatalogItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
   }>;
   setReviewStatus(reviewId: string, status: ReviewStatus): Promise<StoredReview | null>;
   resolveReport(
@@ -1657,6 +1702,9 @@ export class DrizzleReviewsStore implements ReviewsStore {
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
   }> {
+    const authorUsers = alias(users, 'author_users');
+    const reporterUsers = alias(users, 'reporter_users');
+
     const reportsRows = await db
       .select({
         report: reviewReports,
@@ -1664,11 +1712,17 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        authorUserId: authorUsers.id,
+        authorEmail: authorUsers.email,
+        reporterUserId: reporterUsers.id,
+        reporterEmail: reporterUsers.email,
       })
       .from(reviewReports)
       .innerJoin(professorReviews, eq(reviewReports.reviewId, professorReviews.id))
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
+      .leftJoin(reporterUsers, eq(reviewReports.reporterUserId, reporterUsers.id))
       .where(eq(reviewReports.status, 'open'))
       .orderBy(desc(reviewReports.createdAt));
 
@@ -1685,6 +1739,10 @@ export class DrizzleReviewsStore implements ReviewsStore {
       reportStatus: r.report.status as ReportStatus,
       reportedMonthYear: formatYearMonth(r.report.createdAt),
       openReportsOnReview: openCountByReview.get(r.review.id) || 1,
+      reporterUserId: r.reporterUserId || null,
+      reporterEmail: r.reporterEmail || null,
+      authorUserId: r.authorUserId || null,
+      authorEmail: r.authorEmail || null,
       review: {
         id: r.review.id,
         professorId: r.review.professorId,
@@ -1696,6 +1754,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
         comment: r.review.comment,
         status: r.review.status as ReviewStatus,
         publishedMonthYear: formatYearMonth(r.review.createdAt),
+        authorUserId: r.authorUserId || null,
+        authorEmail: r.authorEmail || null,
       },
     }));
 
@@ -1705,10 +1765,13 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        authorUserId: authorUsers.id,
+        authorEmail: authorUsers.email,
       })
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .where(eq(professorReviews.status, 'hidden'))
       .orderBy(desc(professorReviews.updatedAt));
 
@@ -1724,9 +1787,126 @@ export class DrizzleReviewsStore implements ReviewsStore {
       status: h.review.status as ReviewStatus,
       openReportsCount: openCountByReview.get(h.review.id) || 0,
       publishedMonthYear: formatYearMonth(h.review.createdAt),
+      authorUserId: h.authorUserId || null,
+      authorEmail: h.authorEmail || null,
     }));
 
     return { openReports, hiddenReviews };
+  }
+
+  async listAllReviewsForAdmin(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    professorId?: string;
+    subjectId?: string;
+  }): Promise<{
+    items: AdminReviewCatalogItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }> {
+    const page = Math.max(1, params?.page || 1);
+    const pageSize = Math.min(100, Math.max(1, params?.pageSize || 20));
+    const offset = (page - 1) * pageSize;
+
+    const authorUsers = alias(users, 'author_users');
+    const conditions = [];
+
+    if (params?.status && params.status !== 'all') {
+      conditions.push(eq(professorReviews.status, params.status));
+    }
+    if (params?.professorId) {
+      conditions.push(eq(professorReviews.professorId, params.professorId));
+    }
+    if (params?.subjectId) {
+      conditions.push(eq(professorReviews.subjectId, params.subjectId));
+    }
+    if (params?.search && params.search.trim()) {
+      const term = `%${params.search.trim().toLowerCase()}%`;
+      conditions.push(
+        sql`(LOWER(${authorUsers.email}) LIKE ${term} OR LOWER(${professors.displayName}) LIKE ${term} OR LOWER(${professorReviews.comment}) LIKE ${term})`
+      );
+    }
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [totalRes] = await db
+      .select({ value: count() })
+      .from(professorReviews)
+      .innerJoin(professors, eq(professorReviews.professorId, professors.id))
+      .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
+      .where(whereClause);
+
+    const total = totalRes?.value || 0;
+
+    const rows = await db
+      .select({
+        id: professorReviews.id,
+        professorId: professorReviews.professorId,
+        professorName: professors.displayName,
+        subjectId: professorReviews.subjectId,
+        subjectCode: subjects.codeInPlan,
+        subjectName: subjects.name,
+        authorUserId: professorReviews.userId,
+        authorEmail: authorUsers.email,
+        overall: professorReviews.overall,
+        clarity: professorReviews.clarity,
+        treatment: professorReviews.treatment,
+        availability: professorReviews.availability,
+        difficulty: professorReviews.difficulty,
+        wouldRecommend: professorReviews.wouldRecommend,
+        comment: professorReviews.comment,
+        status: professorReviews.status,
+        helpfulCount: professorReviews.helpfulCount,
+        attendedDeclared: professorReviews.attendedDeclared,
+        academicYear: professorReviews.academicYear,
+        term: professorReviews.term,
+        createdAt: professorReviews.createdAt,
+      })
+      .from(professorReviews)
+      .innerJoin(professors, eq(professorReviews.professorId, professors.id))
+      .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
+      .where(whereClause)
+      .orderBy(desc(professorReviews.createdAt))
+      .limit(pageSize)
+      .offset(offset);
+
+    const items: AdminReviewCatalogItem[] = rows.map((r) => ({
+      id: r.id,
+      professorId: r.professorId,
+      professorName: r.professorName,
+      subjectId: r.subjectId,
+      subjectCode: r.subjectCode,
+      subjectName: r.subjectName,
+      authorUserId: r.authorUserId,
+      authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
+      overall: r.overall,
+      clarity: r.clarity,
+      treatment: r.treatment,
+      availability: r.availability,
+      difficulty: r.difficulty,
+      wouldRecommend: r.wouldRecommend,
+      comment: r.comment,
+      status: r.status as ReviewStatus,
+      helpfulCount: r.helpfulCount,
+      attendedDeclared: r.attendedDeclared,
+      academicYear: r.academicYear,
+      term: r.term,
+      createdAt: r.createdAt,
+    }));
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async setReviewStatus(reviewId: string, status: ReviewStatus): Promise<StoredReview | null> {
@@ -3488,6 +3668,10 @@ export class InMemoryReviewsStore implements ReviewsStore {
       openReports.push({
         reportId: rp.id,
         reviewId: rev.id,
+        reporterUserId: rp.reporterUserId,
+        reporterEmail: 'reportante@stack.com',
+        authorUserId: rev.userId,
+        authorEmail: 'autor@stack.com',
         reason: rp.reason,
         note: rp.note,
         reportStatus: rp.status,
@@ -3500,6 +3684,8 @@ export class InMemoryReviewsStore implements ReviewsStore {
           subjectId: sub.id,
           subjectCode: sub.codeInPlan,
           subjectName: sub.name,
+          authorUserId: rev.userId,
+          authorEmail: 'autor@stack.com',
           overall: rev.overall,
           comment: rev.comment,
           status: rev.status,
@@ -3522,6 +3708,8 @@ export class InMemoryReviewsStore implements ReviewsStore {
         subjectId: sub.id,
         subjectCode: sub.codeInPlan,
         subjectName: sub.name,
+        authorUserId: rev.userId,
+        authorEmail: 'autor@stack.com',
         overall: rev.overall,
         comment: rev.comment,
         status: rev.status,
@@ -3531,6 +3719,80 @@ export class InMemoryReviewsStore implements ReviewsStore {
     }
 
     return { openReports, hiddenReviews };
+  }
+
+  async listAllReviewsForAdmin(params: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: ReviewStatus | 'all';
+  }): Promise<{
+    items: AdminReviewCatalogItem[];
+    total: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+  }> {
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.max(1, Math.min(100, params.pageSize || 20));
+    const search = params.search?.trim().toLowerCase();
+    const status = params.status || 'all';
+
+    let all: AdminReviewCatalogItem[] = [];
+    for (const rev of this.reviewsMap.values()) {
+      if (status !== 'all' && rev.status !== status) continue;
+      const prof = this.professorsMap.get(rev.professorId);
+      const sub = this.subjectsMap.get(rev.subjectId);
+      const profName = prof?.displayName || 'Profesor desconocido';
+      const subName = sub?.name || 'Materia desconocida';
+      const authorEmail = 'autor@stack.com';
+
+      if (search) {
+        const matches =
+          profName.toLowerCase().includes(search) ||
+          subName.toLowerCase().includes(search) ||
+          (rev.comment && rev.comment.toLowerCase().includes(search)) ||
+          authorEmail.toLowerCase().includes(search);
+        if (!matches) continue;
+      }
+
+      all.push({
+        id: rev.id,
+        professorId: rev.professorId,
+        professorName: profName,
+        subjectId: rev.subjectId,
+        subjectCode: sub?.codeInPlan || 0,
+        subjectName: subName,
+        authorUserId: rev.userId,
+        authorEmail,
+        overall: rev.overall,
+        clarity: rev.clarity,
+        treatment: rev.treatment,
+        availability: rev.availability,
+        difficulty: rev.difficulty,
+        wouldRecommend: rev.wouldRecommend,
+        comment: rev.comment,
+        status: rev.status,
+        helpfulCount: rev.helpfulCount,
+        attendedDeclared: rev.attendedDeclared,
+        academicYear: rev.academicYear,
+        term: rev.term,
+        createdAt: rev.createdAt,
+      });
+    }
+
+    all.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const total = all.length;
+    const offset = (page - 1) * pageSize;
+    const items = all.slice(offset, offset + pageSize);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async setReviewStatus(reviewId: string, status: ReviewStatus): Promise<StoredReview | null> {

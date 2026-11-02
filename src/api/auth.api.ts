@@ -4,6 +4,7 @@ export interface User {
   id: string;
   email: string;
   role: 'user' | 'admin';
+  status?: 'active' | 'suspended';
   selectedPlanId: string | null;
   emailVerified?: boolean;
   authProviders?: string[];

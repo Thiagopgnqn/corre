@@ -15,11 +15,13 @@ import {
 interface UserMenuProps {
   currentPlanName?: string;
   onOpenPlanSelector?: () => void;
+  onNavigateAdmin?: () => void;
 }
 
 export const UserMenu: React.FC<UserMenuProps> = ({
   currentPlanName = 'Plan 2023',
   onOpenPlanSelector,
+  onNavigateAdmin,
 }) => {
   const { user, logout, deleteAccount } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
@@ -107,6 +109,24 @@ export const UserMenu: React.FC<UserMenuProps> = ({
 
           {/* Menu actions */}
           <div className="py-1">
+            {user.role === 'admin' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  if (onNavigateAdmin) {
+                    onNavigateAdmin();
+                  } else if (typeof window !== 'undefined') {
+                    window.location.hash = 'admin';
+                  }
+                }}
+                className="w-full px-4 py-2 text-left text-xs text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
+              >
+                <Shield className="w-4 h-4 text-amber-400" />
+                <span>Panel de administración</span>
+              </button>
+            )}
+
             {onOpenPlanSelector && (
               <button
                 type="button"

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts && tsx test/authFrontend.test.ts && tsx test/brand.test.ts && tsx test/scheduleLayout.test.ts",
+    "test": "tsx test/correlativas.test.ts && tsx test/scheduleImport.test.ts && tsx test/reviewsFrontend.test.ts && tsx test/authFrontend.test.ts && tsx test/brand.test.ts && tsx test/scheduleLayout.test.ts && tsx test/adminFrontend.test.ts",
     "generate:brand": "node scripts/generateBrandAssets.mjs",
     "import:schedule": "tsx scripts/importSchedule.ts",
     "preview": "vite preview"

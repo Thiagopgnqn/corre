@@ -18,6 +18,7 @@ async function main() {
     compareProfessorParsed,
     analyzeProfessorNames,
   } = await import('../src/modules/professors/professorNormalizer.js');
+  const { setLiveUserResolverForTesting } = await import('../src/middlewares/auth.middleware.js');
 
   console.log('======================================================================');
   console.log(' 🧪 TESTS DE RESEÑAS DE PROFESORES, PRIVACIDAD, MODERACIÓN Y RANKING');
@@ -127,11 +128,13 @@ async function main() {
     endpoint: string,
     token?: string,
     body?: any,
-    includeCsrf: boolean = true
+    includeCsrf: boolean = true,
+    extraCookie?: string
   ) {
     const headers: Record<string, string> = {};
     if (includeCsrf) headers['X-Requested-With'] = 'XMLHttpRequest';
-    if (token) headers['Cookie'] = `accessToken=${token}`;
+    const cookies = [token ? `accessToken=${token}` : '', extraCookie || ''].filter(Boolean);
+    if (cookies.length > 0) headers['Cookie'] = cookies.join('; ');
 
     const fetchOptions: RequestInit = {
       method,
@@ -255,6 +258,19 @@ async function main() {
     const tokenB = makeToken(studentB);
     const tokenC = makeToken(studentC);
     const tokenAdmin = makeToken(adminUser);
+
+    const testUsersMap = new Map<string, any>();
+    testUsersMap.set(studentA.id, { ...studentA, status: 'active', emailVerified: true });
+    testUsersMap.set(studentB.id, { ...studentB, status: 'active', emailVerified: true });
+    testUsersMap.set(studentC.id, { ...studentC, status: 'active', emailVerified: true });
+    testUsersMap.set(adminUser.id, { ...adminUser, status: 'active', emailVerified: true });
+    setLiveUserResolverForTesting(async (id: string) => testUsersMap.get(id) || null);
+
+    const adminReauthCookie = `admin_reauth_token=${jwt.sign(
+      { purpose: 'admin-reauth', userId: adminUser.id, adminEmail: adminUser.email },
+      env.JWT_SECRET,
+      { expiresIn: '10m' }
+    )}`;
 
     // Progreso de studentA:
     // Materia 1: aprobada, Materia 2: cursando (NO elegible), Materia 3: regularizada, Materia 4: promocionada, Materia 5: pendiente
@@ -432,10 +448,17 @@ async function main() {
     });
     assert(revBotta2.status === 201, 'studentB reseña a "Oscar, Botta" antes de la fusión');
 
-    const mergeRes = await api('POST', '/api/admin/professors/merge', tokenAdmin, {
-      sourceProfessorId: profBotta2.id,
-      targetProfessorId: profBotta1.id,
-    });
+    const mergeRes = await api(
+      'POST',
+      '/api/admin/professors/merge',
+      tokenAdmin,
+      {
+        sourceProfessorId: profBotta2.id,
+        targetProfessorId: profBotta1.id,
+      },
+      true,
+      adminReauthCookie
+    );
     assert(
       mergeRes.status === 200 &&
         mergeRes.data?.data?.movedCommissions === 1 &&

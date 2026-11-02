@@ -24,6 +24,8 @@ import { ReviewFormModal } from './components/professors/ReviewFormModal';
 import { Loader2 } from 'lucide-react';
 import { APP_NAME } from './config/brand';
 
+const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
+
 const VALID_VIEWS: AppView[] = [
   'graph',
   'kanban',
@@ -32,6 +34,7 @@ const VALID_VIEWS: AppView[] = [
   'professors',
   'electives',
   'stats',
+  'admin',
 ];
 
 const getInitialView = (): AppView => {
@@ -43,7 +46,7 @@ const getInitialView = (): AppView => {
 };
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated, isEmailVerified, isLoading } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading, user } = useAuth();
   const {
     showMigrationModal,
     setShowMigrationModal,
@@ -63,6 +66,16 @@ const AppContent: React.FC = () => {
       delete (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial;
     };
   }, [startTutorial]);
+
+  // Route guard: el panel de administración es exclusivo para usuarios con rol admin
+  React.useEffect(() => {
+    if (!isLoading && currentView === 'admin' && user?.role !== 'admin') {
+      setCurrentView('graph');
+      if (typeof window !== 'undefined') {
+        window.location.hash = 'graph';
+      }
+    }
+  }, [currentView, user, isLoading]);
 
   // Medir dinámicamente la altura del área de encabezado (Navbar + SimulationBar + Banners)
   React.useEffect(() => {
@@ -122,14 +135,16 @@ const AppContent: React.FC = () => {
         isScheduleView ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen'
       }`}
     >
-      {/* Top Header Area monitored by ResizeObserver */}
-      <div ref={headerAreaRef} className="sticky top-0 z-40 w-full shrink-0">
-        {/* Simulation banner if active */}
-        <SimulationBar />
+      {/* Top Header Area monitored by ResizeObserver (oculto en panel de administración) */}
+      {currentView !== 'admin' && (
+        <div ref={headerAreaRef} className="sticky top-0 z-40 w-full shrink-0">
+          {/* Simulation banner if active */}
+          <SimulationBar />
 
-        {/* Main navigation header */}
-        <Navbar currentView={currentView} setCurrentView={handleSetView} />
-      </div>
+          {/* Main navigation header */}
+          <Navbar currentView={currentView} setCurrentView={handleSetView} />
+        </div>
+      )}
 
       {/* Main content body with smooth transitions */}
       <main
@@ -155,6 +170,17 @@ const AppContent: React.FC = () => {
             {currentView === 'professors' && <ProfessorsDirectory />}
             {currentView === 'electives' && <ElectivesPicker />}
             {currentView === 'stats' && <StatsDashboard />}
+            {currentView === 'admin' && (
+              <React.Suspense
+                fallback={
+                  <div className="flex-1 flex items-center justify-center p-12 text-slate-400">
+                    <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+                  </div>
+                }
+              >
+                <AdminDashboard onNavigateHome={() => handleSetView('graph')} />
+              </React.Suspense>
+            )}
           </motion.div>
         </AnimatePresence>
       </main>

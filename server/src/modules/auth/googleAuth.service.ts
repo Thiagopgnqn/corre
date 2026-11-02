@@ -7,6 +7,7 @@ export interface VerifiedGoogleUser {
   name?: string;
   picture?: string;
   emailVerified: boolean;
+  iat?: number;
 }
 
 export type GoogleTokenVerifier = (credential: string) => Promise<VerifiedGoogleUser>;
@@ -75,6 +76,7 @@ export async function verifyGoogleCredential(credential: string): Promise<Verifi
     name: payload.name,
     picture: payload.picture,
     emailVerified: true,
+    iat: payload.iat,
   };
 }
 

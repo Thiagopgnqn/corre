@@ -1,3 +1,6 @@
+import { inArray } from 'drizzle-orm';
+import { db } from '../../db/index.js';
+import { users } from '../../db/schema.js';
 import {
   ALLOWED_REVIEW_SUBJECT_STATUSES,
   AUTO_HIDE_OPEN_REPORTS_THRESHOLD,
@@ -131,6 +134,8 @@ export interface PublicReviewPayload {
   subjectCode: number;
   subjectName: string;
   studentLabel: string;
+  authorUserId?: string;
+  authorEmail?: string;
   academicYear: number | null;
   term: '1C' | '2C' | 'A' | null;
   attendedPeriod: string | null;
@@ -150,11 +155,11 @@ export interface PublicReviewPayload {
 }
 
 /**
- * Serializador estricto de anonimato:
- * - Jamás expone `userId`, `email` ni timestamps exactos (`createdAt`/`updatedAt`).
- * - Solo emite mes y año de publicación (`YYYY-MM` + etiqueta legible).
+ * Serializador de reseñas:
+ * - Para estudiantes comunes preserva anonimato ("Estudiante de {Materia}").
+ * - Para administradores emite el email del autor y studentLabel ("Por: {email}").
  * - Si el profesor tiene menos de 5 reseñas publicadas (`MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD`),
- *   oculta por completo `academicYear`, `term` y `attendedPeriod` (`null`).
+ *   oculta `academicYear`, `term` y `attendedPeriod` a estudiantes.
  */
 export function serializePublicReview(params: {
   review: StoredReview;
@@ -162,14 +167,15 @@ export function serializePublicReview(params: {
   professorPublishedReviewCount: number;
   viewerHasVotedHelpful?: boolean;
   viewerHasReported?: boolean;
+  authorEmail?: string;
 }): PublicReviewPayload {
-  const { review, subject, professorPublishedReviewCount } = params;
+  const { review, subject, professorPublishedReviewCount, authorEmail } = params;
   const subjectName = subject?.name || 'Materia de la carrera';
   const subjectCode = subject?.codeInPlan || 0;
   const { publishedMonthYear, publishedLabel } = formatPublishedMonthYear(review.createdAt);
 
   const canShowAttendedPeriod =
-    professorPublishedReviewCount >= MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD;
+    professorPublishedReviewCount >= MIN_REVIEWS_TO_SHOW_ATTENDED_PERIOD || Boolean(authorEmail);
 
   const safeYear = canShowAttendedPeriod ? review.academicYear : null;
   const safeTerm = canShowAttendedPeriod ? review.term : null;
@@ -191,7 +197,9 @@ export function serializePublicReview(params: {
     subjectId: review.subjectId,
     subjectCode,
     subjectName,
-    studentLabel: `Estudiante de ${subjectName}`,
+    studentLabel: authorEmail ? `Por: ${authorEmail}` : `Estudiante de ${subjectName}`,
+    authorUserId: authorEmail ? review.userId : undefined,
+    authorEmail,
     academicYear: safeYear,
     term: safeTerm,
     attendedPeriod,
@@ -421,6 +429,7 @@ export class ReviewsService {
     page?: number;
     pageSize?: number;
     sort?: 'recent' | 'helpful';
+    viewerIsAdmin?: boolean;
   }) {
     const found = await this.store.getProfessorById(params.professorId);
     if (!found) {
@@ -466,6 +475,20 @@ export class ReviewsService {
       Array.from(new Set(result.items.map((r) => r.subjectId)))
     );
 
+    let authorEmailMap = new Map<string, string>();
+    if (params.viewerIsAdmin) {
+      const userIds = Array.from(new Set(result.items.map((r) => r.userId)));
+      if (userIds.length > 0) {
+        const userRows = await db
+          .select({ id: users.id, email: users.email })
+          .from(users)
+          .where(inArray(users.id, userIds));
+        for (const u of userRows) {
+          authorEmailMap.set(u.id, u.email);
+        }
+      }
+    }
+
     const serialized = result.items.map((r) =>
       serializePublicReview({
         review: r,
@@ -473,6 +496,7 @@ export class ReviewsService {
         professorPublishedReviewCount: profTotalPublished,
         viewerHasVotedHelpful: result.viewerHelpfulIds.has(r.id),
         viewerHasReported: result.viewerReportedIds.has(r.id),
+        authorEmail: authorEmailMap.get(r.userId),
       })
     );
 
@@ -483,6 +507,22 @@ export class ReviewsService {
       total: result.total,
       totalPages: Math.ceil(result.total / pageSize),
     };
+  }
+
+  async adminListAllReviews(params?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    professorId?: string;
+    subjectId?: string;
+  }) {
+    return this.store.listAllReviewsForAdmin({
+      page: params?.page,
+      pageSize: params?.pageSize,
+      search: params?.search,
+      status: (params?.status as ReviewStatus | 'all') || 'all',
+    });
   }
 
   /**

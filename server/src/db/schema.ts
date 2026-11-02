@@ -173,6 +173,7 @@ export const scheduleTerms = pgTable(
     term: text('term').notNull(), // '1C' | '2C'
     label: text('label').notNull(),
     isCurrent: boolean('is_current').default(false).notNull(),
+    isDraft: boolean('is_draft').default(false).notNull(),
     ...timestamps,
   },
   (table) => [
@@ -214,6 +215,7 @@ export const commissions = pgTable(
     code: text('code').notNull(), // '2K01'
     turno: text('turno').notNull(), // 'M' | 'T' | 'N'
     termOffer: text('term_offer').notNull(), // '1C' | '2C' | 'A'
+    isRetired: boolean('is_retired').default(false).notNull(),
     ...timestamps,
   },
   (table) => [
@@ -358,11 +360,13 @@ export const users = pgTable(
     canonicalEmail: text('canonical_email'),
     passwordHash: text('password_hash'),
     role: text('role').notNull().default('user'), // 'user' | 'admin'
+    status: text('status').notNull().default('active'), // 'active' | 'suspended'
     selectedPlanId: uuid('selected_plan_id').references(() => studyPlans.id, {
       onDelete: 'set null',
     }),
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -935,5 +939,41 @@ export const enrollmentProfessorsRelations = relations(enrollmentProfessors, ({ 
     references: [professors.id],
   }),
 }));
+
+// ==========================================
+// 3. AUDITORÍA DE ADMINISTRACIÓN Y CATÁLOGO
+// ==========================================
+
+export const adminAuditLog = pgTable(
+  'admin_audit_log',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    adminUserId: uuid('admin_user_id').references(() => users.id, { onDelete: 'set null' }),
+    adminEmail: text('admin_email').notNull(),
+    action: text('action').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id'),
+    targetEmail: text('target_email'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    ip: text('ip'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_admin_audit_created').on(table.createdAt),
+    index('idx_admin_audit_admin').on(table.adminUserId),
+    index('idx_admin_audit_action').on(table.action),
+  ]
+);
+
+export const catalogVersions = pgTable('catalog_versions', {
+  id: text('id').primaryKey().default('default'),
+  version: text('version').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type AdminAuditLogEntry = typeof adminAuditLog.$inferSelect;
+export type InsertAdminAuditLog = typeof adminAuditLog.$inferInsert;
+export type CatalogVersion = typeof catalogVersions.$inferSelect;
+
 
 

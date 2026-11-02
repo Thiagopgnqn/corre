@@ -34,7 +34,8 @@ export type AppView =
   | 'schedule'
   | 'professors'
   | 'electives'
-  | 'stats';
+  | 'stats'
+  | 'admin';
 
 interface NavbarProps {
   currentView: AppView;
@@ -242,7 +243,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <SyncStatusBadge status={syncStatus} />
 
             {/* User Profile & Account Menu */}
-            <UserMenu currentPlanName={currentPlanName} onOpenPlanSelector={() => setIsPlanSelectorOpen(true)} />
+            <UserMenu
+              currentPlanName={currentPlanName}
+              onOpenPlanSelector={() => setIsPlanSelectorOpen(true)}
+              onNavigateAdmin={() => setCurrentView('admin')}
+            />
 
             {/* Tutorial Launcher Button: Visible on wide screens >= 1650px (also in More menu on all screens) */}
             <button

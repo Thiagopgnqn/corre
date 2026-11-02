@@ -18,7 +18,7 @@
     "migrate:professors": "tsx src/scripts/migrateProfessors.ts",
     "merge-professors": "tsx src/scripts/mergeProfessors.ts",
     "verify-user": "tsx src/scripts/verifyUser.ts",
-    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts",
+    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },
   "dependencies": {

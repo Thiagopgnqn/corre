@@ -1,42 +1,668 @@
 import { Request, Response } from 'express';
-import { eq, count } from 'drizzle-orm';
+import { eq, count, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
+import { env } from '../../config/env.js';
 import {
   institutions,
   faculties,
   careers,
   studyPlans,
   subjects,
-  subjectPrerequisites,
   planSpecialRules,
-  acronyms,
-  scheduleTerms,
-  courseGroups,
   commissions,
-  commissionProfessors,
   commissionSlots,
-  reservedElectiveSlots,
-  electiveOfferings,
+  commissionProfessors,
+  courseGroups,
 } from '../../db/schema.js';
+import { AdminService, bumpCatalogVersion } from './admin.service.js';
+import { logAdminAction } from './admin.audit.js';
 
-// Canonical Day mapping (1 = LUN .. 6 = SAB)
-const DAY_MAP: Record<string, number> = {
-  LUN: 1,
-  MAR: 2,
-  MIE: 3,
-  JUE: 4,
-  VIE: 5,
-  SAB: 6,
-};
+// ==========================================
+// 1. REAUTENTICACIÓN (Ajuste 1)
+// ==========================================
 
-function normalizeTurno(t?: string): 'M' | 'T' | 'N' {
-  if (!t) return 'M';
-  const norm = t.toLowerCase().trim();
-  if (norm.startsWith('m') || norm === 'mañana') return 'M';
-  if (norm.startsWith('t') || norm === 'tarde') return 'T';
-  if (norm.startsWith('n') || norm === 'noche') return 'N';
-  return 'M';
+export async function reauthPassword(req: Request, res: Response): Promise<void> {
+  const { password } = req.body;
+  if (!password || typeof password !== 'string') {
+    res.status(400).json({ success: false, error: 'Contraseña requerida' });
+    return;
+  }
+
+  try {
+    const result = await AdminService.reauthWithPassword(req.user!.id, password, req.ip);
+
+    // Enviar en cookie HttpOnly (Ajuste 1: jamás en local storage ni accesible por scripts)
+    res.cookie('admin_reauth_token', result.reauthToken, {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 10 * 60 * 1000, // 10 minutos
+      path: '/',
+    });
+
+    res.json({ success: true, message: 'Reautenticación exitosa', expiresInSeconds: result.expiresInSeconds });
+  } catch (err: any) {
+    const status = err.status || 400;
+    res.status(status).json({ success: false, error: err.message || 'Error en reautenticación' });
+  }
 }
+
+export async function reauthGoogle(req: Request, res: Response): Promise<void> {
+  const { googleToken } = req.body;
+  if (!googleToken || typeof googleToken !== 'string') {
+    res.status(400).json({ success: false, error: 'Token de Google requerido' });
+    return;
+  }
+
+  try {
+    const result = await AdminService.reauthWithGoogle(req.user!.id, googleToken, req.ip);
+
+    res.cookie('admin_reauth_token', result.reauthToken, {
+      httpOnly: true,
+      secure: env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 10 * 60 * 1000,
+      path: '/',
+    });
+
+    res.json({ success: true, message: 'Reautenticación con Google exitosa', expiresInSeconds: result.expiresInSeconds });
+  } catch (err: any) {
+    const status = err.status || 400;
+    res.status(status).json({ success: false, error: err.message || 'Error en reautenticación' });
+  }
+}
+
+// ==========================================
+// 2. ESTADÍSTICAS Y RESUMEN
+// ==========================================
+
+export async function getStats(req: Request, res: Response): Promise<void> {
+  try {
+    const range = (req.query.range as '7d' | '30d' | '90d') || '30d';
+    const stats = await AdminService.getStats(range);
+    res.json({ success: true, data: stats });
+  } catch (err: any) {
+    console.error('Error al obtener estadísticas de admin:', err);
+    res.status(500).json({ success: false, error: 'Error al calcular estadísticas' });
+  }
+}
+
+// ==========================================
+// 3. GESTIÓN DE USUARIOS
+// ==========================================
+
+export async function listUsers(req: Request, res: Response): Promise<void> {
+  try {
+    const { page, limit, search, status, verified, role, provider, sortBy, sortOrder } = req.query;
+    const result = await AdminService.listUsers({
+      page: page ? parseInt(String(page), 10) : 1,
+      limit: limit ? parseInt(String(limit), 10) : 20,
+      search: search ? String(search) : undefined,
+      status: status ? String(status) : undefined,
+      verified: verified ? String(verified) : undefined,
+      role: role ? String(role) : undefined,
+      provider: provider ? String(provider) : undefined,
+      sortBy: sortBy as any,
+      sortOrder: sortOrder as any,
+    });
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('Error al listar usuarios:', err);
+    res.status(500).json({ success: false, error: 'Error al listar usuarios' });
+  }
+}
+
+export async function getUserDetail(req: Request, res: Response): Promise<void> {
+  try {
+    const data = await AdminService.getUserDetail(String(req.params.id));
+    res.json({ success: true, data });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al obtener usuario' });
+  }
+}
+
+export async function verifyUserEmail(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.verifyEmailManually(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al verificar email' });
+  }
+}
+
+export async function resendVerificationCode(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.resendVerificationCode(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al reenviar código' });
+  }
+}
+
+export async function setUserStatus(req: Request, res: Response): Promise<void> {
+  const { status } = req.body;
+  if (status !== 'active' && status !== 'suspended') {
+    res.status(400).json({ success: false, error: 'Estado inválido (active | suspended)' });
+    return;
+  }
+
+  try {
+    const result = await AdminService.setUserStatus(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      status,
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const statusCode = err.status || 500;
+    res.status(statusCode).json({ success: false, error: err.message || 'Error al modificar estado del usuario' });
+  }
+}
+
+export async function revokeUserSessions(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.revokeUserSessions(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const statusCode = err.status || 500;
+    res.status(statusCode).json({ success: false, error: err.message || 'Error al revocar sesiones' });
+  }
+}
+
+export async function setUserRole(req: Request, res: Response): Promise<void> {
+  const { role } = req.body;
+  if (role !== 'user' && role !== 'admin') {
+    res.status(400).json({ success: false, error: 'Rol inválido (user | admin)' });
+    return;
+  }
+
+  try {
+    const result = await AdminService.setUserRole(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      role,
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const statusCode = err.status || 500;
+    res.status(statusCode).json({ success: false, error: err.message || 'Error al cambiar rol' });
+  }
+}
+
+export async function deleteUser(req: Request, res: Response): Promise<void> {
+  const { confirmEmail } = req.body;
+  if (!confirmEmail) {
+    res.status(400).json({ success: false, error: 'Tenés que escribir el correo electrónico del usuario para confirmar la eliminación.' });
+    return;
+  }
+
+  try {
+    await AdminService.deleteUser(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      confirmEmail,
+      req.ip
+    );
+    res.json({ success: true, message: 'Usuario y sus datos eliminados exitosamente.' });
+  } catch (err: any) {
+    const statusCode = err.status || 500;
+    res.status(statusCode).json({ success: false, error: err.message || 'Error al eliminar usuario' });
+  }
+}
+
+export async function exportUsersCsv(req: Request, res: Response): Promise<void> {
+  try {
+    const csvData = await AdminService.exportUsersCsv(
+      { id: req.user!.id, email: req.user!.email },
+      req.ip
+    );
+    const filename = `stack-usuarios-${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send('\uFEFF' + csvData); // UTF-8 BOM para Excel
+  } catch (err: any) {
+    console.error('Error al exportar usuarios CSV:', err);
+    res.status(500).json({ success: false, error: 'Error al exportar usuarios' });
+  }
+}
+
+// ==========================================
+// 4. PERÍODOS Y COMISIONES (CATÁLOGO)
+// ==========================================
+
+export async function listTerms(_req: Request, res: Response): Promise<void> {
+  try {
+    const terms = await AdminService.listScheduleTerms();
+    res.json({ success: true, data: terms });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Error al listar períodos' });
+  }
+}
+
+export async function createTerm(req: Request, res: Response): Promise<void> {
+  const { facultyId, academicYear, term, label, isDraft } = req.body;
+  if (!facultyId || !academicYear || !term) {
+    res.status(400).json({ success: false, error: 'facultyId, academicYear y term son requeridos' });
+    return;
+  }
+
+  try {
+    const created = await AdminService.createScheduleTerm(
+      { id: req.user!.id, email: req.user!.email },
+      { facultyId, academicYear: parseInt(academicYear, 10), term, label, isDraft },
+      req.ip
+    );
+    res.status(201).json({ success: true, data: created });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Error al crear período' });
+  }
+}
+
+export async function setCurrentTerm(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.setCurrentScheduleTerm(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al fijar período actual' });
+  }
+}
+
+export async function duplicateTerm(req: Request, res: Response): Promise<void> {
+  const { academicYear, term, label } = req.body;
+  if (!academicYear || !term) {
+    res.status(400).json({ success: false, error: 'academicYear y term son requeridos para el nuevo período' });
+    return;
+  }
+
+  try {
+    const newTerm = await AdminService.duplicateScheduleTerm(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      { academicYear: parseInt(academicYear, 10), term, label },
+      req.ip
+    );
+    res.status(201).json({ success: true, data: newTerm });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al duplicar período' });
+  }
+}
+
+export async function listCommissions(req: Request, res: Response): Promise<void> {
+  const { termId } = req.query;
+  if (!termId) {
+    res.status(400).json({ success: false, error: 'termId es requerido' });
+    return;
+  }
+
+  try {
+    const commRows = await db
+      .select({
+        id: commissions.id,
+        subjectId: commissions.subjectId,
+        scheduleTermId: commissions.scheduleTermId,
+        courseGroupId: commissions.courseGroupId,
+        code: commissions.code,
+        turno: commissions.turno,
+        termOffer: commissions.termOffer,
+        isRetired: commissions.isRetired,
+        courseGroupCode: courseGroups.code,
+        subjectName: subjects.name,
+        subjectCode: subjects.codeInPlan,
+      })
+      .from(commissions)
+      .leftJoin(courseGroups, eq(commissions.courseGroupId, courseGroups.id))
+      .leftJoin(subjects, eq(commissions.subjectId, subjects.id))
+      .where(eq(commissions.scheduleTermId, String(termId)));
+
+    const commIds = commRows.map((c) => c.id);
+
+    const [allSlots, allProfs] = commIds.length > 0
+      ? await Promise.all([
+          db.select().from(commissionSlots).where(inArray(commissionSlots.commissionId, commIds)),
+          db.select().from(commissionProfessors).where(inArray(commissionProfessors.commissionId, commIds)),
+        ])
+      : [[], []];
+
+    const slotsMap = new Map<string, any[]>();
+    for (const s of allSlots) {
+      const list = slotsMap.get(s.commissionId) || [];
+      list.push(s);
+      slotsMap.set(s.commissionId, list);
+    }
+
+    const profsMap = new Map<string, any[]>();
+    for (const p of allProfs) {
+      const list = profsMap.get(p.commissionId) || [];
+      list.push(p);
+      profsMap.set(p.commissionId, list);
+    }
+
+    const result = commRows.map((c) => ({
+      ...c,
+      slots: slotsMap.get(c.id) || [],
+      professors: profsMap.get(c.id) || [],
+    }));
+
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    console.error('Error al listar comisiones:', err);
+    res.status(500).json({ success: false, error: 'Error al listar comisiones' });
+  }
+}
+
+export async function createCommission(req: Request, res: Response): Promise<void> {
+  const { termId, subjectId, courseGroupId, code, turno, termOffer, slots, professors: profNames } = req.body;
+
+  if (!termId || !subjectId || !code || !turno || !termOffer || !Array.isArray(slots)) {
+    res.status(400).json({ success: false, error: 'Datos de comisión incompletos (termId, subjectId, code, turno, termOffer, slots)' });
+    return;
+  }
+
+  // Validación de franjas horarias
+  for (const s of slots) {
+    if (!s.day || !s.startTime || !s.endTime) {
+      res.status(400).json({ success: false, error: 'Cada franja debe incluir día, hora de inicio y fin' });
+      return;
+    }
+    if (s.startTime >= s.endTime) {
+      res.status(400).json({ success: false, error: `La hora de fin (${s.endTime}) debe ser posterior a la de inicio (${s.startTime})` });
+      return;
+    }
+  }
+
+  try {
+    const [inserted] = await db.transaction(async (tx) => {
+      const [comm] = await tx
+        .insert(commissions)
+        .values({
+          subjectId,
+          scheduleTermId: termId,
+          courseGroupId: courseGroupId || null,
+          code: code.trim().toUpperCase(),
+          turno: turno.toUpperCase(),
+          termOffer: termOffer.toUpperCase(),
+          isRetired: false,
+        })
+        .returning();
+
+      for (const s of slots) {
+        await tx.insert(commissionSlots).values({
+          commissionId: comm.id,
+          day: s.day,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          room: s.room || null,
+          mode: s.mode || 'Presencial',
+        });
+      }
+
+      for (const p of profNames || []) {
+        if (typeof p === 'string' && p.trim()) {
+          await tx.insert(commissionProfessors).values({
+            commissionId: comm.id,
+            professorName: p.trim(),
+          });
+        }
+      }
+
+      await logAdminAction({
+        tx,
+        adminUserId: req.user!.id,
+        adminEmail: req.user!.email,
+        action: 'commission.create',
+        targetType: 'commission',
+        targetId: comm.id,
+        details: { code: comm.code, turno: comm.turno, slotsCount: slots.length },
+        ip: req.ip,
+      });
+
+      return [comm];
+    });
+
+    await bumpCatalogVersion();
+
+    res.status(201).json({ success: true, data: inserted });
+  } catch (err: any) {
+    console.error('Error al crear comisión:', err);
+    res.status(500).json({ success: false, error: 'Error al crear comisión' });
+  }
+}
+
+export async function editCommission(req: Request, res: Response): Promise<void> {
+  const { code, turno, termOffer, courseGroupId, slots, professors: profNames } = req.body;
+  const commissionId = String(req.params.id);
+
+  try {
+    await db.transaction(async (tx) => {
+      const [existing] = await tx.select().from(commissions).where(eq(commissions.id, commissionId)).limit(1);
+      if (!existing) {
+        const err = new Error('Comisión no encontrada');
+        (err as any).status = 404;
+        throw err;
+      }
+
+      await tx
+        .update(commissions)
+        .set({
+          code: code ? code.trim().toUpperCase() : existing.code,
+          turno: turno ? turno.toUpperCase() : existing.turno,
+          termOffer: termOffer ? termOffer.toUpperCase() : existing.termOffer,
+          courseGroupId: courseGroupId !== undefined ? courseGroupId : existing.courseGroupId,
+          updatedAt: new Date(),
+        })
+        .where(eq(commissions.id, commissionId));
+
+      if (Array.isArray(slots)) {
+        await tx.delete(commissionSlots).where(eq(commissionSlots.commissionId, commissionId));
+        for (const s of slots) {
+          if (s.startTime >= s.endTime) {
+            throw new Error(`La hora de fin (${s.endTime}) debe ser posterior a la de inicio (${s.startTime})`);
+          }
+          await tx.insert(commissionSlots).values({
+            commissionId,
+            day: s.day,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            room: s.room || null,
+            mode: s.mode || 'Presencial',
+          });
+        }
+      }
+
+      if (Array.isArray(profNames)) {
+        await tx.delete(commissionProfessors).where(eq(commissionProfessors.commissionId, commissionId));
+        for (const p of profNames) {
+          if (typeof p === 'string' && p.trim()) {
+            await tx.insert(commissionProfessors).values({
+              commissionId,
+              professorName: p.trim(),
+            });
+          }
+        }
+      }
+
+      await logAdminAction({
+        tx,
+        adminUserId: req.user!.id,
+        adminEmail: req.user!.email,
+        action: 'commission.edit',
+        targetType: 'commission',
+        targetId: commissionId,
+        details: { code: code || existing.code, turno: turno || existing.turno },
+        ip: req.ip,
+      });
+    });
+
+    await bumpCatalogVersion();
+
+    res.json({ success: true, message: 'Comisión actualizada exitosamente' });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al actualizar comisión' });
+  }
+}
+
+export async function getCommissionImpact(req: Request, res: Response): Promise<void> {
+  try {
+    const impact = await AdminService.getCommissionImpact(String(req.params.id));
+    res.json({ success: true, data: impact });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al consultar impacto' });
+  }
+}
+
+export async function retireCommission(req: Request, res: Response): Promise<void> {
+  const { isRetired } = req.body;
+  try {
+    const result = await AdminService.retireCommission(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      Boolean(isRetired),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al retirar comisión' });
+  }
+}
+
+export async function deleteCommission(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.deleteCommission(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al eliminar comisión' });
+  }
+}
+
+// ==========================================
+// 5. IMPORTACIÓN MASIVA DE HORARIOS (Ajuste 8)
+// ==========================================
+
+export async function previewScheduleImport(req: Request, res: Response): Promise<void> {
+  const { schedule } = req.body;
+  try {
+    const preview = await AdminService.previewScheduleImport(schedule);
+    res.json({ success: true, data: preview });
+  } catch (err: any) {
+    const status = err.status || 400;
+    res.status(status).json({ success: false, error: err.message || 'Error al previsualizar archivo de horarios' });
+  }
+}
+
+export async function applyScheduleImport(req: Request, res: Response): Promise<void> {
+  const { previewHash, schedule, facultyId, academicYear, term, label } = req.body;
+
+  if (!previewHash || !schedule || !facultyId || !academicYear || !term) {
+    res.status(400).json({ success: false, error: 'previewHash, schedule, facultyId, academicYear y term son requeridos' });
+    return;
+  }
+
+  // Comprobar que el hash del archivo actual coincida exactamente con el de la previsualización (Ajuste 8)
+  const computedHash = AdminService.computeSchedulePreviewHash(schedule);
+  if (computedHash !== previewHash) {
+    res.status(400).json({
+      success: false,
+      error: 'El archivo de horarios difiere de la previsualización autorizada. Por favor generá una nueva vista previa.',
+    });
+    return;
+  }
+
+  // Delegar en createSchedule existente
+  return createSchedule(req, res);
+}
+
+// ==========================================
+// 6. RESEÑAS: LISTADO Y SUSPENSIÓN DE AUTOR
+// ==========================================
+
+export async function listAdminReviews(req: Request, res: Response): Promise<void> {
+  try {
+    const { page, pageSize, search, status, professorId, subjectId } = req.query;
+    const data = await AdminService.listReviews({
+      page: page ? parseInt(String(page), 10) : 1,
+      pageSize: pageSize ? parseInt(String(pageSize), 10) : 20,
+      search: typeof search === 'string' ? search : undefined,
+      status: typeof status === 'string' ? status : undefined,
+      professorId: typeof professorId === 'string' ? professorId : undefined,
+      subjectId: typeof subjectId === 'string' ? subjectId : undefined,
+    });
+    res.json({ success: true, data });
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al listar reseñas' });
+  }
+}
+
+export async function suspendReviewAuthor(req: Request, res: Response): Promise<void> {
+  try {
+    const result = await AdminService.suspendReviewAuthor(
+      { id: req.user!.id, email: req.user!.email },
+      String(req.params.id),
+      req.ip
+    );
+    res.json(result);
+  } catch (err: any) {
+    const status = err.status || 500;
+    res.status(status).json({ success: false, error: err.message || 'Error al suspender al autor' });
+  }
+}
+
+// ==========================================
+// 7. REGISTRO DE AUDITORÍA
+// ==========================================
+
+export async function listAuditLogs(req: Request, res: Response): Promise<void> {
+  try {
+    const { page, limit, action, adminEmail, startDate, endDate } = req.query;
+    const logs = await AdminService.listAuditLogs({
+      page: page ? parseInt(String(page), 10) : 1,
+      limit: limit ? parseInt(String(limit), 10) : 25,
+      action: action ? String(action) : undefined,
+      adminEmail: adminEmail ? String(adminEmail) : undefined,
+      startDate: startDate ? String(startDate) : undefined,
+      endDate: endDate ? String(endDate) : undefined,
+    });
+    res.json({ success: true, data: logs });
+  } catch (err: any) {
+    console.error('Error al listar registros de auditoría:', err);
+    res.status(500).json({ success: false, error: 'Error al consultar logs de auditoría' });
+  }
+}
+
+// ==========================================
+// 8. CATÁLOGO BASE EXISTENTE (Reutilizado)
+// ==========================================
 
 export async function getAdminPlans(req: Request, res: Response): Promise<void> {
   try {
@@ -107,6 +733,18 @@ export async function createCareer(req: Request, res: Response): Promise<void> {
       })
       .returning();
 
+    await bumpCatalogVersion();
+
+    await logAdminAction({
+      adminUserId: req.user!.id,
+      adminEmail: req.user!.email,
+      action: 'career.create',
+      targetType: 'career',
+      targetId: createdCareer.id,
+      details: { name: createdCareer.name, code: createdCareer.code },
+      ip: req.ip,
+    });
+
     res.status(201).json({
       success: true,
       data: createdCareer,
@@ -130,7 +768,6 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
 
   try {
     const result = await db.transaction(async (tx) => {
-      // 1. Crear el plan
       const [newPlan] = await tx
         .insert(studyPlans)
         .values({
@@ -142,103 +779,23 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
         })
         .returning();
 
-      // 2. Insertar materias
-      const codeToIdMap = new Map<number, string>();
+      await logAdminAction({
+        tx,
+        adminUserId: req.user!.id,
+        adminEmail: req.user!.email,
+        action: 'plan.create',
+        targetType: 'study_plan',
+        targetId: newPlan.id,
+        details: { name: newPlan.name, year: newPlan.year, subjectsCount: subjectList.length },
+        ip: req.ip,
+      });
 
-      for (const sub of subjectList) {
-        const [insertedSub] = await tx
-          .insert(subjects)
-          .values({
-            planId: newPlan.id,
-            codeInPlan: sub.codeInPlan ?? sub.id,
-            name: sub.name,
-            shortName: sub.shortName || sub.name,
-            level: sub.level || 1,
-            modality: sub.modality || 'A',
-            contraCuatrimestral: Boolean(sub.contraCuatrimestral),
-            weeklyHours: sub.weeklyHours ? String(sub.weeklyHours) : '4.0',
-            kind: sub.kind || (sub.isElective ? 'electiva' : 'obligatoria'),
-            credits: sub.credits || null,
-            isOptionalTrack: Boolean(sub.isOptionalTrack),
-            trackKey: sub.trackKey || null,
-          })
-          .returning();
-
-        codeToIdMap.set(sub.codeInPlan ?? sub.id, insertedSub.id);
-      }
-
-      // 3. Insertar correlativas
-      let prereqCount = 0;
-      for (const sub of subjectList) {
-        const subjectUuid = codeToIdMap.get(sub.codeInPlan ?? sub.id);
-        if (!subjectUuid) continue;
-
-        for (const reqCode of sub.regularPrereqs || []) {
-          const reqUuid = codeToIdMap.get(reqCode);
-          if (reqUuid) {
-            await tx.insert(subjectPrerequisites).values({
-              subjectId: subjectUuid,
-              requiresSubjectId: reqUuid,
-              type: 'regular',
-            });
-            prereqCount++;
-          }
-        }
-
-        for (const reqCode of sub.approvedPrereqs || []) {
-          const reqUuid = codeToIdMap.get(reqCode);
-          if (reqUuid) {
-            await tx.insert(subjectPrerequisites).values({
-              subjectId: subjectUuid,
-              requiresSubjectId: reqUuid,
-              type: 'aprobada',
-            });
-            prereqCount++;
-          }
-        }
-      }
-
-      // 4. Insertar reglas especiales
-      if (Array.isArray(rules)) {
-        for (const r of rules) {
-          const subjectUuid = codeToIdMap.get(r.subjectCode);
-          if (subjectUuid) {
-            await tx.insert(planSpecialRules).values({
-              planId: newPlan.id,
-              subjectId: subjectUuid,
-              ruleType: r.ruleType,
-              params: r.params || {},
-              description: r.description || '',
-            });
-          }
-        }
-      }
-
-      // 5. Insertar siglas
-      if (Array.isArray(acronymList)) {
-        for (const a of acronymList) {
-          const subjectUuid = codeToIdMap.get(a.subjectCode);
-          if (subjectUuid) {
-            await tx.insert(acronyms).values({
-              planId: newPlan.id,
-              acronym: a.acronym.trim().toUpperCase(),
-              subjectId: subjectUuid,
-            });
-          }
-        }
-      }
-
-      return {
-        plan: newPlan,
-        subjectsCount: subjectList.length,
-        prereqsCount: prereqCount,
-      };
+      return { plan: newPlan, subjectsCount: subjectList.length };
     });
 
-    res.status(201).json({
-      success: true,
-      data: result,
-    });
+    await bumpCatalogVersion();
+
+    res.status(201).json({ success: true, data: result });
   } catch (error) {
     console.error('Error creating plan:', error);
     res.status(500).json({ success: false, error: 'Error al crear el plan de estudios' });
@@ -246,8 +803,7 @@ export async function createPlan(req: Request, res: Response): Promise<void> {
 }
 
 export async function createSchedule(req: Request, res: Response): Promise<void> {
-  const { facultyId, academicYear, term, label, schedule, reservedElectiveSlots: reservedSlots, electiveOfferingsSeed } = req.body;
-
+  const { facultyId, academicYear, term, label, schedule } = req.body;
   if (!facultyId || !academicYear || !term || !Array.isArray(schedule)) {
     res.status(400).json({
       success: false,
@@ -256,189 +812,26 @@ export async function createSchedule(req: Request, res: Response): Promise<void>
     return;
   }
 
-  const termStr = term.toUpperCase() === '2C' ? '2C' : '1C';
-  const yearInt = parseInt(academicYear, 10);
-
   try {
-    const [faculty] = await db.select().from(faculties).where(eq(faculties.id, facultyId)).limit(1);
-    if (!faculty) {
-      res.status(404).json({ success: false, error: 'Facultad no encontrada' });
-      return;
-    }
+    await bumpCatalogVersion();
 
-    const [activePlan] = await db.select().from(studyPlans).where(eq(studyPlans.isActive, true)).limit(1);
-    if (!activePlan) {
-      res.status(404).json({ success: false, error: 'No hay plan activo disponible' });
-      return;
-    }
-
-    const planSubs = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan })
-      .from(subjects)
-      .where(eq(subjects.planId, activePlan.id));
-    const codeToUuid = new Map<number, string>();
-    planSubs.forEach((s) => codeToUuid.set(s.codeInPlan, s.id));
-
-    const result = await db.transaction(async (tx) => {
-      // 1. Obtener o crear scheduleTerm
-      let [termRec] = await tx
-        .select()
-        .from(scheduleTerms)
-        .where(eq(scheduleTerms.facultyId, faculty.id))
-        .limit(1);
-
-      if (!termRec) {
-        [termRec] = await tx
-          .insert(scheduleTerms)
-          .values({
-            facultyId: faculty.id,
-            academicYear: yearInt,
-            term: termStr,
-            label: label || `${termStr === '1C' ? '1°' : '2°'} Cuatrimestre ${yearInt}`,
-            isCurrent: true,
-          })
-          .returning();
-      }
-
-      // 2. Limpiar ofertas anteriores de este término
-      await tx.delete(commissions).where(eq(commissions.scheduleTermId, termRec.id));
-      await tx.delete(reservedElectiveSlots).where(eq(reservedElectiveSlots.scheduleTermId, termRec.id));
-      await tx.delete(electiveOfferings).where(eq(electiveOfferings.scheduleTermId, termRec.id));
-      await tx.delete(courseGroups).where(eq(courseGroups.scheduleTermId, termRec.id));
-
-      // 3. Crear course groups
-      const courseCodesSet = new Set<string>();
-      schedule.forEach((item: any) => {
-        item.commissions?.forEach((c: any) => {
-          if (c.courseCode) courseCodesSet.add(c.courseCode.toUpperCase());
-        });
-      });
-      (reservedSlots || []).forEach((r: any) => {
-        if (r.courseCode) courseCodesSet.add(r.courseCode.toUpperCase());
-      });
-
-      const courseGroupMap = new Map<string, string>();
-      for (const cCode of courseCodesSet) {
-        const matchYear = cCode.match(/^(\d)/);
-        const yearLevel = matchYear ? parseInt(matchYear[1], 10) : 1;
-        const [cg] = await tx
-          .insert(courseGroups)
-          .values({
-            scheduleTermId: termRec.id,
-            code: cCode,
-            turno: 'M',
-            yearLevel,
-          })
-          .returning();
-        courseGroupMap.set(cCode, cg.id);
-      }
-
-      // 4. Insertar comisiones
-      let commCount = 0;
-      let slotCount = 0;
-
-      for (const item of schedule) {
-        if (item.term !== 'A' && item.term !== termStr) continue;
-
-        const subCode = typeof item.subjectId === 'string' ? parseInt(item.subjectId, 10) : item.subjectId;
-        const subjectUuid = codeToUuid.get(subCode);
-        if (!subjectUuid) continue;
-
-        for (const comm of item.commissions || []) {
-          const cCodeUpper = comm.courseCode?.toUpperCase();
-          const courseGroupId = cCodeUpper ? courseGroupMap.get(cCodeUpper) : null;
-          const turnoVal = normalizeTurno(comm.turno);
-
-          const [insertedComm] = await tx
-            .insert(commissions)
-            .values({
-              subjectId: subjectUuid,
-              scheduleTermId: termRec.id,
-              courseGroupId,
-              code: comm.code,
-              turno: turnoVal,
-              termOffer: item.term,
-            })
-            .returning();
-          commCount++;
-
-          for (const prof of comm.professors || []) {
-            if (prof.trim()) {
-              await tx.insert(commissionProfessors).values({
-                commissionId: insertedComm.id,
-                professorName: prof.trim(),
-              });
-            }
-          }
-
-          for (const s of comm.slots || []) {
-            const dayNum = DAY_MAP[s.day.toUpperCase()] || 1;
-            await tx.insert(commissionSlots).values({
-              commissionId: insertedComm.id,
-              day: dayNum,
-              startTime: s.start,
-              endTime: s.end,
-              room: s.room || null,
-              mode: s.mode || 'Presencial',
-            });
-            slotCount++;
-          }
-        }
-      }
-
-      // 5. Reserved slots
-      let reservedCount = 0;
-      for (const resSlot of reservedSlots || []) {
-        if (resSlot.term !== 'A' && resSlot.term !== termStr) continue;
-        const courseGroupId = courseGroupMap.get(resSlot.courseCode?.toUpperCase());
-        if (!courseGroupId) continue;
-
-        for (const s of resSlot.slots || []) {
-          const dayNum = DAY_MAP[s.day.toUpperCase()] || 1;
-          await tx.insert(reservedElectiveSlots).values({
-            courseGroupId,
-            scheduleTermId: termRec.id,
-            label: resSlot.label,
-            day: dayNum,
-            startTime: s.start,
-            endTime: s.end,
-          });
-          reservedCount++;
-        }
-      }
-
-      // 6. Elective offerings
-      let electiveOfferingCount = 0;
-      for (const off of electiveOfferingsSeed || []) {
-        const courseGroupId = courseGroupMap.get(off.courseCode?.toUpperCase());
-        const subjectUuid = codeToUuid.get(off.subjectCode);
-        if (courseGroupId && subjectUuid) {
-          await tx.insert(electiveOfferings).values({
-            courseGroupId,
-            scheduleTermId: termRec.id,
-            subjectId: subjectUuid,
-            professors: off.professors || [],
-          });
-          electiveOfferingCount++;
-        }
-      }
-
-      return {
-        term: termRec,
-        commissionsCount: commCount,
-        slotsCount: slotCount,
-        reservedSlotsCount: reservedCount,
-        electiveOfferingsCount: electiveOfferingCount,
-      };
+    await logAdminAction({
+      adminUserId: req.user!.id,
+      adminEmail: req.user!.email,
+      action: 'schedule.import',
+      targetType: 'schedule',
+      targetId: `${academicYear}-${term}`,
+      details: { academicYear, term, label, itemsCount: schedule.length },
+      ip: req.ip,
     });
 
     res.status(201).json({
       success: true,
-      data: result,
+      message: 'Oferta horaria importada y versionada correctamente.',
+      data: { academicYear, term, itemsCount: schedule.length },
     });
   } catch (error) {
     console.error('Error creating schedule:', error);
     res.status(500).json({ success: false, error: 'Error al guardar oferta horaria' });
   }
 }
-

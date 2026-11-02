@@ -22,6 +22,8 @@ import { env } from '../../config/env.js';
 import { isDisposableEmail } from '../../config/disposableDomains.js';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { verifyGoogleCredential } from './googleAuth.service.js';
+import { logAdminAction } from '../admin/admin.audit.js';
+import { getUserLiveStatus } from '../../middlewares/auth.middleware.js';
 import type {
   RegisterInput,
   LoginInput,
@@ -375,6 +377,13 @@ export class AuthService {
         .limit(1);
 
       if (user) {
+        if (user.status === 'suspended') {
+          const err = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
+          (err as any).status = 403;
+          (err as any).code = 'ACCOUNT_SUSPENDED';
+          throw err;
+        }
+
         // Asegurar que el email quede marcado como verificado
         if (!user.emailVerifiedAt) {
           await db
@@ -413,6 +422,17 @@ export class AuthService {
           expiresAt,
         });
 
+        if (user.role === 'admin') {
+          logAdminAction({
+            adminUserId: user.id,
+            adminEmail: user.email,
+            action: 'admin.login',
+            targetType: 'user',
+            targetId: user.id,
+            details: { method: 'google' },
+          }).catch(() => {});
+        }
+
         return {
           user: {
             id: user.id,
@@ -438,6 +458,13 @@ export class AuthService {
         )
       )
       .limit(1);
+
+    if (existingUser && existingUser.status === 'suspended') {
+      const err = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
+      (err as any).status = 403;
+      (err as any).code = 'ACCOUNT_SUSPENDED';
+      throw err;
+    }
 
     // Plan por defecto
     let planId = input.selectedPlanId || null;
@@ -784,6 +811,13 @@ export class AuthService {
       throw genericError;
     }
 
+    if (user.status === 'suspended') {
+      const suspendedError = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
+      (suspendedError as any).status = 403;
+      (suspendedError as any).code = 'ACCOUNT_SUSPENDED';
+      throw suspendedError;
+    }
+
     let planId = user.selectedPlanId;
     if (!planId) {
       const defaultPlan = await db
@@ -851,6 +885,17 @@ export class AuthService {
       tokenHash,
       expiresAt,
     });
+
+    if (user.role === 'admin') {
+      logAdminAction({
+        adminUserId: user.id,
+        adminEmail: user.email,
+        action: 'admin.login',
+        targetType: 'user',
+        targetId: user.id,
+        details: { method: 'password' },
+      }).catch(() => {});
+    }
 
     return {
       user: {
@@ -1277,15 +1322,48 @@ export class AuthService {
       throw err;
     }
 
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, tokenRecord.userId))
-      .limit(1);
+    const liveUser = await getUserLiveStatus(tokenRecord.userId);
+    let user = liveUser
+      ? {
+          id: liveUser.id,
+          email: liveUser.email,
+          role: liveUser.role,
+          status: liveUser.status,
+          emailVerifiedAt: liveUser.emailVerified ? new Date() : null,
+          selectedPlanId: null as string | null,
+        }
+      : null;
+
+    if (!user) {
+      const [dbUser] = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, tokenRecord.userId))
+        .limit(1);
+      user = dbUser ? {
+        id: dbUser.id,
+        email: dbUser.email,
+        role: dbUser.role as 'user' | 'admin',
+        status: dbUser.status as 'active' | 'suspended',
+        emailVerifiedAt: dbUser.emailVerifiedAt,
+        selectedPlanId: dbUser.selectedPlanId,
+      } : null;
+    }
 
     if (!user) {
       const err = new Error('Usuario no encontrado');
       (err as any).status = 401;
+      throw err;
+    }
+
+    if (user.status === 'suspended') {
+      await db
+        .update(refreshTokens)
+        .set({ revokedAt: new Date(), updatedAt: new Date() })
+        .where(eq(refreshTokens.userId, user.id));
+      const err = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
+      (err as any).status = 403;
+      (err as any).code = 'ACCOUNT_SUSPENDED';
       throw err;
     }
 

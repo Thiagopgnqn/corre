@@ -100,6 +100,36 @@ Una aplicación web moderna, interactiva y fluida para el seguimiento académico
 
 ---
 
+## 🛡️ Panel de Administración (`/#admin`)
+
+Stack cuenta con un panel de administración integrado y protegido para usuarios con rol `admin`. Se accede mediante el menú de usuario en la esquina superior derecha o directamente en la URL `/#admin` (el código del panel se carga bajo demanda con `React.lazy` para no impactar el tamaño inicial de la app).
+
+### 1. Pilares de Seguridad y Privacidad
+- **Verificación en Base de Datos en Tiempo Real**: Toda petición a `/api/admin/*` verifica el rol `admin` y el estado `active` directamente en la base de datos (con una caché local de 5 segundos para alto rendimiento). Si se revoca el rol a un usuario, el acceso al panel se pierde inmediatamente.
+- **Reautenticación Reciente Obligatoria (10 Minutos)**: Las acciones sensibles (suspensión de cuentas, cambios de rol, eliminación definitiva de usuarios, retiro de comisiones con alumnos inscriptos e importaciones masivas) exigen reautenticarse:
+  - Cuentas con contraseña: verificación segura con Argon2id (`@node-rs/argon2`).
+  - Cuentas solo-Google: validación del token de Google asegurando que coincida con el `sub` vinculado a la cuenta.
+  - El ticket viaja en una cookie `admin_reauth_token` de tipo `httpOnly`, tiene validez por 10 minutos y queda estrictamente atado a la sesión actual del administrador.
+- **Protección contra Lockout y Último Admin**: Los cambios de rol y suspensiones se ejecutan dentro de una transacción con bloqueo de filas (`SELECT ... FOR UPDATE` sobre la tabla `users`) para evitar condiciones de carrera. El sistema impide que un administrador se auto-degrade o que se elimine/suspenda al último administrador activo del sistema. Para suspender o eliminar a otro administrador, debe ser degradado a usuario común primero.
+- **Auditoría Inmutable (`admin_audit_log`)**: Cada acción administrativa sensible queda registrada en la tabla `admin_audit_log`. La tabla cuenta con un disparador (*trigger*) de PostgreSQL que rechaza de forma absoluta cualquier intento de modificación (`UPDATE`) o borrado (`DELETE`). Los detalles almacenados son recursivamente sanitizados: contraseñas, hashes, tokens y secretos nunca se guardan.
+- **Privacidad Estricta del Estudiante**: La vista de detalle de usuario en el panel expone metadatos de cuenta y contadores generales de uso (cantidad de cursadas, reseñas y reportes), pero **nunca** muestra notas individuales, avance de materias ni historial académico de los alumnos.
+- **Moderación Anónima**: La acción "Suspender al autor" oculta la reseña y suspende la cuenta infractora sin revelar la dirección de correo ni la identidad del autor al moderador.
+
+### 2. Pestañas y Módulos
+1. **Resumen y Métricas**: Métricas de usuarios (activos, suspendidos, nuevos registros), cursadas y reseñas con selector de rango (7d, 30d, 90d), gráficos diarios de actividad, alertas de calidad de catálogo y estado del servidor.
+2. **Usuarios**: Listado paginado con búsqueda por email, filtros por rol, estado y verificación de correo. Permite verificación manual, reenvío de código, revocación de sesiones, suspensión/reactivación, cambio de rol, eliminación definitiva y exportación a CSV con neutralización contra inyección de fórmulas (`=`, `+`, `-`, `@`).
+3. **Horarios y Catálogo**: Gestión de períodos académicos (ciclos vigentes, borradores y duplicación de períodos), alta y edición de comisiones con validación estricta de franjas horarias (inicio < fin, horarios entre 07:00 y 23:30), análisis de impacto antes de eliminar (recomendando retiro lógico `is_retired = true` si hay alumnos cursando) e importación masiva de JSON con verificación de hash SHA-256.
+4. **Docentes y Reseñas**: Cola de moderación con reportes abiertos y reseñas ocultas, acción de suspensión de autor, detección algorítmica de duplicados docentes y asistente de fusión/unificación.
+5. **Auditoría**: Visor paginado del registro inmutable de auditoría con filtros por acción y administrador, y modal para inspeccionar el payload JSON sanitizado.
+
+### 3. Asignación de Rol Administrador (CLI)
+Para promover una cuenta existente a administrador desde la terminal del servidor:
+```bash
+npm --prefix server run make-admin -- --email tu-correo@ejemplo.com
+```
+
+---
+
 ## 🔒 Sistema de Cuentas, Privacidad y Verificación
 
 - **Autenticación con Google**: Integración oficial vía Google Identity Services (GIS) en popup frontend y verificación con `google-auth-library` en backend.
