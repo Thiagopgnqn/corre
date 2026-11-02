@@ -67,8 +67,10 @@ router.delete('/users/:id', csrfProtection, requireRecentReauth, deleteUser);
 router.get('/terms', listTerms);
 router.post('/terms', csrfProtection, createTerm);
 router.patch('/terms/:id/current', csrfProtection, setCurrentTerm);
+router.patch('/terms/:id/default', csrfProtection, setCurrentTerm);
 router.post('/terms/:id/duplicate', csrfProtection, duplicateTerm);
 
+router.get('/terms/:id/commissions', listCommissions);
 router.get('/commissions', listCommissions);
 router.post('/commissions', csrfProtection, createCommission);
 router.get('/commissions/:id/impact', getCommissionImpact);

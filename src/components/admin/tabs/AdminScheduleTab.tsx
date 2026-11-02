@@ -92,9 +92,10 @@ export const AdminScheduleTab: React.FC = () => {
     try {
       const res = await adminApi.listTerms();
       if (res.success && res.data) {
-        setTerms(res.data);
-        if (!selectedTermId && res.data.length > 0) {
-          const defaultTerm = res.data.find((t) => t.isDefault) || res.data[0];
+        const termList = Array.isArray(res.data) ? res.data : [];
+        setTerms(termList);
+        if (!selectedTermId && termList.length > 0) {
+          const defaultTerm = termList.find((t) => t.isDefault) || termList[0];
           setSelectedTermId(defaultTerm.id);
         }
       }
@@ -118,10 +119,11 @@ export const AdminScheduleTab: React.FC = () => {
         search: searchCommission || undefined,
       });
       if (res.success && res.data) {
-        setCommissions(res.data);
+        setCommissions(Array.isArray(res.data) ? res.data : []);
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error al obtener comisiones.');
+      setCommissions([]);
     } finally {
       setIsLoadingComms(false);
     }

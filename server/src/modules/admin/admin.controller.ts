@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { eq, count, inArray } from 'drizzle-orm';
+import { eq, count, inArray, and } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { env } from '../../config/env.js';
 import {
@@ -311,14 +311,21 @@ export async function duplicateTerm(req: Request, res: Response): Promise<void> 
 }
 
 export async function listCommissions(req: Request, res: Response): Promise<void> {
-  const { termId } = req.query;
+  const termId = req.params.id || req.params.termId || req.query.termId;
   if (!termId) {
     res.status(400).json({ success: false, error: 'termId es requerido' });
     return;
   }
 
+  const { subjectId, search } = req.query;
+
   try {
-    const commRows = await db
+    const conditions = [eq(commissions.scheduleTermId, String(termId))];
+    if (subjectId) {
+      conditions.push(eq(commissions.subjectId, String(subjectId)));
+    }
+
+    let commRows = await db
       .select({
         id: commissions.id,
         subjectId: commissions.subjectId,
@@ -335,7 +342,16 @@ export async function listCommissions(req: Request, res: Response): Promise<void
       .from(commissions)
       .leftJoin(courseGroups, eq(commissions.courseGroupId, courseGroups.id))
       .leftJoin(subjects, eq(commissions.subjectId, subjects.id))
-      .where(eq(commissions.scheduleTermId, String(termId)));
+      .where(and(...conditions));
+
+    if (search) {
+      const q = String(search).trim().toLowerCase();
+      commRows = commRows.filter(
+        (c) =>
+          c.code.toLowerCase().includes(q) ||
+          (c.subjectName && c.subjectName.toLowerCase().includes(q))
+      );
+    }
 
     const commIds = commRows.map((c) => c.id);
 

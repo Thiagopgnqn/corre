@@ -15,6 +15,7 @@ import { AdminUsersTab } from './tabs/AdminUsersTab';
 import { AdminScheduleTab } from './tabs/AdminScheduleTab';
 import { AdminReviewsTab } from './tabs/AdminReviewsTab';
 import { AdminAuditTab } from './tabs/AdminAuditTab';
+import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { APP_NAME } from '../../config/brand';
 
 export type AdminTab = 'overview' | 'users' | 'schedule' | 'reviews' | 'audit';
@@ -124,11 +125,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1">
-        {activeTab === 'overview' && <AdminOverviewTab />}
-        {activeTab === 'users' && <AdminUsersTab />}
-        {activeTab === 'schedule' && <AdminScheduleTab />}
-        {activeTab === 'reviews' && <AdminReviewsTab />}
-        {activeTab === 'audit' && <AdminAuditTab />}
+        <AdminErrorBoundary key={activeTab}>
+          {activeTab === 'overview' && <AdminOverviewTab />}
+          {activeTab === 'users' && <AdminUsersTab />}
+          {activeTab === 'schedule' && <AdminScheduleTab />}
+          {activeTab === 'reviews' && <AdminReviewsTab />}
+          {activeTab === 'audit' && <AdminAuditTab />}
+        </AdminErrorBoundary>
       </main>
     </div>
   );

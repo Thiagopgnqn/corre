@@ -39,8 +39,14 @@ export const AdminAuditTab: React.FC = () => {
           adminUserId: adminFilter || undefined,
         });
         if (res.success && res.data) {
-          setLogs(res.data.logs);
-          setPagination(res.data.pagination);
+          setLogs(res.data.logs || []);
+          const p = res.data.pagination || {
+            page: (res.data as any).page || 1,
+            pageSize: (res.data as any).pageSize || (res.data as any).limit || 25,
+            total: (res.data as any).total ?? 0,
+            totalPages: (res.data as any).totalPages || 1,
+          };
+          setPagination(p);
         }
       } catch (err: any) {
         setErrorMsg(err?.message || 'Error al obtener registros de auditoría.');
@@ -201,24 +207,24 @@ export const AdminAuditTab: React.FC = () => {
         {/* Pagination */}
         <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <div>
-            Total: <span className="font-semibold text-white">{pagination.total}</span> acciones auditadas
+            Total: <span className="font-semibold text-white">{pagination?.total ?? 0}</span> acciones auditadas
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              disabled={pagination.page <= 1 || isLoading}
-              onClick={() => fetchLogs(pagination.page - 1)}
+              disabled={(pagination?.page ?? 1) <= 1 || isLoading}
+              onClick={() => fetchLogs((pagination?.page ?? 1) - 1)}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span>
-              Página {pagination.page} de {Math.max(1, pagination.totalPages)}
+              Página {pagination?.page ?? 1} de {Math.max(1, pagination?.totalPages ?? 1)}
             </span>
             <button
               type="button"
-              disabled={pagination.page >= pagination.totalPages || isLoading}
-              onClick={() => fetchLogs(pagination.page + 1)}
+              disabled={(pagination?.page ?? 1) >= (pagination?.totalPages ?? 1) || isLoading}
+              onClick={() => fetchLogs((pagination?.page ?? 1) + 1)}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               <ChevronRight className="w-4 h-4" />

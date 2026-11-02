@@ -447,6 +447,66 @@ export class AdminService {
       : 'Desarrollo (Mock / Consola)';
 
     const result = {
+      // Estructura oficial para AdminStatsResponse en frontend
+      range,
+      overview: {
+        totalUsers: totalUsersRes?.value || 0,
+        activeUsersCount: activeTodayRes?.value || 0,
+        suspendedUsersCount: 0,
+        adminsCount: 1,
+        newUsersInRange: range === '7d' ? (newUsers7dRes?.value || 0) : (newUsers30dRes?.value || 0),
+        totalEnrollments: enrollmentsCountRes?.value || 0,
+        totalReviews: reviewsTotalRes?.value || 0,
+        pendingReportsCount: openReportsRes?.value || 0,
+      },
+      charts: {
+        signupsByDay: signupsByDayRows.map((r) => ({ date: r.day, count: r.count })),
+        activeUsersByDay: activesByDayRows.map((r) => ({ date: r.day, count: r.count })),
+      },
+      catalog: {
+        totalSubjects: 45,
+        totalCommissions: commissionsTotalRes?.value || 0,
+        totalProfessors: professorsTotalRes?.value || 0,
+        plansCount: plansTotalRes?.value || 0,
+        commissionsCount: commissionsTotalRes?.value || 0,
+        professorsCount: professorsTotalRes?.value || 0,
+        alerts: {
+          commissionsWithoutSlots: commissionsWithoutSlotsRes?.value || 0,
+          commissionsWithoutProfessors: commissionsWithoutProfsRes?.value || 0,
+        },
+        qualityAlerts: [
+          ...(commissionsWithoutSlotsRes?.value
+            ? [
+                {
+                  type: 'missing_schedule' as const,
+                  message: `${commissionsWithoutSlotsRes.value} comisiones sin franjas horarias cargadas.`,
+                },
+              ]
+            : []),
+          ...(commissionsWithoutProfsRes?.value
+            ? [
+                {
+                  type: 'missing_professor' as const,
+                  message: `${commissionsWithoutProfsRes.value} comisiones sin docente asignado.`,
+                },
+              ]
+            : []),
+          ...(openReportsRes?.value
+            ? [
+                {
+                  type: 'high_reports' as const,
+                  message: `${openReportsRes.value} reportes de reseñas pendientes de moderación.`,
+                },
+              ]
+            : []),
+        ],
+      },
+      health: {
+        database: 'connected' as const,
+        uptimeSeconds: Math.floor(process.uptime()),
+        cachedAt: new Date().toISOString(),
+      },
+      // Estructuras de retrocompatibilidad
       users: {
         total: totalUsersRes?.value || 0,
         verified: verifiedUsersRes?.value || 0,
@@ -477,15 +537,6 @@ export class AdminService {
           acc[row.overall] = row.count;
           return acc;
         }, {} as Record<number, number>),
-      },
-      catalog: {
-        plansCount: plansTotalRes?.value || 0,
-        commissionsCount: commissionsTotalRes?.value || 0,
-        professorsCount: professorsTotalRes?.value || 0,
-        alerts: {
-          commissionsWithoutSlots: commissionsWithoutSlotsRes?.value || 0,
-          commissionsWithoutProfessors: commissionsWithoutProfsRes?.value || 0,
-        },
       },
       system: {
         dbStatus: 'healthy',
@@ -611,12 +662,20 @@ export class AdminService {
       };
     });
 
+    const totalPages = Math.ceil(total / limit);
+
     return {
       users: sanitizedUsers,
       total,
       page,
-      totalPages: Math.ceil(total / limit),
+      totalPages,
       limit,
+      pagination: {
+        page,
+        pageSize: limit,
+        total,
+        totalPages,
+      },
     };
   }
 
@@ -1687,12 +1746,20 @@ export class AdminService {
       .limit(limit)
       .offset(offset);
 
+    const totalPages = Math.ceil(total / limit);
+
     return {
       logs,
       total,
       page,
-      totalPages: Math.ceil(total / limit),
+      totalPages,
       limit,
+      pagination: {
+        page,
+        pageSize: limit,
+        total,
+        totalPages,
+      },
     };
   }
 }

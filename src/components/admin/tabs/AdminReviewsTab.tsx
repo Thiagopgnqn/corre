@@ -93,10 +93,10 @@ export const AdminReviewsTab: React.FC = () => {
           status: status !== 'all' ? status : undefined,
         });
         if (res.success && res.data) {
-          setAllReviews(res.data.items);
-          setReviewsTotal(res.data.total);
-          setReviewsPage(res.data.page);
-          setReviewsTotalPages(res.data.totalPages);
+          setAllReviews(Array.isArray(res.data.items) ? res.data.items : (Array.isArray(res.data) ? (res.data as any) : []));
+          setReviewsTotal(res.data.total ?? 0);
+          setReviewsPage(res.data.page ?? 1);
+          setReviewsTotalPages(res.data.totalPages ?? 1);
         }
       } catch (err: any) {
         setErrorMsg(err?.message || 'Error al cargar las reseñas.');
