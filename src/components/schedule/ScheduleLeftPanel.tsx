@@ -144,7 +144,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   const activeRatingResolver = resolveProfessorRating || fallbackResolver;
 
   return (
-    <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0">
+    <div className="w-full lg:w-[320px] xl:w-[340px] shrink-0 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0 h-full">
       {/* Header & Search */}
       <div className="p-3 border-b border-slate-800 space-y-2.5 bg-slate-950/40 shrink-0">
         <div className="flex items-center justify-between gap-2">
@@ -281,7 +281,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
       </div>
 
       {/* Subjects Accordion List with dedicated internal scroll */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-0">
+      <div className="flex-1 overflow-y-auto p-2 space-y-2 min-h-0 overscroll-contain">
         {subjectsPool.length === 0 ? (
           <div className="p-6 text-center text-xs text-slate-500 space-y-1">
             <Filter className="w-6 h-6 mx-auto text-slate-600" />

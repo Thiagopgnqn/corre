@@ -346,7 +346,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   const containerWidthClass = isSingleDayMode ? 'w-full lg:min-w-0' : 'min-w-[640px] lg:min-w-0';
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden backdrop-blur-md min-h-0 relative">
+    <div className="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden lg:overflow-visible backdrop-blur-md min-h-0 relative">
       {/* Mobile Day Selector & View Mode Switcher */}
       <div className="lg:hidden flex items-center justify-between p-2 bg-slate-950/90 border-b border-slate-800 gap-1 shrink-0">
         <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
@@ -442,13 +442,19 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
         onScroll={() => {
           userHasScrolled.current = true;
         }}
-        className="flex-1 overflow-auto relative p-2 sm:p-4 min-h-0 select-none"
+        className="flex-1 overflow-auto lg:overflow-visible relative p-2 sm:p-4 min-h-0 select-none"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
         <div className={`${containerWidthClass} flex flex-col`} style={{ height: `${totalGridHeight + 50}px` }}>
           {/* Day Headers: Sticky at top */}
-          <div className={`grid ${gridColsClass} border-b border-slate-800 pb-2 mb-2 sticky top-0 bg-[#090d16] z-20`}>
+          <div
+            className={`grid ${gridColsClass} border-b border-slate-800 pb-2 mb-2 z-20 ${
+              isDesktop
+                ? 'sticky top-3 bg-[#090d16]/95 backdrop-blur-md py-1.5 rounded-xl border border-slate-800/80 shadow-md px-1'
+                : 'sticky top-0 bg-[#090d16]'
+            }`}
+          >
             <div className="text-[11px] font-mono text-slate-500 flex items-center justify-center">
               <Clock className="w-3.5 h-3.5" />
             </div>

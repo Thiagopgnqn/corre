@@ -243,7 +243,7 @@ export const ScheduleBuilder: React.FC = () => {
   const selectedCount = Object.keys(selectedCommissionsMap).length;
 
   return (
-    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col gap-2 min-h-0 h-full overflow-hidden">
+    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col gap-2 min-h-0 h-full overflow-hidden lg:h-auto lg:overflow-visible lg:gap-3">
       {/* Mobile Header Bar & Controls (< lg) */}
       {!isDesktop && (
         <div className="flex flex-col gap-2 shrink-0">
@@ -688,28 +688,30 @@ export const ScheduleBuilder: React.FC = () => {
 
       {/* Main Layout: Desktop side-by-side vs Mobile Vertical Split */}
       {isDesktop ? (
-        <div className="flex-1 min-h-0 flex flex-row gap-3 sm:gap-4 items-stretch overflow-hidden">
-          {/* Columna Izquierda: Oferta Académica */}
-          <ScheduleLeftPanel
-            term={scheduleTerm}
-            availableSubjects={availableSubjects}
-            allSubjects={allSubjects}
-            schedulesMap={schedulesMap}
-            selections={selectedCommissionsMap}
-            onSelectCommission={handleSelectCommissionWithHistory}
-            onRemoveCommission={handleRemoveCommissionWithHistory}
-            onHoverCommission={setHoveredCommission}
-            subjectNamesMap={subjectNamesMap}
-            focusedSubjectId={focusedSubjectId}
-            onViewInGrid={(sId) => {
-              if (sId) setFocusedSubjectId(sId);
-            }}
-            resolveProfessorRating={getRatingForProfessor}
-            onOpenProfessorDetail={setDetailProfessorId}
-          />
+        <div className="flex-1 min-h-0 flex flex-row gap-3 sm:gap-4 items-start lg:overflow-visible">
+          {/* Columna Izquierda: Oferta Académica (Fijada sticky en pantalla) */}
+          <div className="sticky top-3 lg:w-[320px] xl:w-[340px] shrink-0 h-[calc(100vh-1.5rem)] flex flex-col z-10">
+            <ScheduleLeftPanel
+              term={scheduleTerm}
+              availableSubjects={availableSubjects}
+              allSubjects={allSubjects}
+              schedulesMap={schedulesMap}
+              selections={selectedCommissionsMap}
+              onSelectCommission={handleSelectCommissionWithHistory}
+              onRemoveCommission={handleRemoveCommissionWithHistory}
+              onHoverCommission={setHoveredCommission}
+              subjectNamesMap={subjectNamesMap}
+              focusedSubjectId={focusedSubjectId}
+              onViewInGrid={(sId) => {
+                if (sId) setFocusedSubjectId(sId);
+              }}
+              resolveProfessorRating={getRatingForProfessor}
+              onOpenProfessorDetail={setDetailProfessorId}
+            />
+          </div>
 
-          {/* Columna Central: Grilla semanal (con ancho cómodo para los seis días) */}
-          <div className="flex-1 min-w-0 h-full min-h-0 flex flex-col overflow-hidden">
+          {/* Columna Central: Grilla semanal (con ancho cómodo para los seis días, fluye en toda la altura) */}
+          <div className="flex-1 min-w-0 flex flex-col">
             <ScheduleWeeklyGrid
               selections={selectedCommissionsMap}
               onRemoveCommission={handleRemoveCommissionWithHistory}
@@ -722,8 +724,8 @@ export const ScheduleBuilder: React.FC = () => {
             />
           </div>
 
-          {/* Columna Derecha: Resumen semanal (visible desde 1280px / xl) */}
-          <div className="hidden xl:flex w-[300px] xl:w-[320px] shrink-0 h-full min-h-0 flex-col overflow-hidden">
+          {/* Columna Derecha: Resumen semanal (visible desde 1280px / xl, fijada sticky en pantalla) */}
+          <div className="hidden xl:flex sticky top-3 w-[300px] xl:w-[320px] shrink-0 h-[calc(100vh-1.5rem)] flex-col z-10">
             <ScheduleSummaryPanel
               selections={selectedCommissionsMap}
               conflicts={conflicts}

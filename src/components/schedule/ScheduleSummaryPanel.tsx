@@ -173,7 +173,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   };
 
   return (
-    <div className="w-full flex flex-col gap-3 sm:gap-4 overflow-y-auto pr-0.5">
+    <div className="w-full flex flex-col gap-3 sm:gap-4 overflow-y-auto overscroll-contain h-full pr-0.5">
       {/* Overview Metrics Card */}
       <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-4 shadow-xl backdrop-blur-md space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-800">

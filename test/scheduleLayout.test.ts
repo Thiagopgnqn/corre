@@ -12,11 +12,11 @@ describe('Layout y Scroll del Armador de Horarios (ScheduleBuilder)', () => {
 
     // Debe condicionar según la vista activa de horarios
     assert.match(content, /currentView === 'schedule'/, 'Debe condicionar a currentView === "schedule"');
-    // Debe aplicar altura fija 100dvh y overflow hidden solo para schedule
-    assert.match(content, /isScheduleView\s*\?\s*'h-\[100dvh\] max-h-\[100dvh\] overflow-hidden'\s*:\s*'min-h-screen'/, 'Debe aplicar h-[100dvh] y overflow-hidden');
-    // Para main y el contenedor animado debe aplicar min-h-0 overflow-hidden
-    assert.match(content, /isScheduleView\s*\?\s*'min-h-0 overflow-hidden'/, 'Debe propagar min-h-0 y overflow-hidden al main');
-    assert.match(content, /isScheduleView\s*\?\s*'min-h-0 h-full overflow-hidden'/, 'Debe propagar min-h-0 h-full overflow-hidden al motion.div');
+    // Debe aplicar altura fija 100dvh y overflow hidden en mobile para schedule
+    assert.match(content, /isScheduleView\s*\?\s*'h-\[100dvh\] max-h-\[100dvh\] overflow-hidden/, 'Debe aplicar h-[100dvh] y overflow-hidden en mobile');
+    // Para main y el contenedor animado debe aplicar min-h-0 overflow-hidden en mobile
+    assert.match(content, /isScheduleView\s*\?\s*'min-h-0 overflow-hidden/, 'Debe propagar min-h-0 y overflow-hidden al main en mobile');
+    assert.match(content, /isScheduleView\s*\?\s*'min-h-0 h-full overflow-hidden/, 'Debe propagar min-h-0 h-full overflow-hidden al motion.div en mobile');
     // Debe incluir medición dinámica con ResizeObserver de la cabecera completa (navbar + simulation bar + banners)
     assert.match(content, /ResizeObserver/, 'Debe usar ResizeObserver para medir la cabecera');
     assert.match(content, /--app-header-height/, 'Debe setear la variable CSS --app-header-height');
