@@ -27,6 +27,7 @@ import {
 } from '../../utils/correlativas';
 import { formatEnrollmentPeriodLabel } from '../../utils/enrollmentLogic';
 import { StatusBadge } from '../common/StatusBadge';
+import { libraryApi } from '../../api/library.api';
 
 export const SubjectDrawer: React.FC = () => {
   const {
@@ -43,6 +44,23 @@ export const SubjectDrawer: React.FC = () => {
   } = useCareer();
 
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState<string | null>(null);
+  const [libraryCounts, setLibraryCounts] = useState<Record<string, number>>({});
+
+  React.useEffect(() => {
+    libraryApi
+      .getSubjectsSummary()
+      .then((res) => {
+        if (res.success && res.data) {
+          const map: Record<string, number> = {};
+          res.data.forEach((item: any) => {
+            if (item.codeInPlan) map[String(item.codeInPlan)] = item.approvedFilesCount || 0;
+            if (item.id) map[item.id] = item.approvedFilesCount || 0;
+          });
+          setLibraryCounts(map);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   if (!selectedSubject) return null;
 
@@ -291,6 +309,29 @@ export const SubjectDrawer: React.FC = () => {
                   <span>Agregar a mi cuatrimestre planeado</span>
                 </>
               )}
+            </button>
+
+            {/* Material de estudio link to Library */}
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSubjectId(null);
+                if (typeof window !== 'undefined') {
+                  window.location.hash = `library/${selectedSubject.id}`;
+                }
+              }}
+              className="w-full p-3 rounded-xl border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/50 text-indigo-200 hover:text-white font-semibold text-xs transition-all flex items-center justify-between cursor-pointer group shadow-sm"
+            >
+              <div className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Material de estudio ({libraryCounts[String(selectedSubject.id)] || 0})
+                </span>
+              </div>
+              <span className="text-[11px] text-indigo-400 group-hover:text-indigo-200 flex items-center gap-1 font-medium">
+                Ver exámenes y apuntes
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
+              </span>
             </button>
 
             {/* Special rule notice if any */}

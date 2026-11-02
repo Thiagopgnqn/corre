@@ -13,6 +13,13 @@ export interface AdminStatsResponse {
     totalReviews: number;
     pendingReportsCount: number;
   };
+  library?: {
+    approvedCount: number;
+    pendingCount: number;
+    totalSizeBytes: number;
+    openReportsCount: number;
+    warningNearLimit: boolean;
+  };
   charts: {
     signupsByDay: Array<{ date: string; count: number }>;
     activeUsersByDay: Array<{ date: string; count: number }>;

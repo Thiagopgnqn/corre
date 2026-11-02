@@ -21,6 +21,7 @@ import { LocalStorageMigrationModal } from './components/migration/LocalStorageM
 import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
 import { ReviewFormModal } from './components/professors/ReviewFormModal';
+import { LibraryHome } from './components/library/LibraryHome';
 import { Loader2 } from 'lucide-react';
 import { APP_NAME } from './config/brand';
 
@@ -32,17 +33,22 @@ const VALID_VIEWS: AppView[] = [
   'planner',
   'schedule',
   'professors',
+  'library',
   'electives',
   'stats',
   'admin',
 ];
 
-const getInitialView = (): AppView => {
+const parseHashState = () => {
   if (typeof window !== 'undefined') {
-    const hash = window.location.hash.replace('#', '') as AppView;
-    if (VALID_VIEWS.includes(hash)) return hash;
+    const raw = window.location.hash.replace('#', '');
+    const [view, ...rest] = raw.split('/');
+    const param = rest.join('/');
+    if (VALID_VIEWS.includes(view as AppView)) {
+      return { view: view as AppView, param };
+    }
   }
-  return 'graph';
+  return { view: 'graph' as AppView, param: '' };
 };
 
 const AppContent: React.FC = () => {
@@ -56,9 +62,18 @@ const AppContent: React.FC = () => {
     refreshReviewableSummary,
     startTutorial,
   } = useCareer();
-  const [currentView, setCurrentView] = useState<AppView>(getInitialView);
+  const [hashState, setHashState] = useState(parseHashState);
+  const currentView = hashState.view;
   const headerAreaRef = React.useRef<HTMLDivElement>(null);
   const isScheduleView = currentView === 'schedule';
+
+  React.useEffect(() => {
+    const handleHashChange = () => {
+      setHashState(parseHashState());
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   React.useEffect(() => {
     (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial = startTutorial;
@@ -70,10 +85,7 @@ const AppContent: React.FC = () => {
   // Route guard: el panel de administración es exclusivo para usuarios con rol admin
   React.useEffect(() => {
     if (!isLoading && currentView === 'admin' && user?.role !== 'admin') {
-      setCurrentView('graph');
-      if (typeof window !== 'undefined') {
-        window.location.hash = 'graph';
-      }
+      handleSetView('graph');
     }
   }, [currentView, user, isLoading]);
 
@@ -104,7 +116,7 @@ const AppContent: React.FC = () => {
   }, []);
 
   const handleSetView = (view: AppView) => {
-    setCurrentView(view);
+    setHashState({ view, param: '' });
     if (typeof window !== 'undefined') {
       window.location.hash = view;
     }
@@ -168,6 +180,22 @@ const AppContent: React.FC = () => {
             )}
             {currentView === 'schedule' && <ScheduleBuilder />}
             {currentView === 'professors' && <ProfessorsDirectory />}
+            {currentView === 'library' && (
+              <LibraryHome
+                initialSubjectId={
+                  hashState.param && !['my-uploads', 'terms'].includes(hashState.param)
+                    ? hashState.param
+                    : null
+                }
+                initialSubView={
+                  hashState.param === 'my-uploads'
+                    ? 'my-uploads'
+                    : hashState.param === 'terms'
+                    ? 'terms'
+                    : 'home'
+                }
+              />
+            )}
             {currentView === 'electives' && <ElectivesPicker />}
             {currentView === 'stats' && <StatsDashboard />}
             {currentView === 'admin' && (
@@ -213,7 +241,7 @@ const AppContent: React.FC = () => {
       <QuickStatusModal />
       <SearchModal />
       <OnboardingModal />
-      <TutorialSpotlight currentView={currentView} onNavigateView={setCurrentView} />
+      <TutorialSpotlight currentView={currentView} onNavigateView={handleSetView} />
     </div>
   );
 };

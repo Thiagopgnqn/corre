@@ -18,10 +18,12 @@
     "migrate:professors": "tsx src/scripts/migrateProfessors.ts",
     "merge-professors": "tsx src/scripts/mergeProfessors.ts",
     "verify-user": "tsx src/scripts/verifyUser.ts",
-    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts",
+    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts && tsx test/library.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1161.0",
+    "@aws-sdk/s3-request-presigner": "3.1161.0",
     "@node-rs/argon2": "^2.0.2",
     "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",

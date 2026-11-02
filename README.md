@@ -229,6 +229,58 @@ npm run dev
 
 ---
 
+## 📚 Biblioteca de Material de Estudio y Cloudflare R2
+
+La plataforma cuenta con un módulo de Biblioteca para compartir exámenes, apuntes, resúmenes y guías. Los archivos binarios se almacenan en un bucket privado de **Cloudflare R2** y se acceden mediante URLs prefirmadas de corta duración.
+
+### 1. Configuración de Variables de Entorno (R2)
+En producción (Render), se requieren:
+- `R2_ACCOUNT_ID`: ID de cuenta de Cloudflare.
+- `R2_ACCESS_KEY_ID`: Token con permisos de lectura y escritura en el bucket.
+- `R2_SECRET_ACCESS_KEY`: Secreto del token.
+- `R2_BUCKET`: Nombre del bucket privado (ej: `stack-library-prod`).
+- `CONTACT_EMAIL`: Correo de contacto para reclamos DMCA / baja de contenido.
+
+*(En entornos de desarrollo local y tests automatizados, la aplicación utiliza un simulador en memoria `MemoryMockR2Service`, por lo que no es necesario configurar credenciales reales ni se generan costos).*
+
+### 2. Configuración CORS del Bucket Cloudflare R2
+Para permitir subidas directas vía `PUT` desde el navegador y descargas vía `GET` con URLs prefirmadas, el bucket privado de R2 debe configurarse con la siguiente política CORS en formato JSON:
+
+```json
+[
+  {
+    "AllowedOrigins": [
+      "https://corre-ten.vercel.app",
+      "http://localhost:5173"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "PUT",
+      "HEAD"
+    ],
+    "AllowedHeaders": [
+      "Content-Type",
+      "Content-Length",
+      "x-amz-*"
+    ],
+    "ExposeHeaders": [
+      "ETag"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+> **Importante para el cliente de subida**:
+> La petición `PUT` enviada desde el frontend a Cloudflare R2 debe incluir estrictamente el header `Content-Type` idéntico al declarado durante `POST /api/library/uploads/init` con el que se firmó la URL. Si no coincide o se omite, Cloudflare R2 rechazará la subida con error de firma (`SignatureDoesNotMatch`).
+
+### 3. Filtro Básico de Seguridad de Archivos
+- **Límites de tamaño**: 25 MB para documentos PDF (`application/pdf`) y 10 MB para imágenes (`image/jpeg`, `image/png`, `image/webp`).
+- **Escáner streaming**: Al completarse la subida, el servidor valida los *magic numbers* del stream e inspecciona la presencia de marcas sospechosas en PDFs (`/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFile`, `/OpenAction`).
+- **Aviso de limitación**: Esta inspección constituye una capa de sanitización estática heurística básica; no reemplaza un motor de antivirus / sandbox de ejecución dinámica en profundidad.
+
+---
+
 ## 🚀 Despliegue en Producción
 
 - **Render (Backend `server/`)**: Root Directory `server`, Build Command `npm install && npm run build && npm run db:migrate`, Start Command `npm run start`, Health Check `/api/health`.

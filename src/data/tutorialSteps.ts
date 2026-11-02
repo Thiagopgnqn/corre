@@ -213,7 +213,19 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Download',
   },
 
-  // 15. Finalización
+  // 15. Biblioteca de Material de Estudio
+  {
+    id: 'library-tour',
+    title: 'Biblioteca de Material de Estudio',
+    description:
+      'Accedé a exámenes parciales y finales resueltos, apuntes de clase y guías prácticas compartidos por la comunidad estudiantil. Todo el material cuenta con moderación previa antes de publicarse.',
+    badge: 'Biblioteca Colaborativa',
+    placement: 'center',
+    targetView: 'library',
+    iconName: 'BookOpen',
+  },
+
+  // 16. Finalización
   {
     id: 'finish',
     title: '¡Todo Listo para Arrancar!',

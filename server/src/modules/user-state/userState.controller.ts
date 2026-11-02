@@ -18,6 +18,7 @@ import {
   EnrollmentsService,
   serializeEnrollment,
 } from '../enrollments/enrollments.service.js';
+import { LibraryService } from '../library/library.service.js';
 
 const defaultEnrollmentsService = new EnrollmentsService(defaultReviewsStore);
 
@@ -1046,6 +1047,11 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
   }
 
   try {
+    // Ajuste 1: Casilla "Eliminar también mis archivos" (por defecto true)
+    const deleteFiles = req.body?.deleteFiles !== false;
+    const libraryService = new LibraryService();
+    await libraryService.handleAccountDeletion(userId, deleteFiles);
+
     // Identificar profesores reseñados por este usuario antes del borrado en cascada
     const affectedProfessorIds = await defaultReviewsStore.getAffectedProfessorIdsByUser(userId);
 

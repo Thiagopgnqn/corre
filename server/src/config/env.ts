@@ -20,6 +20,12 @@ const baseSchema = z.object({
   VERIFICATION_CODE_PEPPER: z
     .string()
     .default('dev_verification_code_pepper_secret_min_16'),
+  // Cloudflare R2 y contacto para la Biblioteca de Material
+  R2_ACCOUNT_ID: z.string().optional(),
+  R2_ACCESS_KEY_ID: z.string().optional(),
+  R2_SECRET_ACCESS_KEY: z.string().optional(),
+  R2_BUCKET: z.string().optional(),
+  CONTACT_EMAIL: z.string().email('CONTACT_EMAIL debe ser un correo válido').default('contacto@stack.app'),
 });
 
 const envSchema = baseSchema.superRefine((data, ctx) => {
@@ -57,6 +63,36 @@ const envSchema = baseSchema.superRefine((data, ctx) => {
         message: 'BREVO_API_KEY es obligatoria en producción cuando EMAIL_PROVIDER es "brevo"',
       });
     }
+
+    // Cloudflare R2 (obligatorias en producción para la biblioteca)
+    if (!data.R2_ACCOUNT_ID || data.R2_ACCOUNT_ID.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['R2_ACCOUNT_ID'],
+        message: 'R2_ACCOUNT_ID es obligatoria en producción para el almacenamiento Cloudflare R2',
+      });
+    }
+    if (!data.R2_ACCESS_KEY_ID || data.R2_ACCESS_KEY_ID.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['R2_ACCESS_KEY_ID'],
+        message: 'R2_ACCESS_KEY_ID es obligatoria en producción para el almacenamiento Cloudflare R2',
+      });
+    }
+    if (!data.R2_SECRET_ACCESS_KEY || data.R2_SECRET_ACCESS_KEY.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['R2_SECRET_ACCESS_KEY'],
+        message: 'R2_SECRET_ACCESS_KEY es obligatoria en producción para el almacenamiento Cloudflare R2',
+      });
+    }
+    if (!data.R2_BUCKET || data.R2_BUCKET.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['R2_BUCKET'],
+        message: 'R2_BUCKET es obligatoria en producción para el almacenamiento Cloudflare R2',
+      });
+    }
   }
 });
 
@@ -90,5 +126,10 @@ export const env = parsed.success
       EMAIL_FROM_NAME: process.env.EMAIL_FROM_NAME || 'Stack',
       VERIFICATION_CODE_PEPPER:
         process.env.VERIFICATION_CODE_PEPPER || 'dev_verification_code_pepper_secret_min_16',
+      R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID,
+      R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID,
+      R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
+      R2_BUCKET: process.env.R2_BUCKET,
+      CONTACT_EMAIL: process.env.CONTACT_EMAIL || 'contacto@stack.app',
     };
 

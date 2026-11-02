@@ -25,6 +25,8 @@ import {
   markRecommendationsSeenBodySchema,
 } from './modules/enrollments/enrollments.schemas.js';
 import { EnrollmentsService } from './modules/enrollments/enrollments.service.js';
+import libraryRouter from './modules/library/library.routes.js';
+import { LibraryService } from './modules/library/library.service.js';
 import { requireAuth } from './middlewares/auth.middleware.js';
 import { csrfProtection } from './middlewares/csrf.middleware.js';
 import { validate } from './middlewares/validate.middleware.js';
@@ -158,6 +160,7 @@ export function createApp(options?: { reviewsStore?: ReviewsStore }) {
   instance.use('/api/enrollments', createEnrollmentsRouter(enrollmentsService));
   instance.use('/api/admin', adminRouter);
   instance.use('/api/admin', createAdminReviewsRouter(reviewsService));
+  instance.use('/api/library', libraryRouter);
   instance.use('/api', userStateRouter);
 
   // 7. Manejador de 404 para rutas no existentes
@@ -189,8 +192,12 @@ if (process.env.NODE_ENV !== 'test' && currentFile === entryFile) {
 
   // Limpieza periódica liviana de cuentas no verificadas de más de 7 días (cada 12h)
   AuthService.cleanupUnverifiedAccounts(7).catch(() => {});
+  const libraryService = new LibraryService();
+  libraryService.cleanupAbandonedUploads().catch(() => {});
+
   setInterval(() => {
     AuthService.cleanupUnverifiedAccounts(7).catch(() => {});
+    libraryService.cleanupAbandonedUploads().catch(() => {});
   }, 12 * 60 * 60 * 1000).unref();
 
   app.listen(env.PORT, () => {

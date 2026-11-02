@@ -40,6 +40,20 @@ import {
   createPlan,
   createSchedule,
 } from './admin.controller.js';
+import {
+  listPendingFiles,
+  listAllFiles,
+  getPreviewUrl,
+  approveFile,
+  rejectFile,
+  removeFile,
+  getUploaderIdentity,
+  suspendAuthor,
+  listReports,
+  updateReportStatus,
+  getLibraryStats,
+  testR2Connection,
+} from './admin.library.controller.js';
 
 const router = Router();
 
@@ -101,5 +115,19 @@ router.get('/plans', getAdminPlans);
 router.post('/careers', csrfProtection, createCareer);
 router.post('/plans', csrfProtection, createPlan);
 router.post('/schedules', csrfProtection, createSchedule);
+
+// 8. Moderación y Gestión de la Biblioteca de Material de Estudio
+router.get('/library/stats', getLibraryStats);
+router.get('/library/pending', listPendingFiles);
+router.get('/library/files', listAllFiles);
+router.get('/library/files/:id/preview-url', getPreviewUrl);
+router.patch('/library/files/:id/approve', csrfProtection, approveFile);
+router.patch('/library/files/:id/reject', csrfProtection, rejectFile);
+router.patch('/library/files/:id/remove', csrfProtection, requireRecentReauth, removeFile);
+router.get('/library/files/:id/uploader', requireRecentReauth, getUploaderIdentity);
+router.post('/library/files/:id/suspend-author', csrfProtection, requireRecentReauth, suspendAuthor);
+router.get('/library/reports', listReports);
+router.patch('/library/reports/:id', csrfProtection, updateReportStatus);
+router.post('/library/test-storage', csrfProtection, requireRecentReauth, testR2Connection);
 
 export default router;

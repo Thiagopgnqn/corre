@@ -19,9 +19,11 @@ import {
   Clock,
   LogOut,
   Star,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
+import { libraryApi } from '../../api/library.api';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { UserMenu } from './UserMenu';
 import { PlanSelectorModal } from './PlanSelectorModal';
@@ -33,6 +35,7 @@ export type AppView =
   | 'planner'
   | 'schedule'
   | 'professors'
+  | 'library'
   | 'electives'
   | 'stats'
   | 'admin';
@@ -69,8 +72,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
+  const [hasLibraryNovelty, setHasLibraryNovelty] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Check for updates in student library uploads
+  useEffect(() => {
+    if (user) {
+      libraryApi
+        .getMyUploads()
+        .then((res) => {
+          if (res.success && res.data?.hasStatusUpdates) {
+            setHasLibraryNovelty(true);
+          } else {
+            setHasLibraryNovelty(false);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user, currentView]);
 
   // Close menu on click outside (unless tutorial is currently active)
   useEffect(() => {
@@ -126,6 +146,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     { id: 'planner', label: 'Cuatrimestre', fullLabel: 'Armá tu Cuatrimestre', icon: CalendarDays },
     { id: 'schedule', label: 'Horarios', fullLabel: 'Armador de Horarios', icon: Clock },
     { id: 'professors', label: 'Profesores', fullLabel: 'Reseñas de Profesores', icon: Star },
+    { id: 'library', label: 'Biblioteca', fullLabel: 'Biblioteca de Material de Estudio', icon: BookOpen },
     { id: 'electives', label: 'Electivas', fullLabel: 'Catálogo de Electivas', icon: Sparkles },
     { id: 'stats', label: 'Estadísticas', fullLabel: 'Estadísticas & Camino Crítico', icon: BarChart3 },
   ];
@@ -171,6 +192,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     {item.id === 'professors' && unseenRecommendationsCount > 0 && (
                       <span
                         aria-label="Recomendaciones de reseñas pendientes"
+                        className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+                      />
+                    )}
+                    {item.id === 'library' && hasLibraryNovelty && (
+                      <span
+                        aria-label="Novedades en tus aportes de biblioteca"
                         className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
                       />
                     )}
@@ -491,6 +518,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 {item.id === 'professors' && unseenRecommendationsCount > 0 && (
                   <span
                     aria-label="Recomendaciones de reseñas pendientes"
+                    className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+                  />
+                )}
+                {item.id === 'library' && hasLibraryNovelty && (
+                  <span
+                    aria-label="Novedades en tus aportes de biblioteca"
                     className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
                   />
                 )}

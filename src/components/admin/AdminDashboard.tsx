@@ -8,17 +8,19 @@ import {
   FileText,
   ArrowLeft,
   Lock,
+  BookOpen,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AdminOverviewTab } from './tabs/AdminOverviewTab';
 import { AdminUsersTab } from './tabs/AdminUsersTab';
 import { AdminScheduleTab } from './tabs/AdminScheduleTab';
 import { AdminReviewsTab } from './tabs/AdminReviewsTab';
+import { AdminLibraryTab } from './tabs/AdminLibraryTab';
 import { AdminAuditTab } from './tabs/AdminAuditTab';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { APP_NAME } from '../../config/brand';
 
-export type AdminTab = 'overview' | 'users' | 'schedule' | 'reviews' | 'audit';
+export type AdminTab = 'overview' | 'users' | 'schedule' | 'reviews' | 'library' | 'audit';
 
 interface AdminDashboardProps {
   onNavigateHome: () => void;
@@ -53,6 +55,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
     { id: 'users', label: 'Usuarios', icon: Users },
     { id: 'schedule', label: 'Horarios y Catálogo', icon: Calendar },
     { id: 'reviews', label: 'Docentes y Reseñas', icon: MessageSquare },
+    { id: 'library', label: 'Biblioteca', icon: BookOpen },
     { id: 'audit', label: 'Auditoría', icon: FileText },
   ] as const;
 
@@ -130,6 +133,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
           {activeTab === 'users' && <AdminUsersTab />}
           {activeTab === 'schedule' && <AdminScheduleTab />}
           {activeTab === 'reviews' && <AdminReviewsTab />}
+          {activeTab === 'library' && <AdminLibraryTab />}
           {activeTab === 'audit' && <AdminAuditTab />}
         </AdminErrorBoundary>
       </main>

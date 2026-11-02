@@ -227,7 +227,7 @@ export async function setUserRole(req: Request, res: Response): Promise<void> {
 }
 
 export async function deleteUser(req: Request, res: Response): Promise<void> {
-  const { confirmEmail } = req.body;
+  const { confirmEmail, deleteFiles } = req.body;
   if (!confirmEmail) {
     res.status(400).json({ success: false, error: 'Tenés que escribir el correo electrónico del usuario para confirmar la eliminación.' });
     return;
@@ -238,7 +238,8 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
       { id: req.user!.id, email: req.user!.email },
       String(req.params.id),
       confirmEmail,
-      req.ip
+      req.ip,
+      deleteFiles !== false
     );
     res.json({ success: true, message: 'Usuario y sus datos eliminados exitosamente.' });
   } catch (err: any) {

@@ -36,6 +36,7 @@ import { verifyGoogleCredential } from '../auth/googleAuth.service.js';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { hashVerificationCode, computeCanonicalEmail } from '../auth/auth.service.js';
 import { invalidateUserStatusCache, getUserLiveStatus } from '../../middlewares/auth.middleware.js';
+import { LibraryService } from '../library/library.service.js';
 
 // Cache de estadísticas en memoria (TTL 60 segundos) (Ajuste 2)
 let statsCache: { data: any; expiresAt: number; range: string } | null = null;
@@ -978,7 +979,8 @@ export class AdminService {
     adminUser: { id: string; email: string },
     targetUserId: string,
     confirmEmail: string,
-    ip?: string
+    ip?: string,
+    deleteFiles: boolean = true
   ) {
     if (adminUser.id === targetUserId) {
       const err = new Error('No podés eliminar tu propia cuenta de administrador desde el panel.');
@@ -1010,6 +1012,10 @@ export class AdminService {
       throw err;
     }
 
+    // Ajuste 1: Gestionar archivos en R2 (eliminar o desvincular con uploader_user_id = null)
+    const libraryService = new LibraryService();
+    await libraryService.handleAccountDeletion(targetUserId, deleteFiles);
+
     await db.transaction(async (tx) => {
       await logAdminAction({
         tx,
@@ -1019,7 +1025,7 @@ export class AdminService {
         targetType: 'user',
         targetId: targetUserId,
         targetEmail: target.email,
-        details: { deletedEmail: target.email, role: target.role },
+        details: { deletedEmail: target.email, role: target.role, deleteFiles },
         ip,
       });
 

@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   integer,
+  bigint,
   boolean,
   numeric,
   timestamp,
@@ -11,6 +12,7 @@ import {
   uniqueIndex,
   primaryKey,
   index,
+  check,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -367,6 +369,9 @@ export const users = pgTable(
     emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    libraryTermsAcceptedAt: timestamp('library_terms_accepted_at', { withTimezone: true }),
+    libraryTermsVersion: text('library_terms_version'),
+    libraryLastCheckedAt: timestamp('library_last_checked_at', { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -974,6 +979,163 @@ export const catalogVersions = pgTable('catalog_versions', {
 export type AdminAuditLogEntry = typeof adminAuditLog.$inferSelect;
 export type InsertAdminAuditLog = typeof adminAuditLog.$inferInsert;
 export type CatalogVersion = typeof catalogVersions.$inferSelect;
+
+// ==========================================
+// 4. BIBLIOTECA DE MATERIAL DE ESTUDIO
+// ==========================================
+
+export const libraryFiles = pgTable(
+  'library_files',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    uploaderUserId: uuid('uploader_user_id').references(() => users.id, { onDelete: 'set null' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(), // 'parcial' | 'final' | 'apunte' | 'resumen' | 'tp' | 'guia' | 'otro'
+    academicYear: integer('academic_year'),
+    term: text('term'), // '1C' | '2C' | 'A'
+    examInstance: text('exam_instance'),
+    hasSolution: boolean('has_solution').default(false).notNull(),
+    title: text('title').notNull(),
+    description: text('description'),
+    originalFilename: text('original_filename').notNull(),
+    storageKey: text('storage_key').notNull().unique(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    sha256: text('sha256'),
+    status: text('status').notNull().default('uploading'), // 'uploading' | 'pending' | 'approved' | 'rejected' | 'hidden' | 'removed'
+    rejectionReason: text('rejection_reason'),
+    reviewedBy: uuid('reviewed_by').references(() => users.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    downloadCount: integer('download_count').default(0).notNull(),
+    helpfulCount: integer('helpful_count').default(0).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    index('idx_lib_files_subject_status').on(table.subjectId, table.status),
+    index('idx_lib_files_status_created').on(table.status, table.createdAt),
+    index('idx_lib_files_uploader').on(table.uploaderUserId),
+    uniqueIndex('uq_lib_files_sha256_active')
+      .on(table.sha256)
+      .where(sql`${table.status} NOT IN ('removed', 'rejected') AND ${table.sha256} IS NOT NULL`),
+    check('chk_lib_files_status', sql`${table.status} IN ('uploading', 'pending', 'approved', 'rejected', 'hidden', 'removed')`),
+    check('chk_lib_files_kind', sql`${table.kind} IN ('parcial', 'final', 'apunte', 'resumen', 'tp', 'guia', 'otro')`),
+    check('chk_lib_files_term', sql`${table.term} IS NULL OR ${table.term} IN ('1C', '2C', 'A')`),
+  ]
+);
+
+export const libraryFileProfessors = pgTable(
+  'library_file_professors',
+  {
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => libraryFiles.id, { onDelete: 'cascade' }),
+    professorId: uuid('professor_id')
+      .notNull()
+      .references(() => professors.id, { onDelete: 'cascade' }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.fileId, table.professorId] }),
+    index('idx_lib_prof_file').on(table.fileId),
+    index('idx_lib_prof_professor').on(table.professorId),
+  ]
+);
+
+export const libraryDownloads = pgTable(
+  'library_downloads',
+  {
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => libraryFiles.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    firstDownloadedAt: timestamp('first_downloaded_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.fileId, table.userId] }),
+    index('idx_lib_downloads_user').on(table.userId),
+  ]
+);
+
+export const libraryDownloadLogs = pgTable(
+  'library_download_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => libraryFiles.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    downloadedAt: timestamp('downloaded_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lib_dl_logs_user_time').on(table.userId, table.downloadedAt),
+  ]
+);
+
+export const libraryHelpfulVotes = pgTable(
+  'library_helpful_votes',
+  {
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => libraryFiles.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.fileId, table.userId] }),
+  ]
+);
+
+export const libraryReports = pgTable(
+  'library_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => libraryFiles.id, { onDelete: 'cascade' }),
+    reporterUserId: uuid('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reason: text('reason').notNull(), // 'derechos_de_autor' | 'contenido_inapropiado' | 'incorrecto_o_enganoso' | 'duplicado' | 'otro'
+    note: text('note'),
+    status: text('status').notNull().default('open'), // 'open' | 'dismissed' | 'actioned'
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('uq_lib_reports_file_reporter').on(table.fileId, table.reporterUserId),
+    index('idx_lib_reports_status_time').on(table.status, table.createdAt),
+    index('idx_lib_reports_reason').on(table.reason),
+    check('chk_lib_reports_reason', sql`${table.reason} IN ('derechos_de_autor', 'contenido_inapropiado', 'incorrecto_o_enganoso', 'duplicado', 'otro')`),
+    check('chk_lib_reports_status', sql`${table.status} IN ('open', 'dismissed', 'actioned')`),
+  ]
+);
+
+export const libraryOrphanDeletions = pgTable(
+  'library_orphan_deletions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    storageKey: text('storage_key').notNull(),
+    attempts: integer('attempts').default(0).notNull(),
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('idx_lib_orphans_created').on(table.createdAt),
+  ]
+);
+
+export type LibraryFile = typeof libraryFiles.$inferSelect;
+export type InsertLibraryFile = typeof libraryFiles.$inferInsert;
+export type LibraryReport = typeof libraryReports.$inferSelect;
+
 
 
 

@@ -14,6 +14,7 @@ import {
   Clock,
   Server,
   Activity,
+  HardDrive,
 } from 'lucide-react';
 import { adminApi, type AdminStatsResponse } from '../../../api/admin.api';
 
@@ -182,6 +183,69 @@ export const AdminOverviewTab: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Library & Cloudflare R2 KPI row */}
+      {stats?.library && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider">Biblioteca: Aprobados</span>
+              <BookOpen className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div className="text-2xl font-bold text-white">
+              {stats.library.approvedCount}
+            </div>
+            <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-1">
+              Catálogo público disponible
+            </div>
+          </div>
+
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider">Biblioteca: Pendientes</span>
+              <Clock className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="text-2xl font-bold text-white">
+              {stats.library.pendingCount}
+            </div>
+            <div className="text-[11px] text-amber-400 flex items-center gap-1 mt-1 font-medium">
+              En cola de moderación humana
+            </div>
+          </div>
+
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl p-4 flex flex-col justify-between">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider">Almacenamiento R2</span>
+              <HardDrive className="w-4 h-4 text-cyan-400" />
+            </div>
+            <div className="text-2xl font-bold text-white">
+              {stats.library.totalSizeBytes > 1024 * 1024 * 1024
+                ? `${(stats.library.totalSizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+                : `${(stats.library.totalSizeBytes / (1024 * 1024)).toFixed(1)} MB`}
+            </div>
+            <div
+              className={`text-[11px] flex items-center gap-1 mt-1 font-medium ${
+                stats.library.warningNearLimit ? 'text-rose-400 font-bold' : 'text-slate-400'
+              }`}
+            >
+              {stats.library.warningNearLimit ? '⚠️ Cerca del límite gratuito (10 GB)' : 'Tier gratuito Cloudflare R2'}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* R2 Storage Warning Banner */}
+      {stats?.library?.warningNearLimit && (
+        <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl flex items-center gap-3 text-xs text-amber-300">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <div>
+            <p className="font-bold text-amber-200">Alerta preventiva de cuota Cloudflare R2</p>
+            <p className="mt-0.5">
+              El almacenamiento total ocupado ha superado los 8 GB (umbral cercano al límite del tier gratuito de 10 GB de Cloudflare R2).
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
