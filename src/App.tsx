@@ -54,6 +54,8 @@ const AppContent: React.FC = () => {
     startTutorial,
   } = useCareer();
   const [currentView, setCurrentView] = useState<AppView>(getInitialView);
+  const headerAreaRef = React.useRef<HTMLDivElement>(null);
+  const isScheduleView = currentView === 'schedule';
 
   React.useEffect(() => {
     (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial = startTutorial;
@@ -61,6 +63,32 @@ const AppContent: React.FC = () => {
       delete (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial;
     };
   }, [startTutorial]);
+
+  // Medir dinámicamente la altura del área de encabezado (Navbar + SimulationBar + Banners)
+  React.useEffect(() => {
+    const el = headerAreaRef.current;
+    if (!el) return;
+
+    const updateHeaderHeight = () => {
+      const h = el.offsetHeight;
+      if (h > 0) {
+        document.documentElement.style.setProperty('--app-header-height', `${h}px`);
+      }
+    };
+
+    updateHeaderHeight();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => {
+        updateHeaderHeight();
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    } else {
+      window.addEventListener('resize', updateHeaderHeight);
+      return () => window.removeEventListener('resize', updateHeaderHeight);
+    }
+  }, []);
 
   const handleSetView = (view: AppView) => {
     setCurrentView(view);
@@ -89,15 +117,26 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Simulation banner if active */}
-      <SimulationBar />
+    <div
+      className={`bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200 ${
+        isScheduleView ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen'
+      }`}
+    >
+      {/* Top Header Area monitored by ResizeObserver */}
+      <div ref={headerAreaRef} className="sticky top-0 z-40 w-full shrink-0">
+        {/* Simulation banner if active */}
+        <SimulationBar />
 
-      {/* Main navigation header */}
-      <Navbar currentView={currentView} setCurrentView={handleSetView} />
+        {/* Main navigation header */}
+        <Navbar currentView={currentView} setCurrentView={handleSetView} />
+      </div>
 
       {/* Main content body with smooth transitions */}
-      <main className="flex-1 flex flex-col overflow-x-hidden pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+      <main
+        className={`flex-1 flex flex-col pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-0 ${
+          isScheduleView ? 'min-h-0 overflow-hidden' : 'overflow-x-hidden'
+        }`}
+      >
         <AnimatePresence mode="wait">
           <motion.div
             key={currentView}
@@ -105,7 +144,7 @@ const AppContent: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="flex-1 flex flex-col"
+            className={`flex-1 flex flex-col ${isScheduleView ? 'min-h-0 h-full overflow-hidden' : ''}`}
           >
             {currentView === 'graph' && <CorrelativeGraph />}
             {currentView === 'kanban' && <KanbanBoard />}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import {
   AlertTriangle,
   X,
@@ -166,6 +166,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
   const [activePopover, setActivePopover] = useState<ScheduledItem | null>(null);
+  const shouldReduceMotion = useReducedMotion();
 
   // Resize listener to adapt layout dynamically between mobile & desktop
   useEffect(() => {
@@ -642,10 +643,10 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                     return (
                       <motion.div
                         key={`${item.subjectId}-${item.commission.id}-${item.slot.start}-${itemIdx}`}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.95 }}
-                        transition={{ duration: 0.18 }}
+                        initial={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.95 }}
+                        animate={shouldReduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                        exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.95 }}
+                        transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
                         onClick={() => setActivePopover(item)}
                         style={{
                           top: `${topPct}%`,

@@ -11,11 +11,13 @@ import {
   Edit2,
   Check,
   Calendar,
-  BookOpen,
   PieChart,
-  ArrowRight,
   ChevronDown,
   MoreHorizontal,
+  X,
+  AlertTriangle,
+  Sparkles,
+  PlayCircle,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
@@ -208,10 +210,11 @@ export const ScheduleBuilder: React.FC = () => {
     pushHistory(next);
   };
 
-  // Mobile tabs & menu state
-  const [mobileTab, setMobileTab] = useState<'oferta' | 'grilla' | 'resumen'>('oferta');
+  // Mobile & layout state
   const [mobileProposalsOpen, setMobileProposalsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
+  const [isMobileGridExpanded, setIsMobileGridExpanded] = useState(false);
   const [isDesktop, setIsDesktop] = useState(
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
@@ -223,11 +226,6 @@ export const ScheduleBuilder: React.FC = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Al cambiar de pestaña en móvil, volver arriba para evitar quedar desfasado del scroll
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' });
-  }, [mobileTab]);
 
   // Total weekly hours
   const totalHours = useMemo(() => {
@@ -245,8 +243,8 @@ export const ScheduleBuilder: React.FC = () => {
   const selectedCount = Object.keys(selectedCommissionsMap).length;
 
   return (
-    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-4 flex-1 flex flex-col gap-2 sm:gap-3 min-h-0 lg:h-[calc(100vh-64px)] lg:overflow-hidden">
-      {/* Mobile Header Bar & Sub-Nav (< lg) */}
+    <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col gap-2 min-h-0 h-full overflow-hidden">
+      {/* Mobile Header Bar & Controls (< lg) */}
       {!isDesktop && (
         <div className="flex flex-col gap-2 shrink-0">
           <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-2xl backdrop-blur-md shadow-lg flex items-center justify-between gap-2">
@@ -361,6 +359,20 @@ export const ScheduleBuilder: React.FC = () => {
                 )}
               </div>
 
+              {/* Summary drawer button */}
+              <button
+                type="button"
+                onClick={() => setSummaryDrawerOpen(true)}
+                className="px-2 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-transform"
+                title="Ver resumen y opciones"
+              >
+                <PieChart className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Resumen</span>
+                {conflicts.length > 0 && (
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                )}
+              </button>
+
               {/* More Options toggle */}
               <div className="relative">
                 <button
@@ -413,66 +425,6 @@ export const ScheduleBuilder: React.FC = () => {
                 )}
               </div>
             </div>
-          </div>
-
-          {/* Mobile Sub-Navigation Tabs */}
-          <div className="flex items-center p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-bold gap-1 shadow-inner">
-            <button
-              onClick={() => setMobileTab('oferta')}
-              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                mobileTab === 'oferta'
-                  ? 'bg-indigo-600 text-white shadow-md font-black'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Oferta</span>
-              <span
-                className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                  mobileTab === 'oferta' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
-                }`}
-              >
-                {availableSubjects.length}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setMobileTab('grilla')}
-              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
-                mobileTab === 'grilla'
-                  ? 'bg-indigo-600 text-white shadow-md font-black'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Horarios</span>
-              {selectedCount > 0 && (
-                <span
-                  className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                    mobileTab === 'grilla' ? 'bg-white/20 text-white' : 'bg-indigo-500/20 text-indigo-300'
-                  }`}
-                >
-                  {selectedCount}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setMobileTab('resumen')}
-              className={`flex-1 py-2 px-2 rounded-lg flex items-center justify-center gap-1.5 transition-all relative active:scale-95 ${
-                mobileTab === 'resumen'
-                  ? 'bg-indigo-600 text-white shadow-md font-black'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <PieChart className="w-3.5 h-3.5" />
-              <span>Resumen</span>
-              {conflicts.length > 0 && (
-                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse">
-                  !{conflicts.length}
-                </span>
-              )}
-            </button>
           </div>
         </div>
       )}
@@ -677,10 +629,67 @@ export const ScheduleBuilder: React.FC = () => {
         </div>
       )}
 
-      {/* Main Layout: Desktop 3-Column vs Mobile Single Tab */}
+      {/* Compact summary strip on 1024-1279px (lg only, hidden on xl) (Ajuste 2) */}
+      {isDesktop && (
+        <div className="hidden lg:flex xl:hidden items-center justify-between p-2.5 px-3 rounded-xl bg-slate-900/80 border border-slate-800 shadow-md text-xs shrink-0 gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex items-center gap-1.5 font-bold text-white">
+              <Clock className="w-3.5 h-3.5 text-indigo-400" />
+              <span>{totalHours} hs/sem</span>
+            </div>
+            <span className="text-slate-600">•</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">Materias:</span>
+              <span className="font-bold text-white">{selectedCount}</span>
+            </div>
+            <span className="text-slate-600">•</span>
+            <div>
+              {conflicts.length > 0 ? (
+                <span className="text-rose-400 font-bold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {conflicts.length} {conflicts.length === 1 ? 'choque' : 'choques'}
+                </span>
+              ) : (
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <Check className="w-3 h-3" />
+                  Sin choques
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setCombinationsModalOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+            >
+              <Sparkles className="w-3 h-3 text-indigo-400" />
+              <span>Combinaciones</span>
+            </button>
+            {selectedCount > 0 && (
+              <button
+                onClick={applyScheduleToEnrolled}
+                className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+              >
+                <PlayCircle className="w-3 h-3 text-emerald-400" />
+                <span>Cursando</span>
+              </button>
+            )}
+            <button
+              onClick={() => setSummaryDrawerOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+            >
+              <PieChart className="w-3 h-3 text-indigo-400" />
+              <span>Ver resumen</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Layout: Desktop side-by-side vs Mobile Vertical Split */}
       {isDesktop ? (
         <div className="flex-1 min-h-0 flex flex-row gap-3 sm:gap-4 items-stretch overflow-hidden">
-          {/* Left Subjects & Commissions Accordion Panel (340px) */}
+          {/* Columna Izquierda: Oferta Académica */}
           <ScheduleLeftPanel
             term={scheduleTerm}
             availableSubjects={availableSubjects}
@@ -699,10 +708,82 @@ export const ScheduleBuilder: React.FC = () => {
             onOpenProfessorDetail={setDetailProfessorId}
           />
 
-          {/* Center & Right Area: side-by-side at >=1280px, stacked between 1024 and 1280px */}
-          <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-3 sm:gap-4 overflow-y-auto xl:overflow-hidden">
-            {/* Center Timetable Weekly Calendar Grid */}
-            <div className="flex-1 min-h-[500px] xl:min-h-0 flex flex-col xl:h-full">
+          {/* Columna Central: Grilla semanal (con ancho cómodo para los seis días) */}
+          <div className="flex-1 min-w-0 h-full min-h-0 flex flex-col overflow-hidden">
+            <ScheduleWeeklyGrid
+              selections={selectedCommissionsMap}
+              onRemoveCommission={handleRemoveCommissionWithHistory}
+              hoveredCommission={hoveredCommission}
+              conflicts={conflicts}
+              subjectNamesMap={subjectNamesMap}
+              focusedConflictId={focusedConflictId}
+              focusedSubjectId={focusedSubjectId}
+              onFocusSubject={(sId) => setFocusedSubjectId(sId)}
+            />
+          </div>
+
+          {/* Columna Derecha: Resumen semanal (visible desde 1280px / xl) */}
+          <div className="hidden xl:flex w-[300px] xl:w-[320px] shrink-0 h-full min-h-0 flex-col overflow-hidden">
+            <ScheduleSummaryPanel
+              selections={selectedCommissionsMap}
+              conflicts={conflicts}
+              subjectNamesMap={subjectNamesMap}
+              onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
+              onApplyToEnrolled={applyScheduleToEnrolled}
+              onClearAll={handleClearWithHistory}
+              onSelectConflict={setFocusedConflictId}
+              resolveProfessorRating={getRatingForProfessor}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden h-full pb-1">
+          {/* Grilla superior fija (< 1024px) ocupando ~38-42% del alto visible */}
+          <div
+            className={`shrink-0 transition-all duration-200 ${
+              isMobileGridExpanded
+                ? 'fixed inset-0 z-50 p-2 sm:p-4 bg-[#090d16] flex flex-col overflow-hidden'
+                : 'h-[38dvh] max-h-[42%] min-h-[190px] flex flex-col rounded-2xl overflow-hidden shadow-lg border border-slate-800'
+            }`}
+          >
+            {/* Cabecera compacta de la grilla con botón Ver mi semana / Cerrar */}
+            <div className="flex items-center justify-between p-1.5 px-2.5 bg-slate-950 border-b border-slate-800 shrink-0 text-xs">
+              <div className="flex items-center gap-1.5 min-w-0 font-bold text-white">
+                <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span className="truncate">Tu Semana</span>
+                <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                  ({selectedCount} mat. • {totalHours} hs)
+                </span>
+                {conflicts.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse shrink-0">
+                    !{conflicts.length}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsMobileGridExpanded(!isMobileGridExpanded)}
+                  className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
+                  title={isMobileGridExpanded ? 'Cerrar pantalla completa' : 'Ver semana en pantalla completa'}
+                >
+                  {isMobileGridExpanded ? (
+                    <>
+                      <X className="w-3 h-3" />
+                      <span>Cerrar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Layers className="w-3 h-3" />
+                      <span>Ver mi semana</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
               <ScheduleWeeklyGrid
                 selections={selectedCommissionsMap}
                 onRemoveCommission={handleRemoveCommissionWithHistory}
@@ -714,103 +795,73 @@ export const ScheduleBuilder: React.FC = () => {
                 onFocusSubject={(sId) => setFocusedSubjectId(sId)}
               />
             </div>
+          </div>
 
-            {/* Right Summary & Actions Panel (320px on xl, stacked under grid on lg) */}
-            <div className="w-full xl:w-[320px] shrink-0 flex flex-col min-h-0 xl:h-full">
+          {/* Lista inferior con scroll propio */}
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <ScheduleLeftPanel
+              term={scheduleTerm}
+              availableSubjects={availableSubjects}
+              allSubjects={allSubjects}
+              schedulesMap={schedulesMap}
+              selections={selectedCommissionsMap}
+              onSelectCommission={handleSelectCommissionWithHistory}
+              onRemoveCommission={handleRemoveCommissionWithHistory}
+              onHoverCommission={setHoveredCommission}
+              subjectNamesMap={subjectNamesMap}
+              focusedSubjectId={focusedSubjectId}
+              onViewInGrid={(sId) => {
+                if (sId) setFocusedSubjectId(sId);
+              }}
+              resolveProfessorRating={getRatingForProfessor}
+              onOpenProfessorDetail={setDetailProfessorId}
+              isMobileView={true}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Drawer / Modal de Resumen completo para móvil o pantallas intermedias */}
+      {summaryDrawerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-md max-h-[85dvh] flex flex-col rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-3.5 border-b border-slate-800 bg-slate-950/80 shrink-0">
+              <div className="flex items-center gap-2">
+                <PieChart className="w-4 h-4 text-indigo-400" />
+                <h3 className="text-sm font-bold text-white">Resumen y Opciones</h3>
+              </div>
+              <button
+                onClick={() => setSummaryDrawerOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-3">
               <ScheduleSummaryPanel
                 selections={selectedCommissionsMap}
                 conflicts={conflicts}
                 subjectNamesMap={subjectNamesMap}
-                onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
-                onApplyToEnrolled={applyScheduleToEnrolled}
-                onClearAll={handleClearWithHistory}
-                onSelectConflict={setFocusedConflictId}
-                onNavigateToTab={(tab) => setMobileTab(tab)}
+                onOpenCombinationsModal={() => {
+                  setSummaryDrawerOpen(false);
+                  setCombinationsModalOpen(true);
+                }}
+                onApplyToEnrolled={() => {
+                  setSummaryDrawerOpen(false);
+                  applyScheduleToEnrolled();
+                }}
+                onClearAll={() => {
+                  setSummaryDrawerOpen(false);
+                  handleClearWithHistory();
+                }}
+                onSelectConflict={(cId) => {
+                  setSummaryDrawerOpen(false);
+                  setFocusedConflictId(cId);
+                }}
                 resolveProfessorRating={getRatingForProfessor}
               />
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="flex-1 min-h-0 flex flex-col relative pb-16">
-          {mobileTab === 'oferta' && (
-            <>
-              <ScheduleLeftPanel
-                term={scheduleTerm}
-                availableSubjects={availableSubjects}
-                allSubjects={allSubjects}
-                schedulesMap={schedulesMap}
-                selections={selectedCommissionsMap}
-                onSelectCommission={handleSelectCommissionWithHistory}
-                onRemoveCommission={handleRemoveCommissionWithHistory}
-                onHoverCommission={setHoveredCommission}
-                subjectNamesMap={subjectNamesMap}
-                focusedSubjectId={focusedSubjectId}
-                onViewInGrid={(sId) => {
-                  if (sId) setFocusedSubjectId(sId);
-                  setMobileTab('grilla');
-                }}
-                resolveProfessorRating={getRatingForProfessor}
-                onOpenProfessorDetail={setDetailProfessorId}
-              />
-
-              {/* Floating action pill above bottom navigation */}
-              {selectedCount > 0 && (
-                <div className="fixed bottom-[68px] left-3 right-3 z-30">
-                  <button
-                    onClick={() => setMobileTab('grilla')}
-                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:brightness-110 text-white font-bold text-xs shadow-2xl shadow-indigo-600/50 border border-indigo-400/40 flex items-center justify-between active:scale-[0.98] transition-transform"
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-lg bg-white/20 flex items-center justify-center">
-                        <Calendar className="w-3.5 h-3.5 text-white" />
-                      </div>
-                      <span>
-                        {selectedCount} {selectedCount === 1 ? 'materia elegida' : 'materias elegidas'} ({totalHours} hs)
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 font-extrabold text-indigo-100">
-                      <span>Ver horarios</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </div>
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-
-          {mobileTab === 'grilla' && (
-            <ScheduleWeeklyGrid
-              selections={selectedCommissionsMap}
-              onRemoveCommission={handleRemoveCommissionWithHistory}
-              hoveredCommission={hoveredCommission}
-              conflicts={conflicts}
-              subjectNamesMap={subjectNamesMap}
-              focusedConflictId={focusedConflictId}
-              focusedSubjectId={focusedSubjectId}
-              onFocusSubject={(sId) => {
-                setFocusedSubjectId(sId);
-                setMobileTab('oferta');
-              }}
-            />
-          )}
-
-          {mobileTab === 'resumen' && (
-            <ScheduleSummaryPanel
-              selections={selectedCommissionsMap}
-              conflicts={conflicts}
-              subjectNamesMap={subjectNamesMap}
-              onOpenCombinationsModal={() => setCombinationsModalOpen(true)}
-              onApplyToEnrolled={applyScheduleToEnrolled}
-              onClearAll={handleClearWithHistory}
-              onSelectConflict={(cId) => {
-                setFocusedConflictId(cId);
-                setMobileTab('grilla');
-              }}
-              onNavigateToTab={(tab) => setMobileTab(tab)}
-              resolveProfessorRating={getRatingForProfessor}
-            />
-          )}
         </div>
       )}
 

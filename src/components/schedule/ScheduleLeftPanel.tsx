@@ -28,6 +28,7 @@ import {
   type ProfessorRatingResolver,
 } from '../../utils/professorRatingsLogic';
 import { ProfessorRatingBadge } from '../professors/ProfessorRatingBadge';
+import { useIsTouchDevice } from '../../hooks/useTouchDevice';
 
 interface ScheduleLeftPanelProps {
   term: '1C' | '2C';
@@ -43,6 +44,7 @@ interface ScheduleLeftPanelProps {
   onViewInGrid?: (subjectId?: number) => void;
   resolveProfessorRating?: ProfessorRatingResolver;
   onOpenProfessorDetail?: (professorId: string) => void;
+  isMobileView?: boolean;
 }
 
 export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
@@ -59,7 +61,9 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   onViewInGrid,
   resolveProfessorRating,
   onOpenProfessorDetail,
+  isMobileView: _isMobileView,
 }) => {
+  const isTouchDevice = useIsTouchDevice();
   const [searchQuery, setSearchQuery] = useState('');
   const [shiftFilter, setShiftFilter] = useState<'all' | Shift>('all');
   const [onlyConflictFree, setOnlyConflictFree] = useState(false);
@@ -67,6 +71,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
   const [sortByBestRated, setSortByBestRated] = useState<boolean>(false);
   const [expandedSubjectIds, setExpandedSubjectIds] = useState<Set<number>>(new Set());
+  const [previewingCommissionId, setPreviewingCommissionId] = useState<string | null>(null);
 
   // Expand focused subject when requested by popover
   React.useEffect(() => {
@@ -129,14 +134,10 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
     }
   };
 
+  // Al elegir comisión: NO colapsar la materia (ajuste 1) para mantener el scroll intacto
   const handleSelectCommission = (subjectId: number, commissionId: string) => {
     onSelectCommission(subjectId, commissionId);
-    // Auto-collapse this subject so it shows "Com. XXX elegida" prominently
-    setExpandedSubjectIds((prev) => {
-      const next = new Set(prev);
-      next.delete(subjectId);
-      return next;
-    });
+    setPreviewingCommissionId(null);
   };
 
   const fallbackResolver: ProfessorRatingResolver = () => null;
@@ -321,6 +322,15 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
               activeRatingResolver
             );
 
+            // Fijar la comisión elegida al principio de su grupo (ajuste 1)
+            const sortedCommissions = selectedComm
+              ? [...filteredCommissions].sort((a, b) => {
+                  if (a.id === selectedComm.id) return -1;
+                  if (b.id === selectedComm.id) return 1;
+                  return 0;
+                })
+              : filteredCommissions;
+
             return (
               <div
                 key={subject.id}
@@ -374,7 +384,19 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Botón manual Plegar / Ver por materia (ajuste 1) */}
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSubjectExpanded(subject.id);
+                      }}
+                      className="px-2 py-0.5 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 transition-colors cursor-pointer"
+                      title={isExpanded ? 'Plegar comisiones de esta materia' : 'Desplegar comisiones'}
+                    >
+                      {isExpanded ? 'Plegar' : 'Ver'}
+                    </span>
+
                     {!hasCommissions ? (
                       <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-800/60 text-slate-500 border border-slate-700/40">
                         Sin oferta
@@ -410,13 +432,14 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                             <Info className="w-4 h-4 mx-auto mb-1 text-slate-600" />
                             <span>No hay comisiones cargadas para esta materia aún.</span>
                           </div>
-                        ) : filteredCommissions.length === 0 ? (
+                        ) : sortedCommissions.length === 0 ? (
                           <div className="p-3 text-center text-xs text-slate-500">
                             <span>Ninguna comisión coincide con los filtros aplicados.</span>
                           </div>
                         ) : (
-                          filteredCommissions.map((comm) => {
+                          sortedCommissions.map((comm) => {
                             const isSelected = selectedComm?.id === comm.id;
+                            const isPreviewing = previewingCommissionId === comm.id;
                             const { conflicts, consecutive } = getCommissionConflictsWithSelection(
                               comm,
                               subject.id,
@@ -433,18 +456,39 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                             return (
                               <div
                                 key={comm.id}
-                                onMouseEnter={() =>
-                                  onHoverCommission({
-                                    commission: comm,
-                                    subjectId: subject.id,
-                                    subjectName: subject.name,
-                                    hasConflict,
-                                  })
-                                }
-                                onMouseLeave={() => onHoverCommission(null)}
+                                onClick={() => {
+                                  if (isTouchDevice && !isSelected) {
+                                    if (!isPreviewing) {
+                                      setPreviewingCommissionId(comm.id);
+                                      onHoverCommission({
+                                        commission: comm,
+                                        subjectId: subject.id,
+                                        subjectName: subject.name,
+                                        hasConflict,
+                                      });
+                                    }
+                                  }
+                                }}
+                                onMouseEnter={() => {
+                                  if (!isTouchDevice) {
+                                    onHoverCommission({
+                                      commission: comm,
+                                      subjectId: subject.id,
+                                      subjectName: subject.name,
+                                      hasConflict,
+                                    });
+                                  }
+                                }}
+                                onMouseLeave={() => {
+                                  if (!isTouchDevice) {
+                                    onHoverCommission(null);
+                                  }
+                                }}
                                 className={`p-2.5 rounded-xl border text-xs transition-all relative ${
                                   isSelected
-                                    ? 'bg-indigo-600/20 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.2)]'
+                                    ? 'bg-emerald-950/35 border-emerald-400/80 shadow-[0_0_15px_rgba(16,185,129,0.25)] ring-1 ring-emerald-400/40'
+                                    : isPreviewing
+                                    ? 'bg-amber-950/30 border-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.25)] ring-1 ring-amber-400/40'
                                     : hasConflict
                                     ? 'bg-slate-900 border-rose-500/30 hover:border-rose-500/60'
                                     : 'bg-slate-900 border-slate-800 hover:border-slate-700'
@@ -459,6 +503,17 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                     {comm.turno && (
                                       <span className="text-[10px] font-bold px-1.5 py-0.2 rounded uppercase tracking-wider bg-slate-800 text-slate-300">
                                         {comm.turno}
+                                      </span>
+                                    )}
+                                    {isSelected && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                        <Check className="w-3 h-3 text-emerald-400" />
+                                        <span>Elegida</span>
+                                      </span>
+                                    )}
+                                    {isPreviewing && !isSelected && (
+                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
+                                        Previsualizando
                                       </span>
                                     )}
                                     {commRating.professors.length > 1 &&
@@ -486,24 +541,55 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                         Quitar
                                       </button>
                                     )}
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSelectCommission(subject.id, comm.id)}
-                                      className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
-                                        isSelected
-                                          ? 'bg-emerald-600 text-white shadow-sm'
-                                          : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
-                                      }`}
-                                    >
-                                      {isSelected ? (
-                                        <>
-                                          <Check className="w-3.5 h-3.5" />
-                                          <span>Elegida</span>
-                                        </>
-                                      ) : (
-                                        <span>Elegir</span>
-                                      )}
-                                    </button>
+
+                                    {/* Botón de acción: previsualizar o elegir según toque o ratón */}
+                                    {isTouchDevice && !isSelected && !isPreviewing ? (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setPreviewingCommissionId(comm.id);
+                                          onHoverCommission({
+                                            commission: comm,
+                                            subjectId: subject.id,
+                                            subjectName: subject.name,
+                                            hasConflict,
+                                          });
+                                        }}
+                                        className="px-2.5 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all active:scale-95 border border-slate-700"
+                                      >
+                                        Previsualizar
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleSelectCommission(subject.id, comm.id);
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
+                                          isSelected
+                                            ? 'bg-emerald-600 text-white shadow-sm'
+                                            : isPreviewing
+                                            ? 'bg-gradient-to-r from-emerald-600 to-indigo-600 text-white shadow-md animate-pulse'
+                                            : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm'
+                                        }`}
+                                      >
+                                        {isSelected ? (
+                                          <>
+                                            <Check className="w-3.5 h-3.5" />
+                                            <span>Elegida</span>
+                                          </>
+                                        ) : isPreviewing ? (
+                                          <>
+                                            <Check className="w-3.5 h-3.5" />
+                                            <span>Confirmar</span>
+                                          </>
+                                        ) : (
+                                          <span>Elegir</span>
+                                        )}
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
 
@@ -570,6 +656,20 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                               </div>
                             );
                           })
+                        )}
+
+                        {sortedCommissions.length > 0 && (
+                          <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 px-1 text-[10px] text-slate-400">
+                            <span>{sortedCommissions.length} {sortedCommissions.length === 1 ? 'comisión' : 'comisiones'}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleSubjectExpanded(subject.id)}
+                              className="text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 hover:underline cursor-pointer"
+                            >
+                              <ChevronsUp className="w-3 h-3" />
+                              <span>Plegar materia</span>
+                            </button>
+                          </div>
                         )}
                       </div>
                     </motion.div>
