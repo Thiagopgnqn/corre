@@ -79,6 +79,7 @@ export interface UploadInitPayload {
   sizeBytes: number;
   mimeType: string;
   professorIds?: string[];
+  acceptTerms?: boolean;
 }
 
 export interface UploadInitResponse {

@@ -91,6 +91,7 @@ export async function initUpload(req: Request, res: Response): Promise<void> {
       mimeType,
       sizeBytes,
       professorIds,
+      acceptTerms,
     } = req.body;
 
     if (!subjectId || !kind || !title || !originalFilename || !mimeType || !sizeBytes) {
@@ -114,6 +115,7 @@ export async function initUpload(req: Request, res: Response): Promise<void> {
       mimeType,
       sizeBytes: parseInt(sizeBytes, 10),
       professorIds: Array.isArray(professorIds) ? professorIds : undefined,
+      acceptTerms: Boolean(acceptTerms),
     });
 
     res.status(201).json({ success: true, data: result });

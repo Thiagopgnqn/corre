@@ -38,6 +38,7 @@ export interface InitUploadInput {
   mimeType: string;
   sizeBytes: number;
   professorIds?: string[];
+  acceptTerms?: boolean;
 }
 
 export interface ListLibraryFilesFilters {
@@ -224,10 +225,20 @@ export class PgLibraryService implements ILibraryService {
         !lockedUser.libraryTermsAcceptedAt ||
         lockedUser.libraryTermsVersion !== LIBRARY_CONFIG.CURRENT_TERMS_VERSION
       ) {
-        throw Object.assign(
-          new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'),
-          { status: 403, code: 'TERMS_REQUIRED' }
-        );
+        if (input.acceptTerms) {
+          await tx
+            .update(users)
+            .set({
+              libraryTermsAcceptedAt: new Date(),
+              libraryTermsVersion: LIBRARY_CONFIG.CURRENT_TERMS_VERSION,
+            })
+            .where(eq(users.id, userId));
+        } else {
+          throw Object.assign(
+            new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'),
+            { status: 403, code: 'TERMS_REQUIRED' }
+          );
+        }
       }
 
       const todayStart = new Date();
@@ -1744,10 +1755,15 @@ export class InMemoryLibraryService implements ILibraryService {
       throw Object.assign(new Error('Debés verificar tu correo electrónico para subir material de estudio.'), { status: 403 });
     }
     if (!user.libraryTermsAcceptedAt || user.libraryTermsVersion !== LIBRARY_CONFIG.CURRENT_TERMS_VERSION) {
-      throw Object.assign(new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'), {
-        status: 403,
-        code: 'TERMS_REQUIRED',
-      });
+      if (input.acceptTerms) {
+        user.libraryTermsAcceptedAt = new Date();
+        user.libraryTermsVersion = LIBRARY_CONFIG.CURRENT_TERMS_VERSION;
+      } else {
+        throw Object.assign(new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'), {
+          status: 403,
+          code: 'TERMS_REQUIRED',
+        });
+      }
     }
 
     // Topes diarios

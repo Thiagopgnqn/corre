@@ -51,6 +51,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   const [title, setTitle] = useState<string>('');
   const [description, setDescription] = useState<string>('');
   const [acceptedTerms, setAcceptedTerms] = useState<boolean>(false);
+  const [hasAcceptedTermsInProfile, setHasAcceptedTermsInProfile] = useState<boolean>(false);
 
   // Upload state
   const [isUploading, setIsUploading] = useState<boolean>(false);
@@ -60,6 +61,21 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   const [isSuccess, setIsSuccess] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Consulta el estado de aceptación de términos al abrir el modal
+  useEffect(() => {
+    if (isOpen) {
+      libraryApi
+        .getTermsStatus()
+        .then((res) => {
+          if (res.success && res.data?.accepted) {
+            setHasAcceptedTermsInProfile(true);
+            setAcceptedTerms(true);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen]);
 
   // Pre-fill subject if initialSubjectId is provided
   useEffect(() => {
@@ -163,6 +179,17 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
     setUploadProgress(0);
 
     try {
+      // Si el usuario aún no aceptó los términos a nivel cuenta, los registramos en el servidor
+      if (!hasAcceptedTermsInProfile) {
+        setUploadStep('Registrando aceptación de términos...');
+        try {
+          await libraryApi.acceptTerms();
+          setHasAcceptedTermsInProfile(true);
+        } catch (termsErr) {
+          console.warn('Aviso al registrar términos:', termsErr);
+        }
+      }
+
       // Paso 1: Iniciar subida y obtener URL prefirmada
       setUploadStep('Preparando subida...');
       const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg');
@@ -179,6 +206,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
         originalFilename: file.name,
         sizeBytes: file.size,
         mimeType,
+        acceptTerms: true,
       });
 
       const { fileId, uploadUrl } = initRes.data;
@@ -204,6 +232,8 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
         msg = 'Este archivo ya se encuentra en la biblioteca (se detectó un contenido idéntico por firma digital).';
       } else if (err?.code === 'QUOTA_EXCEEDED') {
         msg = 'Superaste tu cuota de almacenamiento disponible (máximo 300 MB por usuario).';
+      } else if (err?.code === 'TERMS_REQUIRED') {
+        msg = 'Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.';
       }
       setSubmitError(msg);
     } finally {
@@ -217,7 +247,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
     setTitle('');
     setDescription('');
     setHasSolution(false);
-    setAcceptedTerms(false);
+    setAcceptedTerms(hasAcceptedTermsInProfile);
     setIsSuccess(false);
     setUploadProgress(0);
     setSubmitError(null);
