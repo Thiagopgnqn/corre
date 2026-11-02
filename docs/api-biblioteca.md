@@ -225,3 +225,4 @@ Si el usuario eliminó su cuenta con desvinculación de autoría (`deleteFiles: 
   }
 }
 ```
+
