@@ -413,7 +413,7 @@ export const AdminUsersTab: React.FC = () => {
                             {u.identities?.some((i) => i.provider === 'google') && (
                               <span className="text-amber-400/80">Google</span>
                             )}
-                            {u.identities?.some((i) => i.provider === 'local') && (
+                            {u.identities?.some((i) => i.provider === 'local' || i.provider === 'password') && (
                               <span>Contraseña</span>
                             )}
                           </div>
@@ -637,21 +637,21 @@ export const AdminUsersTab: React.FC = () => {
                       <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 text-center">
                         <BookOpen className="w-4 h-4 text-indigo-400 mx-auto mb-1" />
                         <span className="text-lg font-bold text-white block">
-                          {userDetail.counters.enrollmentsCount}
+                          {userDetail.counters?.enrollmentsCount ?? 0}
                         </span>
                         <span className="text-[10px] text-slate-400">Cursadas</span>
                       </div>
                       <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 text-center">
                         <MessageSquare className="w-4 h-4 text-purple-400 mx-auto mb-1" />
                         <span className="text-lg font-bold text-white block">
-                          {userDetail.counters.reviewsCount}
+                          {userDetail.counters?.reviewsCount ?? 0}
                         </span>
                         <span className="text-[10px] text-slate-400">Reseñas</span>
                       </div>
                       <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800 text-center">
                         <AlertTriangle className="w-4 h-4 text-amber-400 mx-auto mb-1" />
                         <span className="text-lg font-bold text-white block">
-                          {userDetail.counters.reportsSubmittedCount}
+                          {userDetail.counters?.reportsSubmittedCount ?? 0}
                         </span>
                         <span className="text-[10px] text-slate-400">Reportes</span>
                       </div>

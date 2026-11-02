@@ -8,6 +8,8 @@ import { csrfProtection } from '../../middlewares/csrf.middleware.js';
 import {
   reauthPassword,
   reauthGoogle,
+  reauthUnified,
+  reauthStatus,
   getStats,
   listUsers,
   getUserDetail,
@@ -48,6 +50,8 @@ router.use(adminRateLimiter);
 // 1. Reautenticación reciente (10 minutos)
 router.post('/reauth/password', csrfProtection, reauthPassword);
 router.post('/reauth/google', csrfProtection, reauthGoogle);
+router.post('/reauth', csrfProtection, reauthUnified);
+router.get('/reauth/status', reauthStatus);
 
 // 2. Estadísticas agregadas
 router.get('/stats', getStats);
@@ -55,8 +59,10 @@ router.get('/stats', getStats);
 // 3. Usuarios
 router.get('/users', listUsers);
 router.get('/users/export', exportUsersCsv);
+router.get('/users/export.csv', exportUsersCsv);
 router.get('/users/:id', getUserDetail);
 router.patch('/users/:id/verify-email', csrfProtection, verifyUserEmail);
+router.post('/users/:id/verify-email', csrfProtection, verifyUserEmail);
 router.post('/users/:id/resend-code', csrfProtection, resendVerificationCode);
 router.patch('/users/:id/status', csrfProtection, requireRecentReauth, setUserStatus);
 router.post('/users/:id/revoke-sessions', csrfProtection, revokeUserSessions);
@@ -80,6 +86,8 @@ router.delete('/commissions/:id', csrfProtection, requireRecentReauth, deleteCom
 
 router.post('/schedules/preview-import', csrfProtection, previewScheduleImport);
 router.post('/schedules/apply-import', csrfProtection, requireRecentReauth, applyScheduleImport);
+router.post('/schedule/preview-import', csrfProtection, previewScheduleImport);
+router.post('/schedule/apply-import', csrfProtection, requireRecentReauth, applyScheduleImport);
 
 // 5. Moderación de Reseñas: listar todas y suspender autor
 router.get('/reviews', listAdminReviews);

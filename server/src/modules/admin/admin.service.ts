@@ -659,6 +659,7 @@ export class AdminService {
         createdAt: u.createdAt,
         selectedPlanId: u.selectedPlanId,
         providers: provs.length > 0 ? provs : ['password'],
+        identities: (provs.length > 0 ? provs : ['password']).map((provider) => ({ provider })),
       };
     });
 
@@ -706,13 +707,17 @@ export class AdminService {
       throw err;
     }
 
-    const [identities, [progressCount], [reviewsCount], [proposalsCount], [enrollmentsCount]] =
+    const [identities, [progressCount], [reviewsCount], [proposalsCount], [enrollmentsCount], [reportsCount]] =
       await Promise.all([
-        db.select().from(userIdentities).where(eq(userIdentities.userId, userId)),
+        db
+          .select({ provider: userIdentities.provider })
+          .from(userIdentities)
+          .where(eq(userIdentities.userId, userId)),
         db.select({ value: count() }).from(subjectProgress).where(eq(subjectProgress.userId, userId)),
         db.select({ value: count() }).from(professorReviews).where(eq(professorReviews.userId, userId)),
         db.select({ value: count() }).from(scheduleProposals).where(eq(scheduleProposals.userId, userId)),
         db.select({ value: count() }).from(subjectEnrollments).where(eq(subjectEnrollments.userId, userId)),
+        db.select({ value: count() }).from(reviewReports).where(eq(reviewReports.reporterUserId, userId)),
       ]);
 
     let planName = 'Plan 2023';
@@ -735,8 +740,16 @@ export class AdminService {
       lastLoginAt: user.lastLoginAt,
       lastSeenAt: user.lastSeenAt,
       createdAt: user.createdAt,
+      selectedPlanId: user.selectedPlanId,
       selectedPlanName: planName,
       providers: identities.map((i) => i.provider),
+      // Formato esperado por el frontend (AdminUserDetail)
+      identities: identities.map((i) => ({ provider: i.provider })),
+      counters: {
+        enrollmentsCount: enrollmentsCount?.value || 0,
+        reviewsCount: reviewsCount?.value || 0,
+        reportsSubmittedCount: reportsCount?.value || 0,
+      },
       stats: {
         subjectsProgressCount: progressCount?.value || 0,
         reviewsCount: reviewsCount?.value || 0,
@@ -1074,10 +1087,17 @@ export class AdminService {
   // ==========================================
 
   static async listScheduleTerms() {
-    return db
+    const rows = await db
       .select()
       .from(scheduleTerms)
       .orderBy(desc(scheduleTerms.academicYear), desc(scheduleTerms.term));
+    // Alias esperados por el frontend (AdminTerm): name, year, isDefault
+    return rows.map((t) => ({
+      ...t,
+      name: t.label,
+      year: t.academicYear,
+      isDefault: t.isCurrent,
+    }));
   }
 
   static async createScheduleTerm(
@@ -1517,6 +1537,11 @@ export class AdminService {
 
     return {
       previewHash,
+      // Campos planos esperados por el frontend (ScheduleImportPreview)
+      totalTerms: 1,
+      totalCommissions: additions,
+      termsFound: [] as string[],
+      sampleCommissions: [] as any[],
       summary: {
         subjectsCount: scheduleData.length,
         commissionsCount: additions,

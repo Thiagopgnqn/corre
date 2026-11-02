@@ -48,7 +48,7 @@ export async function reauthPassword(req: Request, res: Response): Promise<void>
 }
 
 export async function reauthGoogle(req: Request, res: Response): Promise<void> {
-  const { googleToken } = req.body;
+  const googleToken = req.body?.googleToken || req.body?.googleIdToken;
   if (!googleToken || typeof googleToken !== 'string') {
     res.status(400).json({ success: false, error: 'Token de Google requerido' });
     return;
@@ -70,6 +70,26 @@ export async function reauthGoogle(req: Request, res: Response): Promise<void> {
     const status = err.status || 400;
     res.status(status).json({ success: false, error: err.message || 'Error en reautenticación' });
   }
+}
+
+/**
+ * Endpoint unificado POST /reauth usado por el frontend: despacha a contraseña o Google
+ * según el cuerpo recibido. Mantiene exactamente la misma verificación que las rutas específicas.
+ */
+export async function reauthUnified(req: Request, res: Response): Promise<void> {
+  if (req.body?.googleIdToken || req.body?.googleToken) {
+    return reauthGoogle(req, res);
+  }
+  return reauthPassword(req, res);
+}
+
+/**
+ * GET /reauth/status: informa si existe un ticket de reautenticación vigente
+ * (la validación real se hace siempre en requireRecentReauth).
+ */
+export async function reauthStatus(req: Request, res: Response): Promise<void> {
+  const hasTicket = Boolean(req.cookies?.admin_reauth_token);
+  res.json({ success: true, authenticated: hasTicket });
 }
 
 // ==========================================
@@ -376,11 +396,25 @@ export async function listCommissions(req: Request, res: Response): Promise<void
       profsMap.set(p.commissionId, list);
     }
 
-    const result = commRows.map((c) => ({
-      ...c,
-      slots: slotsMap.get(c.id) || [],
-      professors: profsMap.get(c.id) || [],
-    }));
+    const result = commRows.map((c) => {
+      const slots = slotsMap.get(c.id) || [];
+      const profs = profsMap.get(c.id) || [];
+      return {
+        ...c,
+        slots,
+        professors: profs,
+        // Alias esperados por el frontend (AdminCommissionItem)
+        termId: String(termId),
+        shift: c.turno,
+        professorName: profs.map((p) => p.professorName).join(', ') || null,
+        scheduleSlots: slots.map((s) => ({
+          day: s.day,
+          start: s.startTime,
+          end: s.endTime,
+          classroom: s.room || undefined,
+        })),
+      };
+    });
 
     res.json({ success: true, data: result });
   } catch (err: any) {
@@ -585,7 +619,29 @@ export async function deleteCommission(req: Request, res: Response): Promise<voi
 // 5. IMPORTACIÓN MASIVA DE HORARIOS (Ajuste 8)
 // ==========================================
 
+/**
+ * Normaliza el cuerpo de importación: acepta `{ schedule, facultyId, ... }` o
+ * `{ scheduleData }` (formato del panel), donde scheduleData puede ser la lista
+ * directamente o un objeto con `schedule` y los metadatos del período.
+ */
+function normalizeImportBody(req: Request): void {
+  const body = req.body || {};
+  if (body.schedule === undefined && body.scheduleData !== undefined) {
+    const sd = body.scheduleData;
+    if (Array.isArray(sd)) {
+      body.schedule = sd;
+    } else if (sd && typeof sd === 'object') {
+      body.schedule = sd.schedule;
+      for (const key of ['facultyId', 'academicYear', 'term', 'label']) {
+        if (body[key] === undefined && sd[key] !== undefined) body[key] = sd[key];
+      }
+    }
+  }
+  req.body = body;
+}
+
 export async function previewScheduleImport(req: Request, res: Response): Promise<void> {
+  normalizeImportBody(req);
   const { schedule } = req.body;
   try {
     const preview = await AdminService.previewScheduleImport(schedule);
@@ -597,6 +653,7 @@ export async function previewScheduleImport(req: Request, res: Response): Promis
 }
 
 export async function applyScheduleImport(req: Request, res: Response): Promise<void> {
+  normalizeImportBody(req);
   const { previewHash, schedule, facultyId, academicYear, term, label } = req.body;
 
   if (!previewHash || !schedule || !facultyId || !academicYear || !term) {

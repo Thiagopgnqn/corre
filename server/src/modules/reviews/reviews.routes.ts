@@ -168,6 +168,30 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
     }
   });
 
+  // Candidatos a duplicados en formato plano para el panel de administración
+  router.get('/professors/duplicates', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await service.adminListProfessors({
+        adminUserId: req.user!.id,
+        planId: req.user?.selectedPlanId,
+      });
+      const confidenceLabel: Record<string, string> = { high: 'Alta', medium: 'Media', low: 'Baja' };
+      const candidates = (data.duplicateCandidates || [])
+        .filter((c) => c.professorAId && c.professorBId)
+        .map((c) => ({
+          id1: c.professorAId,
+          name1: c.professorA.displayName,
+          id2: c.professorBId,
+          name2: c.professorB.displayName,
+          confidence: confidenceLabel[c.confidence] || c.confidence,
+          reason: c.reason,
+        }));
+      res.json({ success: true, data: candidates });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // Crear o resolver un profesor histórico (y opcionalmente vincularlo a una materia)
   router.post(
     '/professors',

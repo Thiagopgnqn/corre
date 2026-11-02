@@ -112,7 +112,7 @@ export const AdminReviewsTab: React.FC = () => {
     try {
       const res = await adminApi.listDuplicateCandidates();
       if (res.success && res.data) {
-        setDuplicateCandidates(res.data);
+        setDuplicateCandidates(Array.isArray(res.data) ? res.data : []);
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error al analizar duplicados.');
