@@ -9,8 +9,8 @@
 
 | Fase | Alcance | Estado | Notas / Cierre |
 | :--- | :--- | :--- | :--- |
-| **Fase 1** | **Infraestructura Base, BottomSheet, Navbar y UserMenu Mobile, Prevención Zoom iOS** | **COMPLETADA (con Ajustes de Cierre)** | Hook `useIsMobile`, componente accesible `BottomSheet`, Bottom Nav de 5 ítems con "Más", `UserMenu` adaptado a sheet, escala Z-Index migrada, safe-areas de notch y landscape, badge de avisos en "Más", sincronización del tutorial en mobile, y regla de font-size de 16px en mobile sin `!important`. Build y 9 suites de tests (100%) en verde. |
-| **Fase 2** | Materias, Estados y Tableros (`SubjectDrawer`, `QuickStatusModal`, `KanbanBoard`) | Pendiente | Esperando aprobación para iniciar. |
+| **Fase 1** | **Infraestructura Base, BottomSheet, Navbar y UserMenu Mobile, Prevención Zoom iOS** | **COMPLETADA (con Ajustes de Cierre)** | Hook `useIsMobile`, componente accesible `BottomSheet`, Bottom Nav de 5 ítems con "Más", `UserMenu` adaptado a sheet, escala Z-Index migrada, safe-areas de notch y landscape, badge de avisos en "Más", sincronización del tutorial en mobile, y regla de font-size de 16px en mobile sin `!important`. Build y tests (100%) en verde. |
+| **Fase 2** | **Materias, Estados y Tableros (`SubjectDrawer`, `QuickStatusModal`, `KanbanBoard`, `PlanSelectorModal`, `SearchModal`, Grafo)** | **COMPLETADA** | `QuickStatusModal` en `BottomSheet` con validación de correlativas y nota táctil; `SubjectDrawer` en `BottomSheet` con 5 pestañas segmentadas; `CorrelativeGraph` con botones $\ge 44\text{ px}$ y botón flotante de re-centrado; `KanbanBoard` con 1 columna a la vez en mobile y drag & drop desactivado en touch; `PlanSelectorModal` en sheet; y `SearchModal` en pantalla completa con font-size $\ge 16\text{ px}$. 10 tests de mobile y 9 suites del proyecto (100%) en verde. |
 | **Fase 3** | Armador de Horarios (`ScheduleBuilder`, grilla día/semana, comisiones táctiles) | Pendiente | Mantener layout y test de desktop intactos. |
 | **Fase 4** | Planificador de Cuatrimestre, Biblioteca, Reseñas y Electivas | Pendiente | Barra flotante sobre bottom nav, formulario de material con galería/cámara. |
 | **Fase 5** | Panel de Administración Completo (6 pestañas) y Métricas | Pendiente | Transformación de tablas HTML anchas a tarjetas táctiles responsivas. |
@@ -21,7 +21,7 @@
 ## 1. Fase 1: Decisiones Tomadas y Ajustes de Cierre Implementados
 
 1. **Rutas Reales de Componentes**:
-   - `Navbar.tsx` reside en `src/components/common/Navbar.tsx` (corregida la referencia previa de `src/components/layout/Navbar.tsx`).
+   - `Navbar.tsx` reside en `src/components/common/Navbar.tsx`.
    - `UserMenu.tsx` reside en `src/components/common/UserMenu.tsx`.
 
 2. **Breakpoint Consistente con Tailwind `md`**:
@@ -64,66 +64,106 @@
 | **Cabecera / Header (`App.tsx` / `Navbar.tsx`)** | `z-40` | `z-[var(--z-header)]` (40) | Capa fija del encabezado de la app. |
 | **Barra Inferior Móvil (`Navbar.tsx`)** | `z-40` | `z-[var(--z-mobile-nav)]` (40) | Capa fija inferior; siempre visible sobre el contenido pero bajo modales. |
 | **Controles y Leyenda del Grafo (`CorrelativeGraph.tsx`)** | `z-20` / default | `z-[var(--z-graph-controls)]` (30) | Flotantes dentro del canvas, debajo de la barra móvil y de la cabecera. |
+| **Botón flotante Re-centrar mapa (`CorrelativeGraph.tsx`)** | Nuevo | `z-[var(--z-graph-controls)]` (30) | Botón flotante accesible en mobile dentro del canvas. |
 | **Menú contextual del Grafo (`CorrelativeGraph.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú emergente de clic derecho. |
 | **Desplegable Más opciones desktop (`Navbar.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú flotante de escritorio. |
 | **Desplegable de Usuario desktop (`UserMenu.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú flotante de usuario en escritorio. |
 | **Contenedor BottomSheet (`BottomSheet.tsx`)** | `z-50` | `z-[var(--z-sheet)]` (50) | Panel modal inferior sobre fondo oscuro. |
+| **Detalle de Materia Desktop (`SubjectDrawer.tsx`)** | `z-50` | `z-[var(--z-sheet)]` (50) | Panel lateral de escritorio y backdrop `z-[var(--z-backdrop)]`. |
+| **Modal Selector de Estado (`QuickStatusModal.tsx`)** | `z-50` | `z-[var(--z-sheet)]` (mobile) / `z-[var(--z-modal)]` (desktop) | Diálogo de cambio rápido de estado académico. |
+| **Modal Selector de Planes (`PlanSelectorModal.tsx`)** | `z-50` | `z-[var(--z-sheet)]` (mobile) / `z-[var(--z-modal)]` (desktop) | Catálogo universitario y planes de estudio. |
+| **Buscador Rápido (`SearchModal.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Pantalla completa en mobile y modal centrado en desktop. |
 | **Diálogos de Confirmación (`Navbar.tsx` / `UserMenu.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Modales de confirmación de reinicio y eliminación de cuenta. |
-| **Aviso de Reseña Cursada (`ReviewRecommendationToast.tsx`)** | `z-[55]` | `z-[var(--z-toast)]` (60) | Notificación emergente flotante (ubicada con holgura por encima de la barra móvil). |
+| **Aviso de Reseña Cursada (`ReviewRecommendationToast.tsx`)** | `z-[55]` | `z-[var(--z-toast)]` (60) | Notificación emergente flotante sobre la barra móvil. |
 | **Spotlight de Tutorial Guiado (`TutorialSpotlight.tsx`)** | `z-50` | `z-[var(--z-modal-top)]` (70) | Capa superior que resalta cualquier elemento interactivo. |
 
 6. **Despeje de Contenido y Prevención de Doble Scroll**:
-   - `App.tsx` `<main>`:
-     `pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0`.
-     Garantiza que ninguna vista de contenido regular quede tapada por la barra inferior fija en pantallas móviles.
-   - `CorrelativeGraph.tsx`:
-     Calcula su altura exacta restando la cabecera dinámica y la barra inferior móvil:
-     `h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] lg:h-[calc(100dvh-var(--app-header-height,4rem))]`.
-     Elimina scroll vertical secundario y ajusta el zoom al área realmente visible.
-   - `ScheduleBuilder.tsx`:
-     Mantiene su altura fija `100dvh` con scroll interno en cada panel (`min-h-0`), con su test `scheduleLayout.test.ts` en verde sin modificaciones.
+   - `App.tsx` `<main>`: `pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0`.
+   - `CorrelativeGraph.tsx`: altura `calc(100dvh - var(--app-header-height) - var(--mobile-nav-height) - safe-area)`.
+   - `ScheduleBuilder.tsx`: mantiene `100dvh` con scroll interno en cada panel (`min-h-0`).
 
 7. **Prevención de Zoom en iOS Safari (Sin `!important` y Acotada)**:
-   - Regla en `src/index.css`:
-     ```css
-     @media (max-width: 767.98px) {
-       input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]),
-       select,
-       textarea {
-         font-size: 16px;
-       }
-     }
-     ```
-   - No utiliza `!important`.
-   - Excluye explícitamente checkboxes, radios, ranges, botones nativos y selectores de color.
-   - `SixDigitInput` (código de 6 dígitos) utiliza `text-xl sm:text-2xl` (20px / 24px), por lo que no se ve alterado negativamente en su diseño.
-   - `index.html` validado con `<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />` sin bloquear el zoom manual del usuario.
+   - Regla en `src/index.css` a $16\text{ px}$ en `< 768px` para inputs de texto, select y textarea.
+   - Excluye checkboxes, radios, ranges, submit/buttons y selectores de color.
 
-8. **Tutorial Interactivo en Mobile**:
-   - Se verificaron los 16 pasos del tutorial (`TUTORIAL_STEPS`):
-     - **Paso 9 (`analista-switch`)**: en desktop está en la cabecera; en mobile vive dentro del sheet "Más". `TutorialSpotlight` ahora detecta si está en viewport móvil y activa automáticamente `setIsMoreMenuOpen(true)` para desplegar el BottomSheet y resaltar el switch.
-     - **Paso 10 y 11 (`app-views` y `schedule-builder-tour`)**: apuntan a `[data-tour="nav-tabs"]`. La barra de navegación inferior móvil ahora porta `data-tour="nav-tabs"`, permitiendo que el spotlight la identifique y resalte de inmediato.
-     - **Paso 14 (`persistence-tour`)**: apunta a `[data-tour="more-menu-btn"]`. En mobile este data-attribute está asignado al 5to botón de la barra ("Más"), guiando al usuario con exactitud.
-     - **Paso 16 (`finish`)**: apunta a `[data-tour="onboarding-menu-item"]` (Carga rápida). La apertura automática del menú ya está soportada.
-     - Ningún paso del tour queda con objetivo nulo o inaccesible en mobile.
-
-9. **Badge de Avisos en "Más"**:
-   - Si un usuario administrador tiene archivos pendientes de moderación en la biblioteca (`adminPendingCount > 0`), el botón "Más" de la barra inferior exhibe un punto ámbar pulsante (`hasMoreAdminBadge`).
-   - Dentro del sheet "Más", el botón "Panel de Administración" indica la cantidad exacta de archivos pendientes (`{adminPendingCount} pend.`).
-
-10. **Comportamiento en Landscape Corto (844x390) y Muescas (Notch)**:
-    - Se aplicaron clases seguras con `env(safe-area-inset-left, 0px)` y `env(safe-area-inset-right, 0px)` en el contenedor raíz de `App.tsx`, en la cabecera `Navbar.tsx`, en la barra inferior móvil y en el `BottomSheet.tsx`.
-    - En teléfonos rotados con notch lateral o esquinas redondeadas, los botones y contenidos respetan los márgenes seguros para evitar recortes.
-    - Los BottomSheets ajustan su contenido con scroll interno fluido en `dvh`.
+8. **Tutorial y Badges**:
+   - Pasos adaptados para abrir automáticamente el sheet "Más" al resaltar opciones secundarias.
+   - Badge ámbar en el botón "Más" para moderación de archivos de administración.
 
 ---
 
-## 2. Tabla de Correspondencia: Navbar Desktop vs Mobile
+## 2. Fase 2: Decisiones Técnicas e Implementación Detallada
+
+### 2.1 Selector Rápido de Estado Académico (`QuickStatusModal.tsx`)
+- **Diseño Mobile**: Se renderiza como un `BottomSheet` accesible con altura máxima de $90\text{ dvh}$.
+- **Consistencia de Reglas de Negocio**:
+  - Utiliza la función pura del motor de correlatividades `checkEligibility(subject, activeState)`.
+  - Cuando una materia no cumple requisitos, las opciones inválidas (`cursando`, `regularizada`, `aprobada`, `promocionada`) aparecen visualmente deshabilitadas indicando el motivo exacto (ej. *"Falta regularizar: Análisis Matemático I"* o *"Falta aprobar: Algoritmos y Estructuras de Datos"*).
+  - En modo simulación (`isSimulationMode`), todas las opciones permanecen habilitadas para permitir la proyección de escenarios hipotéticos.
+  - El estado `disponible` y `libre` siempre son aplicables.
+- **Interacción para el Pulgar**:
+  - Las opciones de estado tienen altura mínima $\ge 50\text{ px}$ (`min-h-[50px]`).
+  - Al tocar un estado que no requiere calificación (como `cursando`, `regularizada`, `disponible`, `libre`), se aplica inmediatamente y se cierra el panel.
+  - Para `aprobada` o `promocionada`, se despliega un teclado numérico táctil (calificaciones de 1 a 10 con targets $\ge 44\text{ px}$) donde tocar una nota guarda y aplica al instante.
+  - Se incluye un botón explícito de *"Restablecer estado"* para revertir a pendiente.
+- **Compatibilidad de Escritorio**: En pantallas $\ge 768\text{ px}$, se renderiza el modal centrado original sin alteraciones.
+
+### 2.2 Panel de Detalle de Materia (`SubjectDrawer.tsx`)
+- **Diseño Mobile**: En pantallas móviles se transforma en un `BottomSheet` (`maxHeightDvh={92}`) en lugar de ocupar toda la pantalla lateralmente.
+- **Arquitectura de Pestañas Segmentadas**:
+  Para evitar un scroll vertical kilométrico en teléfonos pequeños, el contenido se organizó en 5 pestañas horizontales deslizables (`overflow-x-auto no-scrollbar`) con targets táctiles $\ge 44\text{ px}$:
+  1. **General (`info`)**: Tarjeta de estado actual con botón grande para cambiar estado, estadísticas de carga semanal y modalidad, botón de cuatrimestre planeado ($\ge 48\text{ px}$), acceso a biblioteca y regla especial de aprobación (ej. Proyecto Final).
+  2. **Correlativas (`correlativas`)**: Requisitos para cursar (regularizadas y aprobadas) con indicadores visuales claros y sección de *"Qué desbloquea"*.
+  3. **Mi Cursada (`cursadas`)**: Historial de comisiones cursadas, docentes asignados, botón $\ge 44\text{ px}$ para registrar nueva cursada y botones de edición/eliminación táctiles de $44 \times 44\text{ px}$.
+  4. **Finales (`historial`)**: Registro de exámenes finales y aplazos con fecha, nota y observaciones, junto al listado de intentos y botón de borrado táctil.
+  5. **Material (`biblioteca`)**: Acceso directo al catálogo colaborativo con conteo dinámico de archivos.
+- **Compatibilidad de Escritorio**: En escritorio mantiene intacto el panel deslizable derecho (`w-[440px]`) con flujo continuo de información.
+
+### 2.3 Controles y Navegación del Grafo (`CorrelativeGraph.tsx`)
+- **Targets Táctiles de React Flow**:
+  Se incorporó una regla en `src/index.css` acotada a móviles (`@media (max-width: 767.98px)`) que fuerza a los botones nativos de `.react-flow__controls-button` a medir exactamente $44 \times 44\text{ px}$ con íconos escalados a $18\text{ px}$.
+- **Botón Flotante de Re-centrado (`MobileFitViewButton`)**:
+  Se implementó un botón táctil flotante con `min-h-[44px] min-w-[44px]` en la esquina superior derecha (`z-[var(--z-graph-controls)]`) que invoca `fitView({ padding: 0.2, duration: 400 })`, permitiendo recuperar el encuadre del mapa en cualquier momento con un solo toque del pulgar.
+- **MiniMap**: Oculto en pantallas chicas (`hidden sm:block`) para evitar tapar nodos.
+- **Alternativa Documentada (Vista de Lista Jerárquica)**:
+  Para pantallas ultra-compactas (< 360px) o usuarios con dificultades para interactuar con gestos de zoom/pan en lienzos 2D, se propone como futura alternativa una vista en acordeón colapsable por nivel (1° a 5° año) y cuatrimestre, donde cada materia se presenta como tarjeta con chips de correlativas directas y selector de estado.
+
+### 2.4 Tablero Kanban (`KanbanBoard.tsx`)
+- **1 Columna a la Vez en Mobile**:
+  En pantallas pequeñas, apilar 4 columnas generaba un scroll interminable y difícil de manipular. Se diseñó un control segmentado horizontal con 4 pestañas:
+  - *"Pendientes (X)"*
+  - *"Cursando (Y)"*
+  - *"Regularizadas (Z)"*
+  - *"Aprobadas (W)"*
+  Cada pestaña es un botón táctil de $\ge 44\text{ px}$ con ícono y contador de materias. En mobile se visualiza únicamente la columna seleccionada.
+- **Desactivación de Drag & Drop en Touch**:
+  Se configuró `draggable={!isMobile && !isTouch}` y se ignoran los eventos nativos de drag si el dispositivo es táctil. Esto evita que el gesto de arrastre compita con el scroll vertical natural de la pantalla.
+- **Cambio de Estado Accesible**:
+  Cada tarjeta incluye un botón visible *"Cambiar"* ($\ge 44\text{ px}$) que abre de inmediato el `QuickStatusModal` en formato `BottomSheet`.
+  Tocar el cuerpo de la tarjeta abre el `SubjectDrawer`.
+- **Compatibilidad de Escritorio**: En escritorio se mantiene la grilla de 4 columnas (`grid-cols-4`) con drag & drop HTML5 nativo y soporte para cambio de vista por niveles.
+
+### 2.5 Catálogo Universitario (`PlanSelectorModal.tsx`)
+- En mobile se renderiza como `BottomSheet` con altura de $90\text{ dvh}$.
+- Cada plan de estudios se organiza en una tarjeta vertical donde el botón *"Elegir plan"* mide al menos $48\text{ px}$ de altura (`min-h-[48px]`).
+- En escritorio se conserva el diálogo modal centrado con `z-[var(--z-modal)]`.
+
+### 2.6 Buscador Rápido (`SearchModal.tsx`)
+- En mobile se transforma en una pantalla completa inmersiva (`h-[100dvh] max-h-[100dvh]`) con `z-[var(--z-modal)]`.
+- El campo de búsqueda tiene tamaño de fuente de $16\text{ px}$ (`text-[16px]`), eliminando el zoom automático de iOS Safari.
+- Cuenta con botón visible *"Cancelar"* de $\ge 44\text{ px}$ para cerrar rápidamente.
+- Filtros segmentados táctiles de $\ge 44\text{ px}$ por nivel y estado.
+- Las filas de resultados tienen altura táctil $\ge 48\text{ px}$ con acceso directo al detalle de materia y botón para cambiar estado.
+- En escritorio se mantiene el modal centrado emergente (`Ctrl + K`).
+
+---
+
+## 3. Tabla de Correspondencia: Navbar Desktop vs Mobile
 
 | Elemento actual en Navbar Desktop | Ubicación en Mobile (< 768px) | Detalle de accesibilidad / interacción |
 | :--- | :--- | :--- |
 | **BrandLogo (Stack)** | Barra superior (Top bar) | Visible a la izquierda, adaptado en tamaño. |
-| **Selector de Plan (Píldora Plan 2023 / 2008)** | Barra superior, Sheet "Más" y Sheet "Usuario" | Botón táctil en top bar; accesible también desde las hojas de opciones. |
+| **Selector de Plan (Píldora Plan 2023 / 2008)** | Barra superior, Sheet "Más" y Sheet "Usuario" | Botón táctil en top bar; abre `PlanSelectorModal` en `BottomSheet`. |
 | **Pestaña Mapa (Correlativas)** | Barra inferior (Bottom Nav) — Ítem 1 | Botón táctil con altura $\ge 48\text{ px}$ (`min-h-[52px]`), ícono de $24\text{ px}$ (`w-6 h-6`), texto $\ge 11\text{ px}$. |
 | **Pestaña Horarios (Armador)** | Barra inferior (Bottom Nav) — Ítem 2 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto $\ge 11\text{ px}$. |
 | **Pestaña Biblioteca (Material)** | Barra inferior (Bottom Nav) — Ítem 3 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto $\ge 11\text{ px}$, badge de novedades activo. |
@@ -134,7 +174,7 @@
 | **Pestaña Electivas (Catálogo)** | Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `Sparkles` y subtítulo explicativo. |
 | **Pestaña Estadísticas (Camino Crítico)**| Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `BarChart3` y subtítulo explicativo. |
 | **Panel de Administración (/#admin)** | Sheet "Más" y Sheet "Usuario" (Solo Admins) | Fila destacada con ícono `Shield`, visible **únicamente** si `user?.role === 'admin'`. Muestra badge de pendientes. |
-| **Buscador rápido (Ctrl+K)** | Barra superior (Top bar) | **Botón táctil visible $\ge 44 \times 44\text{ px}$** con ícono de lupa (`Search`) para abrir con un solo toque (Ctrl+K no existe en móvil). |
+| **Buscador rápido (Ctrl+K)** | Barra superior (Top bar) | **Botón táctil visible $\ge 44 \times 44\text{ px}$** con ícono de lupa (`Search`) que abre `SearchModal` en pantalla completa. |
 | **Simulador "¿Y si...?"** | Barra superior y Sheet "Más" | Botón táctil en top bar y switch interactivo ON/OFF dentro del sheet "Más". |
 | **Switch Analista (Seminario 99)** | Sheet "Más" | Switch táctil accesible ON/OFF (conserva selector `data-tour="analista-button"` y se auto-abre en tutorial). |
 | **Efectos de sonido** | Sheet "Más" | Switch táctil accesible ON/OFF con íconos de volumen. |
@@ -152,12 +192,17 @@
 
 ---
 
-## 3. Inventario Completo y Asignación por Fases
+## 4. Inventario Completo y Asignación por Fases
 
 | Componente / Pantalla | Archivo | ¿Existe en el Repo? | Fase de Adaptación |
 | :--- | :--- | :--- | :--- |
 | **Electivas Libres por Año** | `src/components/electives/ElectivesPicker.tsx` | Sí | **Fase 4** (tarjetas de materias, filtros por año, selector de créditos). |
-| **Niveles & Tablero Kanban** | `src/components/kanban/KanbanBoard.tsx` | Sí | **Fase 2** (desactivar drag HTML5 en touch, chips táctiles de cambio de estado). |
+| **Niveles & Tablero Kanban** | `src/components/kanban/KanbanBoard.tsx` | Sí | **Fase 2** (COMPLETADA: 1 columna a la vez en mobile, drag & drop desactivado en touch, botón de cambiar estado $\ge 44\text{ px}$). |
+| **Selector Rápido de Estado** | `src/components/common/QuickStatusModal.tsx` | Sí | **Fase 2** (COMPLETADA: BottomSheet táctil, validación de correlativas, teclado de notas 1-10). |
+| **Detalle de Materia** | `src/components/graph/SubjectDrawer.tsx` | Sí | **Fase 2** (COMPLETADA: BottomSheet con 5 pestañas horizontales segmentadas y targets $\ge 44\text{ px}$). |
+| **Controles de Grafo** | `src/components/graph/CorrelativeGraph.tsx` | Sí | **Fase 2** (COMPLETADA: controles $\ge 44\text{ px}$ y botón flotante de re-centrado). |
+| **Selector de Plan** | `src/components/common/PlanSelectorModal.tsx` | Sí | **Fase 2** (COMPLETADA: BottomSheet con botones $\ge 48\text{ px}$). |
+| **Buscador Rápido** | `src/components/common/SearchModal.tsx` | Sí | **Fase 2** (COMPLETADA: pantalla completa, input de 16px, cancelar visible). |
 | **Configuración de Usuario & Preferencias** | `src/components/common/UserMenu.tsx` | Sí | **Fase 1** (implementada en BottomSheet) y ajustes en **Fase 4**. |
 | **Historial de Cursadas y Docentes cursados** | `EnrollmentModal.tsx` & `SubjectDrawer.tsx` | Sí | **Fase 2** (pestaña cursadas en drawer) y **Fase 4** (modal de cursada). |
 | **Reseñas de Comisiones y Docentes** | `ReviewFormModal.tsx` & `ScheduleLeftPanel.tsx` | Sí | **Fase 3** (insignias en comisiones) y **Fase 4** (formulario de reseña táctil). |
@@ -175,22 +220,16 @@
 
 ---
 
-## 4. Notas y Directivas para Fases Futuras
+## 5. Notas y Directivas para Fases Futuras
 
-1. **Biblioteca (Fase 4)**:
-   - El input nativo de archivos debe llevar:
-     `accept="application/pdf,image/jpeg,image/png,image/webp"` y **SIN el atributo `capture`**, permitiendo al estudiante elegir con libertad si subir desde la fototeca/galería, selector de archivos del dispositivo o cámara en vivo.
-   - *Aclaración sobre "permisos"*: Se refiere exclusivamente al consentimiento explícito de Términos y Condiciones mediante el checkbox de aceptación legal y al acceso nativo del navegador a archivos/cámara. **No altera roles, cuotas ni reglas del backend Express**.
-2. **Armador de Horarios (Fase 3)**:
+1. **Armador de Horarios (Fase 3)**:
    - Al separar "Grilla" y "Comisiones" en pestañas para mobile, la selección de cualquier comisión debe reflejar de inmediato en pantalla si presenta superposiciones mediante una alerta visual persistente o mini-preview.
    - Los choques horarios se mostrarán siempre mediante la combinación de **color + ícono de advertencia + texto explicativo** (no solo color, para accesibilidad).
    - El layout de escritorio y el archivo `test/scheduleLayout.test.ts` deben mantenerse intactos y en verde.
-3. **Planificador de Cuatrimestre (Fase 4)**:
+2. **Planificador de Cuatrimestre (Fase 4)**:
    - La barra flotante inferior que resume las materias elegidas y el botón de acción debe posicionarse por encima de la barra de navegación móvil:
      `bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + 0.75rem); z-index: var(--z-planner-bar);`.
-4. **Kanban (Fase 2)**:
-   - En desktop se preserva el drag & drop HTML5 nativo al 100%.
-   - En dispositivos táctiles (`(hover: none) and (pointer: coarse)` o `isTouch`), cada tarjeta ofrecerá un selector rápido o tap directo para abrir el `QuickStatusModal` en formato BottomSheet.
-5. **Mapa de Correlativas (Fase 2)**:
-   - El `MiniMap` se oculta en pantallas móviles para no tapar los nodos.
-   - Se aplicará `fitView` con padding generoso y un botón flotante accesible para re-centrar el lienzo en el año cursado actual.
+3. **Biblioteca (Fase 4)**:
+   - El input nativo de archivos debe llevar:
+     `accept="application/pdf,image/jpeg,image/png,image/webp"` y **SIN el atributo `capture`**, permitiendo al estudiante elegir con libertad si subir desde la fototeca/galería, selector de archivos del dispositivo o cámara en vivo.
+   - El consentimiento de Términos y Condiciones se realiza mediante el checkbox legal del formulario, sin modificar roles ni APIs del backend.

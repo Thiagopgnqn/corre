@@ -5,6 +5,7 @@ import {
   Controls,
   Background,
   BackgroundVariant,
+  useReactFlow,
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -17,8 +18,10 @@ import {
   Sparkles,
   Users,
   X,
+  Maximize2,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
@@ -26,6 +29,26 @@ import { SubjectNode } from './SubjectNode';
 import { SubjectDrawer } from './SubjectDrawer';
 import type { SubjectNodeData } from './SubjectNode';
 import type { Subject, SubjectStatus } from '../../types/career';
+
+const MobileFitViewButton: React.FC = () => {
+  const { fitView } = useReactFlow();
+  const isMobile = useIsMobile();
+  if (!isMobile) return null;
+
+  return (
+    <div className="absolute top-3 right-3 z-[var(--z-graph-controls)] sm:hidden">
+      <button
+        type="button"
+        onClick={() => fitView({ padding: 0.2, duration: 400 })}
+        className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-700/80 text-white text-xs font-semibold shadow-lg backdrop-blur-md flex items-center gap-1.5 active:scale-95 cursor-pointer"
+        aria-label="Re-centrar mapa"
+      >
+        <Maximize2 className="w-4 h-4 text-indigo-400 shrink-0" />
+        <span>Re-centrar</span>
+      </button>
+    </div>
+  );
+};
 
 const nodeTypes = {
   subjectNode: SubjectNode,
@@ -383,6 +406,7 @@ export const CorrelativeGraph: React.FC = () => {
         defaultEdgeOptions={{ type: 'smoothstep' }}
         className="bg-slate-950"
       >
+        <MobileFitViewButton />
         <Background
           variant={BackgroundVariant.Dots}
           gap={24}

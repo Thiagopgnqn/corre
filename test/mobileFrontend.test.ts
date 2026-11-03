@@ -131,3 +131,114 @@ describe('Fase 1: Infraestructura Mobile, BottomSheet, Navegación y Prevención
     assert.match(cssContent, /prefers-reduced-motion:\s*reduce/, 'Debe contemplar prefers-reduced-motion');
   });
 });
+
+describe('Fase 2: Interacciones del Grafo, Modales de Materia y Tablero Kanban en Mobile', () => {
+  it('1. QuickStatusModal se despliega como BottomSheet en mobile con validación de correlativas y targets >= 50px', () => {
+    const filePath = path.join(rootDir, 'src/components/common/QuickStatusModal.tsx');
+    const content = fs.readFileSync(filePath, 'utf8');
+
+    // Usa useIsMobile y BottomSheet
+    assert.match(content, /useIsMobile/, 'Debe importar useIsMobile');
+    assert.match(content, /BottomSheet/, 'Debe importar BottomSheet');
+    assert.match(content, /if\s*\(isMobile\)/, 'Debe renderizar BottomSheet en mobile');
+
+    // Validación de correlatividades sin duplicar reglas de negocio
+    assert.match(content, /checkEligibility/, 'Debe validar elegibilidad con checkEligibility');
+    assert.match(content, /isStatusAllowed/, 'Debe verificar permiso para cada estado');
+    assert.match(content, /Falta regularizar:/, 'Debe indicar materias faltantes para regularizar');
+    assert.match(content, /Falta aprobar:/, 'Debe indicar materias faltantes para aprobar');
+    assert.match(content, /isSimulationMode/, 'No debe bloquear estados en modo simulación');
+
+    // Targets táctiles >= 50px para pulgar y selector numérico
+    assert.match(content, /min-h-\[50px\]/, 'Las opciones de estado en mobile deben medir al menos 50px');
+    assert.match(content, /min-h-\[44px\]/, 'Los botones numéricos de nota deben medir al menos 44px');
+    assert.match(content, /Restablecer estado/, 'Debe contar con acción explícita para restablecer');
+  });
+
+  it('2. SubjectDrawer se transforma en BottomSheet en mobile con pestañas horizontales y targets >= 44px', () => {
+    const filePath = path.join(rootDir, 'src/components/graph/SubjectDrawer.tsx');
+    const content = fs.readFileSync(filePath, 'utf8');
+
+    // Render mobile vs desktop
+    assert.match(content, /if\s*\(isMobile\)/, 'Debe diferenciar render mobile');
+    assert.match(content, /maxHeightDvh=\{92\}/, 'Debe configurar maxHeightDvh={92} en BottomSheet');
+    assert.match(content, /w-full\s*sm:w-\[440px\]/, 'En desktop debe preservar panel lateral de 440px');
+
+    // Pestañas segmentadas horizontales
+    assert.match(content, /id:\s*'info'/, 'Debe tener pestaña General');
+    assert.match(content, /id:\s*'correlativas'/, 'Debe tener pestaña Correlativas');
+    assert.match(content, /id:\s*'cursadas'/, 'Debe tener pestaña Mi Cursada');
+    assert.match(content, /id:\s*'historial'/, 'Debe tener pestaña Finales');
+    assert.match(content, /id:\s*'biblioteca'/, 'Debe tener pestaña Material');
+
+    // Targets táctiles >= 44px
+    assert.match(content, /min-h-\[44px\]/, 'Las pestañas y botones deben tener target mínimo >= 44px');
+    assert.match(content, /min-w-\[44px\]/, 'Los botones de acción en filas deben tener target mínimo >= 44px');
+
+    // Z-Index centralizado
+    assert.match(content, /z-\[var\(--z-backdrop\)\]/, 'Backdrop debe usar escala centralizada');
+    assert.match(content, /z-\[var\(--z-sheet\)\]/, 'Panel drawer debe usar escala centralizada');
+  });
+
+  it('3. Controles del grafo y botón flotante de re-centrar (fitView) en mobile', () => {
+    const graphPath = path.join(rootDir, 'src/components/graph/CorrelativeGraph.tsx');
+    const graphContent = fs.readFileSync(graphPath, 'utf8');
+
+    // Importa useReactFlow y useIsMobile
+    assert.match(graphContent, /useReactFlow/, 'Debe importar useReactFlow de @xyflow/react');
+    assert.match(graphContent, /useIsMobile/, 'Debe importar useIsMobile');
+
+    // Botón flotante para re-centrar mapa
+    assert.match(graphContent, /MobileFitViewButton/, 'Debe definir componente MobileFitViewButton');
+    assert.match(graphContent, /fitView\(\{\s*padding:\s*0\.2,\s*duration:\s*400\s*\}\)/, 'Debe re-centrar mapa con fitView animado');
+    assert.match(graphContent, /aria-label="Re-centrar mapa"/, 'Debe incluir aria-label en botón de re-centrar');
+    assert.match(graphContent, /min-h-\[44px\] min-w-\[44px\]/, 'Botón de re-centrar debe medir al menos 44x44px');
+
+    // MiniMap oculto en mobile
+    assert.match(graphContent, /hidden sm:block/, 'MiniMap debe permanecer oculto en pantallas chicas');
+
+    // Regla en index.css para controles de React Flow >= 44x44px en mobile
+    const cssPath = path.join(rootDir, 'src/index.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+    assert.match(cssContent, /@media\s*\(max-width:\s*767\.98px\)\s*\{[\s\S]*\.react-flow__controls-button\s*\{[\s\S]*width:\s*44px\s*!important;[\s\S]*height:\s*44px\s*!important;/, 'Botones de control del grafo deben medir 44x44px en mobile');
+  });
+
+  it('4. Tablero Kanban en mobile muestra 1 columna a la vez y desactiva HTML5 drag & drop en touch', () => {
+    const kanbanPath = path.join(rootDir, 'src/components/kanban/KanbanBoard.tsx');
+    const content = fs.readFileSync(kanbanPath, 'utf8');
+
+    // Hooks de detección
+    assert.match(content, /useIsMobile/, 'Debe importar useIsMobile');
+    assert.match(content, /useDeviceCapabilities/, 'Debe importar useDeviceCapabilities');
+
+    // Segmented control con 1 columna a la vez en mobile
+    assert.match(content, /mobileColumnTab/, 'Debe gestionar columna activa en mobile');
+    assert.match(content, /!isMobile\s*\|\|\s*mobileColumnTab === col\.id/, 'Debe filtrar para mostrar 1 sola columna a la vez en mobile y 4 en desktop');
+
+    // Desactiva drag and drop en mobile y touch
+    assert.match(content, /draggable=\{!isMobile && !isTouch\}/, 'Debe desactivar draggable en dispositivos móviles y táctiles');
+    assert.match(content, /if\s*\(isMobile\s*\|\|\s*isTouch\)\s*return;/, 'Debe ignorar eventos de arrastre en touch');
+
+    // Botón visible de cambiar estado >= 44px
+    assert.match(content, /min-h-\[44px\][\s\S]{0,350}aria-label=\{`Cambiar estado de/, 'Debe tener botón visible para cambiar estado >= 44px accesible');
+  });
+
+  it('5. PlanSelectorModal y SearchModal adaptados a mobile con targets >= 48px e inputs de 16px', () => {
+    // PlanSelectorModal
+    const planPath = path.join(rootDir, 'src/components/common/PlanSelectorModal.tsx');
+    const planContent = fs.readFileSync(planPath, 'utf8');
+    assert.match(planContent, /if\s*\(isMobile\)/, 'PlanSelectorModal debe renderizar BottomSheet en mobile');
+    assert.match(planContent, /min-h-\[48px\]/, 'Botón de elección de plan en mobile debe medir al menos 48px');
+    assert.match(planContent, /z-\[var\(--z-modal\)\]/, 'Modal en desktop debe usar variable centralizada');
+
+    // SearchModal
+    const searchPath = path.join(rootDir, 'src/components/common/SearchModal.tsx');
+    const searchContent = fs.readFileSync(searchPath, 'utf8');
+    assert.match(searchContent, /if\s*\(isMobile\)/, 'SearchModal debe renderizar vista a pantalla completa en mobile');
+    assert.match(searchContent, /h-\[100dvh\] max-h-\[100dvh\]/, 'SearchModal debe usar h-[100dvh] en mobile');
+    assert.match(searchContent, /text-\[16px\]/, 'Input de búsqueda en mobile debe tener font-size de al menos 16px para evitar auto-zoom');
+    assert.match(searchContent, /Cancelar/, 'Debe tener botón visible de Cancelar');
+    assert.match(searchContent, /min-h-\[44px\]/, 'Los filtros y botones de acción deben medir al menos 44px');
+    assert.match(searchContent, /z-\[var\(--z-modal\)\]/, 'Debe usar variable centralizada de z-index');
+  });
+});

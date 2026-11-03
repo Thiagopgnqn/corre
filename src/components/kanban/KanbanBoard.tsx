@@ -15,6 +15,7 @@ import { useCareer } from '../../context/CareerContext';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { getSubjectStatus } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
+import { useIsMobile, useDeviceCapabilities } from '../../hooks/useIsMobile';
 import type { SubjectStatus } from '../../types/career';
 
 export const KanbanBoard: React.FC = () => {
@@ -30,9 +31,12 @@ export const KanbanBoard: React.FC = () => {
     getSubjectEnrollments,
   } = useCareer();
 
+  const isMobile = useIsMobile();
+  const { isTouch } = useDeviceCapabilities();
+
   const [mode, setMode] = useState<'kanban' | 'levels'>('kanban');
   const [levelFilter, setLevelFilter] = useState<number | 'all'>('all');
-  const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus | 'all'>('all');
+  const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus>('cursando');
   const [draggedSubjectId, setDraggedSubjectId] = useState<number | null>(null);
 
   const subjects = (settings.includeAnalistaTrack
@@ -46,6 +50,7 @@ export const KanbanBoard: React.FC = () => {
   const columns: Array<{
     id: SubjectStatus;
     title: string;
+    shortTitle: string;
     icon: React.ComponentType<{ className?: string }>;
     accentColor: string;
     borderColor: string;
@@ -54,6 +59,7 @@ export const KanbanBoard: React.FC = () => {
     {
       id: 'disponible',
       title: 'Pendiente / Disponible',
+      shortTitle: 'Pendientes',
       icon: Lock,
       accentColor: 'text-slate-400',
       borderColor: 'border-slate-800',
@@ -62,6 +68,7 @@ export const KanbanBoard: React.FC = () => {
     {
       id: 'cursando',
       title: 'Cursando',
+      shortTitle: 'Cursando',
       icon: PlayCircle,
       accentColor: 'text-cyan-400',
       borderColor: 'border-cyan-500/30',
@@ -70,6 +77,7 @@ export const KanbanBoard: React.FC = () => {
     {
       id: 'regularizada',
       title: 'Regularizada (Final pendiente)',
+      shortTitle: 'Regularizadas',
       icon: Clock,
       accentColor: 'text-amber-400',
       borderColor: 'border-amber-500/30',
@@ -78,6 +86,7 @@ export const KanbanBoard: React.FC = () => {
     {
       id: 'aprobada',
       title: 'Aprobada / Promocionada',
+      shortTitle: 'Aprobadas',
       icon: CheckCircle2,
       accentColor: 'text-emerald-400',
       borderColor: 'border-emerald-500/30',
@@ -86,15 +95,18 @@ export const KanbanBoard: React.FC = () => {
   ];
 
   const handleDragStart = (e: React.DragEvent, id: number) => {
+    if (isMobile || isTouch) return;
     e.dataTransfer.setData('text/plain', String(id));
     setDraggedSubjectId(id);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (isMobile || isTouch) return;
     e.preventDefault();
   };
 
   const handleDrop = (e: React.DragEvent, targetColStatus: SubjectStatus) => {
+    if (isMobile || isTouch) return;
     e.preventDefault();
     const idStr = e.dataTransfer.getData('text/plain');
     const id = Number(idStr) || draggedSubjectId;
@@ -114,7 +126,7 @@ export const KanbanBoard: React.FC = () => {
       {/* View Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-slate-900/60 border border-slate-800/80 p-3 sm:p-4 rounded-2xl backdrop-blur-md">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
             <KanbanIcon className="w-5 h-5 text-indigo-400" />
             <span>Tablero de Seguimiento</span>
           </h2>
@@ -128,7 +140,7 @@ export const KanbanBoard: React.FC = () => {
           <div className="grid grid-cols-2 w-full sm:w-auto bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
             <button
               onClick={() => setMode('kanban')}
-              className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-all text-center ${
+              className={`min-h-[44px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all text-center cursor-pointer ${
                 mode === 'kanban'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
@@ -139,7 +151,7 @@ export const KanbanBoard: React.FC = () => {
             </button>
             <button
               onClick={() => setMode('levels')}
-              className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg font-semibold transition-all text-center ${
+              className={`min-h-[44px] sm:min-h-0 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition-all text-center cursor-pointer ${
                 mode === 'levels'
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'text-slate-400 hover:text-white'
@@ -157,7 +169,7 @@ export const KanbanBoard: React.FC = () => {
               <button
                 key={lvl}
                 onClick={() => setLevelFilter(lvl)}
-                className={`px-2.5 py-1 rounded-lg transition-colors font-medium shrink-0 ${
+                className={`min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-xl transition-colors font-semibold shrink-0 cursor-pointer ${
                   levelFilter === lvl
                     ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
                     : 'bg-slate-800 text-slate-400 hover:text-slate-200'
@@ -189,7 +201,7 @@ export const KanbanBoard: React.FC = () => {
                   targetStatus: kanbanEnrollmentHint.status,
                 })
               }
-              className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-sm transition-colors cursor-pointer"
+              className="min-h-[44px] px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-sm transition-colors cursor-pointer flex items-center"
             >
               Indicar comisión
             </button>
@@ -197,9 +209,9 @@ export const KanbanBoard: React.FC = () => {
               type="button"
               onClick={dismissKanbanEnrollmentHint}
               aria-label="Cerrar aviso"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -208,36 +220,42 @@ export const KanbanBoard: React.FC = () => {
       {/* Mode 1: Kanban Board */}
       {mode === 'kanban' && (
         <div className="space-y-4">
-          {/* Mobile column selector tabs */}
-          <div className="flex md:hidden items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
-            <button
-              onClick={() => setMobileColumnTab('all')}
-              className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
-                mobileColumnTab === 'all'
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-slate-900 text-slate-400 border border-slate-800'
-              }`}
-            >
-              Todas las columnas
-            </button>
-            {columns.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => setMobileColumnTab(c.id)}
-                className={`px-3 py-1.5 rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
-                  mobileColumnTab === c.id
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'bg-slate-900 text-slate-400 border border-slate-800'
-                }`}
-              >
-                {c.title.split(' ')[0]}
-              </button>
-            ))}
+          {/* Mobile column selector: Segmented horizontal control (1 columna a la vez para interacción con pulgar) */}
+          <div className="flex md:hidden items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs -mx-1 px-1">
+            {columns.map((c) => {
+              const ColIcon = c.icon;
+              const colSubjects = subjects.filter((s) => c.filterFn(getSubjectStatus(s, activeState)));
+              const isSelected = mobileColumnTab === c.id;
+
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setMobileColumnTab(c.id)}
+                  className={`min-h-[44px] px-3.5 py-2 rounded-xl font-bold whitespace-nowrap shrink-0 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  <ColIcon className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-white' : c.accentColor}`} />
+                  <span>{c.shortTitle}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {colSubjects.length}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
+          {/* Column Grid: on mobile renders 1 column at a time; on desktop renders 4 columns side by side */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
             {columns
-              .filter((col) => mobileColumnTab === 'all' || mobileColumnTab === col.id)
+              .filter((col) => !isMobile || mobileColumnTab === col.id)
               .map((col) => {
                 const ColIcon = col.icon;
                 const colSubjects = subjects.filter((s) => {
@@ -269,7 +287,7 @@ export const KanbanBoard: React.FC = () => {
                     <div className="p-2.5 space-y-2.5 flex-1 overflow-y-auto max-h-[75vh]">
                       {colSubjects.length === 0 ? (
                         <div className="h-32 border-2 border-dashed border-slate-800/80 rounded-xl flex items-center justify-center text-xs text-slate-500">
-                          Arrastrá materias aquí
+                          {isMobile ? 'No hay materias en este estado' : 'Arrastrá materias aquí'}
                         </div>
                       ) : (
                         colSubjects.map((subject) => {
@@ -283,10 +301,12 @@ export const KanbanBoard: React.FC = () => {
                           return (
                             <div
                               key={subject.id}
-                              draggable
+                              draggable={!isMobile && !isTouch}
                               onDragStart={(e) => handleDragStart(e, subject.id)}
                               onClick={() => setSelectedSubjectId(subject.id)}
-                              className={`p-3 rounded-xl border bg-slate-900/90 hover:bg-slate-800/90 transition-all cursor-grab active:cursor-grabbing group shadow-sm hover:shadow-lg hover:border-slate-600 ${
+                              className={`p-3.5 rounded-xl border bg-slate-900/90 hover:bg-slate-800/90 transition-all group shadow-sm hover:shadow-lg hover:border-slate-600 cursor-pointer ${
+                                !isMobile && !isTouch ? 'cursor-grab active:cursor-grabbing' : ''
+                              } ${
                                 status === 'disponible'
                                   ? 'border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.15)]'
                                   : status === 'bloqueada'
@@ -316,9 +336,9 @@ export const KanbanBoard: React.FC = () => {
                                         targetStatus: status,
                                       })
                                     }
-                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/25 text-indigo-300 flex items-center gap-1 transition-colors cursor-pointer"
+                                    className="min-h-[44px] sm:min-h-0 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/25 text-indigo-300 flex items-center gap-1.5 transition-colors cursor-pointer"
                                   >
-                                    <Users className="w-2.5 h-2.5" />
+                                    <Users className="w-3 h-3" />
                                     <span>Indicar comisión</span>
                                   </button>
                                 </div>
@@ -326,18 +346,21 @@ export const KanbanBoard: React.FC = () => {
 
                               <div className="flex flex-wrap items-center justify-between mt-2.5 pt-2 border-t border-slate-800/80 text-[11px] gap-2">
                                 <span className="text-slate-400 flex items-center gap-1 shrink-0">
-                                  <BookOpen className="w-3 h-3 text-slate-500 shrink-0" />
+                                  <BookOpen className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                                   <span className="whitespace-nowrap">{subject.weeklyHours} hs</span>
                                 </span>
 
-                                <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
                                   <StatusBadge status={status} grade={grade} size="sm" />
                                   <button
+                                    type="button"
                                     onClick={() => setStatusModalSubjectId(subject.id)}
-                                    className="p-1 rounded bg-slate-800 hover:bg-indigo-600 text-slate-400 hover:text-white transition-colors shrink-0"
+                                    className="min-h-[44px] px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700/60 transition-colors flex items-center gap-1 shrink-0 cursor-pointer active:scale-95 text-xs font-semibold"
                                     title="Cambiar estado"
+                                    aria-label={`Cambiar estado de ${subject.name}`}
                                   >
-                                    <Sparkles className="w-3 h-3" />
+                                    <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                                    <span>Cambiar</span>
                                   </button>
                                 </div>
                               </div>
@@ -421,8 +444,9 @@ export const KanbanBoard: React.FC = () => {
                         <div className="flex flex-wrap items-center justify-between pt-2 border-t border-slate-800/60 gap-2" onClick={(e) => e.stopPropagation()}>
                           <StatusBadge status={status} grade={grade} size="sm" />
                           <button
+                            type="button"
                             onClick={() => setStatusModalSubjectId(subject.id)}
-                            className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white transition-colors shrink-0"
+                            className="min-h-[44px] px-3.5 py-1.5 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700/60 transition-colors shrink-0 cursor-pointer active:scale-95"
                           >
                             Modificar
                           </button>
