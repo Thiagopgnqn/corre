@@ -2,6 +2,7 @@ import type { SubjectStatus } from './career';
 
 export type EnrollmentSource = 'manual' | 'schedule_builder';
 export type EnrollmentTerm = '1C' | '2C' | 'A';
+export type SubjectEnrollmentStatus = 'cursando' | 'regularizada' | 'promocionada' | 'libre';
 
 export interface EnrollmentProfessorBrief {
   professorId: string;
@@ -20,6 +21,7 @@ export interface SubjectEnrollment {
   turno: string | null;
   academicYear: number | null;
   term: EnrollmentTerm | null;
+  status?: SubjectEnrollmentStatus | null;
   source: EnrollmentSource;
   professors: EnrollmentProfessorBrief[];
   createdAt: string;
@@ -77,6 +79,7 @@ export interface UpsertEnrollmentInput {
   term?: EnrollmentTerm | null;
   professorIds?: string[];
   professorNames?: string[];
+  status?: SubjectEnrollmentStatus | null;
   source?: EnrollmentSource;
 }
 

@@ -14,6 +14,8 @@ import {
   importData,
   exportData,
   deleteAccount,
+  saveExamAttempt,
+  deleteExamAttempt,
 } from './userState.controller.js';
 
 const router = Router();
@@ -36,6 +38,8 @@ router.delete('/schedule/proposals/:id', csrfProtection, deleteScheduleProposal)
 router.put('/schedule/selections', csrfProtection, saveScheduleSelections);
 router.post('/import', csrfProtection, importData);
 router.delete('/me', csrfProtection, deleteAccount);
+router.post('/exam-attempts', csrfProtection, saveExamAttempt);
+router.delete('/exam-attempts/:id', csrfProtection, deleteExamAttempt);
 
 export default router;
 

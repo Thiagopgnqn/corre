@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lock, Sparkles, Clock, CheckCircle2, Award, PlayCircle } from 'lucide-react';
+import { Lock, Sparkles, Clock, CheckCircle2, Award, PlayCircle, AlertCircle } from 'lucide-react';
 import type { SubjectStatus } from '../../types/career';
 
 interface StatusBadgeProps {
@@ -67,6 +67,14 @@ export const STATUS_CONFIG: Record<
     bgColor: 'bg-purple-950/70',
     borderColor: 'border-purple-500/50',
     glowColor: 'shadow-[0_0_14px_rgba(168,85,247,0.4)]',
+  },
+  libre: {
+    label: 'Libre',
+    icon: AlertCircle,
+    textColor: 'text-rose-400',
+    bgColor: 'bg-rose-950/70',
+    borderColor: 'border-rose-500/50',
+    glowColor: 'shadow-[0_0_10px_rgba(244,63,94,0.25)]',
   },
 };
 

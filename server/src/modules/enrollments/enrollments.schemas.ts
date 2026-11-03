@@ -32,6 +32,10 @@ export const upsertEnrollmentBodySchema = z.object({
     .optional(),
   professorNames: z.array(z.string().trim().max(150)).max(15).optional(),
   source: z.enum(['manual', 'schedule_builder']).optional(),
+  status: z
+    .enum(['cursando', 'regularizada', 'promocionada', 'libre'])
+    .nullable()
+    .optional(),
 });
 
 export const dismissRecommendationBodySchema = z.object({

@@ -722,7 +722,10 @@ export class ReviewsService {
       const existingReview = ownByPair.get(pairKey);
       const enrollInfo = enrolledMap.get(pairKey);
 
-      if (allowedSet.has(currentStatus)) {
+      const isEnrolledWithProf = Boolean(enrollInfo);
+      const isAllowedStatus = allowedSet.has(currentStatus);
+
+      if (isEnrolledWithProf || isAllowedStatus) {
         const recommended = Boolean(enrollInfo);
         const dismissed = dismissedSet.has(pairKey);
         const seen = seenSet.has(pairKey);
@@ -759,7 +762,7 @@ export class ReviewsService {
           subjectLevel: pair.subjectLevel,
           userSubjectStatus: currentStatus,
           recommended: false,
-          blockedReason: `Debés tener "${pair.subjectName}" regularizada, aprobada o promocionada para reseñar a este docente (estado actual: ${statusHuman}).`,
+          blockedReason: `Debés haber cursado "${pair.subjectName}" con este docente o tenerla en estado ${ALLOWED_REVIEW_SUBJECT_STATUSES.join(', ')} (estado actual: ${statusHuman}).`,
         });
       }
     }
@@ -943,15 +946,20 @@ export class ReviewsService {
       );
     }
 
-    // 3. Validar elegibilidad (b): progreso académico del usuario en esa materia
+    // 3. Validar elegibilidad (b): progreso académico del usuario o cursada con el docente
     const progressMap = await this.store.getUserSubjectProgressMap(params.userId);
     const userProg = progressMap.get(subject.id);
     const currentStatus = userProg?.status || 'pendiente';
     const allowedSet = new Set<string>(ALLOWED_REVIEW_SUBJECT_STATUSES);
 
-    if (!allowedSet.has(currentStatus)) {
+    const userEnrollments = await this.store.listUserEnrollments(params.userId);
+    const hasEnrollmentWithProf = userEnrollments.some(
+      (e) => e.subjectId === subject.id && e.professors.some((p) => p.professorId === profData.professor.id)
+    );
+
+    if (!hasEnrollmentWithProf && !allowedSet.has(currentStatus)) {
       throw appError(
-        `Solo podés reseñar profesores de materias que tengas en estado ${ALLOWED_REVIEW_SUBJECT_STATUSES.join(
+        `Solo podés reseñar profesores de materias que hayas cursado con ellos o tengas en estado ${ALLOWED_REVIEW_SUBJECT_STATUSES.join(
           ', '
         )} (tu estado actual en "${subject.name}" es "${currentStatus}").`,
         403,

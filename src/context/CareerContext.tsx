@@ -6,6 +6,7 @@ import type {
   CriticalPathResult,
   Subject,
   AssignedElectivesByYear,
+  ExamAttempt,
 } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
 import type {
@@ -66,6 +67,8 @@ import {
   saveScheduleTerm,
   loadEnrollments,
   saveEnrollments,
+  loadExamAttempts,
+  saveExamAttempts,
 } from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { userStateApi } from '../api/userState.api';
@@ -210,6 +213,16 @@ interface CareerContextType {
   resetAll: () => void;
   loadSample: () => void;
 
+
+  // Exámenes Finales y Aplazos
+  examAttempts: ExamAttempt[];
+  getSubjectExamAttempts: (subjectCode: number) => ExamAttempt[];
+  saveExamAttempt: (
+    subjectCode: number,
+    attempt: { date: string; grade: number; notes?: string }
+  ) => Promise<ExamAttempt>;
+  deleteExamAttempt: (id: string) => Promise<void>;
+
   // Full-Stack & Sync features
   syncStatus: SyncStatus;
   showMigrationModal: boolean;
@@ -244,6 +257,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Enrollments & Recommendations state
   const [enrollments, setEnrollments] = useState<SubjectEnrollment[]>(() => loadEnrollments());
+  const [examAttempts, setExamAttempts] = useState<ExamAttempt[]>(() => loadExamAttempts());
   const [pendingCommissionPrompt, setPendingCommissionPrompt] =
     useState<PendingCommissionPrompt | null>(null);
   const [kanbanEnrollmentHint, setKanbanEnrollmentHint] =
@@ -318,6 +332,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
         if (Array.isArray(d.enrollments)) {
           setEnrollments(d.enrollments);
+        }
+        if (Array.isArray(d.examAttempts)) {
+          setExamAttempts(d.examAttempts);
         }
 
         // Si la cuenta en la nube es virgen pero el navegador tiene datos locales
@@ -413,6 +430,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     saveEnrollments(enrollments);
   }, [enrollments]);
 
+  useEffect(() => {
+    saveExamAttempts(examAttempts);
+  }, [examAttempts]);
+
   const isSimulationMode = simulationState !== null;
   const activeState = simulationState ?? userState;
 
@@ -488,6 +509,73 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
     },
     [refreshReviewableSummary]
+  );
+
+
+  const getSubjectExamAttempts = useCallback(
+    (subjectCode: number): ExamAttempt[] => {
+      return examAttempts.filter((att) => att.subjectCode === subjectCode);
+    },
+    [examAttempts]
+  );
+
+  const saveExamAttempt = useCallback(
+    async (
+      subjectCode: number,
+      attempt: { date: string; grade: number; notes?: string }
+    ): Promise<ExamAttempt> => {
+      const isPassed = attempt.grade >= settings.minPassingGrade;
+      if (isAuthenticated) {
+        setSyncStatus('saving');
+        try {
+          const res = await userStateApi.saveExamAttempt({
+            subjectIdOrCode: subjectCode,
+            date: attempt.date,
+            grade: attempt.grade,
+            notes: attempt.notes,
+          });
+          const saved = res.data;
+          setExamAttempts((prev) => [saved, ...prev.filter((a) => a.id !== saved.id)]);
+          setSyncStatus('saved');
+          return saved;
+        } catch (err) {
+          setSyncStatus('error');
+          throw err;
+        }
+      } else {
+        const localAttempt: ExamAttempt = {
+          id: 'local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          subjectCode,
+          date: attempt.date,
+          grade: attempt.grade,
+          isPassed,
+          notes: attempt.notes,
+          createdAt: new Date().toISOString(),
+        };
+        setExamAttempts((prev) => [localAttempt, ...prev]);
+        return localAttempt;
+      }
+    },
+    [isAuthenticated, settings.minPassingGrade]
+  );
+
+  const deleteExamAttempt = useCallback(
+    async (id: string): Promise<void> => {
+      if (isAuthenticated) {
+        setSyncStatus('saving');
+        try {
+          await userStateApi.deleteExamAttempt(id);
+          setExamAttempts((prev) => prev.filter((a) => a.id !== id));
+          setSyncStatus('saved');
+        } catch (err) {
+          setSyncStatus('error');
+          throw err;
+        }
+      } else {
+        setExamAttempts((prev) => prev.filter((a) => a.id !== id));
+      }
+    },
+    [isAuthenticated]
   );
 
   const dismissReviewRecommendation = useCallback(
@@ -919,6 +1007,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     let takingCount = 0;
     let blockedCount = 0;
     let availableCount = 0;
+    let libreCount = 0;
 
     let totalWeeklyHours = 0;
     let approvedWeeklyHours = 0;
@@ -948,6 +1037,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         takingCount++;
       } else if (status === 'disponible') {
         availableCount++;
+      } else if (status === 'libre') {
+        libreCount++;
+        blockedCount++;
       } else {
         blockedCount++;
       }
@@ -994,9 +1086,25 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ? Math.round((approvedWeeklyHours / totalWeeklyHours) * 100)
       : 0;
 
-    const averageGrade = gradesToAverage.length > 0
+
+    const failGrades = examAttempts
+      .filter((att) => !att.isPassed || att.grade < settings.minPassingGrade)
+      .map((att) => att.grade);
+
+    const allGradesWithFails = [...gradesToAverage, ...failGrades];
+
+    const averageGradeWithoutFails = gradesToAverage.length > 0
       ? Number((gradesToAverage.reduce((a, b) => a + b, 0) / gradesToAverage.length).toFixed(2))
       : 0;
+
+    const averageGradeWithFails = allGradesWithFails.length > 0
+      ? Number((allGradesWithFails.reduce((a, b) => a + b, 0) / allGradesWithFails.length).toFixed(2))
+      : averageGradeWithoutFails;
+
+    const averageGrade = settings.includeFailsInGPA
+      ? averageGradeWithFails
+      : averageGradeWithoutFails;
+
 
     const missingElectiveCreditsForDegree = Math.max(0, REQUIRED_ELECTIVE_CREDITS_TOTAL - totalElectiveCreditsApproved);
     const missingCoreForDegree = activeCoreSubjects
@@ -1031,6 +1139,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       approvedEquivalentSlots: breakdown.approvedEquivalentSlots,
       averageGrade,
       averageGradeWithPromotions: averageGrade,
+      averageGradeWithoutFails,
+      averageGradeWithFails,
+      totalFailsCount: failGrades.length,
+      libreCount,
       pendingFinalsCount: regularizedCount,
       totalElectiveCreditsApproved,
       totalElectiveCreditsTaking,
@@ -1047,7 +1159,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isPPSEligible: ppsCheck.eligible,
       isDegreeEligible,
     };
-  }, [activeState, settings]);
+  }, [activeState, settings, examAttempts]);
 
   const criticalPath = useMemo<CriticalPathResult>(() => {
     return calculateCriticalPath(activeState, settings.includeAnalistaTrack);
@@ -1262,6 +1374,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       customSchedules: customSchedules || undefined,
       scheduleTerm,
       enrollments,
+      examAttempts,
     });
   }, [
     userState,
@@ -1273,6 +1386,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     customSchedules,
     scheduleTerm,
     enrollments,
+    examAttempts,
   ]);
 
   const importData = useCallback(
@@ -1288,6 +1402,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (result.customSchedules) setCustomSchedules(result.customSchedules);
         if (result.scheduleTerm) setScheduleTerm(result.scheduleTerm);
         if (result.enrollments) setEnrollments(result.enrollments);
+        if (result.examAttempts) setExamAttempts(result.examAttempts);
 
         // Si está autenticado, sincronizar a Neon en una sola transacción
         if (isAuthenticated) {
@@ -1324,6 +1439,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setScheduleDrafts([]);
     setCustomSchedules(null);
     setEnrollments([]);
+    setExamAttempts([]);
     setSettings(loadSettings());
     soundManager.playClick();
 
@@ -1483,6 +1599,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         getSubjectEnrollments,
         saveSubjectEnrollment,
         deleteSubjectEnrollment,
+        examAttempts,
+        getSubjectExamAttempts,
+        saveExamAttempt,
+        deleteExamAttempt,
         pendingCommissionPrompt,
         setPendingCommissionPrompt,
         openEnrollmentModal,

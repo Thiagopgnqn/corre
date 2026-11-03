@@ -26,6 +26,7 @@ export interface PublicEnrollmentPayload {
   academicYear: number | null;
   term: EnrollmentTerm | null;
   source: EnrollmentSource;
+  status: string | null;
   professors: Array<{
     professorId: string;
     displayName: string;
@@ -48,6 +49,7 @@ export function serializeEnrollment(enr: StoredEnrollment): PublicEnrollmentPayl
     academicYear: enr.academicYear,
     term: enr.term,
     source: enr.source,
+    status: enr.status ?? 'cursando',
     professors: enr.professors.map((p) => ({
       professorId: p.professorId,
       displayName: p.displayName,
@@ -108,6 +110,7 @@ export class EnrollmentsService {
     professorIds?: string[];
     professorNames?: string[];
     source?: EnrollmentSource;
+    status?: string | null;
   }): Promise<PublicEnrollmentPayload> {
     const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
     if (!ctx) {
@@ -230,6 +233,7 @@ export class EnrollmentsService {
       academicYear: effectiveYear,
       term: effectiveTerm,
       source: params.source || 'manual',
+      status: params.status || 'cursando',
       professorIds: effectiveProfessorIds,
     });
 

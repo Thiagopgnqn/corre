@@ -4,7 +4,8 @@ export type SubjectStatus =
   | 'cursando'
   | 'regularizada'
   | 'aprobada'
-  | 'promocionada';
+  | 'promocionada'
+  | 'libre';
 
 export type Modality = 'A' | '1C' | '2C' | '1C-CC' | '2C-CC' | '1C/2C';
 
@@ -48,6 +49,10 @@ export interface CareerProgress {
   careerPercentageByHours: number;
   averageGrade: number;
   averageGradeWithPromotions: number;
+  averageGradeWithoutFails?: number;
+  averageGradeWithFails?: number;
+  totalFailsCount?: number;
+  libreCount?: number;
   pendingFinalsCount: number;
   // Electivas globales (sin mínimos por nivel)
   totalElectiveCreditsApproved: number;
@@ -78,4 +83,15 @@ export interface CriticalPathResult {
   chain: Subject[];
   length: number;
   estimatedTerms: number;
+}
+
+export interface ExamAttempt {
+  id: string;
+  subjectCode: number;
+  subjectId?: string;
+  date: string;
+  grade: number;
+  isPassed: boolean;
+  notes?: string;
+  createdAt?: string;
 }

@@ -115,6 +115,15 @@ export const QuickStatusModal: React.FC = () => {
       bgActive: 'bg-purple-950/70',
       requiresGrade: true,
     },
+    {
+      status: 'libre',
+      label: 'Libre / Recursar',
+      description: 'Cursada no aprobada o abandonada',
+      icon: AlertTriangle,
+      accentColor: 'text-rose-400',
+      borderActive: 'border-rose-500 shadow-[0_0_15px_rgba(244,63,94,0.3)]',
+      bgActive: 'bg-rose-950/70',
+    },
   ];
 
   return (

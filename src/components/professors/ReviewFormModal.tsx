@@ -422,7 +422,7 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
               {isLoadingReviewable && !editingReview ? (
                 <div className="py-10 flex items-center justify-center gap-2 text-xs text-slate-400">
                   <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                  <span>Verificando tus materias regularizadas y aprobadas...</span>
+                  <span>Verificando tus materias cursadas, regularizadas y aprobadas...</span>
                 </div>
               ) : (
                 <>
@@ -505,8 +505,7 @@ export const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
                       ) : (
                         <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs">
                           No tenés pares (docente, materia) pendientes de reseñar con ese filtro.
-                          Recordá que solo podés reseñar docentes de materias que tengas en estado{' '}
-                          <strong>regularizada, aprobada o promocionada</strong>.
+                          Recordá que podés reseñar docentes de materias que hayas cursado, quedado libre, regularizado, aprobado o promocionado.
                         </div>
                       )}
 

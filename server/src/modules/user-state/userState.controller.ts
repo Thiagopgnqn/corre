@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, asc } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   users,
@@ -12,6 +12,7 @@ import {
   studyPlans,
   subjects,
   scheduleTerms,
+  finalExamAttempts,
 } from '../../db/schema.js';
 import { defaultReviewsStore } from '../reviews/reviews.store.js';
 import {
@@ -171,6 +172,32 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
     const storedEnrollments = await defaultReviewsStore.listUserEnrollments(userId, planId);
     const formattedEnrollments = storedEnrollments.map(serializeEnrollment);
 
+    const examAttemptsRows = await db
+      .select({
+        id: finalExamAttempts.id,
+        subjectId: finalExamAttempts.subjectId,
+        subjectCode: subjects.codeInPlan,
+        examDate: finalExamAttempts.examDate,
+        grade: finalExamAttempts.grade,
+        notes: finalExamAttempts.notes,
+        createdAt: finalExamAttempts.createdAt,
+      })
+      .from(finalExamAttempts)
+      .innerJoin(subjects, eq(finalExamAttempts.subjectId, subjects.id))
+      .where(eq(finalExamAttempts.userId, userId))
+      .orderBy(asc(finalExamAttempts.examDate));
+
+    const formattedExamAttempts = examAttemptsRows.map((r) => ({
+      id: r.id,
+      subjectId: r.subjectId,
+      subjectCode: r.subjectCode,
+      date: String(r.examDate),
+      grade: Number(r.grade),
+      isPassed: Number(r.grade) >= (settings?.minPassingGrade || 4),
+      notes: r.notes || undefined,
+      createdAt: r.createdAt.toISOString(),
+    }));
+
     // Determinar si el usuario tiene datos guardados (para detectar si la cuenta está virgen)
     const hasSavedData =
       progressRows.length > 0 ||
@@ -178,6 +205,7 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
       basketRows.length > 0 ||
       proposals.length > 0 ||
       formattedEnrollments.length > 0 ||
+      formattedExamAttempts.length > 0 ||
       (settingsRow !== undefined && settingsRow.tutorialCompleted);
 
     res.json({
@@ -193,6 +221,7 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
         scheduleSelections: scheduleSelectionMap,
         scheduleProposals: formattedProposals,
         enrollments: formattedEnrollments,
+        examAttempts: formattedExamAttempts,
       },
     });
   } catch (error) {
@@ -211,7 +240,7 @@ export async function updateProgress(req: Request, res: Response): Promise<void>
     return;
   }
 
-  const validStatuses = ['pendiente', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada', 'disponible'];
+  const validStatuses = ['pendiente', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada', 'disponible', 'libre'];
   if (!status || !validStatuses.includes(status)) {
     res.status(400).json({ success: false, error: 'Estado de materia inválido' });
     return;
@@ -1078,5 +1107,88 @@ export async function deleteAccount(req: Request, res: Response): Promise<void> 
   } catch (error) {
     console.error('Error deleting account:', error);
     res.status(500).json({ success: false, error: 'Error al eliminar la cuenta' });
+  }
+}
+
+export async function saveExamAttempt(req: Request, res: Response): Promise<void> {
+  const userId = req.user?.id;
+  if (!userId) {
+    res.status(401).json({ success: false, error: 'No autenticado' });
+    return;
+  }
+  const { subjectIdOrCode, date: examDate, grade, notes } = req.body;
+  if (!subjectIdOrCode || !examDate || grade === undefined || grade === null) {
+    res.status(400).json({ success: false, error: 'Datos de examen incompletos (materia, fecha y nota requeridos)' });
+    return;
+  }
+  const numGrade = Number(grade);
+  if (isNaN(numGrade) || numGrade < 1 || numGrade > 10) {
+    res.status(400).json({ success: false, error: 'La calificación debe estar entre 1 y 10' });
+    return;
+  }
+
+  try {
+    const [user] = await db.select({ selectedPlanId: users.selectedPlanId }).from(users).where(eq(users.id, userId));
+    const isCode = !isNaN(Number(subjectIdOrCode));
+    const subQuery = isCode
+      ? and(eq(subjects.planId, user.selectedPlanId || ''), eq(subjects.codeInPlan, Number(subjectIdOrCode)))
+      : eq(subjects.id, String(subjectIdOrCode));
+
+    const [sub] = await db.select({ id: subjects.id, codeInPlan: subjects.codeInPlan }).from(subjects).where(subQuery);
+    if (!sub) {
+      res.status(404).json({ success: false, error: 'Materia no encontrada' });
+      return;
+    }
+
+    const [inserted] = await db
+      .insert(finalExamAttempts)
+      .values({
+        userId,
+        subjectId: sub.id,
+        examDate,
+        grade: String(numGrade),
+        notes: typeof notes === 'string' ? notes.trim() : null,
+      })
+      .returning();
+
+    res.json({
+      success: true,
+      data: {
+        id: inserted.id,
+        subjectId: sub.id,
+        subjectCode: sub.codeInPlan,
+        date: String(inserted.examDate),
+        grade: numGrade,
+        notes: inserted.notes || undefined,
+        createdAt: inserted.createdAt.toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error('Error saving exam attempt:', error);
+    res.status(500).json({ success: false, error: 'Error al registrar examen final' });
+  }
+}
+
+export async function deleteExamAttempt(req: Request, res: Response): Promise<void> {
+  const userId = req.user?.id;
+  if (!userId) {
+    res.status(401).json({ success: false, error: 'No autenticado' });
+    return;
+  }
+  const { id } = req.params;
+  try {
+    const [deleted] = await db
+      .delete(finalExamAttempts)
+      .where(and(eq(finalExamAttempts.id, String(id)), eq(finalExamAttempts.userId, userId)))
+      .returning({ id: finalExamAttempts.id });
+
+    if (!deleted) {
+      res.status(404).json({ success: false, error: 'Examen no encontrado' });
+      return;
+    }
+    res.json({ success: true, data: { id: deleted.id } });
+  } catch (error) {
+    console.error('Error deleting exam attempt:', error);
+    res.status(500).json({ success: false, error: 'Error al eliminar examen final' });
   }
 }

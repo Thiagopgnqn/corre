@@ -16,6 +16,7 @@ import { useCareer } from '../../context/CareerContext';
 import { enrollmentsApi } from '../../api/enrollments.api';
 import type {
   EnrollmentTerm,
+  SubjectEnrollmentStatus,
   SubjectCommissionOption,
   SubjectEnrollmentOptions,
 } from '../../types/enrollment';
@@ -40,6 +41,7 @@ export const EnrollmentModal: React.FC = () => {
   const [manualYear, setManualYear] = useState<string>('');
   const [manualTerm, setManualTerm] = useState<'' | EnrollmentTerm>('');
   const [profSearch, setProfSearch] = useState<string>('');
+  const [cursadaStatus, setCursadaStatus] = useState<SubjectEnrollmentStatus>('cursando');
 
   const currentYear = new Date().getFullYear();
   const availableYears = useMemo(
@@ -69,6 +71,19 @@ export const EnrollmentModal: React.FC = () => {
         if (!active || !res.success) return;
         const data = res.data;
         setOptions(data);
+
+
+        if (editingEnrollment?.status) {
+          setCursadaStatus(editingEnrollment.status);
+        } else if (pendingCommissionPrompt.targetStatus === 'libre') {
+          setCursadaStatus('libre');
+        } else if (pendingCommissionPrompt.targetStatus === 'regularizada') {
+          setCursadaStatus('regularizada');
+        } else if (pendingCommissionPrompt.targetStatus === 'promocionada') {
+          setCursadaStatus('promocionada');
+        } else {
+          setCursadaStatus('cursando');
+        }
 
         if (editingEnrollment) {
           if (editingEnrollment.commissionId) {
@@ -237,6 +252,7 @@ export const EnrollmentModal: React.FC = () => {
           enrollmentId: editingEnrollment?.id ?? null,
           commissionId: selectedCommissionId,
           professorIds: selectedProfessorIds,
+          status: cursadaStatus,
           source: editingEnrollment?.source ?? 'manual',
         });
       } else if (mode === 'unknown') {
@@ -246,6 +262,7 @@ export const EnrollmentModal: React.FC = () => {
           academicYear: null,
           term: null,
           professorIds: [],
+          status: cursadaStatus,
           source: 'manual',
         });
       } else {
@@ -255,6 +272,7 @@ export const EnrollmentModal: React.FC = () => {
           academicYear: manualYear ? Number(manualYear) : null,
           term: manualTerm ? manualTerm : null,
           professorIds: selectedProfessorIds,
+          status: cursadaStatus,
           source: 'manual',
         });
       }
@@ -328,6 +346,36 @@ export const EnrollmentModal: React.FC = () => {
               </div>
             ) : (
               <>
+
+                {/* Selector del resultado de la cursada */}
+                <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-200">Resultado de esta cursada:</span>
+                    <span className="text-[11px] text-slate-400 capitalize">Estado: {cursadaStatus}</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                    {[
+                      { val: 'cursando', label: 'Cursando', color: 'border-cyan-500 bg-cyan-950/40 text-cyan-300' },
+                      { val: 'regularizada', label: 'Regularizada', color: 'border-amber-500 bg-amber-950/40 text-amber-300' },
+                      { val: 'promocionada', label: 'Promocionada', color: 'border-purple-500 bg-purple-950/40 text-purple-300' },
+                      { val: 'libre', label: 'Quedé libre', color: 'border-rose-500 bg-rose-950/40 text-rose-300' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.val}
+                        type="button"
+                        onClick={() => setCursadaStatus(opt.val as SubjectEnrollmentStatus)}
+                        className={`px-2 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer text-center ${
+                          cursadaStatus === opt.val
+                            ? opt.color + ' ring-1 ring-inset ring-white/20'
+                            : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Selector de modo: Comisiones cargadas vs Otra / año anterior vs No lo sé */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button

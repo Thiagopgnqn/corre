@@ -12,6 +12,7 @@ export const ALLOWED_REVIEW_SUBJECT_STATUSES = [
   'regularizada',
   'aprobada',
   'promocionada',
+  'libre',
 ] as const;
 
 export type AllowedReviewSubjectStatus = (typeof ALLOWED_REVIEW_SUBJECT_STATUSES)[number];

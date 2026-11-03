@@ -184,6 +184,7 @@ export interface StoredEnrollment {
   academicYear: number | null;
   term: EnrollmentTerm | null;
   source: EnrollmentSource;
+  status: string | null;
   professors: Array<{
     professorId: string;
     displayName: string;
@@ -508,6 +509,7 @@ export interface ReviewsStore {
     academicYear: number | null;
     term: EnrollmentTerm | null;
     source: EnrollmentSource;
+    status?: string | null;
     professorIds: string[];
   }): Promise<StoredEnrollment>;
   deleteUserEnrollment(
@@ -2505,6 +2507,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         academicYear: r.academicYear ?? null,
         term: (r.term as EnrollmentTerm | null) ?? null,
         source: (r.source as EnrollmentSource) || 'manual',
+        status: (r as any).status || 'cursando',
         professors: profs,
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
@@ -2560,6 +2563,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
     academicYear: number | null;
     term: EnrollmentTerm | null;
     source: EnrollmentSource;
+    status?: string | null;
     professorIds: string[];
   }): Promise<StoredEnrollment> {
     const uniqueProfIds = Array.from(new Set(params.professorIds));
@@ -2626,6 +2630,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
             academicYear: params.academicYear,
             term: params.term,
             source: params.source,
+            status: params.status || 'cursando',
             updatedAt: new Date(),
           })
           .where(eq(subjectEnrollments.id, target.id));
@@ -2644,6 +2649,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
               academicYear: params.academicYear,
               term: params.term,
               source: params.source,
+              status: params.status || 'cursando',
               updatedAt: new Date(),
             })
             .where(eq(subjectEnrollments.id, toUpdate.id));
@@ -2658,6 +2664,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
               academicYear: params.academicYear,
               term: params.term,
               source: params.source,
+              status: params.status || 'cursando',
             })
             .returning({ id: subjectEnrollments.id });
           chosenId = inserted.id;
@@ -2685,6 +2692,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
               academicYear: null,
               term: null,
               source: params.source,
+              status: params.status || 'cursando',
             })
             .returning({ id: subjectEnrollments.id });
           chosenId = inserted.id;
@@ -2699,6 +2707,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
               academicYear: params.academicYear,
               term: params.term,
               source: params.source,
+              status: params.status || 'cursando',
               updatedAt: new Date(),
             })
             .where(eq(subjectEnrollments.id, placeholder.id));
@@ -2713,6 +2722,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
               academicYear: params.academicYear,
               term: params.term,
               source: params.source,
+              status: params.status || 'cursando',
             })
             .returning({ id: subjectEnrollments.id });
           chosenId = inserted.id;
@@ -2917,6 +2927,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
       academicYear: number | null;
       term: EnrollmentTerm | null;
       source: EnrollmentSource;
+    status?: string | null;
       professorIds: string[];
       createdAt: Date;
       updatedAt: Date;
@@ -4060,6 +4071,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     academicYear: number | null;
     term: EnrollmentTerm | null;
     source: EnrollmentSource;
+    status?: string | null;
     professorIds: string[];
     createdAt: Date;
     updatedAt: Date;
@@ -4088,6 +4100,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
       academicYear: raw.academicYear,
       term: raw.term,
       source: raw.source,
+      status: raw.status || 'cursando',
       professors: profs,
       createdAt: raw.createdAt,
       updatedAt: raw.updatedAt,
@@ -4122,6 +4135,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     academicYear: number | null;
     term: EnrollmentTerm | null;
     source: EnrollmentSource;
+    status?: string | null;
     professorIds: string[];
   }): Promise<StoredEnrollment> {
     const uniqueProfIds = Array.from(new Set(params.professorIds));
@@ -4164,6 +4178,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
       target.academicYear = params.academicYear;
       target.term = params.term;
       target.source = params.source;
+      target.status = params.status || 'cursando';
       target.professorIds = uniqueProfIds;
       target.updatedAt = now;
       targetId = target.id;
@@ -4185,6 +4200,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         placeholder.academicYear = params.academicYear;
         placeholder.term = params.term;
         placeholder.source = params.source;
+        placeholder.status = params.status || 'cursando';
         placeholder.professorIds = uniqueProfIds;
         placeholder.updatedAt = now;
         targetId = placeholder.id;
@@ -4198,6 +4214,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
           academicYear: params.academicYear,
           term: params.term,
           source: params.source,
+          status: params.status || 'cursando',
           professorIds: uniqueProfIds,
           createdAt: now,
           updatedAt: now,
@@ -4206,6 +4223,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     } else if (params.commissionId === null && uniqueProfIds.length === 0) {
       const placeholder = existingRows.find(isEmptyPlaceholder);
       if (placeholder) {
+        placeholder.status = params.status || placeholder.status || 'cursando';
         placeholder.updatedAt = now;
         targetId = placeholder.id;
       } else if (existingRows.length > 0) {
@@ -4220,6 +4238,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
           academicYear: null,
           term: null,
           source: params.source,
+          status: params.status || 'cursando',
           professorIds: [],
           createdAt: now,
           updatedAt: now,
@@ -4232,6 +4251,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         placeholder.academicYear = params.academicYear;
         placeholder.term = params.term;
         placeholder.source = params.source;
+        placeholder.status = params.status || 'cursando';
         placeholder.professorIds = uniqueProfIds;
         placeholder.updatedAt = now;
         targetId = placeholder.id;

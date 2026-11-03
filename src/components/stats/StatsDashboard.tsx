@@ -26,6 +26,7 @@ export const StatsDashboard: React.FC = () => {
     settings,
     updateSettings,
     setSelectedSubjectId,
+    examAttempts,
   } = useCareer();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'critical' | 'badges'>('overview');
@@ -54,12 +55,23 @@ export const StatsDashboard: React.FC = () => {
     const bestGrade = gradesOnly.length > 0 ? Math.max(...gradesOnly) : 0;
     const lowestGrade = gradesOnly.length > 0 ? Math.min(...gradesOnly) : 0;
 
-    // Distribution: count of each grade 1-10
+
+    // Distribution: count of each grade 1-10 (including fail attempts)
     const distribution: Record<number, number> = {};
     for (let i = 1; i <= 10; i++) distribution[i] = 0;
     gradesOnly.forEach((g) => {
       distribution[g] = (distribution[g] || 0) + 1;
     });
+
+    const failsList = (examAttempts || []).filter(
+      (a) => !a.isPassed || a.grade < settings.minPassingGrade
+    );
+    failsList.forEach((a) => {
+      if (a.grade >= 1 && a.grade <= 10) {
+        distribution[a.grade] = (distribution[a.grade] || 0) + 1;
+      }
+    });
+
 
     // Average per level
     const avgByLevel: Record<number, { sum: number; count: number; avg: number }> = {
@@ -89,9 +101,10 @@ export const StatsDashboard: React.FC = () => {
       lowestGrade,
       distribution,
       avgByLevel,
+      failsCount: failsList.length,
       totalGradesCount: list.length,
     };
-  }, [activeState, settings]);
+  }, [activeState, settings, examAttempts]);
 
   // Milestones verification
   const milestones = useMemo(() => {
@@ -407,7 +420,7 @@ export const StatsDashboard: React.FC = () => {
                 </div>
               </div>
               <div className="text-[11px] text-emerald-400/80">
-                {settings.includePromotionsInGPA ? 'Incluye promociones' : 'Solo exámenes finales'}
+                {settings.includeFailsInGPA ? 'Con aplazos incluidos' : 'Sin aplazos'} · {computedProgress.totalFailsCount || 0} aplazos
               </div>
             </div>
           </div>
@@ -681,6 +694,23 @@ export const StatsDashboard: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center gap-4 text-xs">
+
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings.includeFailsInGPA)}
+                  onChange={(e) => updateSettings({ includeFailsInGPA: e.target.checked })}
+                  className="rounded border-slate-700 text-rose-500 focus:ring-0 bg-slate-800"
+                />
+                <span className="flex items-center gap-1.5">
+                  <span>Incluir aplazos en el promedio</span>
+                  {(computedProgress.totalFailsCount || 0) > 0 && (
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      {computedProgress.totalFailsCount}
+                    </span>
+                  )}
+                </span>
+              </label>
               <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
                 <input
                   type="checkbox"
@@ -705,15 +735,29 @@ export const StatsDashboard: React.FC = () => {
             </div>
           </div>
 
+
           {/* Grade Metrics & Distribution */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
-              <span className="text-xs font-semibold text-slate-400 uppercase">Promedio General</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="p-5 rounded-2xl border border-indigo-500/30 bg-slate-900/60 backdrop-blur-md text-center">
+              <span className="text-xs font-semibold text-slate-400 uppercase">
+                Promedio {settings.includeFailsInGPA ? '(Con Aplazos)' : '(Sin Aplazos)'}
+              </span>
               <div className="text-4xl font-black text-indigo-400 my-2">
                 {computedProgress.averageGrade > 0 ? computedProgress.averageGrade : '--'}
               </div>
+              <div className="text-[11px] text-slate-400 space-y-0.5">
+                <div>Sin aplazos: <strong className="text-white">{computedProgress.averageGradeWithoutFails || '--'}</strong></div>
+                <div>Con aplazos: <strong className="text-white">{computedProgress.averageGradeWithFails || '--'}</strong></div>
+              </div>
+            </div>
+
+            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
+              <span className="text-xs font-semibold text-slate-400 uppercase">Total de Aplazos</span>
+              <div className="text-4xl font-black text-rose-400 my-2">
+                {computedProgress.totalFailsCount ?? 0}
+              </div>
               <span className="text-xs text-slate-500">
-                Calculado sobre {gradesData.totalGradesCount} materias
+                {computedProgress.totalFailsCount === 1 ? '1 examen reprobado' : `${computedProgress.totalFailsCount ?? 0} exámenes reprobados`}
               </span>
             </div>
 
@@ -734,6 +778,7 @@ export const StatsDashboard: React.FC = () => {
             </div>
           </div>
 
+
           {/* Grade Distribution Bar Graph */}
           <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md space-y-4">
             <h3 className="text-sm font-bold text-white uppercase tracking-wider">
@@ -749,7 +794,7 @@ export const StatsDashboard: React.FC = () => {
                   <div key={num} className="flex flex-col items-center h-full justify-end gap-1.5">
                     <span className="text-[9px] sm:text-[10px] text-slate-400 font-bold">{count}</span>
                     <div
-                      className="w-full rounded-t-lg bg-gradient-to-t from-indigo-600 to-cyan-400 transition-all duration-500"
+                      className={`w-full rounded-t-lg transition-all duration-500 ${num < settings.minPassingGrade ? 'bg-gradient-to-t from-rose-700 to-rose-400' : 'bg-gradient-to-t from-indigo-600 to-cyan-400'}`}
                       style={{ height: `${Math.max(heightPercent, 4)}%` }}
                     />
                     <span className="text-[11px] sm:text-xs font-bold text-slate-300 font-mono">{num}</span>

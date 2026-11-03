@@ -41,6 +41,9 @@ export const SubjectDrawer: React.FC = () => {
     getSubjectEnrollments,
     openEnrollmentModal,
     deleteSubjectEnrollment,
+    getSubjectExamAttempts,
+    saveExamAttempt,
+    deleteExamAttempt,
   } = useCareer();
 
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState<string | null>(null);
@@ -70,6 +73,45 @@ export const SubjectDrawer: React.FC = () => {
 
   const isInBasket = semesterBasket.includes(selectedSubject.id);
   const subjectEnrollments = getSubjectEnrollments(selectedSubject.id);
+
+
+  const [isAddingAttempt, setIsAddingAttempt] = useState(false);
+  const [attemptDate, setAttemptDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [attemptGrade, setAttemptGrade] = useState(2);
+  const [attemptNotes, setAttemptNotes] = useState('');
+  const [isSavingAttempt, setIsSavingAttempt] = useState(false);
+  const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
+
+  const subjectExamAttempts = selectedSubject ? getSubjectExamAttempts(selectedSubject.id) : [];
+
+  const handleSaveAttempt = async () => {
+    if (!selectedSubject) return;
+    setIsSavingAttempt(true);
+    try {
+      await saveExamAttempt(selectedSubject.id, {
+        date: attemptDate,
+        grade: attemptGrade,
+        notes: attemptNotes.trim() ? attemptNotes.trim() : undefined,
+      });
+      setIsAddingAttempt(false);
+      setAttemptNotes('');
+    } catch (err: any) {
+      alert(err?.message || 'Error al guardar el examen');
+    } finally {
+      setIsSavingAttempt(false);
+    }
+  };
+
+  const handleDeleteAttempt = async (id: string) => {
+    setDeletingAttemptId(id);
+    try {
+      await deleteExamAttempt(id);
+    } catch (err: any) {
+      alert(err?.message || 'Error al eliminar el examen');
+    } finally {
+      setDeletingAttemptId(null);
+    }
+  };
 
   const handleDeleteEnrollment = async (enrollmentId: string) => {
     setDeletingEnrollmentId(enrollmentId);
@@ -202,6 +244,22 @@ export const SubjectDrawer: React.FC = () => {
                                 Cursada manual
                               </span>
                             )}
+
+                            {enr.status && (
+                              <span
+                                className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border capitalize ${
+                                  enr.status === 'libre'
+                                    ? 'bg-rose-950/70 text-rose-300 border-rose-500/40'
+                                    : enr.status === 'promocionada'
+                                    ? 'bg-purple-950/70 text-purple-300 border-purple-500/40'
+                                    : enr.status === 'regularizada'
+                                    ? 'bg-amber-950/70 text-amber-300 border-amber-500/40'
+                                    : 'bg-cyan-950/70 text-cyan-300 border-cyan-500/40'
+                                }`}
+                              >
+                                {enr.status === 'libre' ? 'Libre' : enr.status}
+                              </span>
+                            )}
                             {enr.turno && (
                               <span className="text-[10px] capitalize px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
                                 {enr.turno}
@@ -262,6 +320,140 @@ export const SubjectDrawer: React.FC = () => {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+
+
+            {/* Historial de Finales y Aplazos */}
+            <div className="p-4 rounded-2xl bg-slate-800/40 border border-slate-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                    Finales y Aplazos ({subjectExamAttempts.length})
+                  </span>
+                </div>
+                {!isAddingAttempt && (
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingAttempt(true)}
+                    className="text-[11px] font-bold text-indigo-400 hover:text-indigo-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Registrar final</span>
+                  </button>
+                )}
+              </div>
+
+              {isAddingAttempt && (
+                <div className="p-3 rounded-xl bg-slate-900 border border-indigo-500/30 space-y-3">
+                  <div className="text-xs font-bold text-indigo-300">
+                    Nuevo intento de examen final
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">Fecha</label>
+                      <input
+                        type="date"
+                        value={attemptDate}
+                        onChange={(e) => setAttemptDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">Nota (1 - 10)</label>
+                      <select
+                        value={attemptGrade}
+                        onChange={(e) => setAttemptGrade(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white"
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                          <option key={n} value={n}>
+                            {n} {n < settings.minPassingGrade ? '(Aplazo)' : '(Aprobado)'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Comentarios / Observaciones (opcional)</label>
+                    <input
+                      type="text"
+                      placeholder="Ej. Mesa de diciembre, libre por falta de tp..."
+                      value={attemptNotes}
+                      onChange={(e) => setAttemptNotes(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-white placeholder-slate-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingAttempt(false)}
+                      className="px-3 py-1 text-xs text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSavingAttempt}
+                      onClick={handleSaveAttempt}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingAttempt ? 'Guardando...' : 'Guardar'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {subjectExamAttempts.length === 0 && !isAddingAttempt ? (
+                <div className="text-[11px] text-slate-400 italic">
+                  No hay intentos de examen final o aplazos registrados para esta materia.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {subjectExamAttempts.map((att) => {
+                    const isPassed = att.grade >= settings.minPassingGrade;
+                    return (
+                      <div
+                        key={att.id}
+                        className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                                isPassed
+                                  ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/40'
+                                  : 'bg-rose-950/70 text-rose-300 border-rose-500/40'
+                              }`}
+                            >
+                              {isPassed ? 'Aprobado' : 'Aplazo'}
+                            </span>
+                            <span className="font-extrabold text-white">Nota: {att.grade}</span>
+                            <span className="text-[11px] text-slate-400">{att.date}</span>
+                          </div>
+                          {att.notes && (
+                            <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                              {att.notes}
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={deletingAttemptId === att.id}
+                          onClick={() => handleDeleteAttempt(att.id)}
+                          className="p-1 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
+                          title="Eliminar intento"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

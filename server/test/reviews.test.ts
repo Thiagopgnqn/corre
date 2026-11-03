@@ -350,6 +350,30 @@ async function main() {
       'Permite reseñar profesor que dictó la materia en un período anterior no vigente (todos los períodos)'
     );
 
+    // 2.3b Materia en estado "libre" permite reseñar al docente (Ajuste Libre/Recursada)
+    const profLibre = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Profesor Cursada Libre, Test',
+    });
+    store.seedCommissionTeaching({
+      professorId: profLibre.id,
+      subjectId: subjects[4].id,
+      termLabel: '2026 1C',
+      isCurrent: true,
+    });
+    store.seedUserProgress(studentB.id, subjects[4].id, 'libre');
+    const resLibreReview = await api('POST', '/api/reviews', tokenB, {
+      professorId: profLibre.id,
+      subjectId: subjects[4].id,
+      overall: 4,
+      clarity: 4,
+      comment: 'Quedé libre pero el profesor explica muy bien los conceptos.',
+    });
+    assert(
+      resLibreReview.status === 201,
+      'Permite reseñar profesor si el alumno cursó y quedó en estado "libre" en esa materia'
+    );
+
     // 2.4 Vínculo manual de profesor "histórico" por Admin (Ajuste #1)
     const nonAdminHist = await api('POST', '/api/admin/professors', tokenA, {
       displayName: 'Profesor Jubilado, Carlos',

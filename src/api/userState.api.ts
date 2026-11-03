@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { UserSubjectState, AssignedElectivesByYear } from '../types/career';
+import type { UserSubjectState, AssignedElectivesByYear, ExamAttempt } from '../types/career';
 import type { AppSettings } from '../utils/storage';
 import type { ScheduleDraft } from '../types/schedule';
 import type { SubjectEnrollment } from '../types/enrollment';
@@ -15,6 +15,7 @@ export interface ConsolidatedUserState {
   scheduleSelections: Record<number, string>;
   scheduleProposals: ScheduleDraft[];
   enrollments?: SubjectEnrollment[];
+  examAttempts?: ExamAttempt[];
 }
 
 export const userStateApi = {
@@ -102,6 +103,24 @@ export const userStateApi = {
     });
   },
 
+
+  async saveExamAttempt(attempt: {
+    subjectIdOrCode: number | string;
+    date: string;
+    grade: number;
+    notes?: string;
+  }): Promise<{ success: boolean; data: ExamAttempt }> {
+    return apiFetch('/api/exam-attempts', {
+      method: 'POST',
+      body: JSON.stringify(attempt),
+    });
+  },
+
+  async deleteExamAttempt(id: string): Promise<{ success: boolean; message: string }> {
+    return apiFetch(`/api/exam-attempts/${id}`, {
+      method: 'DELETE',
+    });
+  },
   async exportData(): Promise<{ success: boolean; data: unknown }> {
     return apiFetch('/api/export');
   },

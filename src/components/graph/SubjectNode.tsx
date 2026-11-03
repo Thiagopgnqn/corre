@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Award,
   BookOpen,
+  AlertTriangle,
 } from 'lucide-react';
 import type { Subject, SubjectStatus } from '../../types/career';
 
@@ -119,6 +120,17 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
       icon: Award,
       color: 'text-purple-300',
       titleColor: 'text-white',
+    },
+    libre: {
+      border: 'border-rose-400 border-2',
+      glow: 'shadow-[0_0_20px_rgba(244,63,94,0.35)]',
+      bg: 'bg-gradient-to-r from-rose-950/45 via-slate-900/95 to-slate-900/95',
+      stripe: 'bg-rose-400',
+      pillBg: 'bg-rose-500/25 text-rose-200 border border-rose-400/50',
+      pillLabel: 'Libre',
+      icon: AlertTriangle,
+      color: 'text-rose-300',
+      titleColor: 'text-rose-50',
     },
   };
 

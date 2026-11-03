@@ -6,6 +6,7 @@ import {
   bigint,
   boolean,
   numeric,
+  date,
   timestamp,
   jsonb,
   unique,
@@ -738,6 +739,7 @@ export const subjectEnrollments = pgTable(
     academicYear: integer('academic_year'),
     term: text('term'), // '1C' | '2C' | 'A' | null
     source: text('source').notNull().default('manual'), // 'manual' | 'schedule_builder'
+    status: text('status').default('cursando'), // 'cursando' | 'regularizada' | 'promocionada' | 'libre'
     ...timestamps,
   },
   (table) => [
@@ -765,6 +767,27 @@ export const enrollmentProfessors = pgTable(
       name: 'pk_enrollment_professors',
     }),
     index('idx_enrollment_professors_prof').on(table.professorId),
+  ]
+);
+
+export const finalExamAttempts = pgTable(
+  'final_exam_attempts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    subjectId: uuid('subject_id')
+      .notNull()
+      .references(() => subjects.id, { onDelete: 'cascade' }),
+    examDate: date('exam_date').notNull(),
+    grade: numeric('grade', { precision: 4, scale: 2 }).notNull(),
+    notes: text('notes'),
+    ...timestamps,
+  },
+  (table) => [
+    index('idx_exam_attempts_user').on(table.userId),
+    index('idx_exam_attempts_user_subject').on(table.userId, table.subjectId),
   ]
 );
 
@@ -947,6 +970,17 @@ export const enrollmentProfessorsRelations = relations(enrollmentProfessors, ({ 
 }));
 
 // ==========================================
+export const finalExamAttemptsRelations = relations(finalExamAttempts, ({ one }) => ({
+  user: one(users, {
+    fields: [finalExamAttempts.userId],
+    references: [users.id],
+  }),
+  subject: one(subjects, {
+    fields: [finalExamAttempts.subjectId],
+    references: [subjects.id],
+  }),
+}));
+
 // 3. AUDITORÍA DE ADMINISTRACIÓN Y CATÁLOGO
 // ==========================================
 
