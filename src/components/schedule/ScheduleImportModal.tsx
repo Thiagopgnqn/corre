@@ -79,7 +79,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md">
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
@@ -99,7 +99,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -129,7 +129,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
               O seleccioná el archivo desde tu dispositivo
             </p>
 
-            <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white cursor-pointer border border-slate-700 transition-all">
+            <label className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white cursor-pointer border border-slate-700 transition-all min-h-[44px] active:scale-95">
               <span>Examinar archivo</span>
               <input
                 type="file"
@@ -153,7 +153,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
               value={jsonText}
               onChange={(e) => handleValidateString(e.target.value)}
               placeholder='[ { "subjectId": 1, "term": "1C", "commissions": [ ... ] } ]'
-              className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+              className="w-full p-3 rounded-xl bg-slate-950 border border-slate-800 text-[16px] sm:text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
             />
           </div>
 
@@ -222,7 +222,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
                 onResetDefault();
                 onClose();
               }}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-1.5 transition-colors"
+              className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 flex items-center gap-1.5 transition-colors min-h-[44px] cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Restaurar horarios de ejemplo</span>
@@ -234,7 +234,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+              className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white min-h-[44px] flex items-center justify-center cursor-pointer"
             >
               Cancelar
             </button>
@@ -242,7 +242,7 @@ export const ScheduleImportModal: React.FC<ScheduleImportModalProps> = ({
             <button
               onClick={handleApply}
               disabled={!validationResult?.valid}
-              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer active:scale-95"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Importar horarios</span>

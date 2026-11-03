@@ -19,6 +19,8 @@ import {
   DAY_LABELS,
   timeToMinutes,
 } from '../../utils/scheduleLogic';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { BottomSheet } from '../common/BottomSheet';
 
 export const SUBJECT_PALETTES = [
   { id: 'indigo', border: 'border-indigo-400', bg: 'bg-indigo-950/90', text: 'text-indigo-200', dot: 'bg-indigo-400', badge: 'bg-indigo-500/20 text-indigo-300' },
@@ -160,6 +162,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   focusedSubjectId,
   onFocusSubject,
 }) => {
+  const isMobile = useIsMobile();
   const [selectedMobileDay, setSelectedMobileDay] = useState<DayOfWeek>('LUN');
   const [mobileGridMode, setMobileGridMode] = useState<'day' | 'week'>('day');
   const [isDesktop, setIsDesktop] = useState(
@@ -356,8 +359,9 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               if (idx > 0) setSelectedMobileDay(DAYS_ORDER[idx - 1]);
             }}
             disabled={DAYS_ORDER.indexOf(selectedMobileDay) === 0}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0"
+            className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
             title="Día anterior"
+            aria-label="Día anterior"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -374,7 +378,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                     setSelectedMobileDay(d);
                     setMobileGridMode('day');
                   }}
-                  className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 active:scale-95 ${
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 active:scale-95 min-h-[44px] ${
                     isActive && mobileGridMode === 'day'
                       ? 'bg-indigo-600 text-white shadow-md'
                       : 'bg-slate-900 text-slate-400 hover:text-white'
@@ -386,7 +390,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                   )}
                   {count > 0 && (
                     <span
-                      className={`text-[9px] px-1 rounded-full font-mono font-bold ${
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                         isActive && mobileGridMode === 'day' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
                       }`}
                     >
@@ -404,8 +408,9 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               if (idx < DAYS_ORDER.length - 1) setSelectedMobileDay(DAYS_ORDER[idx + 1]);
             }}
             disabled={DAYS_ORDER.indexOf(selectedMobileDay) === DAYS_ORDER.length - 1}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0"
+            className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
             title="Día siguiente"
+            aria-label="Día siguiente"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -415,7 +420,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
         <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[10px] font-bold shrink-0">
           <button
             onClick={() => setMobileGridMode('day')}
-            className={`px-2 py-1 rounded-md transition-all ${
+            className={`px-2.5 py-1.5 rounded-md transition-all min-h-[38px] flex items-center justify-center ${
               mobileGridMode === 'day'
                 ? 'bg-indigo-600 text-white shadow-sm font-black'
                 : 'text-slate-400 hover:text-slate-200'
@@ -425,7 +430,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
           </button>
           <button
             onClick={() => setMobileGridMode('week')}
-            className={`px-2 py-1 rounded-md transition-all ${
+            className={`px-2.5 py-1.5 rounded-md transition-all min-h-[38px] flex items-center justify-center ${
               mobileGridMode === 'week'
                 ? 'bg-indigo-600 text-white shadow-sm font-black'
                 : 'text-slate-400 hover:text-slate-200'
@@ -844,45 +849,28 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
         </div>
       )}
 
-      {/* Popover / Detail Card upon Clicking a Scheduled Class Block */}
-      <AnimatePresence>
-        {activePopover && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 10 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 10 }}
-              transition={{ duration: 0.18 }}
-              className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-4 sm:p-5 space-y-4"
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className={`w-3 h-3 rounded-full ${activePopover.color.dot}`} />
-                    <h3 className="text-base font-extrabold text-white leading-tight">
-                      {activePopover.subjectName}
-                    </h3>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
-                    <span className="font-mono font-bold text-indigo-400">
-                      Comisión {activePopover.commission.code}
-                    </span>
-                    {activePopover.commission.turno && (
-                      <>
-                        <span>•</span>
-                        <span className="capitalize font-semibold">{activePopover.commission.turno}</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => setActivePopover(null)}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+      {/* Popover / Detail Card upon Clicking a Scheduled Class Block: BottomSheet on mobile, centered modal on desktop */}
+      {isMobile ? (
+        <BottomSheet
+          isOpen={Boolean(activePopover)}
+          onClose={() => setActivePopover(null)}
+          title={activePopover?.subjectName || 'Detalle de Comisión'}
+          maxHeightDvh={88}
+        >
+          {activePopover && (
+            <div className="space-y-4">
+              {/* Commission Code & Shift */}
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span className={`w-3 h-3 rounded-full ${activePopover.color.dot}`} />
+                <span className="font-mono font-bold text-indigo-400 text-sm">
+                  Comisión {activePopover.commission.code}
+                </span>
+                {activePopover.commission.turno && (
+                  <>
+                    <span>•</span>
+                    <span className="capitalize font-semibold text-slate-300">{activePopover.commission.turno}</span>
+                  </>
+                )}
               </div>
 
               {/* Professors */}
@@ -908,9 +896,9 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                   {activePopover.commission.slots.map((s, idx) => (
                     <div
                       key={idx}
-                      className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border font-mono ${
+                      className={`flex items-center justify-between text-xs px-3 py-2 rounded-lg border font-mono ${
                         s.day === activePopover.slot.day && s.start === activePopover.slot.start
-                          ? 'bg-indigo-600/20 border-indigo-400/50 text-indigo-200'
+                          ? 'bg-indigo-600/20 border-indigo-400/50 text-indigo-200 font-bold'
                           : 'bg-slate-950/50 border-slate-800 text-slate-300'
                       }`}
                     >
@@ -929,7 +917,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               {activePopover.hasConflict && (
                 <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-200 space-y-1">
                   <div className="font-bold flex items-center gap-1.5 text-rose-300">
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                     <span>¡Superposición horaria detectada!</span>
                   </div>
                   <p className="text-[11px] text-rose-300/90 pl-5">
@@ -939,34 +927,159 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
               )}
 
               {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
+                  type="button"
                   onClick={() => {
                     onRemoveCommission(activePopover.subjectId);
                     setActivePopover(null);
                   }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/20 transition-all"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/20 transition-all min-h-[44px] flex items-center justify-center cursor-pointer active:scale-95"
                 >
                   Quitar comisión
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => {
                     if (onFocusSubject) {
                       onFocusSubject(activePopover.subjectId);
                     }
                     setActivePopover(null);
                   }}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-1.5 min-h-[44px] cursor-pointer active:scale-95"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   <span>Cambiar comisión</span>
                 </button>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+            </div>
+          )}
+        </BottomSheet>
+      ) : (
+        <AnimatePresence>
+          {activePopover && (
+            <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.92, y: 10 }}
+                transition={{ duration: 0.18 }}
+                className="w-full max-w-md max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-700/80 shadow-2xl p-4 sm:p-5 space-y-4"
+              >
+                {/* Header */}
+                <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className={`w-3 h-3 rounded-full ${activePopover.color.dot}`} />
+                      <h3 className="text-base font-extrabold text-white leading-tight">
+                        {activePopover.subjectName}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
+                      <span className="font-mono font-bold text-indigo-400">
+                        Comisión {activePopover.commission.code}
+                      </span>
+                      {activePopover.commission.turno && (
+                        <>
+                          <span>•</span>
+                          <span className="capitalize font-semibold">{activePopover.commission.turno}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setActivePopover(null)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Professors */}
+                {activePopover.commission.professors.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                      <User className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Equipo Docente:</span>
+                    </span>
+                    <p className="text-xs text-slate-200 pl-5">
+                      {activePopover.commission.professors.join(', ')}
+                    </p>
+                  </div>
+                )}
+
+                {/* All Slots for this Commission */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Días y horarios de la comisión:</span>
+                  </span>
+                  <div className="space-y-1 pl-1">
+                    {activePopover.commission.slots.map((s, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex items-center justify-between text-xs px-2.5 py-1.5 rounded-lg border font-mono ${
+                          s.day === activePopover.slot.day && s.start === activePopover.slot.start
+                            ? 'bg-indigo-600/20 border-indigo-400/50 text-indigo-200'
+                            : 'bg-slate-950/50 border-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <span className="font-bold">{s.day}</span>
+                        <span>{s.start} - {s.end}</span>
+                        <span className="text-slate-400 flex items-center gap-1">
+                          {s.room && <span>Aula: {s.room}</span>}
+                          {s.mode === 'virtual' && <span className="text-cyan-300 font-semibold">[Virtual]</span>}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Conflict Alert in Popover */}
+                {activePopover.hasConflict && (
+                  <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-xs text-rose-200 space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-rose-300">
+                      <AlertTriangle className="w-4 h-4 text-rose-400" />
+                      <span>¡Superposición horaria detectada!</span>
+                    </div>
+                    <p className="text-[11px] text-rose-300/90 pl-5">
+                      {activePopover.conflictDetails}
+                    </p>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    onClick={() => {
+                      onRemoveCommission(activePopover.subjectId);
+                      setActivePopover(null);
+                    }}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/20 transition-all"
+                  >
+                    Quitar comisión
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (onFocusSubject) {
+                        onFocusSubject(activePopover.subjectId);
+                      }
+                      setActivePopover(null);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Cambiar comisión</span>
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+      )}
     </div>
   );
 };

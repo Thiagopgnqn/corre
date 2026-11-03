@@ -324,7 +324,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         {/* Suggest combinations generator */}
         <button
           onClick={onOpenCombinationsModal}
-          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2"
+          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 min-h-[44px] cursor-pointer active:scale-95"
         >
           <Sparkles className="w-4 h-4" />
           <span>Sugerir combinaciones</span>
@@ -334,7 +334,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         <button
           onClick={() => setConfirmApplyOpen(true)}
           disabled={selectedCount === 0}
-          className="w-full py-2 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          className="w-full py-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40 min-h-[48px] cursor-pointer active:scale-95"
         >
           <PlayCircle className="w-4 h-4 text-emerald-400" />
           <span>Pasar elegidas a "Cursando"</span>
@@ -344,7 +344,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         <button
           onClick={handleCopyText}
           disabled={selectedCount === 0}
-          className="w-full py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40 min-h-[44px] cursor-pointer active:scale-95"
         >
           {copied ? (
             <>
@@ -363,7 +363,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         <button
           onClick={handleExportIcs}
           disabled={selectedCount === 0}
-          className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-indigo-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40 min-h-[44px] cursor-pointer active:scale-95"
           title="Exportar archivo .ics para Google Calendar, Apple Calendar o Outlook"
         >
           <CalendarPlus className="w-4 h-4 text-indigo-400" />
@@ -374,7 +374,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         <button
           onClick={handlePrint}
           disabled={selectedCount === 0}
-          className="w-full py-2 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40"
+          className="w-full py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2 disabled:opacity-40 min-h-[44px] cursor-pointer active:scale-95"
         >
           <Download className="w-4 h-4" />
           <span>Descargar / Imprimir horario</span>
@@ -384,7 +384,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
         <button
           onClick={() => setConfirmClearOpen(true)}
           disabled={selectedCount === 0}
-          className="w-full py-2 rounded-xl bg-transparent hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 font-semibold text-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-40"
+          className="w-full py-2.5 rounded-xl bg-transparent hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 font-semibold text-xs transition-colors flex items-center justify-center gap-2 disabled:opacity-40 min-h-[44px] cursor-pointer active:scale-95"
         >
           <Trash2 className="w-3.5 h-3.5" />
           <span>Limpiar todo</span>
@@ -393,7 +393,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
 
       {/* Confirmation Modal: Apply to enrolled */}
       {confirmApplyOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
             <h4 className="text-base font-bold text-white flex items-center gap-2">
               <PlayCircle className="w-5 h-5 text-emerald-400" />
@@ -404,17 +404,19 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => setConfirmApplyOpen(false)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white min-h-[44px] flex items-center justify-center cursor-pointer"
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setConfirmApplyOpen(false);
                   onApplyToEnrolled();
                 }}
-                className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 min-h-[44px] flex items-center justify-center cursor-pointer active:scale-95"
               >
                 Confirmar
               </button>
@@ -425,7 +427,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
 
       {/* Confirmation Modal: Clear all */}
       {confirmClearOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-5 max-w-sm w-full space-y-4 shadow-2xl">
             <h4 className="text-base font-bold text-white flex items-center gap-2">
               <Trash2 className="w-5 h-5 text-rose-400" />
@@ -436,17 +438,19 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
             </p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
+                type="button"
                 onClick={() => setConfirmClearOpen(false)}
-                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white min-h-[44px] flex items-center justify-center cursor-pointer"
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setConfirmClearOpen(false);
                   onClearAll();
                 }}
-                className="px-4 py-1.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/30"
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/30 min-h-[44px] flex items-center justify-center cursor-pointer active:scale-95"
               >
                 Limpiar
               </button>

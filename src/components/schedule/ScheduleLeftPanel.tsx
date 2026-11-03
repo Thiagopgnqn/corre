@@ -190,15 +190,15 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Buscar materia, código o docente..."
-            className="w-full pl-8 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full pl-8 pr-9 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[16px] sm:text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px] sm:min-h-0"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
               title="Borrar búsqueda"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -211,7 +211,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
               <button
                 key={sh}
                 onClick={() => setShiftFilter(sh)}
-                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize transition-all ${
+                className={`px-2 py-1.5 sm:py-0.5 rounded text-xs sm:text-[10px] font-semibold capitalize transition-all min-h-[38px] sm:min-h-0 flex items-center justify-center ${
                   shiftFilter === sh
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -225,7 +225,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Conflict-free filter toggle */}
           <button
             onClick={() => setOnlyConflictFree(!onlyConflictFree)}
-            className={`px-1.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
+            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border text-xs sm:text-[10px] font-semibold flex items-center gap-1 transition-all min-h-[38px] sm:min-h-0 ${
               onlyConflictFree
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -238,7 +238,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Show all subjects toggle */}
           <button
             onClick={() => setShowAllSubjects(!showAllSubjects)}
-            className={`px-1.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
+            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border text-xs sm:text-[10px] font-semibold flex items-center gap-1 transition-all min-h-[38px] sm:min-h-0 ${
               showAllSubjects
                 ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -256,7 +256,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
             aria-label="Valoración mínima de comisión"
             value={minRatingFilter}
             onChange={(e) => setMinRatingFilter(Number(e.target.value))}
-            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
+            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1.5 sm:py-1 text-[16px] sm:text-[10px] font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 min-h-[38px] sm:min-h-0"
           >
             <option value={0}>Valoración mínima: Todas</option>
             <option value={3.5}>Valoración: ★ 3,5+</option>
@@ -267,7 +267,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           <button
             type="button"
             onClick={() => setSortByBestRated(!sortByBestRated)}
-            className={`px-2 py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer ${
+            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer min-h-[38px] sm:min-h-0 text-xs sm:text-[10px] ${
               sortByBestRated
                 ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -345,7 +345,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                   type="button"
                   aria-expanded={isExpanded}
                   onClick={() => toggleSubjectExpanded(subject.id)}
-                  className="w-full p-2.5 flex items-center justify-between text-left hover:bg-slate-800/40 transition-colors cursor-pointer group"
+                  className="w-full p-2.5 sm:p-3 min-h-[48px] flex items-center justify-between text-left hover:bg-slate-800/40 transition-colors cursor-pointer group"
                 >
                   <div className="min-w-0 pr-2 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -391,7 +391,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                         e.stopPropagation();
                         toggleSubjectExpanded(subject.id);
                       }}
-                      className="px-2 py-0.5 rounded-lg text-[10px] font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 transition-colors cursor-pointer"
+                      className="px-2.5 py-1.5 sm:py-0.5 rounded-lg text-xs sm:text-[10px] font-semibold text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700 transition-colors cursor-pointer min-h-[38px] sm:min-h-0 flex items-center justify-center"
                       title={isExpanded ? 'Plegar comisiones de esta materia' : 'Desplegar comisiones'}
                     >
                       {isExpanded ? 'Plegar' : 'Ver'}
@@ -535,7 +535,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                           e.stopPropagation();
                                           onRemoveCommission(subject.id);
                                         }}
-                                        className="px-2.5 py-1.5 rounded-lg font-semibold text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/30 transition-all active:scale-95"
+                                        className="px-3 py-2 sm:py-1.5 rounded-lg font-semibold text-xs sm:text-[11px] text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 border border-rose-500/30 transition-all active:scale-95 min-h-[44px] sm:min-h-0 flex items-center justify-center"
                                         title="Deseleccionar comisión"
                                       >
                                         Quitar
@@ -556,7 +556,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                             hasConflict,
                                           });
                                         }}
-                                        className="px-2.5 py-1.5 rounded-lg font-semibold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all active:scale-95 border border-slate-700"
+                                        className="px-3 py-2 sm:py-1.5 rounded-lg font-semibold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 transition-all active:scale-95 border border-slate-700 min-h-[44px] sm:min-h-0 flex items-center justify-center"
                                       >
                                         Previsualizar
                                       </button>
@@ -567,7 +567,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
                                           e.stopPropagation();
                                           handleSelectCommission(subject.id, comm.id);
                                         }}
-                                        className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${
+                                        className={`px-3.5 py-2 sm:py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95 min-h-[44px] sm:min-h-0 justify-center ${
                                           isSelected
                                             ? 'bg-emerald-600 text-white shadow-sm'
                                             : isPreviewing

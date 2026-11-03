@@ -242,3 +242,124 @@ describe('Fase 2: Interacciones del Grafo, Modales de Materia y Tablero Kanban e
     assert.match(searchContent, /z-\[var\(--z-modal\)\]/, 'Debe usar variable centralizada de z-index');
   });
 });
+
+describe('Fase 3: Armador de Horarios (ScheduleBuilder) en Mobile', () => {
+  it('1. ScheduleBuilder implementa segmented control de 3 modos, banner de choques persistente y BottomSheets', () => {
+    const builderPath = path.join(rootDir, 'src/components/schedule/ScheduleBuilder.tsx');
+    const content = fs.readFileSync(builderPath, 'utf8');
+
+    // Segmented mode switcher en mobile: Comisiones / Mi Semana / Dividida
+    assert.match(content, /mobileTab === 'comisiones'/, 'Debe soportar pestaña de Comisiones en mobile');
+    assert.match(content, /mobileTab === 'grilla'/, 'Debe soportar pestaña de Mi Semana (grilla) en mobile');
+    assert.match(content, /mobileTab === 'dividida'/, 'Debe soportar pestaña Dividida en mobile');
+    assert.match(content, /setMobileTab\('comisiones'\)/, 'Debe permitir cambiar a pestaña Comisiones');
+    assert.match(content, /setMobileTab\('grilla'\)/, 'Debe permitir cambiar a pestaña Mi Semana');
+    assert.match(content, /setMobileTab\('dividida'\)/, 'Debe permitir cambiar a pestaña Dividida');
+
+    // Banner de advertencia persistente de choques en mobile
+    assert.match(content, /conflicts\.length > 0 &&/, 'Debe renderizar alerta cuando existan choques');
+    assert.match(content, /choque detectado|choques detectados/, 'Debe indicar claramente la cantidad de choques');
+    assert.match(content, /Ver en grilla/, 'El banner debe tener acceso directo a la grilla');
+
+    // BottomSheets en mobile para Propuestas, Resumen y Más Opciones
+    assert.match(content, /<BottomSheet[\s\S]*title="Mis Propuestas de Horarios"/, 'Debe renderizar propuestas en BottomSheet');
+    assert.match(content, /<BottomSheet[\s\S]*title="Más Opciones de Horarios"/, 'Debe renderizar más opciones en BottomSheet');
+    assert.match(content, /<BottomSheet[\s\S]*title="Resumen y Opciones"/, 'Debe renderizar resumen en BottomSheet en mobile');
+
+    // Targets táctiles en cabecera mobile >= 38px y 40px
+    assert.match(content, /min-h-\[38px\]/, 'Toggle 1C/2C debe tener altura táctil mínima');
+    assert.match(content, /min-h-\[40px\]/, 'Botones de cabecera deben tener altura táctil mínima de 40px');
+
+    // Invariantes de escritorio preservados estrictamente
+    assert.match(content, /h-full overflow-hidden/, 'ScheduleBuilder debe mantener h-full y overflow-hidden');
+    assert.match(content, /min-h-0/, 'ScheduleBuilder debe mantener min-h-0');
+    assert.match(content, /hidden lg:flex xl:hidden/, 'Debe mantener barra compacta en lg');
+    assert.match(content, /hidden xl:flex/, 'Debe mantener columna derecha en xl');
+    assert.match(content, /summaryDrawerOpen/, 'Debe mantener soporte a summaryDrawerOpen');
+  });
+
+  it('2. ScheduleLeftPanel adapta input a 16px, filtros táctiles y botones de comisión >= 44px', () => {
+    const leftPanelPath = path.join(rootDir, 'src/components/schedule/ScheduleLeftPanel.tsx');
+    const content = fs.readFileSync(leftPanelPath, 'utf8');
+
+    // Input de búsqueda a 16px para prevenir zoom en iOS y altura >= 44px
+    assert.match(content, /text-\[16px\]\s*sm:text-xs/, 'Input de búsqueda debe tener 16px en mobile y xs en desktop');
+    assert.match(content, /min-h-\[44px\]\s*sm:min-h-0/, 'Input de búsqueda debe tener al menos 44px de alto en mobile');
+
+    // Botones de filtro de turno, sin choques y ordenamiento >= 38px
+    assert.match(content, /min-h-\[38px\]\s*sm:min-h-0/, 'Filtros deben tener altura mínima táctil >= 38px en mobile');
+
+    // Cabecera de materia del acordeón >= 48px
+    assert.match(content, /min-h-\[48px\]/, 'Cabecera de materia debe medir al menos 48px');
+
+    // Botones de acción de comisión: Quitar, Previsualizar, Elegir/Confirmar >= 44px
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Quitar/, 'Botón Quitar debe medir al menos 44px en mobile');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Previsualizar/, 'Botón Previsualizar debe medir al menos 44px en mobile');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,1200}Confirmar/, 'Botón Confirmar/Elegir debe medir al menos 44px en mobile');
+
+    // Preserva invariantes de layout
+    assert.match(content, /Plegar/, 'Debe conservar botón manual Plegar');
+    assert.match(content, /elegida|Elegida/, 'Debe conservar insignia de elegida');
+    assert.match(content, /a\.id === selectedComm\.id\s*\?\s*-1|if\s*\(a\.id === selectedComm\.id\)\s*return -1/, 'Debe posicionar comisión elegida primero');
+  });
+
+  it('3. ScheduleWeeklyGrid optimiza selector de días táctil y popover de clase como BottomSheet en mobile', () => {
+    const gridPath = path.join(rootDir, 'src/components/schedule/ScheduleWeeklyGrid.tsx');
+    const content = fs.readFileSync(gridPath, 'utf8');
+
+    // Botones de día anterior y siguiente >= 44x44px
+    assert.match(content, /min-h-\[44px\] min-w-\[44px\][\s\S]{0,100}title="Día anterior"/, 'Chevron izquierdo debe medir al menos 44x44px');
+    assert.match(content, /min-h-\[44px\] min-w-\[44px\][\s\S]{0,100}title="Día siguiente"/, 'Chevron derecho debe medir al menos 44x44px');
+
+    // Píldoras de día >= 44px
+    assert.match(content, /key=\{d\}[\s\S]{0,500}min-h-\[44px\]/, 'Píldoras de día deben medir al menos 44px');
+
+    // Switch Día / Semana >= 38px
+    assert.match(content, /min-h-\[38px\][\s\S]{0,400}Día/, 'Botón Día debe medir al menos 38px');
+    assert.match(content, /min-h-\[38px\][\s\S]{0,400}Semana/, 'Botón Semana debe medir al menos 38px');
+
+    // Popover de clase como BottomSheet en mobile y modal centrado en desktop
+    assert.match(content, /if\s*\(isMobile\)|\bisMobile\s*\?/, 'Debe consultar condición isMobile para el popover');
+    assert.match(content, /<BottomSheet[\s\S]*title=\{activePopover\?\.subjectName/, 'Debe renderizar popover como BottomSheet en mobile');
+    assert.match(content, /z-\[var\(--z-modal\)\]/, 'Modal en desktop debe usar variable centralizada de z-index');
+
+    // Botones del popover >= 44px
+    assert.match(content, /min-h-\[44px\][\s\S]{0,140}Quitar comisión/, 'Botón Quitar comisión debe medir al menos 44px');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,140}Cambiar comisión/, 'Botón Cambiar comisión debe medir al menos 44px');
+  });
+
+  it('4. ScheduleSummaryPanel eleva diálogos de confirmación a z-modal-elevated y agranda botones táctiles', () => {
+    const summaryPath = path.join(rootDir, 'src/components/schedule/ScheduleSummaryPanel.tsx');
+    const content = fs.readFileSync(summaryPath, 'utf8');
+
+    // Diálogos de confirmación en z-modal-elevated
+    assert.match(content, /z-\[var\(--z-modal-elevated\)\][\s\S]{0,500}¿Pasar a "Cursando"\?/, 'Diálogo de pasar a cursando debe usar z-modal-elevated');
+    assert.match(content, /z-\[var\(--z-modal-elevated\)\][\s\S]{0,500}¿Limpiar toda la selección\?/, 'Diálogo de limpiar todo debe usar z-modal-elevated');
+
+    // Acciones principales >= 44px y 48px
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Sugerir combinaciones/, 'Botón Sugerir combinaciones debe medir al menos 44px');
+    assert.match(content, /min-h-\[48px\][\s\S]{0,250}Pasar elegidas a "Cursando"/, 'Botón Pasar a cursando debe medir al menos 48px');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,500}Copiar resumen en texto/, 'Botón Copiar texto debe medir al menos 44px');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Exportar a Calendario \(\.ics\)/, 'Botón Exportar .ics debe medir al menos 44px');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Descargar \/ Imprimir horario/, 'Botón Imprimir debe medir al menos 44px');
+    assert.match(content, /min-h-\[44px\][\s\S]{0,300}Limpiar todo/, 'Botón Limpiar todo debe medir al menos 44px');
+  });
+
+  it('5. ScheduleCombinationsModal y ScheduleImportModal adaptados con BottomSheet, 16px en texto y z-modal', () => {
+    // ScheduleCombinationsModal
+    const comboPath = path.join(rootDir, 'src/components/schedule/ScheduleCombinationsModal.tsx');
+    const comboContent = fs.readFileSync(comboPath, 'utf8');
+    assert.match(comboContent, /if\s*\(isMobile\)/, 'ScheduleCombinationsModal debe renderizar BottomSheet en mobile');
+    assert.match(comboContent, /maxHeightDvh=\{92\}/, 'BottomSheet de combinaciones debe usar 92 dvh');
+    assert.match(comboContent, /z-\[var\(--z-modal\)\]/, 'Modal en desktop debe usar variable centralizada');
+    assert.match(comboContent, /min-h-\[44px\][\s\S]{0,140}Cargar en mi grilla/, 'Botón Cargar en mi grilla debe medir al menos 44px');
+
+    // ScheduleImportModal
+    const importPath = path.join(rootDir, 'src/components/schedule/ScheduleImportModal.tsx');
+    const importContent = fs.readFileSync(importPath, 'utf8');
+    assert.match(importContent, /z-\[var\(--z-modal\)\]/, 'ScheduleImportModal debe usar variable centralizada');
+    assert.match(importContent, /text-\[16px\]\s*sm:text-xs/, 'Textarea de importación debe usar 16px en mobile');
+    assert.match(importContent, /min-h-\[44px\][\s\S]{0,250}Examinar archivo/, 'Botón Examinar archivo debe medir al menos 44px');
+    assert.match(importContent, /min-h-\[44px\][\s\S]{0,250}Importar horarios/, 'Botón Importar horarios debe medir al menos 44px');
+  });
+});
