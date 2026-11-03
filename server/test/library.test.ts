@@ -15,6 +15,13 @@ import {
   setLibraryServiceForTesting,
 } from '../src/modules/library/library.service.js';
 import { LIBRARY_CONFIG } from '../src/config/library.config.js';
+import {
+  mockSentNotifications,
+  clearMockSentNotifications,
+  setMockAdminRecipients,
+  escapeHtml,
+  sanitizeSubject,
+} from '../src/modules/library/library.mailer.js';
 import { setLiveUserResolverForTesting } from '../src/middlewares/auth.middleware.js';
 import { createApp } from '../src/app.js';
 
@@ -168,6 +175,7 @@ async function main() {
   libraryStore.seedUser({ id: unverifiedId, email: 'no-verificado@frc.utn.edu.ar', role: 'user', emailVerified: false, termsAccepted: true });
   libraryStore.seedUser({ id: adminId, email: 'admin-lib@stack.com', role: 'admin', emailVerified: true, termsAccepted: true });
   libraryStore.seedUser({ id: student3Id, email: 'alumno3@frc.utn.edu.ar', role: 'user', emailVerified: true, termsAccepted: true });
+  setMockAdminRecipients(['admin-lib@stack.com']);
 
   setLiveUserResolverForTesting(async (id: string) => {
     const u = libraryStore.users.get(id);
@@ -606,6 +614,291 @@ async function main() {
   await libraryStore.handleAccountDeletion(student3Id, true);
   assert(!libraryStore.files.has('file-delete-user'), 'Archivo eliminado de la base si deleteFiles: true');
   assert(!mockR2.hasObjectDirect(fileDeleteKey), 'Objeto eliminado físicamente de R2 si deleteFiles: true');
+
+  // ---------------------------------------------------------------------------
+  // 14. SISTEMA DE NOTIFICACIONES POR CORREO ELECTRÓNICO (BIBLIOTECA)
+  // ---------------------------------------------------------------------------
+  console.log('📌 14. Avisos por Mail: Subida, Aprobación, Rechazo, Exclusiones y Seguridad');
+
+  // 14.1 Seguridad y sanitizado
+  const xssStr = '<script>alert("hack")</script>&"\'';
+  const escaped = escapeHtml(xssStr);
+  assert(
+    !escaped.includes('<script>') && escaped.includes('&lt;script&gt;') && escaped.includes('&amp;'),
+    'escapeHtml neutraliza scripts y caracteres especiales HTML'
+  );
+
+  const dirtySubject = "Nuevo material\r\nBcc: victim@test.com\nTest";
+  const cleanSub = sanitizeSubject(dirtySubject);
+  assert(
+    !cleanSub.includes('\r') && !cleanSub.includes('\n'),
+    'sanitizeSubject elimina saltos de línea contra Header Injection'
+  );
+
+  // 14.2 (a) Aviso al admin al completar subida
+  clearMockSentNotifications();
+  const notifPdfBuf1 = Buffer.from('%PDF-1.4 %%EOF notif-pdf-buffer-1-' + Date.now() + '-a');
+  const notifPdfBuf2 = Buffer.from('%PDF-1.4 %%EOF notif-pdf-buffer-2-' + Date.now() + '-b');
+  const notifPdfBuf3 = Buffer.from('%PDF-1.4 %%EOF notif-pdf-buffer-3-' + Date.now() + '-c');
+  const notifPdfBuf4 = Buffer.from('%PDF-1.4 %%EOF notif-pdf-buffer-4-' + Date.now() + '-d');
+  const notifPdfBuf5 = Buffer.from('%PDF-1.4 %%EOF notif-pdf-buffer-5-' + Date.now() + '-e');
+
+  const notifStudentId = '77777777-7777-4777-8777-777777777777';
+  libraryStore.seedUser({
+    id: notifStudentId,
+    email: 'notif.alumno@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const notifStudentToken = signToken({
+    id: notifStudentId,
+    email: 'notif.alumno@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const initRes = await api(
+    'POST',
+    '/api/library/uploads/init',
+    notifStudentToken,
+    {
+      subjectId: 'sub-sintaxis',
+      kind: 'parcial',
+      academicYear: 2026,
+      term: '1C',
+      title: 'Parcial 1 Sintaxis & Semántica "Turno Mañana"',
+      originalFilename: 'parcial1.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: notifPdfBuf1.length,
+      acceptTerms: true,
+    }
+  );
+  assert(initRes.status === 201, 'Init subida devuelve 201', JSON.stringify(initRes.data));
+  const notifFileId = initRes.data?.data?.fileId;
+  const notifStorageKey = initRes.data?.data?.storageKey;
+  await mockR2.putObjectDirect(notifStorageKey, notifPdfBuf1, 'application/pdf');
+
+  // Mientras está en uploading, NO debe enviarse mail
+  assert(
+    mockSentNotifications.length === 0,
+    'No se envían avisos mientras el archivo está en estado uploading'
+  );
+
+  // Completar subida -> pasa a pending
+  const notifCompleteRes = await api('POST', `/api/library/uploads/${notifFileId}/complete`, notifStudentToken);
+  assert(notifCompleteRes.status === 200, 'Complete subida devuelve 200', JSON.stringify(notifCompleteRes.data));
+
+  // Pequeña espera para resolución asíncrona no bloqueante
+  await new Promise((r) => setTimeout(r, 60));
+
+  const adminNotif = mockSentNotifications.find((n) => n.type === 'admin_pending');
+  assert(adminNotif !== undefined, '(a) Al pasar a pending se envía correo al administrador');
+  assert(
+    Boolean(adminNotif?.to.includes('admin-lib@stack.com')),
+    'El destinatario es la dirección de administración configurada'
+  );
+  assert(
+    !adminNotif?.html.includes('notif.alumno@frc.utn.edu.ar') && !adminNotif?.text.includes('notif.alumno@frc.utn.edu.ar'),
+    'Regla de privacidad estricta: El correo de aviso al admin NO incluye el email del autor'
+  );
+  assert(
+    !adminNotif?.html.includes(notifStudentId) && !adminNotif?.text.includes(notifStudentId),
+    'Regla de privacidad estricta: El correo de aviso al admin NO incluye el ID del autor'
+  );
+  assert(
+    Boolean(adminNotif?.html.includes('Sintaxis y Sem')),
+    'El correo al admin incluye el nombre de la materia'
+  );
+  assert(
+    Boolean(adminNotif?.html.includes('&amp;') && adminNotif?.html.includes('&quot;Turno Mañana&quot;')),
+    'El título en el correo al admin está correctamente escapado contra HTML injection'
+  );
+
+  // 14.3 (b) Aprobación de archivo -> Notificación al usuario que aportó
+  clearMockSentNotifications();
+  const notifApproveRes = await api('PATCH', `/api/admin/library/files/${notifFileId}/approve`, adminToken);
+  assert(notifApproveRes.status === 200, 'Admin aprueba archivo con éxito (200)');
+
+  await new Promise((r) => setTimeout(r, 60));
+
+  const uploaderApprovedNotif = mockSentNotifications.find((n) => n.type === 'uploader_approved');
+  assert(uploaderApprovedNotif !== undefined, '(b) Aprobación envía correo al usuario que aportó el material');
+  assert(
+    Boolean(uploaderApprovedNotif?.to.includes('notif.alumno@frc.utn.edu.ar')),
+    'El destinatario de la aprobación es el autor del archivo'
+  );
+  assert(
+    Boolean(uploaderApprovedNotif?.subject.includes('Tu aporte fue aprobado en Stack')),
+    'Asunto de aprobación correcto'
+  );
+  assert(
+    Boolean(uploaderApprovedNotif?.text.includes('Sintaxis y Sem') && uploaderApprovedNotif?.text.includes('Muchas gracias')),
+    'El correo de aprobación contiene título, materia y agradecimiento'
+  );
+
+  // Segundo approve idempotente: NO debe re-enviar aviso
+  clearMockSentNotifications();
+  await api('PATCH', `/api/admin/library/files/${notifFileId}/approve`, adminToken);
+  await new Promise((r) => setTimeout(r, 60));
+  assert(
+    mockSentNotifications.length === 0,
+    'Aprobaciones subsecuentes no reenvían notificación al uploader (uploaderNotifiedAt)'
+  );
+
+  // 14.4 (c) Rechazo de archivo con motivo -> Notificación al usuario
+  clearMockSentNotifications();
+  const initRes2 = await api(
+    'POST',
+    '/api/library/uploads/init',
+    notifStudentToken,
+    {
+      subjectId: 'sub-paradigmas',
+      kind: 'apunte',
+      title: 'Apunte con observaciones',
+      originalFilename: 'apunte2.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: notifPdfBuf2.length,
+      acceptTerms: true,
+    }
+  );
+  const rejectFileId = initRes2.data.data.fileId;
+  const rejectStorageKey = initRes2.data.data.storageKey;
+  await mockR2.putObjectDirect(rejectStorageKey, notifPdfBuf2, 'application/pdf');
+  await api('POST', `/api/library/uploads/${rejectFileId}/complete`, notifStudentToken);
+  clearMockSentNotifications();
+
+  const notifRejectRes = await api(
+    'PATCH',
+    `/api/admin/library/files/${rejectFileId}/reject`,
+    adminToken,
+    { reason: 'El apunte está incompleto & contiene ejercicios de otra materia ("Guía 2").' }
+  );
+  assert(notifRejectRes.status === 200, 'Admin rechaza archivo con motivo (200)');
+
+  await new Promise((r) => setTimeout(r, 60));
+
+  const uploaderRejectedNotif = mockSentNotifications.find((n) => n.type === 'uploader_rejected');
+  assert(uploaderRejectedNotif !== undefined, '(c) Rechazo envía correo al autor con el motivo');
+  assert(
+    Boolean(uploaderRejectedNotif?.to.includes('notif.alumno@frc.utn.edu.ar')),
+    'Destinatario del rechazo es el autor'
+  );
+  assert(
+    Boolean(uploaderRejectedNotif?.html.includes('&amp;') && uploaderRejectedNotif?.html.includes('&quot;Guía 2&quot;')),
+    'El motivo del rechazo está debidamente escapado en el HTML'
+  );
+  assert(
+    Boolean(uploaderRejectedNotif?.text.includes('El apunte está incompleto')),
+    'El texto del correo incluye el motivo para corregir y volver a subir'
+  );
+
+  // 14.5 Exclusiones
+  // Exclusión 1: Preferencia del usuario desactivada (notifyLibraryEmail = false)
+  const notifUser = libraryStore.users.get(notifStudentId)!;
+  notifUser.notifyLibraryEmail = false;
+
+  const initRes3 = await api(
+    'POST',
+    '/api/library/uploads/init',
+    notifStudentToken,
+    {
+      subjectId: 'sub-sintaxis',
+      kind: 'guia',
+      title: 'Guía sin avisos de mail',
+      originalFilename: 'guia.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: notifPdfBuf3.length,
+      acceptTerms: true,
+    }
+  );
+  const file3Id = initRes3.data.data.fileId;
+  await mockR2.putObjectDirect(initRes3.data.data.storageKey, notifPdfBuf3, 'application/pdf');
+  await api('POST', `/api/library/uploads/${file3Id}/complete`, notifStudentToken);
+
+  clearMockSentNotifications();
+  await api('PATCH', `/api/admin/library/files/${file3Id}/approve`, adminToken);
+  await new Promise((r) => setTimeout(r, 60));
+  assert(
+    mockSentNotifications.length === 0,
+    'Exclusión: No se envía email si el usuario desactivó notifyLibraryEmail'
+  );
+
+  notifUser.notifyLibraryEmail = true; // restaurar
+
+  // Exclusión 2: Usuario suspendido
+  const initRes4 = await api(
+    'POST',
+    '/api/library/uploads/init',
+    notifStudentToken,
+    {
+      subjectId: 'sub-sintaxis',
+      kind: 'tp',
+      title: 'TP usuario suspendido',
+      originalFilename: 'tp.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: notifPdfBuf4.length,
+      acceptTerms: true,
+    }
+  );
+  const file4Id = initRes4.data.data.fileId;
+  await mockR2.putObjectDirect(initRes4.data.data.storageKey, notifPdfBuf4, 'application/pdf');
+  await api('POST', `/api/library/uploads/${file4Id}/complete`, notifStudentToken);
+
+  // Ahora suspender al usuario
+  notifUser.status = 'suspended';
+  clearMockSentNotifications();
+  await api('PATCH', `/api/admin/library/files/${file4Id}/approve`, adminToken);
+  await new Promise((r) => setTimeout(r, 60));
+  assert(
+    mockSentNotifications.length === 0,
+    'Exclusión: No se envía email a usuarios en estado suspendido'
+  );
+  notifUser.status = 'active'; // restaurar
+
+  // 14.6 Endpoint de Reenvío de Aviso a Administradores
+  const initRes5 = await api(
+    'POST',
+    '/api/library/uploads/init',
+    notifStudentToken,
+    {
+      subjectId: 'sub-sintaxis',
+      kind: 'parcial',
+      title: 'Parcial para reenvío de aviso',
+      originalFilename: 'parcial_resend.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: notifPdfBuf5.length,
+      acceptTerms: true,
+    }
+  );
+  const file5Id = initRes5.data.data.fileId;
+  await mockR2.putObjectDirect(initRes5.data.data.storageKey, notifPdfBuf5, 'application/pdf');
+  await api('POST', `/api/library/uploads/${file5Id}/complete`, notifStudentToken);
+  await new Promise((r) => setTimeout(r, 60));
+
+  clearMockSentNotifications();
+
+  // Llamar al endpoint de reenvío
+  const resendRes = await api(
+    'POST',
+    `/api/admin/library/files/${file5Id}/resend-admin-notification`,
+    adminToken
+  );
+  assert(resendRes.status === 200, 'POST /api/admin/library/files/:id/resend-admin-notification responde 200');
+  assert(resendRes.data.success === true, 'Reenvío retorna success: true');
+
+  await new Promise((r) => setTimeout(r, 60));
+  const resentNotif = mockSentNotifications.find((n) => n.type === 'admin_pending' && n.fileId === file5Id);
+  assert(resentNotif !== undefined, 'El aviso fue reenviado exitosamente a los administradores');
+
+  // Intentar reenviar para archivo no pendiente (aprobarlo primero)
+  await api('PATCH', `/api/admin/library/files/${file5Id}/approve`, adminToken);
+  const invalidResend = await api(
+    'POST',
+    `/api/admin/library/files/${file5Id}/resend-admin-notification`,
+    adminToken
+  );
+  assert(invalidResend.status === 400, 'Reenviar aviso sobre archivo no pendiente responde 400 Bad Request');
 
   server.close();
 

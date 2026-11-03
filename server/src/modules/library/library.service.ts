@@ -22,6 +22,11 @@ import {
   sanitizeLibraryText,
   checkLibraryProfanity,
 } from './library.validator.js';
+import {
+  notifyAdminNewPendingFile,
+  notifyUploaderFileApproved,
+  notifyUploaderFileRejected,
+} from './library.mailer.js';
 import { logAdminAction } from '../admin/admin.audit.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
 
@@ -82,6 +87,7 @@ export interface ILibraryService {
   getPreviewUrl(fileId: string): Promise<any>;
   approveFile(fileId: string, adminUserId: string): Promise<any>;
   rejectFile(fileId: string, adminUserId: string, reason: string): Promise<any>;
+  resendAdminNotification(fileId: string): Promise<{ success: boolean; message: string; notifiedAt?: Date }>;
   removeFile(fileId: string, adminUserId: string, reason?: string): Promise<any>;
   getUploaderIdentity(fileId: string, adminUser: { id: string; email: string }, ip?: string): Promise<any>;
   suspendAuthor(fileId: string, adminUser: { id: string; email: string }, reason: string, ip?: string): Promise<any>;
@@ -449,6 +455,11 @@ export class PgLibraryService implements ILibraryService {
         })
         .where(eq(libraryFiles.id, fileId))
         .returning();
+
+      // Notificar a administradores de forma asíncrona no bloqueante
+      void notifyAdminNewPendingFile(fileId).catch((err) => {
+        console.error('[LibraryService] Error no fatal enviando aviso admin:', err?.message || err);
+      });
 
       return {
         success: true,
@@ -923,6 +934,8 @@ export class PgLibraryService implements ILibraryService {
         mimeType: libraryFiles.mimeType,
         status: libraryFiles.status,
         rejectionReason: libraryFiles.rejectionReason,
+        adminNotifiedAt: libraryFiles.adminNotifiedAt,
+        uploaderNotifiedAt: libraryFiles.uploaderNotifiedAt,
         downloadCount: libraryFiles.downloadCount,
         helpfulCount: libraryFiles.helpfulCount,
         createdAt: libraryFiles.createdAt,
@@ -1067,6 +1080,8 @@ export class PgLibraryService implements ILibraryService {
         sizeBytes: libraryFiles.sizeBytes,
         sha256: libraryFiles.sha256,
         status: libraryFiles.status,
+        adminNotifiedAt: libraryFiles.adminNotifiedAt,
+        uploaderNotifiedAt: libraryFiles.uploaderNotifiedAt,
         createdAt: libraryFiles.createdAt,
       })
       .from(libraryFiles)
@@ -1154,6 +1169,8 @@ export class PgLibraryService implements ILibraryService {
         sizeBytes: libraryFiles.sizeBytes,
         status: libraryFiles.status,
         rejectionReason: libraryFiles.rejectionReason,
+        adminNotifiedAt: libraryFiles.adminNotifiedAt,
+        uploaderNotifiedAt: libraryFiles.uploaderNotifiedAt,
         downloadCount: libraryFiles.downloadCount,
         helpfulCount: libraryFiles.helpfulCount,
         createdAt: libraryFiles.createdAt,
@@ -1224,6 +1241,13 @@ export class PgLibraryService implements ILibraryService {
       .where(eq(libraryFiles.id, fileId))
       .returning();
 
+    // Notificar al estudiante que subió el archivo (solo en transición pending -> approved y si no fue notificado)
+    if (file.status === 'pending' && !file.uploaderNotifiedAt) {
+      void notifyUploaderFileApproved(fileId).catch((err) => {
+        console.error('[LibraryService] Error no fatal enviando aviso de aprobación:', err?.message || err);
+      });
+    }
+
     return updated;
   }
 
@@ -1252,7 +1276,48 @@ export class PgLibraryService implements ILibraryService {
       .where(eq(libraryFiles.id, fileId))
       .returning();
 
+    // Notificar al estudiante del rechazo con el motivo indicado
+    if (!file.uploaderNotifiedAt) {
+      void notifyUploaderFileRejected(fileId, cleanReason).catch((err) => {
+        console.error('[LibraryService] Error no fatal enviando aviso de rechazo:', err?.message || err);
+      });
+    }
+
     return updated;
+  }
+
+  async resendAdminNotification(fileId: string) {
+    const [file] = await db
+      .select()
+      .from(libraryFiles)
+      .where(eq(libraryFiles.id, fileId))
+      .limit(1);
+
+    if (!file) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
+    if (file.status !== 'pending') {
+      throw Object.assign(
+        new Error('Solo se pueden reenviar avisos para archivos en estado pendiente de revisión.'),
+        { status: 400 }
+      );
+    }
+
+    // Reiniciar marca de notificación para permitir reenvío
+    await db
+      .update(libraryFiles)
+      .set({ adminNotifiedAt: null })
+      .where(eq(libraryFiles.id, fileId));
+
+    const sent = await notifyAdminNewPendingFile(fileId);
+    return {
+      success: sent,
+      message: sent
+        ? 'Aviso reenviado correctamente a los administradores.'
+        : 'No se pudo enviar el aviso (verifique la configuración de correo o el límite de envíos).',
+      notifiedAt: sent ? new Date() : undefined,
+    };
   }
 
   async removeFile(fileId: string, adminUserId: string, reason?: string) {
@@ -1637,6 +1702,7 @@ export class InMemoryLibraryService implements ILibraryService {
     libraryTermsAcceptedAt: Date | null;
     libraryTermsVersion: string | null;
     libraryLastCheckedAt: Date | null;
+    notifyLibraryEmail?: boolean;
   }>();
 
   public subjects = new Map<string, { id: string; name: string; codeInPlan: number; level: number; kind: string; planId?: string }>();
@@ -1655,7 +1721,7 @@ export class InMemoryLibraryService implements ILibraryService {
   }
 
   // Métodos auxiliares de seeding para tests
-  seedUser(user: { id: string; email: string; role?: 'user' | 'admin'; status?: 'active' | 'suspended'; emailVerified?: boolean; termsAccepted?: boolean }) {
+  seedUser(user: { id: string; email: string; role?: 'user' | 'admin'; status?: 'active' | 'suspended'; emailVerified?: boolean; termsAccepted?: boolean; notifyLibraryEmail?: boolean }) {
     this.users.set(user.id, {
       id: user.id,
       email: user.email,
@@ -1665,6 +1731,7 @@ export class InMemoryLibraryService implements ILibraryService {
       libraryTermsAcceptedAt: user.termsAccepted ? new Date() : null,
       libraryTermsVersion: user.termsAccepted ? LIBRARY_CONFIG.CURRENT_TERMS_VERSION : null,
       libraryLastCheckedAt: null,
+      notifyLibraryEmail: user.notifyLibraryEmail ?? true,
     });
   }
 
@@ -1825,6 +1892,8 @@ export class InMemoryLibraryService implements ILibraryService {
       sizeBytes: input.sizeBytes,
       sha256: null, // Null mientras está en estado uploading (Requisito 1)
       status: 'uploading',
+      adminNotifiedAt: null,
+      uploaderNotifiedAt: null,
       rejectionReason: null,
       reviewedBy: null,
       reviewedAt: null,
@@ -1913,6 +1982,22 @@ export class InMemoryLibraryService implements ILibraryService {
     file.status = 'pending';
     file.rejectionReason = null;
     file.updatedAt = new Date();
+
+    const sub = this.subjects.get(file.subjectId);
+    void notifyAdminNewPendingFile(fileId, {
+      id: file.id,
+      title: file.title,
+      subjectName: sub?.name || 'Materia',
+      kind: file.kind,
+      academicYear: file.academicYear,
+      term: file.term,
+      sizeBytes: file.sizeBytes,
+      mimeType: file.mimeType,
+      createdAt: file.createdAt,
+      adminNotifiedAt: file.adminNotifiedAt,
+    }).then((sent) => {
+      if (sent) file.adminNotifiedAt = new Date();
+    }).catch(() => {});
 
     return {
       success: true,
@@ -2245,6 +2330,8 @@ export class InMemoryLibraryService implements ILibraryService {
           sizeBytes: f.sizeBytes,
           sha256: f.sha256,
           status: f.status,
+          adminNotifiedAt: f.adminNotifiedAt || null,
+          uploaderNotifiedAt: f.uploaderNotifiedAt || null,
           createdAt: f.createdAt,
           professors: profs,
         };
@@ -2287,6 +2374,8 @@ export class InMemoryLibraryService implements ILibraryService {
         sizeBytes: f.sizeBytes,
         status: f.status,
         rejectionReason: f.rejectionReason,
+        adminNotifiedAt: f.adminNotifiedAt || null,
+        uploaderNotifiedAt: f.uploaderNotifiedAt || null,
         downloadCount: f.downloadCount,
         helpfulCount: f.helpfulCount,
         createdAt: f.createdAt,
@@ -2326,11 +2415,31 @@ export class InMemoryLibraryService implements ILibraryService {
     const f = this.files.get(fileId);
     if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
 
+    const wasPending = f.status === 'pending';
     f.status = 'approved';
     f.rejectionReason = null;
     f.reviewedBy = adminUserId;
     f.reviewedAt = new Date();
     f.updatedAt = new Date();
+
+    if (wasPending && !f.uploaderNotifiedAt && f.uploaderUserId) {
+      const u = this.users.get(f.uploaderUserId);
+      const sub = this.subjects.get(f.subjectId);
+      if (u) {
+        void notifyUploaderFileApproved(fileId, {
+          title: f.title,
+          subjectName: sub?.name || 'Materia',
+          uploaderUserId: f.uploaderUserId,
+          userEmail: u.email,
+          userStatus: u.status,
+          notifyLibraryEmail: u.notifyLibraryEmail,
+          uploaderNotifiedAt: f.uploaderNotifiedAt,
+        }).then((sent) => {
+          if (sent) f.uploaderNotifiedAt = new Date();
+        }).catch(() => {});
+      }
+    }
+
     return f;
   }
 
@@ -2338,12 +2447,70 @@ export class InMemoryLibraryService implements ILibraryService {
     const f = this.files.get(fileId);
     if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
 
+    const cleanReason = sanitizeLibraryText(reason, 500) || 'El archivo no cumple con las pautas de publicación.';
     f.status = 'rejected';
-    f.rejectionReason = sanitizeLibraryText(reason, 500) || 'El archivo no cumple con las pautas de publicación.';
+    f.rejectionReason = cleanReason;
     f.reviewedBy = adminUserId;
     f.reviewedAt = new Date();
     f.updatedAt = new Date();
+
+    if (!f.uploaderNotifiedAt && f.uploaderUserId) {
+      const u = this.users.get(f.uploaderUserId);
+      const sub = this.subjects.get(f.subjectId);
+      if (u) {
+        void notifyUploaderFileRejected(fileId, cleanReason, {
+          title: f.title,
+          subjectName: sub?.name || 'Materia',
+          uploaderUserId: f.uploaderUserId,
+          userEmail: u.email,
+          userStatus: u.status,
+          notifyLibraryEmail: u.notifyLibraryEmail,
+          uploaderNotifiedAt: f.uploaderNotifiedAt,
+        }).then((sent) => {
+          if (sent) f.uploaderNotifiedAt = new Date();
+        }).catch(() => {});
+      }
+    }
+
     return f;
+  }
+
+  async resendAdminNotification(fileId: string) {
+    const f = this.files.get(fileId);
+    if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (f.status !== 'pending') {
+      throw Object.assign(
+        new Error('Solo se pueden reenviar avisos para archivos en estado pendiente de revisión.'),
+        { status: 400 }
+      );
+    }
+
+    f.adminNotifiedAt = null;
+    const sub = this.subjects.get(f.subjectId);
+    const sent = await notifyAdminNewPendingFile(fileId, {
+      id: f.id,
+      title: f.title,
+      subjectName: sub?.name || 'Materia',
+      kind: f.kind,
+      academicYear: f.academicYear,
+      term: f.term,
+      sizeBytes: f.sizeBytes,
+      mimeType: f.mimeType,
+      createdAt: f.createdAt,
+      adminNotifiedAt: null,
+    });
+
+    if (sent) {
+      f.adminNotifiedAt = new Date();
+    }
+
+    return {
+      success: sent,
+      message: sent
+        ? 'Aviso reenviado correctamente a los administradores.'
+        : 'No se pudo enviar el aviso (verifique la configuración de correo o el límite de envíos).',
+      notifiedAt: sent ? new Date() : undefined,
+    };
   }
 
   async removeFile(fileId: string, adminUserId: string, reason?: string) {

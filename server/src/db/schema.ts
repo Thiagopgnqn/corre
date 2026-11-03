@@ -449,6 +449,7 @@ export const userSettings = pgTable('user_settings', {
   includeElectivesInProgress: boolean('include_electives_in_progress').default(true).notNull(),
   soundEnabled: boolean('sound_enabled').default(true).notNull(),
   tutorialCompleted: boolean('tutorial_completed').default(false).notNull(),
+  notifyLibraryEmail: boolean('notify_library_email').default(true).notNull(),
   extraSettings: jsonb('extra_settings').$type<Record<string, unknown>>().default({}),
   ...timestamps,
 });
@@ -1010,6 +1011,8 @@ export const libraryFiles = pgTable(
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     downloadCount: integer('download_count').default(0).notNull(),
     helpfulCount: integer('helpful_count').default(0).notNull(),
+    adminNotifiedAt: timestamp('admin_notified_at', { withTimezone: true }),
+    uploaderNotifiedAt: timestamp('uploader_notified_at', { withTimezone: true }),
     ...timestamps,
   },
   (table) => [

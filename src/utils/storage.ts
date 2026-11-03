@@ -22,6 +22,7 @@ export interface AppSettings {
   allowBlockedElectivesPlanning: boolean; // Default false
   includeElectivesInProgress: boolean; // Default true
   tutorialCompleted: boolean; // Default false
+  notifyLibraryEmail?: boolean; // Default true
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -31,6 +32,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   allowBlockedElectivesPlanning: false,
   includeElectivesInProgress: true,
   tutorialCompleted: false,
+  notifyLibraryEmail: true,
 };
 
 export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = {
@@ -194,6 +196,7 @@ export function loadSettings(): AppSettings {
       allowBlockedElectivesPlanning: parsed.allowBlockedElectivesPlanning ?? false,
       includeElectivesInProgress: parsed.includeElectivesInProgress ?? true,
       tutorialCompleted: parsed.tutorialCompleted ?? false,
+      notifyLibraryEmail: parsed.notifyLibraryEmail ?? true,
     };
   } catch {
     return DEFAULT_SETTINGS;

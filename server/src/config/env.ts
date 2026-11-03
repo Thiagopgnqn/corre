@@ -26,6 +26,19 @@ const baseSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET: z.string().optional(),
   CONTACT_EMAIL: z.string().email('CONTACT_EMAIL debe ser un correo válido').default('contacto@stack.app'),
+  // Notificaciones administrativas de la Biblioteca (opcional, separadas por coma)
+  ADMIN_NOTIFICATION_EMAIL: z
+    .string()
+    .optional()
+    .refine((val) => {
+      if (!val || val.trim().length === 0) return true;
+      const emails = val.split(',').map((e) => e.trim()).filter(Boolean);
+      if (emails.length === 0) return false;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      return emails.every((e) => emailRegex.test(e));
+    }, {
+      message: 'ADMIN_NOTIFICATION_EMAIL debe contener una o varias direcciones de correo válidas separadas por coma',
+    }),
 });
 
 const envSchema = baseSchema.superRefine((data, ctx) => {

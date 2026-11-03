@@ -138,3 +138,13 @@ export async function testR2Connection(req: Request, res: Response): Promise<voi
     res.status(err.status || 500).json({ success: false, error: err.message || 'Error al probar conexión con R2' });
   }
 }
+
+export async function resendAdminNotification(req: Request, res: Response): Promise<void> {
+  try {
+    const fileId = String(req.params.id);
+    const result = await getLibraryService().resendAdminNotification(fileId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(err.status || 500).json({ success: false, error: err.message || 'Error al reenviar aviso de administración' });
+  }
+}

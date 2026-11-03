@@ -109,6 +109,8 @@ export interface AdminLibraryFile extends LibraryFileUser {
   uploaderUserId: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  adminNotifiedAt?: string | null;
+  uploaderNotifiedAt?: string | null;
   reportsCount?: number;
   subjectName?: string;
 }

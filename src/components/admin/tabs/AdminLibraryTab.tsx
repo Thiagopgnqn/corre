@@ -46,6 +46,7 @@ export const AdminLibraryTab: React.FC = () => {
   const [isTestingStorage, setIsTestingStorage] = useState(false);
   const [storageReport, setStorageReport] = useState<StorageTestReport | null>(null);
   const [isStorageReportOpen, setIsStorageReportOpen] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   // Reauth State
   const [reauthOpen, setReauthOpen] = useState(false);
@@ -214,6 +215,24 @@ export const AdminLibraryTab: React.FC = () => {
       showFeedback('error', err?.message || 'Error al rechazar el archivo.');
     } finally {
       setIsSubmittingReject(false);
+    }
+  };
+
+  // Resend Admin Notification
+  const handleResendNotification = async (fileId: string) => {
+    setResendingId(fileId);
+    try {
+      const res = await adminLibraryApi.resendAdminNotification(fileId);
+      if (res.success) {
+        showFeedback('success', res.message || 'Aviso enviado a los administradores.');
+        await fetchPending();
+      } else {
+        showFeedback('error', res.message || 'No se pudo enviar el aviso.');
+      }
+    } catch (err: any) {
+      showFeedback('error', err?.message || 'Error al reenviar aviso.');
+    } finally {
+      setResendingId(null);
     }
   };
 
@@ -472,6 +491,18 @@ export const AdminLibraryTab: React.FC = () => {
                       <span className="text-[11px] text-slate-500">
                         {(file.sizeBytes / (1024 * 1024)).toFixed(2)} MB · {file.mimeType}
                       </span>
+                      {file.adminNotifiedAt ? (
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 flex items-center gap-1"
+                          title={`Aviso enviado el ${new Date(file.adminNotifiedAt).toLocaleString()}`}
+                        >
+                          <Check className="w-3 h-3" /> Aviso enviado
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25 flex items-center gap-1">
+                          <Clock className="w-3 h-3" /> Aviso pendiente de reintento
+                        </span>
+                      )}
                     </div>
 
                     <div>
@@ -494,6 +525,21 @@ export const AdminLibraryTab: React.FC = () => {
 
                   {/* Moderation Actions */}
                   <div className="flex items-center gap-2 flex-wrap self-end lg:self-center shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleResendNotification(file.id)}
+                      disabled={resendingId === file.id}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Reenviar aviso por correo a los administradores"
+                    >
+                      {resendingId === file.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5 text-indigo-400" />
+                      )}
+                      <span>Reenviar aviso</span>
+                    </button>
+
                     <button
                       type="button"
                       onClick={() => handlePreview(file.id)}
