@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
-import { libraryApi } from '../../api/library.api';
+import { libraryApi, adminLibraryApi } from '../../api/library.api';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { SyncStatusBadge } from './SyncStatusBadge';
 import { UserMenu } from './UserMenu';
@@ -79,7 +79,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
   const [hasLibraryNovelty, setHasLibraryNovelty] = useState(false);
-  const [isMobileMoreSheetOpen, setIsMobileMoreSheetOpen] = useState(false);
+  const [adminPendingCount, setAdminPendingCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,8 +96,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           }
         })
         .catch(() => {});
+
+      if (user.role === 'admin') {
+        adminLibraryApi
+          .getPendingFiles()
+          .then((res) => {
+            if (res.success && res.data) {
+              setAdminPendingCount(res.data.total);
+            }
+          })
+          .catch(() => {});
+      }
     }
   }, [user, currentView]);
+
+  const hasMoreAdminBadge = Boolean(
+    user?.role === 'admin' && adminPendingCount !== null && adminPendingCount > 0
+  );
 
   // Cerrar menú desktop al hacer click afuera
   useEffect(() => {
@@ -125,7 +140,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     a.click();
     URL.revokeObjectURL(url);
     setIsMoreMenuOpen(false);
-    setIsMobileMoreSheetOpen(false);
   };
 
   const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,7 +155,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     };
     reader.readAsText(file);
     setIsMoreMenuOpen(false);
-    setIsMobileMoreSheetOpen(false);
   };
 
   // Lista completa de navegación de escritorio (8 destinos)
@@ -188,12 +201,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
   const handleMobileNavigate = (view: AppView) => {
     setCurrentView(view);
-    setIsMobileMoreSheetOpen(false);
+    setIsMoreMenuOpen(false);
   };
 
   return (
     <>
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-40 w-full">
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-[var(--z-header)] w-full safe-area-x">
         <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-4 min-w-0">
           {/* Logo & Plan */}
           <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
@@ -345,7 +358,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               </button>
 
               {isMoreMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-50 text-xs divide-y divide-slate-800/80 backdrop-blur-xl animate-fade-in">
+                <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-[var(--z-modal)] text-xs divide-y divide-slate-800/80 backdrop-blur-xl animate-fade-in">
                   {user && (
                     <div className="px-3.5 py-2.5 bg-slate-950/40">
                       <div className="flex items-center gap-2">
@@ -540,9 +553,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
       {/* MOBILE BOTTOM NAVIGATION BAR (Fixed at bottom on < md, exactly 5 thumb-friendly items) */}
       <nav
-        data-tour="nav-tabs-mobile"
+        data-tour="nav-tabs"
         aria-label="Navegación principal móvil"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 flex items-stretch justify-around shadow-2xl safe-area-pb"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-[var(--z-mobile-nav)] bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 flex items-stretch justify-around shadow-2xl safe-area-pb safe-area-x"
       >
         {mobilePrimaryNav.map((item) => {
           const Icon = item.icon;
@@ -584,17 +597,25 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         <button
           type="button"
           data-tour="more-menu-btn"
-          onClick={() => setIsMobileMoreSheetOpen(true)}
+          onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
           className={`flex-1 min-w-0 min-h-[52px] py-1.5 flex flex-col items-center justify-center gap-1 transition-all relative cursor-pointer active:scale-95 ${
-            isMobileMoreSheetOpen
+            isMobile && isMoreMenuOpen
               ? 'text-indigo-400 font-bold bg-indigo-500/15'
               : 'text-slate-400 hover:text-slate-200'
           }`}
           aria-label="Más secciones y herramientas"
           aria-haspopup="dialog"
-          aria-expanded={isMobileMoreSheetOpen}
+          aria-expanded={isMobile && isMoreMenuOpen}
         >
-          <Menu className={`w-6 h-6 shrink-0 ${isMobileMoreSheetOpen ? 'text-indigo-400' : 'text-slate-400'}`} />
+          <div className="relative">
+            <Menu className={`w-6 h-6 shrink-0 ${isMobile && isMoreMenuOpen ? 'text-indigo-400' : 'text-slate-400'}`} />
+            {hasMoreAdminBadge && (
+              <span
+                aria-label="Avisos pendientes de administración"
+                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+              />
+            )}
+          </div>
           <span className="leading-tight text-[11px] font-semibold truncate max-w-full text-center">
             Más
           </span>
@@ -603,8 +624,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
       {/* MOBILE: BottomSheet "Más" (Acceso a las vistas y utilidades secundarias) */}
       <BottomSheet
-        isOpen={isMobileMoreSheetOpen}
-        onClose={() => setIsMobileMoreSheetOpen(false)}
+        isOpen={isMobile && isMoreMenuOpen}
+        onClose={() => setIsMoreMenuOpen(false)}
         title="Más Secciones & Herramientas"
         subtitle={`Progreso de carrera: ${computedProgress.careerPercentageBySubjects}% de materias`}
       >
@@ -770,7 +791,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 type="button"
                 data-tour="onboarding-menu-item"
                 onClick={() => {
-                  setIsMobileMoreSheetOpen(false);
+                  setIsMoreMenuOpen(false);
                   setIsOnboardingOpen(true);
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -782,7 +803,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 type="button"
                 onClick={() => {
-                  setIsMobileMoreSheetOpen(false);
+                  setIsMoreMenuOpen(false);
                   loadSample();
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -794,7 +815,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 type="button"
                 onClick={() => {
-                  setIsMobileMoreSheetOpen(false);
+                  setIsMoreMenuOpen(false);
                   startTutorial(0);
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -824,7 +845,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 type="button"
                 onClick={() => {
-                  setIsMobileMoreSheetOpen(false);
+                  setIsMoreMenuOpen(false);
                   setResetConfirmOpen(true);
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -841,7 +862,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               <button
                 type="button"
                 onClick={() => {
-                  setIsMobileMoreSheetOpen(false);
+                  setIsMoreMenuOpen(false);
                   logout();
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -856,7 +877,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-800 p-5 shadow-2xl space-y-4">
             <h3 className="text-lg font-bold text-white">¿Reiniciar todos los datos?</h3>
             <p className="text-xs text-slate-400 leading-relaxed">

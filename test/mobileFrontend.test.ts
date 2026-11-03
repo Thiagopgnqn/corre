@@ -80,6 +80,9 @@ describe('Fase 1: Infraestructura Mobile, BottomSheet, Navegación y Prevención
 
     // Búsqueda accesible en mobile sin depender de teclado físico (Ctrl+K)
     assert.match(content, /data-tour="search-button"[\s\S]{0,120}min-h-\[44px\] min-w-\[44px\]/, 'Botón de búsqueda táctil visible >= 44x44 px');
+
+    // Badge de avisos pendientes de administración en "Más"
+    assert.match(content, /hasMoreAdminBadge/, 'Debe calcular badge de admin en botón Más');
   });
 
   it('4. UserMenu mobile se despliega como BottomSheet con accesos táctiles >= 48px', () => {
@@ -110,16 +113,19 @@ describe('Fase 1: Infraestructura Mobile, BottomSheet, Navegación y Prevención
     assert.doesNotMatch(htmlContent, /user-scalable=no/, 'NO debe bloquear el zoom con user-scalable=no');
     assert.doesNotMatch(htmlContent, /maximum-scale/, 'NO debe bloquear el zoom con maximum-scale');
 
-    // Regla global en index.css
+    // Regla global en index.css (acotada a inputs de texto, select y textarea sin !important)
     const cssPath = path.join(rootDir, 'src/index.css');
     const cssContent = fs.readFileSync(cssPath, 'utf8');
-    assert.match(cssContent, /@media\s*\(max-width:\s*767\.98px\)\s*\{[\s\S]*input,\s*select,\s*textarea\s*\{[\s\S]*font-size:\s*16px\s*!important;/, 'Debe forzar font-size: 16px en mobile para prevenir zoom de iOS Safari');
+    assert.match(cssContent, /@media\s*\(max-width:\s*767\.98px\)\s*\{[\s\S]*input:not\([\s\S]*font-size:\s*16px;/, 'Debe forzar font-size: 16px en mobile sin !important excluyendo checkbox/radio/range/file/button');
+    assert.doesNotMatch(cssContent, /font-size:\s*16px\s*!important;/, 'NO debe usar !important en la regla de font-size');
 
     // Escala centralizada de Z-Index
     assert.match(cssContent, /--mobile-nav-height:\s*4rem;/, 'Debe definir variable CSS --mobile-nav-height');
     assert.match(cssContent, /--z-mobile-nav:\s*40;/, 'Debe definir z-index de barra móvil');
     assert.match(cssContent, /--z-backdrop:\s*50;/, 'Debe definir z-index de backdrop');
     assert.match(cssContent, /--z-sheet:\s*50;/, 'Debe definir z-index de bottom sheet');
+    assert.match(cssContent, /--z-toast:\s*60;/, 'Debe definir z-index de toast');
+    assert.match(cssContent, /--z-modal-top:\s*70;/, 'Debe definir z-index superior');
 
     // Prefers-reduced-motion
     assert.match(cssContent, /prefers-reduced-motion:\s*reduce/, 'Debe contemplar prefers-reduced-motion');

@@ -313,10 +313,10 @@ export const CorrelativeGraph: React.FC = () => {
   return (
     <div
       data-tour="graph-canvas"
-      className="relative w-full h-[calc(100dvh-7.5rem)] lg:h-[calc(100dvh-4.25rem)] bg-slate-950 overflow-hidden"
+      className="relative w-full h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] lg:h-[calc(100dvh-var(--app-header-height,4rem))] bg-slate-950 overflow-hidden"
     >
       {/* Top Floating Controls & Legend */}
-      <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-20 flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
+      <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-[var(--z-graph-controls)] flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
         <div
           data-tour="graph-controls"
           className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-2 sm:gap-3 text-xs"
@@ -391,7 +391,7 @@ export const CorrelativeGraph: React.FC = () => {
           className="bg-slate-950"
         />
         <Controls
-          className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300"
+          className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300 !bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+0.75rem)] md:!bottom-4 !left-3 sm:!left-4 z-[var(--z-graph-controls)]"
         />
         <MiniMap
           nodeColor={(n) => {
@@ -422,7 +422,7 @@ export const CorrelativeGraph: React.FC = () => {
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(e) => e.stopPropagation()}
           role="menu"
-          className="fixed z-50 w-56 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 shadow-2xl py-1.5 text-xs divide-y divide-slate-800/80"
+          className="fixed z-[var(--z-modal)] w-56 rounded-2xl bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 shadow-2xl py-1.5 text-xs divide-y divide-slate-800/80"
         >
           <div className="px-3 py-2">
             <span className="font-mono text-[10px] text-slate-400">

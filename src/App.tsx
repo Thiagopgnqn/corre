@@ -143,13 +143,13 @@ const AppContent: React.FC = () => {
 
   return (
     <div
-      className={`bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200 ${
+      className={`bg-[#090d16] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200 pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] ${
         isScheduleView ? 'h-[100dvh] max-h-[100dvh] overflow-hidden lg:h-auto lg:max-h-none lg:overflow-visible' : 'min-h-screen'
       }`}
     >
       {/* Top Header Area monitored by ResizeObserver (oculto en panel de administración) */}
       {currentView !== 'admin' && (
-        <div ref={headerAreaRef} className={`${isScheduleView ? 'relative lg:static' : 'sticky top-0'} z-40 w-full shrink-0`}>
+        <div ref={headerAreaRef} className={`${isScheduleView ? 'relative lg:static' : 'sticky top-0'} z-[var(--z-header)] w-full shrink-0`}>
           {/* Simulation banner if active */}
           <SimulationBar />
 
@@ -160,7 +160,7 @@ const AppContent: React.FC = () => {
 
       {/* Main content body with smooth transitions */}
       <main
-        className={`flex-1 flex flex-col pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] md:pb-0 ${
+        className={`flex-1 flex flex-col pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0 ${
           isScheduleView ? 'min-h-0 overflow-hidden lg:overflow-visible lg:h-auto' : 'overflow-x-hidden'
         }`}
       >

@@ -129,7 +129,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
 
       {/* DESKTOP: Menú flotante tradicional (hidden en mobile) */}
       {!isMobile && isOpen && (
-        <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl py-2 z-50 text-slate-200 animate-fade-in backdrop-blur-xl">
+        <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl py-2 z-[var(--z-modal)] text-slate-200 animate-fade-in backdrop-blur-xl">
           {/* User info header */}
           <div className="px-4 py-2.5 border-b border-slate-800">
             <div className="flex items-center justify-between mb-1">
@@ -387,7 +387,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
 
       {/* Modal de confirmación para eliminar cuenta */}
       {showDeleteConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in">
           <div className="bg-slate-900 border border-red-500/30 rounded-2xl max-w-sm w-full p-6 text-slate-100 shadow-2xl">
             <div className="flex items-center gap-3 mb-3 text-red-400">
               <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20">

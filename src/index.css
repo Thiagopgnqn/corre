@@ -20,6 +20,8 @@
   --z-sheet: 50;
   --z-modal: 50;
   --z-toast: 60;
+  --z-modal-elevated: 65;
+  --z-modal-top: 70;
 }
 
 @layer base {
@@ -150,6 +152,11 @@
   padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
 }
 
+.safe-area-x {
+  padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+  padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+}
+
 /* Hide scrollbars while allowing touch/mouse scrolling */
 .no-scrollbar::-webkit-scrollbar,
 .scrollbar-none::-webkit-scrollbar {
@@ -162,12 +169,12 @@
   scrollbar-width: none;
 }
 
-/* Prevención estricta de auto-zoom en iOS Safari en pantallas menores a 768px */
+/* Prevención de auto-zoom en iOS Safari en pantallas menores a 768px (mínimo 16px en campos de texto) */
 @media (max-width: 767.98px) {
-  input,
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]),
   select,
   textarea {
-    font-size: 16px !important;
+    font-size: 16px;
   }
 }
 

@@ -24,7 +24,7 @@ export const ReviewRecommendationToast: React.FC = () => {
           transition={{ duration: 0.2 }}
           role="status"
           aria-live="polite"
-          className="fixed bottom-20 md:bottom-5 right-3 sm:right-5 z-[55] w-[calc(100vw-1.5rem)] max-w-md bg-slate-900/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl p-4 shadow-2xl shadow-indigo-950/60"
+          className="fixed bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+1rem)] md:bottom-5 right-3 sm:right-5 z-[var(--z-toast)] w-[calc(100vw-1.5rem)] max-w-md bg-slate-900/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl p-4 shadow-2xl shadow-indigo-950/60"
         >
           <div className="flex items-start gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">

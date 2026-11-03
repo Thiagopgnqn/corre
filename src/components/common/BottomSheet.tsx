@@ -158,7 +158,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end pointer-events-auto">
+        <div className="fixed inset-0 z-[var(--z-sheet)] flex flex-col justify-end pointer-events-auto pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
           {/* Backdrop con tap para cerrar */}
           <motion.div
             initial={{ opacity: 0 }}

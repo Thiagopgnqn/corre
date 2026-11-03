@@ -264,15 +264,20 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     }
   }, [isTutorialOpen, step?.id, selectedSubjectId, setSelectedSubjectId]);
 
-  // Auto-open more options menu if tutorial step targets an option inside it (e.g. Carga Rápida)
+  // Auto-open more options menu if tutorial step targets an option inside it (e.g. Carga Rápida or Analista in mobile)
   useEffect(() => {
     if (!isTutorialOpen) {
       setIsMoreMenuOpen(false);
       return;
     }
 
+    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
+
     const targetsMenuItem = Boolean(
-      step?.targetSelector && step.targetSelector.includes('menu-item')
+      step?.targetSelector && (
+        step.targetSelector.includes('menu-item') ||
+        (isMobileViewport && step.targetSelector.includes('analista-button'))
+      )
     );
 
     if (targetsMenuItem) {
@@ -346,9 +351,9 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden pointer-events-none" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-[var(--z-modal-top)] overflow-hidden pointer-events-none" role="dialog" aria-modal="true">
       {/* Dark Spotlight SVG Mask with smoothly animated cutout */}
-      <svg className="fixed inset-0 w-full h-full pointer-events-none z-50">
+      <svg className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]">
         <defs>
           <mask id="tutorial-spotlight-mask">
             {/* White background reveals the overlay */}
@@ -403,7 +408,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
             stiffness: 300,
             mass: 0.8,
           }}
-          className="fixed rounded-2xl border-2 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.5)] pointer-events-none z-50 animate-pulse"
+          className="fixed rounded-2xl border-2 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.5)] pointer-events-none z-[var(--z-modal-top)] animate-pulse"
         />
       )}
 

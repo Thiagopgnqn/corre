@@ -9,7 +9,7 @@
 
 | Fase | Alcance | Estado | Notas / Cierre |
 | :--- | :--- | :--- | :--- |
-| **Fase 1** | **Infraestructura Base, BottomSheet, Navbar y UserMenu Mobile, Prevención Zoom iOS** | **COMPLETADA** | Hook `useIsMobile`, componente accesible `BottomSheet`, Bottom Nav de 5 ítems con "Más", `UserMenu` adaptado a sheet, escala Z-Index y regla de font-size de 16px en mobile. Build y 9 suites de tests en verde. |
+| **Fase 1** | **Infraestructura Base, BottomSheet, Navbar y UserMenu Mobile, Prevención Zoom iOS** | **COMPLETADA (con Ajustes de Cierre)** | Hook `useIsMobile`, componente accesible `BottomSheet`, Bottom Nav de 5 ítems con "Más", `UserMenu` adaptado a sheet, escala Z-Index migrada, safe-areas de notch y landscape, badge de avisos en "Más", sincronización del tutorial en mobile, y regla de font-size de 16px en mobile sin `!important`. Build y 9 suites de tests (100%) en verde. |
 | **Fase 2** | Materias, Estados y Tableros (`SubjectDrawer`, `QuickStatusModal`, `KanbanBoard`) | Pendiente | Esperando aprobación para iniciar. |
 | **Fase 3** | Armador de Horarios (`ScheduleBuilder`, grilla día/semana, comisiones táctiles) | Pendiente | Mantener layout y test de desktop intactos. |
 | **Fase 4** | Planificador de Cuatrimestre, Biblioteca, Reseñas y Electivas | Pendiente | Barra flotante sobre bottom nav, formulario de material con galería/cámara. |
@@ -18,14 +18,19 @@
 
 ---
 
-## 1. Fase 1: Decisiones Tomadas y Cambios Implementados
+## 1. Fase 1: Decisiones Tomadas y Ajustes de Cierre Implementados
 
-1. **Breakpoint Consistente con Tailwind `md`**:
+1. **Rutas Reales de Componentes**:
+   - `Navbar.tsx` reside en `src/components/common/Navbar.tsx` (corregida la referencia previa de `src/components/layout/Navbar.tsx`).
+   - `UserMenu.tsx` reside en `src/components/common/UserMenu.tsx`.
+
+2. **Breakpoint Consistente con Tailwind `md`**:
    - `src/hooks/useIsMobile.ts` evalúa `(max-width: 767.98px)`.
    - Se utiliza solo para decisiones de comportamiento interactivo (ej. abrir un BottomSheet en vez de un dropdown absoluto). Todo el layout visual se maneja preferentemente con clases utilitarias responsivas de Tailwind (`md:`, `lg:`).
    - Capacidades táctiles mediante `(hover: none) and (pointer: coarse)`.
    - Detección de pantallas horizontales con baja altura mediante `(orientation: landscape) and (max-height: 500px)`.
-2. **Componente Reutilizable y Accesible `BottomSheet` (`src/components/common/BottomSheet.tsx`)**:
+
+3. **Componente Reutilizable y Accesible `BottomSheet` (`src/components/common/BottomSheet.tsx`)**:
    - Cumple WAI-ARIA para diálogos modales: `role="dialog"`, `aria-modal="true"`, `aria-labelledby`.
    - Gestión de foco: al abrir enfoca el primer elemento interactivo; al cerrar devuelve el foco al elemento disparador previo.
    - Trampa de foco (Focus Trap): cicla mediante `Tab` y `Shift+Tab` dentro del sheet impidiendo escapar al fondo.
@@ -34,8 +39,10 @@
    - Prevención de rebote en iOS Safari con `overscroll-behavior: contain`.
    - Soporte de gestos: arrastre hacia abajo (swipe-to-close) capturado con **Pointer Events exclusivamente en la cabecera / handle** para no interferir nunca con el scroll interno del contenido.
    - Teclado virtual: los botones de acción (footer) van `sticky` dentro del propio sheet, no en un `position: fixed` flotante desvinculado.
+   - Soporte para notch y landscape: `pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]`.
    - Respeto de `prefers-reduced-motion` para usuarios con sensibilidad visual.
-3. **Escala Centralizada de Capas (Z-Index) y Alturas**:
+
+4. **Escala Centralizada de Capas (Z-Index) y Alturas**:
    - Declarada en `src/index.css` en `:root`:
      - `--mobile-nav-height: 4rem;` (64px)
      - `--z-graph-controls: 30;`
@@ -47,18 +54,67 @@
      - `--z-sheet: 50;`
      - `--z-modal: 50;`
      - `--z-toast: 60;`
-4. **Prevención Global de Zoom en iOS Safari**:
-   - Regla CSS en `src/index.css`:
+     - `--z-modal-elevated: 65;`
+     - `--z-modal-top: 70;`
+
+5. **Auditoría y Migración de Z-Index**:
+
+| Componente | Z-Index Anterior | Variable Centralizada Nueva | Justificación |
+| :--- | :--- | :--- | :--- |
+| **Cabecera / Header (`App.tsx` / `Navbar.tsx`)** | `z-40` | `z-[var(--z-header)]` (40) | Capa fija del encabezado de la app. |
+| **Barra Inferior Móvil (`Navbar.tsx`)** | `z-40` | `z-[var(--z-mobile-nav)]` (40) | Capa fija inferior; siempre visible sobre el contenido pero bajo modales. |
+| **Controles y Leyenda del Grafo (`CorrelativeGraph.tsx`)** | `z-20` / default | `z-[var(--z-graph-controls)]` (30) | Flotantes dentro del canvas, debajo de la barra móvil y de la cabecera. |
+| **Menú contextual del Grafo (`CorrelativeGraph.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú emergente de clic derecho. |
+| **Desplegable Más opciones desktop (`Navbar.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú flotante de escritorio. |
+| **Desplegable de Usuario desktop (`UserMenu.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Menú flotante de usuario en escritorio. |
+| **Contenedor BottomSheet (`BottomSheet.tsx`)** | `z-50` | `z-[var(--z-sheet)]` (50) | Panel modal inferior sobre fondo oscuro. |
+| **Diálogos de Confirmación (`Navbar.tsx` / `UserMenu.tsx`)** | `z-50` | `z-[var(--z-modal)]` (50) | Modales de confirmación de reinicio y eliminación de cuenta. |
+| **Aviso de Reseña Cursada (`ReviewRecommendationToast.tsx`)** | `z-[55]` | `z-[var(--z-toast)]` (60) | Notificación emergente flotante (ubicada con holgura por encima de la barra móvil). |
+| **Spotlight de Tutorial Guiado (`TutorialSpotlight.tsx`)** | `z-50` | `z-[var(--z-modal-top)]` (70) | Capa superior que resalta cualquier elemento interactivo. |
+
+6. **Despeje de Contenido y Prevención de Doble Scroll**:
+   - `App.tsx` `<main>`:
+     `pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0`.
+     Garantiza que ninguna vista de contenido regular quede tapada por la barra inferior fija en pantallas móviles.
+   - `CorrelativeGraph.tsx`:
+     Calcula su altura exacta restando la cabecera dinámica y la barra inferior móvil:
+     `h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] lg:h-[calc(100dvh-var(--app-header-height,4rem))]`.
+     Elimina scroll vertical secundario y ajusta el zoom al área realmente visible.
+   - `ScheduleBuilder.tsx`:
+     Mantiene su altura fija `100dvh` con scroll interno en cada panel (`min-h-0`), con su test `scheduleLayout.test.ts` en verde sin modificaciones.
+
+7. **Prevención de Zoom en iOS Safari (Sin `!important` y Acotada)**:
+   - Regla en `src/index.css`:
      ```css
      @media (max-width: 767.98px) {
-       input, select, textarea {
-         font-size: 16px !important;
+       input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="color"]),
+       select,
+       textarea {
+         font-size: 16px;
        }
      }
      ```
-   - `index.html` verificado: `<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />` sin `user-scalable=no` ni `maximum-scale`.
-5. **No `overflow-x-hidden` simultáneo en HTML y Body**:
-   - Solo `body` posee `overflow-x: hidden`; `html` no se toca para no quebrar `position: sticky` ni el scroll en iOS.
+   - No utiliza `!important`.
+   - Excluye explícitamente checkboxes, radios, ranges, botones nativos y selectores de color.
+   - `SixDigitInput` (código de 6 dígitos) utiliza `text-xl sm:text-2xl` (20px / 24px), por lo que no se ve alterado negativamente en su diseño.
+   - `index.html` validado con `<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />` sin bloquear el zoom manual del usuario.
+
+8. **Tutorial Interactivo en Mobile**:
+   - Se verificaron los 16 pasos del tutorial (`TUTORIAL_STEPS`):
+     - **Paso 9 (`analista-switch`)**: en desktop está en la cabecera; en mobile vive dentro del sheet "Más". `TutorialSpotlight` ahora detecta si está en viewport móvil y activa automáticamente `setIsMoreMenuOpen(true)` para desplegar el BottomSheet y resaltar el switch.
+     - **Paso 10 y 11 (`app-views` y `schedule-builder-tour`)**: apuntan a `[data-tour="nav-tabs"]`. La barra de navegación inferior móvil ahora porta `data-tour="nav-tabs"`, permitiendo que el spotlight la identifique y resalte de inmediato.
+     - **Paso 14 (`persistence-tour`)**: apunta a `[data-tour="more-menu-btn"]`. En mobile este data-attribute está asignado al 5to botón de la barra ("Más"), guiando al usuario con exactitud.
+     - **Paso 16 (`finish`)**: apunta a `[data-tour="onboarding-menu-item"]` (Carga rápida). La apertura automática del menú ya está soportada.
+     - Ningún paso del tour queda con objetivo nulo o inaccesible en mobile.
+
+9. **Badge de Avisos en "Más"**:
+   - Si un usuario administrador tiene archivos pendientes de moderación en la biblioteca (`adminPendingCount > 0`), el botón "Más" de la barra inferior exhibe un punto ámbar pulsante (`hasMoreAdminBadge`).
+   - Dentro del sheet "Más", el botón "Panel de Administración" indica la cantidad exacta de archivos pendientes (`{adminPendingCount} pend.`).
+
+10. **Comportamiento en Landscape Corto (844x390) y Muescas (Notch)**:
+    - Se aplicaron clases seguras con `env(safe-area-inset-left, 0px)` y `env(safe-area-inset-right, 0px)` en el contenedor raíz de `App.tsx`, en la cabecera `Navbar.tsx`, en la barra inferior móvil y en el `BottomSheet.tsx`.
+    - En teléfonos rotados con notch lateral o esquinas redondeadas, los botones y contenidos respetan los márgenes seguros para evitar recortes.
+    - Los BottomSheets ajustan su contenido con scroll interno fluido en `dvh`.
 
 ---
 
@@ -67,46 +123,36 @@
 | Elemento actual en Navbar Desktop | Ubicación en Mobile (< 768px) | Detalle de accesibilidad / interacción |
 | :--- | :--- | :--- |
 | **BrandLogo (Stack)** | Barra superior (Top bar) | Visible a la izquierda, adaptado en tamaño. |
-| **Selector de Plan (Píldora Plan 2023 / 2008)** | Barra superior & Sheet "Más" & Sheet "Usuario" | Botón táctil en top bar; accesible también desde las hojas de opciones. |
+| **Selector de Plan (Píldora Plan 2023 / 2008)** | Barra superior, Sheet "Más" y Sheet "Usuario" | Botón táctil en top bar; accesible también desde las hojas de opciones. |
 | **Pestaña Mapa (Correlativas)** | Barra inferior (Bottom Nav) — Ítem 1 | Botón táctil con altura $\ge 48\text{ px}$ (`min-h-[52px]`), ícono de $24\text{ px}$ (`w-6 h-6`), texto $\ge 11\text{ px}$. |
 | **Pestaña Horarios (Armador)** | Barra inferior (Bottom Nav) — Ítem 2 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto $\ge 11\text{ px}$. |
 | **Pestaña Biblioteca (Material)** | Barra inferior (Bottom Nav) — Ítem 3 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto $\ge 11\text{ px}$, badge de novedades activo. |
 | **Pestaña Profesores (Reseñas)** | Barra inferior (Bottom Nav) — Ítem 4 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto $\ge 11\text{ px}$, badge de recomendaciones activo. |
-| **Botón "Más"** | Barra inferior (Bottom Nav) — Ítem 5 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto "Más". Abre `BottomSheet` de Más Secciones. |
-| **Pestaña Niveles (Kanban)** | Sheet "Más" | Ítem táctil $\ge 48\text{ px}$ con ícono `Kanban` y subtítulo explicativo. |
-| **Pestaña Cuatrimestre (Planificador)** | Sheet "Más" | Ítem táctil $\ge 48\text{ px}$ con ícono `CalendarDays` y subtítulo explicativo. |
-| **Pestaña Electivas (Catálogo)** | Sheet "Más" | Ítem táctil $\ge 48\text{ px}$ con ícono `Sparkles` y subtítulo explicativo. |
-| **Pestaña Estadísticas (Camino Crítico)**| Sheet "Más" | Ítem táctil $\ge 48\text{ px}$ con ícono `BarChart3` y subtítulo explicativo. |
-| **Panel de Administración (/#admin)** | Sheet "Más" & Sheet "Usuario" (Solo Admins) | Botón destacado con ícono `Shield`, visible **únicamente** si `user?.role === 'admin'`. Muestra badge de pendientes. |
+| **Botón "Más"** | Barra inferior (Bottom Nav) — Ítem 5 | Botón táctil con altura $\ge 48\text{ px}$, ícono de $24\text{ px}$, texto "Más". Badge de moderación para administradores. Abre `BottomSheet` "Más Secciones". |
+| **Pestaña Niveles (Kanban)** | Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `Kanban` y subtítulo explicativo. |
+| **Pestaña Cuatrimestre (Planificador)** | Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `CalendarDays` y subtítulo explicativo. |
+| **Pestaña Electivas (Catálogo)** | Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `Sparkles` y subtítulo explicativo. |
+| **Pestaña Estadísticas (Camino Crítico)**| Sheet "Más" | Fila táctil $\ge 48\text{ px}$ con ícono `BarChart3` y subtítulo explicativo. |
+| **Panel de Administración (/#admin)** | Sheet "Más" y Sheet "Usuario" (Solo Admins) | Fila destacada con ícono `Shield`, visible **únicamente** si `user?.role === 'admin'`. Muestra badge de pendientes. |
 | **Buscador rápido (Ctrl+K)** | Barra superior (Top bar) | **Botón táctil visible $\ge 44 \times 44\text{ px}$** con ícono de lupa (`Search`) para abrir con un solo toque (Ctrl+K no existe en móvil). |
-| **Simulador "¿Y si...?"** | Barra superior & Sheet "Más" | Botón táctil en top bar y switch interactivo ON/OFF dentro del sheet "Más". |
-| **Switch Analista (Seminario 99)** | Sheet "Más" | Switch táctil accesible ON/OFF (conserva selector `data-tour="analista-button"`). |
+| **Simulador "¿Y si...?"** | Barra superior y Sheet "Más" | Botón táctil en top bar y switch interactivo ON/OFF dentro del sheet "Más". |
+| **Switch Analista (Seminario 99)** | Sheet "Más" | Switch táctil accesible ON/OFF (conserva selector `data-tour="analista-button"` y se auto-abre en tutorial). |
 | **Efectos de sonido** | Sheet "Más" | Switch táctil accesible ON/OFF con íconos de volumen. |
-| **Carga rápida por nivel** | Sheet "Más" | Botón táctil $\ge 44\text{ px}$ con ícono `Layers` (conserva `data-tour="onboarding-menu-item"`). |
-| **Cargar muestra demo (3er año)** | Sheet "Más" | Botón táctil $\ge 44\text{ px}$ con ícono `Sparkles`. |
-| **Ver tutorial interactivo** | Sheet "Más" | Botón táctil $\ge 44\text{ px}$ con ícono `HelpCircle`. |
-| **Exportar carrera (JSON)** | Sheet "Más" & Sheet "Usuario" | Botón táctil $\ge 44\text{ px}$ con descarga inmediata. |
-| **Importar carrera (JSON)** | Sheet "Más" | Botón táctil $\ge 44\text{ px}$ que abre el selector de archivo nativo. |
-| **Reiniciar carrera...** | Sheet "Más" | Botón táctil de advertencia con diálogo de confirmación. |
+| **Carga rápida por nivel** | Sheet "Más" | Fila táctil $\ge 44\text{ px}$ con ícono `Layers` (conserva `data-tour="onboarding-menu-item"`). |
+| **Cargar muestra demo (3er año)** | Sheet "Más" | Fila táctil $\ge 44\text{ px}$ con ícono `Sparkles`. |
+| **Ver tutorial interactivo** | Sheet "Más" | Fila táctil $\ge 44\text{ px}$ con ícono `HelpCircle`. |
+| **Exportar carrera (JSON)** | Sheet "Más" y Sheet "Usuario" | Fila táctil $\ge 44\text{ px}$ con descarga inmediata. |
+| **Importar carrera (JSON)** | Sheet "Más" | Fila táctil $\ge 44\text{ px}$ que abre el selector de archivo nativo. |
+| **Reiniciar carrera...** | Sheet "Más" | Botón de advertencia con diálogo de confirmación. |
 | **Badge de Sync / Offline** | Barra superior (Top bar) | Indicador visual de estado de sincronización. |
 | **Menú de Usuario / Perfil** | Barra superior (Top bar) | Botón táctil $\ge 44 \times 44\text{ px}$ con avatar que en mobile despliega `UserMenu` como `BottomSheet`. |
 | **Aviso de mails de Biblioteca** | Sheet "Usuario" | Switch táctil con área de toque amplia ($\ge 44\text{ px}$). |
-| **Cerrar Sesión** | Sheet "Usuario" & Sheet "Más" | Botón táctil $\ge 48\text{ px}$ de fácil acceso. |
-| **Eliminar cuenta...** | Sheet "Usuario" | Botón táctil de acción peligrosa con modal de confirmación. |
+| **Cerrar Sesión** | Sheet "Usuario" y Sheet "Más" | Fila táctil $\ge 48\text{ px}$ de fácil acceso. |
+| **Eliminar cuenta...** | Sheet "Usuario" | Botón de acción peligrosa con diálogo de confirmación modal. |
 
 ---
 
-## 3. Comportamiento en Orientación Horizontal (Landscape, ej. 844x390)
-
-En teléfonos colocados en horizontal con poca altura ($< 500\text{ px}$):
-- **Barra Superior**: Mantiene su altura compacta (máx 44px) para preservar el área de trabajo.
-- **Barra Inferior**: Reduce el padding vertical manteniendo los targets táctiles accesibles.
-- **Bottom Sheets**: Ajustan su altura máxima a `max-h-[92dvh]`, con cabecera compacta y scroll interno fluido, garantizando que el usuario siempre pueda ver los contenidos y los botones de acción sin que queden ocultos.
-- **Armador de Horarios / Grafo**: Se apoya en el scroll vertical del canvas y vista de día único sin solapar controles.
-
----
-
-## 4. Inventario Completo y Asignación por Fases
+## 3. Inventario Completo y Asignación por Fases
 
 | Componente / Pantalla | Archivo | ¿Existe en el Repo? | Fase de Adaptación |
 | :--- | :--- | :--- | :--- |
@@ -129,7 +175,7 @@ En teléfonos colocados en horizontal con poca altura ($< 500\text{ px}$):
 
 ---
 
-## 5. Notas y Directivas para Fases Futuras
+## 4. Notas y Directivas para Fases Futuras
 
 1. **Biblioteca (Fase 4)**:
    - El input nativo de archivos debe llevar:
@@ -148,4 +194,3 @@ En teléfonos colocados en horizontal con poca altura ($< 500\text{ px}$):
 5. **Mapa de Correlativas (Fase 2)**:
    - El `MiniMap` se oculta en pantallas móviles para no tapar los nodos.
    - Se aplicará `fitView` con padding generoso y un botón flotante accesible para re-centrar el lienzo en el año cursado actual.
-
