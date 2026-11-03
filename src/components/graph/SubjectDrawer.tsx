@@ -48,6 +48,18 @@ export const SubjectDrawer: React.FC = () => {
 
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState<string | null>(null);
   const [libraryCounts, setLibraryCounts] = useState<Record<string, number>>({});
+  const [isAddingAttempt, setIsAddingAttempt] = useState(false);
+  const [attemptDate, setAttemptDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [attemptGrade, setAttemptGrade] = useState(2);
+  const [attemptNotes, setAttemptNotes] = useState('');
+  const [isSavingAttempt, setIsSavingAttempt] = useState(false);
+  const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
+
+
+  React.useEffect(() => {
+    setIsAddingAttempt(false);
+    setAttemptNotes('');
+  }, [selectedSubject?.id]);
 
   React.useEffect(() => {
     libraryApi
@@ -75,12 +87,7 @@ export const SubjectDrawer: React.FC = () => {
   const subjectEnrollments = getSubjectEnrollments(selectedSubject.id);
 
 
-  const [isAddingAttempt, setIsAddingAttempt] = useState(false);
-  const [attemptDate, setAttemptDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [attemptGrade, setAttemptGrade] = useState(2);
-  const [attemptNotes, setAttemptNotes] = useState('');
-  const [isSavingAttempt, setIsSavingAttempt] = useState(false);
-  const [deletingAttemptId, setDeletingAttemptId] = useState<string | null>(null);
+
 
   const subjectExamAttempts = selectedSubject ? getSubjectExamAttempts(selectedSubject.id) : [];
 
