@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LIBRARY_CONFIG, type LibraryFilePublic, type LibraryFileKind } from '../src/types/library';
+import { DEFAULT_SETTINGS } from '../src/utils/storage';
+import { adminLibraryApi } from '../src/api/library.api';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -359,6 +361,14 @@ test('Todas las rutas de Biblioteca llamadas por el frontend existen en el backe
     [],
     `Error de contrato: Las siguientes rutas del cliente no existen en el backend: ${missingRoutes.join(', ')}`
   );
+});
+
+// ---------------------------------------------------------------------
+// 9. Configuración y preferencia de notificaciones por email
+// ---------------------------------------------------------------------
+test('Preferencia notifyLibraryEmail habilitada por defecto y cliente de reenvío expuesto', () => {
+  assert.equal(DEFAULT_SETTINGS.notifyLibraryEmail, true, 'notifyLibraryEmail debe ser true por defecto');
+  assert(typeof adminLibraryApi.resendAdminNotification === 'function', 'adminLibraryApi debe exponer resendAdminNotification');
 });
 
 console.log('\n======================================================================');

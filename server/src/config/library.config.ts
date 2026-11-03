@@ -59,6 +59,12 @@ export const LIBRARY_CONFIG = {
 
   /** Umbral de almacenamiento en bytes a partir del cual se dispara alerta en admin (8 GB) */
   STORAGE_WARNING_THRESHOLD_BYTES: 8 * 1024 * 1024 * 1024,
+
+  /** Máximo de notificaciones individuales por email a administradores por hora antes de agrupar en resumen */
+  NOTIFY_ADMIN_MAX_PER_HOUR: 10,
+
+  /** Tope global diario de emails a usuarios sobre aportes para preservar la cuota del proveedor */
+  NOTIFY_USERS_MAX_PER_DAY: 150,
 };
 
 export type AllowedMimeType = (typeof LIBRARY_CONFIG.ALLOWED_MIME_TYPES)[number];

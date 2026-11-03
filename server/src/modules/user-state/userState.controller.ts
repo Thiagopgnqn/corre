@@ -77,6 +77,7 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
           includeElectivesInProgress: settingsRow.includeElectivesInProgress,
           soundEnabled: settingsRow.soundEnabled,
           tutorialCompleted: settingsRow.tutorialCompleted,
+          notifyLibraryEmail: settingsRow.notifyLibraryEmail ?? true,
         }
       : {
           includePromotionsInGPA: true,
@@ -86,6 +87,7 @@ export async function getUserState(req: Request, res: Response): Promise<void> {
           includeElectivesInProgress: true,
           soundEnabled: true,
           tutorialCompleted: false,
+          notifyLibraryEmail: true,
         };
 
     // 4. Progreso
@@ -497,6 +499,7 @@ export async function updateSettings(req: Request, res: Response): Promise<void>
     includeElectivesInProgress,
     soundEnabled,
     tutorialCompleted,
+    notifyLibraryEmail,
     extraSettings,
   } = req.body;
 
@@ -511,6 +514,7 @@ export async function updateSettings(req: Request, res: Response): Promise<void>
       includeElectivesInProgress: includeElectivesInProgress !== undefined ? Boolean(includeElectivesInProgress) : (existing?.includeElectivesInProgress ?? true),
       soundEnabled: soundEnabled !== undefined ? Boolean(soundEnabled) : (existing?.soundEnabled ?? true),
       tutorialCompleted: tutorialCompleted !== undefined ? Boolean(tutorialCompleted) : (existing?.tutorialCompleted ?? false),
+      notifyLibraryEmail: notifyLibraryEmail !== undefined ? Boolean(notifyLibraryEmail) : (existing?.notifyLibraryEmail ?? true),
       extraSettings: extraSettings ?? existing?.extraSettings ?? {},
       updatedAt: new Date(),
     };
@@ -755,6 +759,7 @@ export async function importData(req: Request, res: Response): Promise<void> {
           includeElectivesInProgress: s.includeElectivesInProgress ?? true,
           soundEnabled: s.soundEnabled ?? true,
           tutorialCompleted: Boolean(s.tutorialCompleted),
+          notifyLibraryEmail: s.notifyLibraryEmail ?? existingSet?.notifyLibraryEmail ?? true,
           updatedAt: new Date(),
         };
 

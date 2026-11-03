@@ -1,5 +1,5 @@
 import { env } from '../../config/env.js';
-import type { IMailerAdapter, SendVerificationCodeInput, SendResult } from './mailer.types.js';
+import type { IMailerAdapter, SendVerificationCodeInput, SendEmailInput, SendResult } from './mailer.types.js';
 import { ResendAdapter } from './adapters/resend.adapter.js';
 import { BrevoAdapter } from './adapters/brevo.adapter.js';
 
@@ -54,6 +54,32 @@ export class MailerService {
     // Modo desarrollo / test sin API key de proveedor configurada
     if (env.NODE_ENV !== 'production') {
       console.log(`\n📧 [DEV EMAIL CONSOLE] Código de verificación para ${input.to}: ${input.code} (vence en 10m)\n`);
+      return {
+        success: true,
+        provider: 'dev-console',
+      };
+    }
+
+    console.error('[Mailer] En producción no se pudo enviar el correo: no hay proveedor configurado.');
+    return {
+      success: false,
+      provider: 'none',
+      error: 'Proveedor de correo no disponible',
+    };
+  }
+
+  async sendEmail(input: SendEmailInput): Promise<SendResult> {
+    const toDesc = Array.isArray(input.to) ? input.to.join(', ') : input.to;
+    if (this.adapter) {
+      const result = await this.adapter.sendEmail(input);
+      if (env.NODE_ENV !== 'production') {
+        console.log(`\n📧 [DEV EMAIL] Correo "${input.subject}" para ${toDesc}\n`);
+      }
+      return result;
+    }
+
+    if (env.NODE_ENV !== 'production') {
+      console.log(`\n📧 [DEV EMAIL CONSOLE] "${input.subject}" para ${toDesc}\n${input.text}\n`);
       return {
         success: true,
         provider: 'dev-console',

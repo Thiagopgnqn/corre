@@ -174,6 +174,7 @@ Todas las rutas requieren rol `admin` (`requireAdmin`), rate limiter específico
 | `POST` | `/api/admin/library/files/:id/suspend-author`| `:id` (UUID) | `{ reason: string }` | **Sí** | Suspende la cuenta del autor y audita `library.suspend_author`. |
 | `GET` | `/api/admin/library/reports` | `?status=open` | - | No | Lista denuncias comunitarias de la biblioteca. |
 | `PATCH` | `/api/admin/library/reports/:id` | `:id` (UUID) | `{ status: "open" \| "dismissed" \| "actioned" }` | No | Actualiza el estado de resolución de un reporte. |
+| `POST` | `/api/admin/library/files/:id/resend-admin-notification` | `:id` (UUID) | - | No | Reenvía manualmente el aviso de material pendiente a los administradores. |
 | `POST` | `/api/admin/library/test-storage` | - | - | **Sí** | Prueba conexión R2 (subida, lectura, borrado de un objeto) sin tocar datos reales. |
 
 ---
@@ -215,14 +216,41 @@ Respuesta:
   }
 }
 ```
-Si el usuario eliminó su cuenta con desvinculación de autoría (`deleteFiles: false`):
+#### `POST /api/admin/library/files/:id/resend-admin-notification`
+Respuesta exitosa:
 ```json
 {
   "success": true,
-  "data": {
-    "hasUploader": false,
-    "message": "El archivo es anónimo o su autor dio de baja su cuenta conservando los materiales aportados."
-  }
+  "message": "Aviso reenviado correctamente a los administradores.",
+  "notifiedAt": "2026-11-02T21:40:00.000Z"
 }
 ```
+Si el archivo ya no está en estado pendiente:
+```json
+{
+  "success": false,
+  "error": "Solo se pueden reenviar avisos para archivos en estado pendiente de revisión."
+}
+```
+
+---
+
+## 3. Extensiones de Esquema y Notificaciones en Respuestas de Admin
+
+Los objetos de archivo en respuestas de administración (`GET /api/admin/library/pending` y `GET /api/admin/library/files`) incluyen timestamps que reflejan el estado del ciclo de avisos por correo:
+
+```json
+{
+  "id": "33333333-3333-4333-8333-333333333333",
+  "title": "Primer Parcial Turno Noche",
+  "status": "pending",
+  "adminNotifiedAt": "2026-11-02T21:30:00.000Z",
+  "uploaderNotifiedAt": null
+}
+```
+
+- `adminNotifiedAt`: Fecha y hora en que se envió el aviso de material para revisar a los administradores (`null` si está pendiente de primer envío o en cola de reintento).
+- `uploaderNotifiedAt`: Fecha y hora en que se notificó al estudiante el resultado de la moderación (aprobación o rechazo), garantizando que solo se envíe una vez.
+
+---
 

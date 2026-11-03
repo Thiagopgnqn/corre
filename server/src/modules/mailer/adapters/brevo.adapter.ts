@@ -1,4 +1,4 @@
-import type { IMailerAdapter, SendVerificationCodeInput, SendResult } from '../mailer.types.js';
+import type { IMailerAdapter, SendVerificationCodeInput, SendEmailInput, SendResult } from '../mailer.types.js';
 import { buildVerificationEmail } from '../templates/verificationEmail.js';
 
 export class BrevoAdapter implements IMailerAdapter {
@@ -9,8 +9,21 @@ export class BrevoAdapter implements IMailerAdapter {
   ) {}
 
   async sendVerificationCode(input: SendVerificationCodeInput): Promise<SendResult> {
+    const template = buildVerificationEmail(input.code);
+    return this.sendEmail({
+      to: input.to,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+      recipientName: input.recipientName,
+    });
+  }
+
+  async sendEmail(input: SendEmailInput): Promise<SendResult> {
     try {
-      const template = buildVerificationEmail(input.code);
+      const recipients = Array.isArray(input.to)
+        ? input.to.map((email) => ({ email, name: input.recipientName || undefined }))
+        : [{ email: input.to, name: input.recipientName || undefined }];
 
       const response = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
@@ -23,15 +36,10 @@ export class BrevoAdapter implements IMailerAdapter {
             name: this.fromName,
             email: this.fromAddress,
           },
-          to: [
-            {
-              email: input.to,
-              name: input.recipientName || undefined,
-            },
-          ],
-          subject: template.subject,
-          htmlContent: template.html,
-          textContent: template.text,
+          to: recipients,
+          subject: input.subject,
+          htmlContent: input.html,
+          textContent: input.text,
         }),
       });
 

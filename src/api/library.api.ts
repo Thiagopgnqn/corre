@@ -67,6 +67,8 @@ function toAdminFile(raw: any): AdminLibraryFile {
     uploaderUserId: raw.uploaderUserId ?? null,
     reviewedBy: raw.reviewedBy ?? null,
     reviewedAt: raw.reviewedAt ?? null,
+    adminNotifiedAt: raw.adminNotifiedAt ?? null,
+    uploaderNotifiedAt: raw.uploaderNotifiedAt ?? null,
     subjectName: raw.subjectName,
   };
 }
@@ -340,6 +342,12 @@ export const adminLibraryApi = {
     return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/reject`, {
       method: 'PATCH',
       body: JSON.stringify({ reason }),
+    });
+  },
+
+  async resendAdminNotification(fileId: string): Promise<{ success: boolean; message: string; notifiedAt?: string }> {
+    return apiFetch(`/api/admin/library/files/${encodeURIComponent(fileId)}/resend-admin-notification`, {
+      method: 'POST',
     });
   },
 

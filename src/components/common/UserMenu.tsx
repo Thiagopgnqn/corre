@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useCareer } from '../../context/CareerContext';
 import { userStateApi } from '../../api/userState.api';
+import { adminLibraryApi } from '../../api/library.api';
 import {
   User as UserIcon,
   LogOut,
@@ -10,6 +12,7 @@ import {
   Shield,
   Loader2,
   AlertTriangle,
+  Mail,
 } from 'lucide-react';
 
 interface UserMenuProps {
@@ -24,11 +27,26 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   onNavigateAdmin,
 }) => {
   const { user, logout, deleteAccount } = useAuth();
+  const { settings, updateSettings } = useCareer();
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      adminLibraryApi
+        .getPendingFiles()
+        .then((res) => {
+          if (res.success && res.data) {
+            setPendingCount(res.data.total);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [user?.role]);
 
   // Close when clicking outside
   useEffect(() => {
@@ -120,10 +138,17 @@ export const UserMenu: React.FC<UserMenuProps> = ({
                     window.location.hash = 'admin';
                   }
                 }}
-                className="w-full px-4 py-2 text-left text-xs text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 flex items-center gap-2.5 transition-colors cursor-pointer font-medium"
+                className="w-full px-4 py-2 text-left text-xs text-amber-300 hover:bg-amber-500/10 hover:text-amber-200 flex items-center justify-between gap-2.5 transition-colors cursor-pointer font-medium"
               >
-                <Shield className="w-4 h-4 text-amber-400" />
-                <span>Panel de administración</span>
+                <div className="flex items-center gap-2.5">
+                  <Shield className="w-4 h-4 text-amber-400" />
+                  <span>Panel de administración</span>
+                </div>
+                {pendingCount !== null && pendingCount > 0 && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    {pendingCount}
+                  </span>
+                )}
               </button>
             )}
 
@@ -140,6 +165,36 @@ export const UserMenu: React.FC<UserMenuProps> = ({
                 <span>Cambiar de Carrera / Plan</span>
               </button>
             )}
+
+            {/* Preferencia de Notificaciones de Biblioteca */}
+            <div className="px-4 py-2 my-1 border-t border-b border-slate-800/80 bg-slate-950/40">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Mail className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span className="text-[11.5px] text-slate-300 leading-tight">
+                    Avisarme por mail sobre mis aportes a la Biblioteca
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.notifyLibraryEmail !== false}
+                  onClick={() =>
+                    updateSettings({ notifyLibraryEmail: settings.notifyLibraryEmail === false })
+                  }
+                  className={`relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                    settings.notifyLibraryEmail !== false ? 'bg-indigo-600' : 'bg-slate-700'
+                  }`}
+                  title="Activar/desactivar notificaciones por email de la Biblioteca"
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                      settings.notifyLibraryEmail !== false ? 'translate-x-3.5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
 
             <button
               type="button"

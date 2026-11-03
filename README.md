@@ -279,6 +279,25 @@ Para permitir subidas directas vía `PUT` desde el navegador y descargas vía `G
 - **Escáner streaming**: Al completarse la subida, el servidor valida los *magic numbers* del stream e inspecciona la presencia de marcas sospechosas en PDFs (`/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFile`, `/OpenAction`).
 - **Aviso de limitación**: Esta inspección constituye una capa de sanitización estática heurística básica; no reemplaza un motor de antivirus / sandbox de ejecución dinámica en profundidad.
 
+### 4. Sistema de Avisos por Email y Moderación
+La Biblioteca cuenta con notificaciones automáticas por correo electrónico para mantener informados a administradores y estudiantes durante el ciclo de moderación:
+
+- **Configuración de destinatarios admin (`ADMIN_NOTIFICATION_EMAIL`)**:
+  - Variable opcional en `server/.env`. Puede contener una o varias direcciones de correo separadas por coma (ej: `admin@stack.com,moderador@stack.com`).
+  - **Fallback automático**: Si no se define, el backend consulta automáticamente los usuarios con rol `admin`, estado `active` y correo verificado (`email_verified_at IS NOT NULL`). Si no hay ninguna dirección disponible, emite una advertencia informativa al arrancar.
+- **Preferencia del estudiante (`user_settings.notify_library_email`)**:
+  - Campo booleano (por defecto `true`). El estudiante puede activar o desactivar los avisos en cualquier momento desde el menú de usuario ("Avisarme por mail sobre mis aportes a la Biblioteca").
+  - Aplica exclusivamente a los avisos de aprobación y rechazo dirigidos al usuario; el aviso de material nuevo al administrador no depende de esta preferencia.
+- **Eventos y reglas de privacidad**:
+  1. **(a) Subida completada**: Al pasar a estado `pending`, se envía un aviso a los administradores con el título, materia, tipo, año/cuatrimestre, tamaño y fecha. **Privacidad estricta**: El correo NO contiene el email ni el ID del estudiante autor (el admin consulta la autoría solo desde el panel bajo auditoría).
+  2. **(b) Material aprobado**: Al pasar de `pending` a `approved`, se envía un aviso único al estudiante confirmando que su material ya está publicado y accesible para toda la comunidad.
+  3. **(c) Material rechazado**: Al pasar a `rejected`, se envía un correo con el motivo ingresado por el moderador (debidamente sanitizado y escapado) para que el estudiante pueda corregirlo y volver a subirlo.
+  - **Exclusiones**: No se envía email si el autor es anónimo (`uploader_user_id IS NULL`), si el usuario está suspendido (`status === 'suspended'`), o si desactivó su preferencia `notify_library_email`.
+- **Topes de tasa y control de spam**:
+  - `NOTIFY_ADMIN_MAX_PER_HOUR = 10`: Si se supera este límite en una hora, los avisos sucesivos se consolidan en un único resumen horario indicando la cantidad de archivos pendientes para no saturar al equipo.
+  - `NOTIFY_USERS_MAX_PER_DAY = 150`: Límite diario global para preservar la cuota del proveedor de correo (Resend / Brevo) compartida con los códigos de verificación.
+  - **Reenvío manual**: Desde la cola de moderación del Panel de Admin (`POST /api/admin/library/files/:id/resend-admin-notification`), los administradores pueden disparar un reenvío manual de la notificación ante contingencias.
+
 ---
 
 ## 🚀 Despliegue en Producción

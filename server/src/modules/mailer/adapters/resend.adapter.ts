@@ -1,4 +1,4 @@
-import type { IMailerAdapter, SendVerificationCodeInput, SendResult } from '../mailer.types.js';
+import type { IMailerAdapter, SendVerificationCodeInput, SendEmailInput, SendResult } from '../mailer.types.js';
 import { buildVerificationEmail } from '../templates/verificationEmail.js';
 
 export class ResendAdapter implements IMailerAdapter {
@@ -9,9 +9,20 @@ export class ResendAdapter implements IMailerAdapter {
   ) {}
 
   async sendVerificationCode(input: SendVerificationCodeInput): Promise<SendResult> {
+    const template = buildVerificationEmail(input.code);
+    return this.sendEmail({
+      to: input.to,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
+      recipientName: input.recipientName,
+    });
+  }
+
+  async sendEmail(input: SendEmailInput): Promise<SendResult> {
     try {
-      const template = buildVerificationEmail(input.code);
       const from = this.fromName ? `${this.fromName} <${this.fromAddress}>` : this.fromAddress;
+      const recipients = Array.isArray(input.to) ? input.to : [input.to];
 
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -21,10 +32,10 @@ export class ResendAdapter implements IMailerAdapter {
         },
         body: JSON.stringify({
           from,
-          to: [input.to],
-          subject: template.subject,
-          html: template.html,
-          text: template.text,
+          to: recipients,
+          subject: input.subject,
+          html: input.html,
+          text: input.text,
         }),
       });
 

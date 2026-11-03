@@ -53,6 +53,7 @@ import {
   updateReportStatus,
   getLibraryStats,
   testR2Connection,
+  resendAdminNotification,
 } from './admin.library.controller.js';
 
 const router = Router();
@@ -129,5 +130,6 @@ router.post('/library/files/:id/suspend-author', csrfProtection, requireRecentRe
 router.get('/library/reports', listReports);
 router.patch('/library/reports/:id', csrfProtection, updateReportStatus);
 router.post('/library/test-storage', csrfProtection, requireRecentReauth, testR2Connection);
+router.post('/library/files/:id/resend-admin-notification', csrfProtection, resendAdminNotification);
 
 export default router;
