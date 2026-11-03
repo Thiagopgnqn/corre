@@ -24,3 +24,4 @@ END $$;
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_exam_attempts_user" ON "final_exam_attempts" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_exam_attempts_user_subject" ON "final_exam_attempts" USING btree ("user_id","subject_id");
+
