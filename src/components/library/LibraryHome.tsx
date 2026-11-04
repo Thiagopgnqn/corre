@@ -300,7 +300,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
                 key={String(lvl.id)}
                 type="button"
                 onClick={() => setLevelFilter(lvl.id as any)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+                className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center ${
                   levelFilter === lvl.id
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                     : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -319,7 +319,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar por materia o código..."
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              className="w-full pl-9 pr-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
         </div>

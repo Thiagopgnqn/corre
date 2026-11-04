@@ -75,7 +75,7 @@ export const ReportReviewModal: React.FC<ReportReviewModalProps> = ({
   return (
     <AnimatePresence>
       <div
-        className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+        className="fixed inset-0 z-[var(--z-modal-top)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-review-title"

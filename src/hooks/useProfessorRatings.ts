@@ -3,6 +3,16 @@ import { professorsApi } from '../api/professors.api';
 import type { ProfessorBatchRating, RatingsBatchData } from '../types/professor';
 import { normalizeProfessorLookupKey } from '../utils/professorRatingsLogic';
 
+const DEFAULT_THRESHOLDS = {
+  minReviewsForReliableAverage: 3,
+  bayesianPriorGlobalMean: 3.5,
+  bayesianPriorWeight: 3,
+  minReviewsToShowAttendedPeriod: 2,
+  maxNewReviewsPerDay: 5,
+  autoHideOpenReportsThreshold: 3,
+  allowedSubjectStatuses: ['regularizada', 'aprobada', 'promocionada'],
+};
+
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos en memoria
 
 let cachedRatings: RatingsBatchData | null = null;
@@ -19,6 +29,24 @@ export function invalidateProfessorRatingsCache() {
   cachedAt = 0;
 }
 
+export function normalizeRatingsBatchResponse(res: any): RatingsBatchData {
+  // Normalizar la respuesta: si la API devuelve un array vacío, null o formato inesperado,
+  // garantizar siempre un objeto RatingsBatchData con byId y byNormalizedName válidos.
+  const raw =
+    res && res.success && res.data && typeof res.data === 'object' && !Array.isArray(res.data)
+      ? res.data
+      : null;
+
+  return {
+    byId: raw?.byId && typeof raw.byId === 'object' ? raw.byId : {},
+    byNormalizedName:
+      raw?.byNormalizedName && typeof raw.byNormalizedName === 'object'
+        ? raw.byNormalizedName
+        : {},
+    thresholds: raw?.thresholds || DEFAULT_THRESHOLDS,
+  };
+}
+
 async function fetchRatingsWithCache(force = false): Promise<RatingsBatchData | null> {
   const now = Date.now();
   if (!force && cachedRatings && now - cachedAt < CACHE_TTL_MS) {
@@ -32,13 +60,17 @@ async function fetchRatingsWithCache(force = false): Promise<RatingsBatchData | 
   inFlightPromise = professorsApi
     .getRatingsBatch()
     .then((res) => {
-      const next = res.success && res.data ? res.data : null;
+      const next = normalizeRatingsBatchResponse(res);
       cachedRatings = next;
       cachedAt = Date.now();
       notifySubscribers(next);
       return next;
     })
-    .catch(() => cachedRatings)
+    .catch(() => {
+      const fallback: RatingsBatchData = { byId: {}, byNormalizedName: {}, thresholds: DEFAULT_THRESHOLDS };
+      cachedRatings = fallback;
+      return fallback;
+    })
     .finally(() => {
       inFlightPromise = null;
     });
@@ -90,7 +122,7 @@ export function useProfessorRatings(enabled = true) {
 
   const getRatingForProfessor = useCallback(
     (ref: { id?: string | null; name: string }): ProfessorBatchRating | null => {
-      if (!data) return null;
+      if (!data || !data.byId || !data.byNormalizedName) return null;
       if (ref.id && data.byId[ref.id]) {
         return data.byId[ref.id];
       }

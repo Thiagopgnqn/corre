@@ -230,7 +230,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             key={tab.id}
             type="button"
             onClick={() => setActiveKindTab(tab.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+            className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center ${
               activeKindTab === tab.id
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                 : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -251,7 +251,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por título o palabras clave..."
-            className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-xs"
+            className="w-full pl-9 pr-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base sm:text-xs"
           />
         </div>
 
@@ -273,7 +273,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as any)}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none"
+              className="px-3 py-2 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none"
             >
               <option value="recent">Más recientes</option>
               <option value="downloads">Más descargados</option>
@@ -360,7 +360,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setReportingFile(file)}
-                      className="text-slate-500 hover:text-slate-300 p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                      className="text-slate-500 hover:text-slate-300 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
                       title="Reportar material"
                     >
                       <Flag className="w-3.5 h-3.5" />
@@ -409,7 +409,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleToggleHelpful(file)}
-                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                         file.hasVotedHelpful
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                           : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
@@ -425,7 +425,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                       type="button"
                       onClick={() => handleDownload(file)}
                       disabled={downloadingId === file.id}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
                     >
                       {downloadingId === file.id ? (
                         <>
@@ -449,10 +449,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
 
       {/* Report Modal */}
       {reportingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
           <form
             onSubmit={handleSubmitReport}
-            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4"
+            className="w-full max-w-md bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -489,7 +489,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                   <select
                     value={reportReason}
                     onChange={(e) => setReportReason(e.target.value as LibraryReportReason)}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                    className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white"
                   >
                     <option value="derechos_de_autor">Infracción de derechos de autor comercial</option>
                     <option value="contenido_inapropiado">Contenido inapropiado u ofensivo</option>
@@ -509,7 +509,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                     value={reportNote}
                     onChange={(e) => setReportNote(e.target.value)}
                     placeholder="Explicá brevemente por qué considerás que debe removerse..."
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white resize-none"
+                    className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white resize-none"
                   />
                 </div>
 

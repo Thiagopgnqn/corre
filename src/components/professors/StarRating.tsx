@@ -143,7 +143,7 @@ export const StarRating: React.FC<StarRatingProps> = ({
               onMouseEnter={() => setHoveredStar(star)}
               onClick={() => onChange(star)}
               onKeyDown={(e) => handleKeyDown(e, star)}
-              className="p-0.5 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 cursor-pointer transition-colors"
+              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 cursor-pointer transition-colors"
             >
               <Star
                 className={`${sizeClass} transition-colors ${
@@ -164,7 +164,7 @@ export const StarRating: React.FC<StarRatingProps> = ({
           onClick={onClear}
           aria-label={`Quitar puntaje de ${label}`}
           title="Dejar sin responder"
-          className="p-1 rounded-md text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+          className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
         >
           <X className="w-3.5 h-3.5" />
         </button>

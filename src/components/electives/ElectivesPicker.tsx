@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCareer } from '../../context/CareerContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { ELECTIVES, REQUIRED_ELECTIVE_CREDITS_TOTAL, type ElectiveSubject } from '../../data/electives';
 import { getSubjectStatus, checkEligibility, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
@@ -33,6 +34,8 @@ export const ElectivesPicker: React.FC = () => {
 
   const [modalYear, setModalYear] = useState<number | null>(null);
   const [modalSearch, setModalSearch] = useState('');
+  const isMobile = useIsMobile();
+  const [selectedMobileYear, setSelectedMobileYear] = useState<number | 'all'>('all');
 
   // Helper to find which year an elective is assigned to
   const getAssignedYear = (id: number): number | null => {
@@ -175,9 +178,41 @@ export const ElectivesPicker: React.FC = () => {
         </div>
       </div>
 
+
+      {/* Mobile Year Selector Chips */}
+      {isMobile && (
+        <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/80 rounded-2xl border border-slate-800 overflow-x-auto no-scrollbar">
+          <button
+            type="button"
+            onClick={() => setSelectedMobileYear('all')}
+            className={`px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center shrink-0 ${
+              selectedMobileYear === 'all'
+                ? 'bg-amber-500 text-slate-950 shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            Todos los años
+          </button>
+          {[1, 2, 3, 4, 5].map((y) => (
+            <button
+              key={y}
+              type="button"
+              onClick={() => setSelectedMobileYear(y)}
+              className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center shrink-0 ${
+                selectedMobileYear === y
+                  ? 'bg-amber-500 text-slate-950 shadow-md'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              {y}° Año
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Years Container: 1° to 5° */}
       <div className="space-y-5">
-        {years.map((year) => {
+        {years.filter((y) => (!isMobile || selectedMobileYear === 'all' || selectedMobileYear === y)).map((year) => {
           const assignedIds = assignedElectives[year] || [];
           const assignedSubjects = assignedIds
             .map((id) => ELECTIVES.find((e) => e.id === id))
@@ -215,7 +250,7 @@ export const ElectivesPicker: React.FC = () => {
                     setModalSearch('');
                     setModalYear(year);
                   }}
-                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+                  className="px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Agregar electiva</span>
@@ -247,8 +282,8 @@ export const ElectivesPicker: React.FC = () => {
                     return (
                       <div
                         key={elective.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, elective.id)}
+                        draggable={!isMobile}
+                        onDragStart={(e) => !isMobile && handleDragStart(e, elective.id)}
                         onClick={() => setSelectedSubjectId(elective.id)}
                         className={`p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between gap-3 relative group ${
                           status === 'aprobada' || status === 'promocionada'
@@ -319,7 +354,7 @@ export const ElectivesPicker: React.FC = () => {
                         >
                           <button
                             onClick={() => setStatusModalSubjectId(elective.id)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-amber-600 text-slate-200 hover:text-white transition-all flex items-center gap-1"
+                            className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold bg-slate-800 hover:bg-amber-600 text-slate-200 hover:text-white transition-all flex items-center gap-1"
                           >
                             <span>Cambiar estado</span>
                           </button>
@@ -334,7 +369,7 @@ export const ElectivesPicker: React.FC = () => {
                                   moveElectiveYear(elective.id, year, newYear);
                                 }
                               }}
-                              className="text-[10px] font-semibold bg-slate-800 text-slate-300 border border-slate-700 rounded-lg px-1.5 py-1 focus:ring-1 focus:ring-amber-500"
+                              className="text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 rounded-xl px-2.5 py-2 min-h-[44px] focus:ring-1 focus:ring-amber-500"
                               title="Mover a otro año"
                             >
                               <option value={1}>1° Año</option>
@@ -347,7 +382,7 @@ export const ElectivesPicker: React.FC = () => {
                             {/* Remove button */}
                             <button
                               onClick={() => removeElectiveFromYear(elective.id, year)}
-                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+                              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
                               title="Quitar electiva de este año"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -367,7 +402,7 @@ export const ElectivesPicker: React.FC = () => {
       {/* Add Elective Modal */}
       <AnimatePresence>
         {modalYear !== null && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -407,7 +442,7 @@ export const ElectivesPicker: React.FC = () => {
                     value={modalSearch}
                     onChange={(e) => setModalSearch(e.target.value)}
                     placeholder="Buscar por nombre, código o nivel..."
-                    className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                   />
                 </div>
 
@@ -529,7 +564,7 @@ export const ElectivesPicker: React.FC = () => {
                                 {isAlreadyInThisYear ? (
                                   <button
                                     onClick={() => removeElectiveFromYear(elective.id, modalYear)}
-                                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/30 transition-all flex items-center gap-1.5"
+                                    className="px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border border-rose-500/30 transition-all flex items-center justify-center gap-1.5"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                     <span>Quitar</span>
@@ -540,7 +575,7 @@ export const ElectivesPicker: React.FC = () => {
                                     onClick={() => {
                                       addElectiveToYear(elective.id, modalYear);
                                     }}
-                                    className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                                    className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
                                       !canAdd
                                         ? 'bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed'
                                         : isAlreadyInOtherYear
@@ -585,7 +620,7 @@ export const ElectivesPicker: React.FC = () => {
                 </span>
                 <button
                   onClick={() => setModalYear(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-colors"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-colors flex items-center justify-center"
                 >
                   Listo
                 </button>

@@ -19,6 +19,8 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
+import { useIsMobile } from '../../hooks/useIsMobile';
+import { BottomSheet } from '../common/BottomSheet';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { professorsApi } from '../../api/professors.api';
@@ -58,6 +60,8 @@ export const ProfessorsDirectory: React.FC = () => {
   const [minRatingFilter, setMinRatingFilter] = useState<number>(0);
   const [withReviewsOnly, setWithReviewsOnly] = useState<boolean>(false);
   const [sortBy, setSortBy] = useState<'rating' | 'reviews' | 'name'>('rating');
+  const isMobile = useIsMobile();
+  const [isMobileFilterOpen, setIsMobileFilterOpen] = useState<boolean>(false);
 
   // Datos del directorio
   const [professors, setProfessors] = useState<ProfessorListItem[]>([]);
@@ -569,7 +573,7 @@ export const ProfessorsDirectory: React.FC = () => {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Buscar docente por apellido, nombre o materia..."
-            className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full pl-9 pr-8 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-base sm:text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
           {searchInput && (
             <button
@@ -583,8 +587,8 @@ export const ProfessorsDirectory: React.FC = () => {
           )}
         </div>
 
-        {/* Controles de filtro y orden */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
+        {/* Controles de filtro y orden en Desktop */}
+        <div className="hidden md:flex flex-wrap items-center gap-2 text-xs">
           {/* Materia */}
           <select
             aria-label="Filtrar por materia"
@@ -782,6 +786,105 @@ export const ProfessorsDirectory: React.FC = () => {
         onClose={() => setModerationModalOpen(false)}
         onModerated={refreshEverything}
       />
+
+      {/* BottomSheet de Filtros para Mobile */}
+      <BottomSheet
+        isOpen={isMobile && isMobileFilterOpen}
+        onClose={() => setIsMobileFilterOpen(false)}
+        title="Filtros del Directorio"
+      >
+        <div className="space-y-4 p-1">
+          {/* Materia */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-300 block">Materia</label>
+            <select
+              aria-label="Filtrar por materia en mobile"
+              value={subjectFilter}
+              onChange={(e) => setSubjectFilter(e.target.value)}
+              className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2.5 min-h-[44px] text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="">Todas las materias</option>
+              {allPlanSubjects.map((sub) => (
+                <option key={sub.id} value={String(sub.code)}>
+                  {sub.level}° · {sub.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Puntaje mínimo */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-300 block">Valoración mínima</label>
+            <select
+              aria-label="Valoración mínima en mobile"
+              value={minRatingFilter}
+              onChange={(e) => setMinRatingFilter(Number(e.target.value))}
+              className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2.5 min-h-[44px] text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            >
+              <option value={0}>Cualquier puntaje</option>
+              <option value={3.5}>★ 3,5 o más</option>
+              <option value={4}>★ 4,0 o más</option>
+              <option value={4.5}>★ 4,5 o más</option>
+            </select>
+          </div>
+
+          {/* Orden */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-bold text-slate-300 block">Ordenar por</label>
+            <select
+              aria-label="Ordenar profesores en mobile"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'rating' | 'reviews' | 'name')}
+              className="w-full rounded-xl bg-slate-950 border border-slate-800 px-3 py-2.5 min-h-[44px] text-xs font-semibold text-white focus:outline-none focus:border-indigo-500"
+            >
+              <option value="rating">Mejor valorados</option>
+              <option value="reviews">Más reseñas</option>
+              <option value="name">Nombre (A-Z)</option>
+            </select>
+          </div>
+
+          {/* Solo con reseñas */}
+          <button
+            type="button"
+            onClick={() => setWithReviewsOnly(!withReviewsOnly)}
+            className={`w-full px-3 py-2.5 min-h-[44px] rounded-xl border font-semibold flex items-center justify-between transition-all cursor-pointer ${
+              withReviewsOnly
+                ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>Mostrar solo con reseñas</span>
+            </span>
+            <span className={`w-4 h-4 rounded-md border flex items-center justify-center ${withReviewsOnly ? 'bg-amber-500 border-amber-400 text-slate-950' : 'border-slate-700 bg-slate-900'}`}>
+              {withReviewsOnly && '✓'}
+            </span>
+          </button>
+
+          {/* Acciones */}
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="px-3.5 py-2.5 min-h-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpiar</span>
+              </button>
+            ) : <div />}
+
+            <button
+              type="button"
+              onClick={() => setIsMobileFilterOpen(false)}
+              className="px-5 py-2.5 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md transition-all flex items-center justify-center cursor-pointer"
+            >
+              <span>Aplicar filtros ({professors.length})</span>
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
     </div>
   );
 };

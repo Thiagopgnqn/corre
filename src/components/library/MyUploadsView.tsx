@@ -282,7 +282,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                   <button
                     type="button"
                     onClick={() => handleStartEdit(file)}
-                    className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
                     title="Editar título y descripción"
                   >
                     <Edit2 className="w-4 h-4" />
@@ -291,7 +291,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                   <button
                     type="button"
                     onClick={() => setDeletingFile(file)}
-                    className="p-2 rounded-xl bg-rose-950/30 hover:bg-rose-950/60 text-rose-400 hover:text-rose-300 border border-rose-500/25 transition-colors cursor-pointer"
+                    className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-rose-950/30 hover:bg-rose-950/60 text-rose-400 hover:text-rose-300 border border-rose-500/25 transition-colors cursor-pointer"
                     title="Eliminar material"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -305,10 +305,10 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
 
       {/* Edit Modal */}
       {editingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
           <form
             onSubmit={handleSaveEdit}
-            className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4"
+            className="w-full max-w-md bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl space-y-4"
           >
             <h3 className="text-base font-bold text-white">Editar Material</h3>
             <div>
@@ -319,7 +319,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                 onChange={(e) => setEditTitle(e.target.value)}
                 maxLength={120}
                 required
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white"
+                className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white"
               />
             </div>
             <div>
@@ -331,21 +331,21 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                 onChange={(e) => setEditDescription(e.target.value)}
                 maxLength={500}
                 rows={3}
-                className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white resize-none"
+                className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white resize-none"
               />
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setEditingFile(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl"
+                className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl flex items-center justify-center"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={isSavingEdit || !editTitle.trim()}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold"
+                className="px-5 py-2.5 min-h-[44px] bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center justify-center"
               >
                 {isSavingEdit ? 'Guardando...' : 'Guardar Cambios'}
               </button>
@@ -356,8 +356,8 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
 
       {/* Delete Modal */}
       {deletingFile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-white">¿Eliminar material?</h3>
             <p className="text-xs text-slate-300 leading-relaxed">
               Estás a punto de eliminar <strong className="text-white">&ldquo;{deletingFile.title}&rdquo;</strong>. Esta acción borrará el archivo permanentemente de la plataforma y liberará tu cuota de almacenamiento.
@@ -367,7 +367,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                 type="button"
                 onClick={() => setDeletingFile(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl"
+                className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl flex items-center justify-center"
               >
                 Cancelar
               </button>
@@ -375,7 +375,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
                 type="button"
                 onClick={handleConfirmDelete}
                 disabled={isDeleting}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold"
+                className="px-5 py-2.5 min-h-[44px] bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold flex items-center justify-center"
               >
                 {isDeleting ? 'Eliminando...' : 'Sí, eliminar archivo'}
               </button>

@@ -62,7 +62,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
   return (
     <div className="flex-1 flex flex-col bg-[#0b0f19] text-slate-100 min-h-screen">
       {/* Top Admin Bar */}
-      <header className="bg-slate-900/90 border-b border-slate-800/80 sticky top-0 z-30 backdrop-blur-md">
+      <header className="bg-slate-900/90 border-b border-slate-800/80 sticky top-0 z-[var(--z-header)] backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Left: Branding & Back Button */}

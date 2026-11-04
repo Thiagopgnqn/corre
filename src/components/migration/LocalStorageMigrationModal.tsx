@@ -77,7 +77,7 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
       <div className="bg-slate-900 border border-indigo-500/30 rounded-2xl max-w-lg w-full p-6 sm:p-7 shadow-2xl relative text-slate-100 overflow-hidden">
         {/* Glow corner */}
         <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />

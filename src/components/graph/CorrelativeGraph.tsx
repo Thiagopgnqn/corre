@@ -5,6 +5,7 @@ import {
   Controls,
   Background,
   BackgroundVariant,
+  ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react';
 import type { Node, Edge } from '@xyflow/react';
@@ -27,28 +28,11 @@ import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
 import { SubjectNode } from './SubjectNode';
 import { SubjectDrawer } from './SubjectDrawer';
+import { SubjectListView } from './SubjectListView';
 import type { SubjectNodeData } from './SubjectNode';
 import type { Subject, SubjectStatus } from '../../types/career';
 
-const MobileFitViewButton: React.FC = () => {
-  const { fitView } = useReactFlow();
-  const isMobile = useIsMobile();
-  if (!isMobile) return null;
-
-  return (
-    <div className="absolute top-3 right-3 z-[var(--z-graph-controls)] sm:hidden">
-      <button
-        type="button"
-        onClick={() => fitView({ padding: 0.2, duration: 400 })}
-        className="min-h-[44px] min-w-[44px] px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-700/80 text-white text-xs font-semibold shadow-lg backdrop-blur-md flex items-center gap-1.5 active:scale-95 cursor-pointer"
-        aria-label="Re-centrar mapa"
-      >
-        <Maximize2 className="w-4 h-4 text-indigo-400 shrink-0" />
-        <span>Re-centrar</span>
-      </button>
-    </div>
-  );
-};
+export const DEFAULT_MOBILE_GRAPH_VIEW: 'lista' | 'mapa' = 'lista';
 
 const nodeTypes = {
   subjectNode: SubjectNode,
@@ -60,7 +44,24 @@ interface NodeContextMenuState {
   y: number;
 }
 
-export const CorrelativeGraph: React.FC = () => {
+
+const FitViewButton: React.FC<{ className?: string }> = ({ className = '' }) => {
+  const { fitView } = useReactFlow();
+  return (
+    <button
+      type="button"
+      onClick={() => fitView({ padding: 0.18, duration: 400 })}
+      className={className}
+      title="Ajustar vista para ver todo el grafo"
+      aria-label="Ver todo el grafo"
+    >
+      <Maximize2 className="w-3.5 h-3.5 shrink-0" />
+      <span>Ver todo</span>
+    </button>
+  );
+};
+
+const CorrelativeGraphContent: React.FC = () => {
   const {
     activeState,
     selectedSubjectId,
@@ -72,7 +73,24 @@ export const CorrelativeGraph: React.FC = () => {
     setShowElectivesInGraph,
     settings,
     assignedElectives,
+    isSimulationMode,
   } = useCareer();
+
+  const isMobile = useIsMobile();
+  const [mobileGraphView, setMobileGraphView] = useState<'lista' | 'mapa'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('ui_mobile_graph_view');
+      if (saved === 'mapa' || saved === 'lista') return saved;
+    }
+    return DEFAULT_MOBILE_GRAPH_VIEW;
+  });
+
+  const handleSetMobileGraphView = (view: 'lista' | 'mapa') => {
+    setMobileGraphView(view);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ui_mobile_graph_view', view);
+    }
+  };
 
   const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<NodeContextMenuState | null>(null);
@@ -227,6 +245,119 @@ export const CorrelativeGraph: React.FC = () => {
   ]);
 
   // Generate edges: dashed for regular, solid for approved
+  
+  // Dynamic initial viewport and translateExtent based on actual nodes
+  const { initialViewport, dynamicTranslateExtent, isDegreeComplete } = useMemo(() => {
+    if (currentNodes.length === 0) {
+      return {
+        initialViewport: { x: 50, y: 120, zoom: 0.78 },
+        dynamicTranslateExtent: [[-400, -200], [3200, 2200]] as [[number, number], [number, number]],
+      };
+    }
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    currentNodes.forEach((n) => {
+      if (n.position.x < minX) minX = n.position.x;
+      if (n.position.x > maxX) maxX = n.position.x;
+      if (n.position.y < minY) minY = n.position.y;
+      if (n.position.y > maxY) maxY = n.position.y;
+    });
+
+    const NODE_WIDTH = 240;
+    const NODE_HEIGHT = 120;
+    const MARGIN_X = 300;
+    const MARGIN_Y = 250;
+
+    const dynamicTranslateExtent: [[number, number], [number, number]] = [
+      [Math.round(minX - MARGIN_X), Math.round(minY - MARGIN_Y)],
+      [Math.round(maxX + NODE_WIDTH + MARGIN_X), Math.round(maxY + NODE_HEIGHT + MARGIN_Y)],
+    ];
+
+    // Verificar si la carrera está completa (todas aprobadas/promocionadas y ninguna cursando)
+    const cursandoNodes = currentNodes.filter((n) => {
+      const data = n.data as unknown as SubjectNodeData;
+      return data.status === 'cursando';
+    });
+    const unapprovedNodes = currentNodes.filter((n) => {
+      const data = n.data as unknown as SubjectNodeData;
+      return data.status !== 'aprobada' && data.status !== 'promocionada';
+    });
+
+    const isDegreeComplete = cursandoNodes.length === 0 && unapprovedNodes.length === 0;
+
+    let targetNodes: Node[] = [];
+
+    if (cursandoNodes.length > 0) {
+      // Si las materias cursando están en años distintos, centrar en el año con más materias cursando
+      // (o en el menor año si hay empate) para evitar caer en un espacio vacío entre nodos.
+      const yearBuckets = new Map<number, Node[]>();
+      cursandoNodes.forEach((n) => {
+        const data = n.data as unknown as SubjectNodeData;
+        const yr = data.subject.level || 1;
+        const bucket = yearBuckets.get(yr) || [];
+        bucket.push(n);
+        yearBuckets.set(yr, bucket);
+      });
+
+      let bestYear = 1;
+      let maxCount = -1;
+      const sortedYears = Array.from(yearBuckets.keys()).sort((a, b) => a - b);
+      sortedYears.forEach((yr) => {
+        const count = yearBuckets.get(yr)!.length;
+        if (count > maxCount) {
+          maxCount = count;
+          bestYear = yr;
+        }
+      });
+
+      targetNodes = yearBuckets.get(bestYear) || cursandoNodes;
+    } else if (unapprovedNodes.length > 0) {
+      // Si no hay materias cursando, centrar en el año más bajo con materias no aprobadas
+      const minYear = Math.min(
+        ...unapprovedNodes.map((n) => {
+          const data = n.data as unknown as SubjectNodeData;
+          return data.subject.level || 1;
+        })
+      );
+      targetNodes = unapprovedNodes.filter((n) => {
+        const data = n.data as unknown as SubjectNodeData;
+        return (data.subject.level || 1) === minYear;
+      });
+    }
+
+    if (targetNodes.length === 0) {
+      targetNodes = currentNodes.filter((n) => {
+        const data = n.data as unknown as SubjectNodeData;
+        return (data.subject.level || 1) === 1;
+      });
+    }
+
+    let tMinX = Infinity;
+    let tMaxX = -Infinity;
+    let tMinY = Infinity;
+    targetNodes.forEach((n) => {
+      if (n.position.x < tMinX) tMinX = n.position.x;
+      if (n.position.x > tMaxX) tMaxX = n.position.x;
+      if (n.position.y < tMinY) tMinY = n.position.y;
+    });
+
+    const zoom = 0.78; // Texto legible de al menos 11-12px efectivos
+    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
+    const targetCenterX = (tMinX + tMaxX + NODE_WIDTH) / 2;
+    const calcX = Math.round(screenWidth / 2 - targetCenterX * zoom);
+    const calcY = Math.round(140 - tMinY * zoom);
+
+    return {
+      initialViewport: { x: calcX, y: calcY, zoom },
+      dynamicTranslateExtent,
+      isDegreeComplete,
+    };
+  }, [currentNodes]);
+
   const currentEdges = useMemo(() => {
     const edges: Edge[] = [];
     const displayedIds = new Set(activeSubjects.map((s) => s.id));
@@ -336,16 +467,44 @@ export const CorrelativeGraph: React.FC = () => {
   return (
     <div
       data-tour="graph-canvas"
-      className="relative w-full h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] lg:h-[calc(100dvh-var(--app-header-height,4rem))] bg-slate-950 overflow-hidden"
+      className="relative w-full h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-var(--app-header-height,4rem))] bg-slate-950 overflow-hidden flex flex-col"
     >
-      {/* Top Floating Controls & Legend */}
-      <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-[var(--z-graph-controls)] flex flex-wrap items-center gap-2 pointer-events-none max-w-[calc(100vw-1.5rem)]">
+      {/* Top Floating Controls & View Switcher */}
+      <div className="absolute top-2 inset-x-2 sm:top-4 sm:left-4 sm:right-auto z-[var(--z-graph-controls)] flex items-center justify-between sm:justify-start gap-2 pointer-events-none">
         <div
           data-tour="graph-controls"
-          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-xl border border-slate-800 shadow-xl flex flex-wrap items-center gap-2 sm:gap-3 text-xs"
+          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-2xl border border-slate-800 shadow-xl flex items-center gap-1.5 sm:gap-3 text-xs max-w-full overflow-hidden"
         >
+          {/* Segmented Switcher en Mobile: Lista | Mapa */}
+          {isMobile && (
+            <div className="inline-flex rounded-xl bg-slate-950 p-0.5 border border-slate-800 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleSetMobileGraphView('lista')}
+                className={`min-h-[38px] px-2.5 py-1 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                  mobileGraphView === 'lista'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>📋 Lista</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetMobileGraphView('mapa')}
+                className={`min-h-[38px] px-2.5 py-1 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                  mobileGraphView === 'mapa'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>🗺️ Mapa</span>
+              </button>
+            </div>
+          )}
+
           {/* Edge Legend */}
-          <div data-tour="edge-legend" className="flex items-center gap-2">
+          <div data-tour="edge-legend" className="hidden sm:flex items-center gap-2">
             <span className="flex items-center gap-1.5 font-medium text-amber-400 whitespace-nowrap">
               <span className="w-4 sm:w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
               <span>Regular</span>
@@ -357,88 +516,110 @@ export const CorrelativeGraph: React.FC = () => {
             </span>
           </div>
 
+          <FitViewButton className="min-h-[38px] px-2.5 py-1 rounded-lg font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 flex items-center gap-1.5 cursor-pointer text-xs transition-colors shrink-0" />
+
           <div className="h-3 w-[1px] bg-slate-800 hidden sm:block" />
 
           {/* Electives toggle */}
           <button
+            type="button"
             onClick={() => setShowElectivesInGraph(!showElectivesInGraph)}
-            className={`px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 ${
+            className={`min-h-[38px] px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
               showElectivesInGraph
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 shrink-0" />
-            <span>{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
+            <span className="hidden sm:inline">{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
+            <span className="sm:hidden">{showElectivesInGraph ? 'Sin Electivas' : 'Electivas'}</span>
           </button>
 
           {/* Active selection badge */}
           {selectedSubjectId && (
             <button
+              type="button"
               onClick={() => setSelectedSubjectId(null)}
-              className="px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1 hover:bg-indigo-500/30 whitespace-nowrap shrink-0"
+              className="min-h-[38px] px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1 hover:bg-indigo-500/30 whitespace-nowrap shrink-0 cursor-pointer"
               title="Limpiar selección"
             >
-              <span>Foco activo</span>
+              <span>Foco</span>
               <X className="w-3 h-3 shrink-0" />
             </button>
           )}
         </div>
       </div>
 
-      {/* React Flow Graph */}
-      <ReactFlow
-        nodes={currentNodes}
-        edges={currentEdges}
-        nodeTypes={nodeTypes}
-        onNodeClick={onNodeClick}
-        onNodeContextMenu={onNodeContextMenu}
-        onNodeMouseEnter={onNodeMouseEnter}
-        onNodeMouseLeave={onNodeMouseLeave}
-        onPaneClick={() => {
-          setContextMenu(null);
-          setSelectedSubjectId(null);
-        }}
-        fitView
-        fitViewOptions={{ padding: 0.15 }}
-        minZoom={0.2}
-        maxZoom={1.5}
-        defaultEdgeOptions={{ type: 'smoothstep' }}
-        className="bg-slate-950"
-      >
-        <MobileFitViewButton />
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={24}
-          size={1.5}
-          color="#1e293b"
-          className="bg-slate-950"
-        />
-        <Controls
-          className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300 !bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+0.75rem)] md:!bottom-4 !left-3 sm:!left-4 z-[var(--z-graph-controls)]"
-        />
-        <MiniMap
-          nodeColor={(n) => {
-            const data = n.data as unknown as SubjectNodeData;
-            switch (data.status) {
-              case 'aprobada':
-                return '#22c55e';
-              case 'promocionada':
-                return '#a855f7';
-              case 'regularizada':
-                return '#f59e0b';
-              case 'cursando':
-                return '#06b6d4';
-              case 'disponible':
-                return '#10b981';
-              default:
-                return '#334155';
-            }
+      {/* Render Mode: Mobile List vs Interactive Canvas Graph */}
+      {isMobile && mobileGraphView === 'lista' ? (
+        <div className="flex-1 min-h-0 pt-16 flex flex-col overflow-hidden">
+          <SubjectListView
+            subjects={activeSubjects}
+            activeState={activeState}
+            onSelectSubject={(id) => setSelectedSubjectId(id)}
+            selectedSubjectId={selectedSubjectId}
+            isSimulationActive={isSimulationMode}
+          />
+        </div>
+      ) : (
+        <ReactFlow
+          nodes={currentNodes}
+          edges={currentEdges}
+          nodeTypes={nodeTypes}
+          onNodeClick={onNodeClick}
+          onNodeContextMenu={onNodeContextMenu}
+          onNodeMouseEnter={onNodeMouseEnter}
+          onNodeMouseLeave={onNodeMouseLeave}
+          onPaneClick={() => {
+            setContextMenu(null);
+            setSelectedSubjectId(null);
           }}
-          maskColor="rgba(11, 15, 25, 0.75)"
-          className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-xl !bottom-4 !right-4 hidden sm:block"
-        />
-      </ReactFlow>
+          fitView={!isMobile || isDegreeComplete}
+          defaultViewport={isMobile ? initialViewport : undefined}
+          fitViewOptions={{ padding: 0.15 }}
+          minZoom={isMobile ? 0.35 : 0.2}
+          maxZoom={1.5}
+          translateExtent={dynamicTranslateExtent}
+          nodeClickDistance={5}
+          paneClickDistance={5}
+          nodesDraggable={!isMobile}
+          defaultEdgeOptions={{ type: 'smoothstep' }}
+          className="bg-slate-950 flex-1"
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={24}
+            size={1.5}
+            color="#1e293b"
+            className="bg-slate-950"
+          />
+          <Controls
+            showInteractive={false}
+            className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300 !bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+0.75rem)] md:!bottom-4 !right-3 md:!right-auto md:!left-4 z-[var(--z-graph-controls)]"
+          />
+          <MiniMap
+            nodeColor={(n) => {
+              const data = n.data as unknown as SubjectNodeData;
+              switch (data.status) {
+                case 'aprobada':
+                  return '#22c55e';
+                case 'promocionada':
+                  return '#a855f7';
+                case 'regularizada':
+                  return '#f59e0b';
+                case 'cursando':
+                  return '#06b6d4';
+                case 'disponible':
+                  return '#10b981';
+                default:
+                  return '#334155';
+              }
+            }}
+            maskColor="rgba(11, 15, 25, 0.75)"
+            className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-xl !bottom-4 !right-4 hidden sm:block"
+          />
+        </ReactFlow>
+      )}
 
       {/* Menú contextual (click derecho sobre una materia en el mapa) */}
       {contextMenu && contextSubject && (
@@ -522,5 +703,13 @@ export const CorrelativeGraph: React.FC = () => {
       {/* Drawer with details for selected node */}
       <SubjectDrawer />
     </div>
+  );
+};
+
+export const CorrelativeGraph: React.FC = () => {
+  return (
+    <ReactFlowProvider>
+      <CorrelativeGraphContent />
+    </ReactFlowProvider>
   );
 };

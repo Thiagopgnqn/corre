@@ -555,7 +555,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
       <nav
         data-tour="nav-tabs"
         aria-label="Navegación principal móvil"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-[var(--z-mobile-nav)] bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 flex items-stretch justify-around shadow-2xl safe-area-pb safe-area-x"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-[var(--z-mobile-nav)] bg-slate-950/95 backdrop-blur-xl border-t border-slate-800/90 flex items-stretch justify-around shadow-2xl safe-area-pb safe-area-x h-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))]"
       >
         {mobilePrimaryNav.map((item) => {
           const Icon = item.icon;
@@ -565,14 +565,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               key={item.id}
               type="button"
               onClick={() => setCurrentView(item.id)}
-              className={`flex-1 min-w-0 min-h-[52px] py-1.5 flex flex-col items-center justify-center gap-1 transition-all relative cursor-pointer active:scale-95 ${
+              className={`flex-1 min-w-0 min-h-[52px] landscape:min-h-0 h-full py-1.5 landscape:py-0.5 flex flex-col landscape:flex-row items-center justify-center gap-1 landscape:gap-1.5 transition-all relative cursor-pointer active:scale-95 ${
                 isActive
                   ? 'text-indigo-400 font-bold bg-indigo-500/10'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <div className="relative">
-                <Icon className={`w-6 h-6 shrink-0 transition-transform ${isActive ? 'scale-110 text-indigo-400' : 'text-slate-400'}`} />
+                <Icon className={`w-6 h-6 landscape:w-4 landscape:h-4 shrink-0 transition-transform ${isActive ? 'scale-110 text-indigo-400' : 'text-slate-400'}`} />
                 {item.id === 'professors' && unseenRecommendationsCount > 0 && (
                   <span
                     aria-label="Recomendaciones de reseñas pendientes"
@@ -586,7 +586,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   />
                 )}
               </div>
-              <span className="leading-tight text-[11px] font-semibold truncate max-w-full text-center">
+              <span className="leading-tight text-[11px] landscape:text-[10px] font-semibold truncate max-w-full text-center">
                 {item.label}
               </span>
             </button>
@@ -598,7 +598,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           type="button"
           data-tour="more-menu-btn"
           onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-          className={`flex-1 min-w-0 min-h-[52px] py-1.5 flex flex-col items-center justify-center gap-1 transition-all relative cursor-pointer active:scale-95 ${
+          className={`flex-1 min-w-0 min-h-[52px] landscape:min-h-0 h-full py-1.5 landscape:py-0.5 flex flex-col landscape:flex-row items-center justify-center gap-1 landscape:gap-1.5 transition-all relative cursor-pointer active:scale-95 ${
             isMobile && isMoreMenuOpen
               ? 'text-indigo-400 font-bold bg-indigo-500/15'
               : 'text-slate-400 hover:text-slate-200'
@@ -608,7 +608,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           aria-expanded={isMobile && isMoreMenuOpen}
         >
           <div className="relative">
-            <Menu className={`w-6 h-6 shrink-0 ${isMobile && isMoreMenuOpen ? 'text-indigo-400' : 'text-slate-400'}`} />
+            <Menu className={`w-6 h-6 landscape:w-4 landscape:h-4 shrink-0 ${isMobile && isMoreMenuOpen ? 'text-indigo-400' : 'text-slate-400'}`} />
             {hasMoreAdminBadge && (
               <span
                 aria-label="Avisos pendientes de administración"
@@ -616,7 +616,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               />
             )}
           </div>
-          <span className="leading-tight text-[11px] font-semibold truncate max-w-full text-center">
+          <span className="leading-tight text-[11px] landscape:text-[10px] font-semibold truncate max-w-full text-center">
             Más
           </span>
         </button>

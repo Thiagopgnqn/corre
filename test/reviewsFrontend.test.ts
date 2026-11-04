@@ -1,3 +1,4 @@
+import { normalizeRatingsBatchResponse } from '../src/hooks/useProfessorRatings.ts';
 import {
   normalizeProfessorLookupKey,
   formatProfessorBadgeState,
@@ -522,6 +523,68 @@ const mockSubjects: Subject[] = [
 const missing = getSubjectsMissingDeclaredProfessors(mockSubjects, dummyEnrollments);
 assert(missing.length === 1, 'Solo debe detectar 1 materia cursando/regularizada sin inscripción');
 assert(missing[0].subjectId === '2', 'La materia faltante debe ser Álgebra (id 2)');
+
+
+// ======================================================================
+// 🧪 TEST DE REGRESIÓN: NORMALIZACIÓN DE RESPUESTA DE PROFESSOR RATINGS
+// ======================================================================
+
+console.log('\n🧪 Ejecutando tests de regresión para useProfessorRatings y normalización de API...');
+
+// Caso 1: Forma REAL de respuesta vacía del backend ({ success: true, data: [] })
+const emptyBackendResponse = { success: true, data: [] };
+const normalizedEmpty = normalizeRatingsBatchResponse(emptyBackendResponse);
+
+assert(typeof normalizedEmpty === 'object' && normalizedEmpty !== null, 'Respuesta normalizada debe ser un objeto');
+assert(typeof normalizedEmpty.byId === 'object' && !Array.isArray(normalizedEmpty.byId), 'byId debe ser un objeto de mapa, no array');
+assert(typeof normalizedEmpty.byNormalizedName === 'object' && !Array.isArray(normalizedEmpty.byNormalizedName), 'byNormalizedName debe ser un objeto de mapa, no array');
+assert(typeof normalizedEmpty.thresholds === 'object', 'thresholds debe contener los umbrales por defecto');
+assert(normalizedEmpty.thresholds.minReviewsForReliableAverage === 3, 'thresholds por defecto debe tener minReviewsForReliableAverage = 3');
+
+// Acceso directo que antes crasheaba la app con TypeError: Cannot read properties of undefined (reading 'esther irene romoli')
+const safeAccessEmpty = normalizedEmpty.byNormalizedName['esther irene romoli'];
+assert(safeAccessEmpty === undefined, 'Acceder a un docente inexistente en byNormalizedName debe devolver undefined sin lanzar excepción');
+
+// Caso 2: Forma completa con datos reales
+const sampleRating = {
+  id: 'prof-42',
+  displayName: 'Esther Irene Romoli',
+  normalizedName: 'esther irene romoli',
+  reviewCount: 7,
+  averageOverall: 4.8,
+  hasReliableAverage: true,
+  ratingStatus: 'confiable',
+};
+const fullBackendResponse = {
+  success: true,
+  data: {
+    byId: { 'prof-42': sampleRating },
+    byNormalizedName: { 'esther irene romoli': sampleRating },
+    thresholds: {
+      minReviewsForReliableAverage: 5,
+      bayesianPriorGlobalMean: 3.5,
+      bayesianPriorWeight: 3,
+      minReviewsToShowAttendedPeriod: 2,
+      maxNewReviewsPerDay: 5,
+      autoHideOpenReportsThreshold: 3,
+      allowedSubjectStatuses: ['regularizada', 'aprobada', 'promocionada'],
+    },
+  },
+};
+const normalizedFull = normalizeRatingsBatchResponse(fullBackendResponse);
+
+assert(normalizedFull.byId['prof-42']?.displayName === 'Esther Irene Romoli', 'byId debe mapear correctamente');
+assert(normalizedFull.byNormalizedName['esther irene romoli']?.averageOverall === 4.8, 'byNormalizedName debe mapear correctamente');
+assert(normalizedFull.thresholds.minReviewsForReliableAverage === 5, 'thresholds personalizados deben respetarse');
+
+// Caso 3: Respuestas defensivas ante errores o nulos
+const nullResponse = normalizeRatingsBatchResponse(null);
+assert(typeof nullResponse.byId === 'object' && typeof nullResponse.byNormalizedName === 'object', 'Null debe devolver mapas seguros');
+
+const errorResponse = normalizeRatingsBatchResponse({ success: false, data: null });
+assert(typeof errorResponse.byId === 'object' && typeof errorResponse.byNormalizedName === 'object', 'Error debe devolver mapas seguros');
+
+console.log('✅ Todos los tests de regresión de useProfessorRatings pasaron con éxito!\n');
 
 console.log('TODAS LAS PRUEBAS DE RESEÑAS FRONTEND, INSIGNIAS, FILTROS Y ACCESIBILIDAD PASARON CON ÉXITO!');
 

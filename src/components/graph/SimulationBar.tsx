@@ -20,7 +20,7 @@ export const SimulationBar: React.FC = () => {
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: -50, opacity: 0 }}
-        className="w-full bg-gradient-to-r from-amber-600 via-purple-600 to-indigo-600 p-[1px] shadow-lg shadow-indigo-950/40 sticky top-0 z-30"
+        className="w-full bg-gradient-to-r from-amber-600 via-purple-600 to-indigo-600 p-[1px] shadow-lg shadow-indigo-950/40 sticky top-0 z-[var(--z-simulation-banner)]"
       >
         <div className="bg-slate-950/95 backdrop-blur-md px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">

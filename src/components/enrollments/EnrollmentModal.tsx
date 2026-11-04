@@ -293,7 +293,7 @@ export const EnrollmentModal: React.FC = () => {
   return (
     <AnimatePresence>
       <div
-        className="fixed inset-0 z-[65] flex items-center justify-center p-2.5 sm:p-4 bg-black/75 backdrop-blur-sm"
+        className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-2.5 sm:p-4 bg-black/75 backdrop-blur-sm"
         role="dialog"
         aria-modal="true"
         aria-labelledby="enrollment-modal-title"
@@ -303,7 +303,7 @@ export const EnrollmentModal: React.FC = () => {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={shouldReduceMotion ? undefined : { opacity: 0, y: 10, scale: 0.97 }}
           transition={{ duration: 0.18 }}
-          className="w-full max-w-2xl max-h-[90vh] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
+          className="w-full max-w-2xl max-h-[90dvh] sm:max-h-[90vh] bg-slate-900 border-t sm:border border-slate-700/80 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col"
         >
           {/* Header */}
           <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-950/70 flex items-start justify-between gap-3 shrink-0">
@@ -331,7 +331,7 @@ export const EnrollmentModal: React.FC = () => {
               type="button"
               onClick={handleOmit}
               aria-label="Omitir y cerrar"
-              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
+              className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
@@ -364,7 +364,7 @@ export const EnrollmentModal: React.FC = () => {
                         key={opt.val}
                         type="button"
                         onClick={() => setCursadaStatus(opt.val as SubjectEnrollmentStatus)}
-                        className={`px-2 py-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer text-center ${
+                        className={`px-2.5 py-2 min-h-[44px] rounded-xl border text-xs font-semibold transition-all cursor-pointer text-center flex items-center justify-center ${
                           cursadaStatus === opt.val
                             ? opt.color + ' ring-1 ring-inset ring-white/20'
                             : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200'
@@ -382,7 +382,7 @@ export const EnrollmentModal: React.FC = () => {
                     type="button"
                     disabled={!options || options.commissions.length === 0}
                     onClick={() => setMode('commission')}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`p-3 min-h-[44px] rounded-xl border text-left transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex flex-col justify-center ${
                       mode === 'commission'
                         ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
                         : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700'
@@ -405,7 +405,7 @@ export const EnrollmentModal: React.FC = () => {
                       setMode('manual');
                       setSelectedCommissionId(null);
                     }}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-3 min-h-[44px] rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-center ${
                       mode === 'manual'
                         ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
                         : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700'
@@ -427,7 +427,7 @@ export const EnrollmentModal: React.FC = () => {
                       setSelectedCommissionId(null);
                       setSelectedProfessorIds([]);
                     }}
-                    className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                    className={`p-3 min-h-[44px] rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-center ${
                       mode === 'unknown'
                         ? 'bg-indigo-600/20 border-indigo-500 text-white shadow-sm'
                         : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700'
@@ -706,7 +706,7 @@ export const EnrollmentModal: React.FC = () => {
               type="button"
               disabled={isSaving}
               onClick={handleOmit}
-              className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              className="px-3.5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer flex items-center justify-center"
             >
               {editingEnrollment ? 'Cancelar' : 'Omitir por ahora'}
             </button>
@@ -715,7 +715,7 @@ export const EnrollmentModal: React.FC = () => {
               type="button"
               disabled={isLoading || isSaving}
               onClick={handleSave}
-              className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-45 text-white text-xs font-extrabold shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              className="px-5 py-2.5 min-h-[44px] rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 disabled:opacity-45 text-white text-xs font-extrabold shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
             >
               {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>{editingEnrollment ? 'Guardar cambios' : 'Guardar cursada'}</span>

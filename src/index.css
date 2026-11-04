@@ -9,6 +9,7 @@
 
   /* Alturas de navegación y áreas seguras */
   --mobile-nav-height: 4rem; /* 64px */
+  --schedule-bar-height: 4.5rem; /* 72px para barra flotante de horarios y padding */
 
   /* Escala centralizada de capas (Z-Index) */
   --z-graph-controls: 30;
@@ -16,12 +17,29 @@
   --z-mobile-nav: 40;
   --z-simulation-banner: 40;
   --z-header: 40;
-  --z-backdrop: 50;
+  --z-backdrop: 45;
+  --z-modal-backdrop: 45;
   --z-sheet: 50;
   --z-modal: 50;
+  --z-dropdown: 50;
+  --z-modal-elevated: 55;
   --z-toast: 60;
-  --z-modal-elevated: 65;
-  --z-modal-top: 70;
+  --z-modal-top: 100;
+  --z-spotlight: 100;
+}
+
+@media (min-width: 768px) {
+  :root {
+    /* En tablets y desktop la barra inferior móvil no existe */
+    --mobile-nav-height: 0px;
+  }
+}
+
+@media (max-width: 767.98px) and (orientation: landscape) and (max-height: 500px) {
+  :root {
+    /* En landscape corto la barra inferior se compacta a 44px */
+    --mobile-nav-height: 2.75rem;
+  }
 }
 
 @layer base {

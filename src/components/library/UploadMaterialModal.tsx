@@ -260,8 +260,8 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-      <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden my-6">
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm overflow-hidden">
+      <div className="w-full max-w-xl max-h-[92dvh] sm:max-h-[92vh] bg-slate-900 border-t sm:border border-slate-800 rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col my-0 sm:my-6">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/70">
           <div className="flex items-center gap-2.5">
@@ -319,7 +319,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
             </div>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-5">
+          <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-5 overflow-y-auto flex-1">
             {/* File Dropzone */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1.5">
@@ -344,7 +344,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".pdf,image/png,image/jpeg,image/webp"
+                  accept="application/pdf,image/jpeg,image/png,image/webp"
                   onChange={(e) => {
                     if (e.target.files && e.target.files[0]) {
                       validateAndSetFile(e.target.files[0]);
@@ -384,14 +384,27 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2 py-1">
                     <UploadCloud className="w-8 h-8 text-indigo-400 mx-auto" />
                     <p className="text-xs font-semibold text-slate-200">
-                      Arrastrá tu archivo acá o <span className="text-indigo-400 underline">buscalo en tu dispositivo</span>
+                      Arrastrá tu archivo acá o tocalo para buscarlo
                     </p>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[10px] text-slate-400">
                       Formatos soportados: PDF (hasta 25 MB), PNG, JPEG, WEBP (hasta 10 MB)
                     </p>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          fileInputRef.current?.click();
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 min-h-[44px] rounded-xl bg-indigo-600/25 hover:bg-indigo-600/40 text-indigo-300 font-bold text-xs border border-indigo-500/40 cursor-pointer shadow-sm transition-all"
+                      >
+                        <UploadCloud className="w-4 h-4" />
+                        <span>Elegir archivo o foto</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -412,7 +425,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                 <select
                   value={selectedSubjectId}
                   onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500"
                 >
                   {subjects.map((sub) => (
                     <option key={sub.id} value={sub.id}>
@@ -429,7 +442,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                 <select
                   value={kind}
                   onChange={(e) => setKind(e.target.value as LibraryFileKind)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500"
                 >
                   <option value="parcial">Examen Parcial</option>
                   <option value="final">Examen Final</option>
@@ -454,7 +467,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                       max={2030}
                       value={academicYear}
                       onChange={(e) => setAcademicYear(Number(e.target.value))}
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
+                      className="w-full px-2.5 py-2 min-h-[44px] rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white"
                     />
                   </div>
 
@@ -463,7 +476,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                     <select
                       value={term}
                       onChange={(e) => setTerm(e.target.value as LibraryTerm)}
-                      className="w-full px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
+                      className="w-full px-2.5 py-2 min-h-[44px] rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white"
                     >
                       <option value="1C">1° Cuatrimestre</option>
                       <option value="2C">2° Cuatrimestre</option>
@@ -478,7 +491,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                       value={examInstance}
                       onChange={(e) => setExamInstance(e.target.value)}
                       placeholder="1° Parcial, Recuperatorio..."
-                      className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white"
+                      className="w-full px-2.5 py-2 min-h-[44px] rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-xs text-white"
                     />
                   </div>
                 </div>
@@ -509,7 +522,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Ej: Primer Parcial Resuelto - Tema 1 (2024)"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500"
+                  className="w-full px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
@@ -523,19 +536,19 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Aclaraciones sobre el tema, unidades abarcadas o cátedra..."
-                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:outline-none focus:border-indigo-500 resize-none"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-base sm:text-xs text-white focus:outline-none focus:border-indigo-500 resize-none"
                 />
               </div>
             </div>
 
             {/* Terms Checkbox */}
-            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-              <label className="flex items-start gap-2.5 cursor-pointer">
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 min-h-[44px]">
+              <label className="flex items-start gap-2.5 cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={acceptedTerms}
                   onChange={(e) => setAcceptedTerms(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 mt-0.5"
+                  className="w-5 h-5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900 mt-0.5 shrink-0"
                 />
                 <span className="text-xs text-slate-300 leading-snug">
                   Acepto los términos de la Biblioteca y declaro que este archivo es material legítimo de estudio, no infringe derechos de autor comerciales ni contiene datos privados.
@@ -583,19 +596,19 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
             )}
 
             {/* Actions */}
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-end gap-3 p-3 sm:p-4 -mx-4 -mb-4 sm:-mx-6 sm:-mb-6 border-t border-slate-800 shadow-lg">
               <button
                 type="button"
                 onClick={handleClose}
                 disabled={isUploading}
-                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-40"
+                className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-40 flex items-center justify-center"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={isUploading || !file || !acceptedTerms}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                className="px-5 py-2.5 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isUploading ? (
                   <>

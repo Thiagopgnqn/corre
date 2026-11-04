@@ -20,6 +20,45 @@ export interface BottomSheetProps {
 const FOCUSABLE_SELECTOR =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// Pila global de capas activas para soportar sheets y modales anidados
+const activeSheetStack: string[] = [];
+let originalBodyOverflow = '';
+
+export function getActiveLayersCount(): number {
+  return activeSheetStack.length;
+}
+
+export function isTopLayer(id: string): boolean {
+  return activeSheetStack[activeSheetStack.length - 1] === id;
+}
+
+export function registerLayer(id: string): number {
+  if (typeof document !== 'undefined') {
+    if (activeSheetStack.length === 0) {
+      originalBodyOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+    }
+  }
+  const idx = activeSheetStack.indexOf(id);
+  if (idx === -1) {
+    activeSheetStack.push(id);
+  }
+  return activeSheetStack.indexOf(id);
+}
+
+export function unregisterLayer(id: string): void {
+  const idx = activeSheetStack.indexOf(id);
+  if (idx !== -1) {
+    activeSheetStack.splice(idx, 1);
+  }
+  if (typeof document !== 'undefined') {
+    if (activeSheetStack.length === 0) {
+      document.body.style.overflow = originalBodyOverflow;
+      originalBodyOverflow = '';
+    }
+  }
+}
+
 export const BottomSheet: React.FC<BottomSheetProps> = ({
   isOpen,
   onClose,
@@ -41,6 +80,19 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   const [dragOffset, setDragOffset] = useState(0);
   const isDraggingRef = useRef(false);
   const startYRef = useRef(0);
+
+  // 1. Gestión de capas anidadas y bloqueo global de scroll
+  const [layerIndex, setLayerIndex] = useState(0);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const idx = registerLayer(generatedId);
+    setLayerIndex(idx);
+
+    return () => {
+      unregisterLayer(generatedId);
+    };
+  }, [isOpen, generatedId]);
 
   // 1. Gestión de foco: guardar foco previo y devolverlo al cerrar
   useEffect(() => {
@@ -69,6 +121,9 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Si hay capas anidadas, solo la capa superior responde a Escape y a la trampa de foco
+      if (!isTopLayer(generatedId)) return;
+
       if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
@@ -105,18 +160,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
-  // 3. Bloqueo de scroll del body (scroll lock no destructivo)
-  useEffect(() => {
-    if (!isOpen) return;
-    const originalOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-    };
-  }, [isOpen]);
+  }, [isOpen, onClose, generatedId]);
 
   // 4. Swipe to close mediante Pointer Events en la cabecera / drag-handle
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -158,7 +202,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   return (
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[var(--z-sheet)] flex flex-col justify-end pointer-events-auto pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]">
+        <div
+          style={{ zIndex: `calc(var(--z-sheet) + ${layerIndex * 10})` }}
+          className="fixed inset-0 flex flex-col justify-end pointer-events-auto pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
+        >
           {/* Backdrop con tap para cerrar */}
           <motion.div
             initial={{ opacity: 0 }}

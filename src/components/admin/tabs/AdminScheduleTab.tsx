@@ -661,7 +661,7 @@ export const AdminScheduleTab: React.FC = () => {
 
       {/* ── Modal: Impact Preview & Retirement / Safe Deletion ── */}
       {impactModalOpen && impactTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <div className="flex items-start gap-3.5 mb-4">
               <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
@@ -742,7 +742,7 @@ export const AdminScheduleTab: React.FC = () => {
 
       {/* ── Modal: Commission Form (Create / Edit) with Slot Validation ── */}
       {commissionFormModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100 my-8">
             <h3 className="text-base font-bold text-white mb-4">
               {editingCommission ? `Editar Comisión ${editingCommission.code}` : 'Nueva Comisión'}
@@ -908,7 +908,7 @@ export const AdminScheduleTab: React.FC = () => {
 
       {/* ── Modal: Duplicate Term ── */}
       {duplicateTermModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <h3 className="text-base font-bold text-white mb-2">Duplicar Período en Borrador</h3>
             <p className="text-xs text-slate-400 mb-4 leading-relaxed">
@@ -961,7 +961,7 @@ export const AdminScheduleTab: React.FC = () => {
 
       {/* ── Modal: New Term ── */}
       {newTermModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <h3 className="text-base font-bold text-white mb-4">Crear Nuevo Período Académico</h3>
 
@@ -1021,7 +1021,7 @@ export const AdminScheduleTab: React.FC = () => {
 
       {/* ── Modal: Schedule JSON Import with SHA-256 Preview & Apply ── */}
       {importModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
           <div className="relative w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100 my-8">
             <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
               <UploadCloud className="w-5 h-5 text-indigo-400" />

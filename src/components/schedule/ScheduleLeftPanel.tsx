@@ -29,6 +29,7 @@ import {
 } from '../../utils/professorRatingsLogic';
 import { ProfessorRatingBadge } from '../professors/ProfessorRatingBadge';
 import { useIsTouchDevice } from '../../hooks/useTouchDevice';
+import { BottomSheet } from '../common/BottomSheet';
 
 interface ScheduleLeftPanelProps {
   term: '1C' | '2C';
@@ -72,6 +73,25 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
   const [sortByBestRated, setSortByBestRated] = useState<boolean>(false);
   const [expandedSubjectIds, setExpandedSubjectIds] = useState<Set<number>>(new Set());
   const [previewingCommissionId, setPreviewingCommissionId] = useState<string | null>(null);
+  const [isFiltersSheetOpen, setIsFiltersSheetOpen] = useState(false);
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (shiftFilter !== 'all') count++;
+    if (onlyConflictFree) count++;
+    if (showAllSubjects) count++;
+    if (minRatingFilter > 0) count++;
+    if (sortByBestRated) count++;
+    return count;
+  }, [shiftFilter, onlyConflictFree, showAllSubjects, minRatingFilter, sortByBestRated]);
+
+  const handleClearAllFilters = () => {
+    setShiftFilter('all');
+    setOnlyConflictFree(false);
+    setShowAllSubjects(false);
+    setMinRatingFilter(0);
+    setSortByBestRated(false);
+  };
 
   // Expand focused subject when requested by popover
   React.useEffect(() => {
@@ -182,36 +202,102 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           </div>
         </div>
 
-        {/* Search bar */}
-        <div className="relative">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Buscar materia, código o docente..."
-            className="w-full pl-8 pr-9 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[16px] sm:text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px] sm:min-h-0"
-          />
-          {searchQuery && (
+        {/* Search bar + Mobile Filters Button */}
+        <div className="flex items-center gap-1.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar materia, código o docente..."
+              className="w-full pl-8 pr-9 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[16px] sm:text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors min-h-[44px] sm:min-h-0"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
+                title="Borrar búsqueda"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Botón Filtros solo en mobile */}
+          <div className="sm:hidden">
             <button
-              onClick={() => setSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 hover:text-white min-w-[36px] min-h-[36px] flex items-center justify-center cursor-pointer"
-              title="Borrar búsqueda"
+              type="button"
+              onClick={() => setIsFiltersSheetOpen(true)}
+              className={`min-h-[44px] px-3 rounded-xl border flex items-center gap-1.5 text-xs font-bold transition-all shrink-0 cursor-pointer active:scale-95 ${
+                activeFiltersCount > 0
+                  ? 'bg-indigo-600 border-indigo-500 text-white shadow-md'
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              }`}
             >
-              <X className="w-4 h-4" />
+              <Filter className="w-4 h-4" />
+              <span>Filtros</span>
+              {activeFiltersCount > 0 && (
+                <span className="w-5 h-5 rounded-full bg-white/20 text-white font-mono text-[10px] flex items-center justify-center">
+                  {activeFiltersCount}
+                </span>
+              )}
             </button>
-          )}
+          </div>
         </div>
 
-        {/* Filters bar */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
+        {/* Chips de filtros activos en mobile */}
+        {activeFiltersCount > 0 && (
+          <div className="sm:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 text-[11px]">
+            {shiftFilter !== 'all' && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-semibold whitespace-nowrap">
+                <span>Turno: {shiftFilter}</span>
+                <button type="button" onClick={() => setShiftFilter('all')} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            {onlyConflictFree && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold whitespace-nowrap">
+                <span>Sin choques</span>
+                <button type="button" onClick={() => setOnlyConflictFree(false)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            {showAllSubjects && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold whitespace-nowrap">
+                <span>Todas</span>
+                <button type="button" onClick={() => setShowAllSubjects(false)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            {minRatingFilter > 0 && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold whitespace-nowrap">
+                <span>★ {minRatingFilter}+</span>
+                <button type="button" onClick={() => setMinRatingFilter(0)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            {sortByBestRated && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold whitespace-nowrap">
+                <span>Mejor valoradas</span>
+                <button type="button" onClick={() => setSortByBestRated(false)} className="hover:text-white ml-0.5">✕</button>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
+              className="text-[10px] text-slate-400 hover:text-white underline shrink-0 px-1"
+            >
+              Limpiar
+            </button>
+          </div>
+        )}
+
+        {/* Filters bar en Desktop (oculto en pantallas chicas para no comer espacio vertical) */}
+        <div className="hidden sm:flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
           {/* Shift selector */}
           <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800">
             {(['all', 'mañana', 'tarde', 'noche'] as const).map((sh) => (
               <button
                 key={sh}
                 onClick={() => setShiftFilter(sh)}
-                className={`px-2 py-1.5 sm:py-0.5 rounded text-xs sm:text-[10px] font-semibold capitalize transition-all min-h-[38px] sm:min-h-0 flex items-center justify-center ${
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold capitalize transition-all flex items-center justify-center ${
                   shiftFilter === sh
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -225,7 +311,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Conflict-free filter toggle */}
           <button
             onClick={() => setOnlyConflictFree(!onlyConflictFree)}
-            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border text-xs sm:text-[10px] font-semibold flex items-center gap-1 transition-all min-h-[38px] sm:min-h-0 ${
+            className={`px-2.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
               onlyConflictFree
                 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -238,7 +324,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           {/* Show all subjects toggle */}
           <button
             onClick={() => setShowAllSubjects(!showAllSubjects)}
-            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border text-xs sm:text-[10px] font-semibold flex items-center gap-1 transition-all min-h-[38px] sm:min-h-0 ${
+            className={`px-2.5 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 transition-all ${
               showAllSubjects
                 ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-300'
@@ -250,13 +336,13 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           </button>
         </div>
 
-        {/* Professor rating filter & sort row */}
-        <div className="flex items-center justify-between gap-1.5 pt-0.5 text-[10px]">
+        {/* Professor rating filter & sort row en Desktop */}
+        <div className="hidden sm:flex items-center justify-between gap-1.5 pt-0.5 text-[10px]">
           <select
             aria-label="Valoración mínima de comisión"
             value={minRatingFilter}
             onChange={(e) => setMinRatingFilter(Number(e.target.value))}
-            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1.5 sm:py-1 text-[16px] sm:text-[10px] font-semibold text-slate-300 focus:outline-none focus:border-indigo-500 min-h-[38px] sm:min-h-0"
+            className="flex-1 min-w-0 rounded-lg bg-slate-950 border border-slate-800 px-2 py-1 text-[10px] font-semibold text-slate-300 focus:outline-none focus:border-indigo-500"
           >
             <option value={0}>Valoración mínima: Todas</option>
             <option value={3.5}>Valoración: ★ 3,5+</option>
@@ -267,7 +353,7 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           <button
             type="button"
             onClick={() => setSortByBestRated(!sortByBestRated)}
-            className={`px-2.5 py-1.5 sm:py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer min-h-[38px] sm:min-h-0 text-xs sm:text-[10px] ${
+            className={`px-2.5 py-1 rounded-lg border font-semibold flex items-center gap-1 shrink-0 transition-all cursor-pointer text-[10px] ${
               sortByBestRated
                 ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
                 : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -680,6 +766,157 @@ export const ScheduleLeftPanel: React.FC<ScheduleLeftPanelProps> = ({
           })
         )}
       </div>
+
+      {/* BottomSheet de Filtros para Mobile */}
+      <BottomSheet
+        isOpen={isFiltersSheetOpen}
+        onClose={() => setIsFiltersSheetOpen(false)}
+        title="Filtros de Comisiones"
+        subtitle={`Oferta Académica (${term})`}
+        maxHeightDvh={85}
+        footer={
+          <div className="flex items-center justify-between gap-3 w-full">
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
+              className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-300 font-bold text-xs hover:bg-slate-700 transition-colors cursor-pointer min-h-[44px]"
+            >
+              Limpiar
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsFiltersSheetOpen(false)}
+              className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-bold text-xs hover:bg-indigo-500 transition-colors shadow-lg shadow-indigo-950/50 cursor-pointer min-h-[44px]"
+            >
+              Aplicar filtros ({activeFiltersCount})
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-5 text-sm p-1">
+          {/* Turno */}
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+              Turno de Cursada
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['all', 'mañana', 'tarde', 'noche'] as const).map((sh) => (
+                <button
+                  key={sh}
+                  type="button"
+                  onClick={() => setShiftFilter(sh)}
+                  className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold capitalize transition-all border flex items-center justify-center cursor-pointer ${
+                    shiftFilter === sh
+                      ? 'bg-indigo-600 text-white border-indigo-500 shadow-md'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  {sh === 'all' ? 'Cualquier turno' : `Turno ${sh}`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Choques y materias */}
+          <div className="space-y-2 pt-2 border-t border-slate-800">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+              Opciones de Oferta
+            </label>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setOnlyConflictFree(!onlyConflictFree)}
+                className={`w-full min-h-[48px] p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
+                  onlyConflictFree
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-400" />
+                  <span>Ocultar comisiones con choques</span>
+                </div>
+                <div className={`w-5 h-5 rounded-md border flex items-center justify-center ${
+                  onlyConflictFree ? 'bg-emerald-600 border-emerald-500 text-white' : 'border-slate-700 bg-slate-950'
+                }`}>
+                  {onlyConflictFree && <Check className="w-3.5 h-3.5" />}
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAllSubjects(!showAllSubjects)}
+                className={`w-full min-h-[48px] p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer ${
+                  showAllSubjects
+                    ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Eye className="w-4 h-4 text-cyan-400" />
+                  <span>Mostrar todas (incluyendo bloqueadas)</span>
+                </div>
+                <div className={`w-5 h-5 rounded-md border flex items-center justify-center ${
+                  showAllSubjects ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-slate-700 bg-slate-950'
+                }`}>
+                  {showAllSubjects && <Check className="w-3.5 h-3.5" />}
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Valoración Docente */}
+          <div className="space-y-2 pt-2 border-t border-slate-800">
+            <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">
+              Valoración Docente
+            </label>
+
+            <div className="space-y-1.5">
+              {[
+                { val: 0, label: 'Cualquier valoración' },
+                { val: 3, label: '★ 3,0 o más (Regular o superior)' },
+                { val: 3.5, label: '★ 3,5 o más (Buena o superior)' },
+                { val: 4, label: '★ 4,0 o más (Muy buena o superior)' },
+                { val: 4.5, label: '★ 4,5 o más (Excelente)' },
+              ].map((opt) => (
+                <button
+                  key={opt.val}
+                  type="button"
+                  onClick={() => setMinRatingFilter(opt.val)}
+                  className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between transition-all cursor-pointer ${
+                    minRatingFilter === opt.val
+                      ? 'bg-indigo-600 text-white border-indigo-500 font-bold'
+                      : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                  }`}
+                >
+                  <span>{opt.label}</span>
+                  {minRatingFilter === opt.val && <Check className="w-4 h-4" />}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSortByBestRated(!sortByBestRated)}
+              className={`w-full min-h-[48px] p-3 rounded-xl border flex items-center justify-between text-xs font-bold transition-all cursor-pointer mt-2 ${
+                sortByBestRated
+                  ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                <span>Ordenar comisiones mejor valoradas primero</span>
+              </div>
+              <div className={`w-5 h-5 rounded-md border flex items-center justify-center ${
+                sortByBestRated ? 'bg-amber-600 border-amber-500 text-white' : 'border-slate-700 bg-slate-950'
+              }`}>
+                {sortByBestRated && <Check className="w-3.5 h-3.5" />}
+              </div>
+            </button>
+          </div>
+        </div>
+      </BottomSheet>
     </div>
   );
 };

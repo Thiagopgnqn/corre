@@ -10,8 +10,6 @@ import {
   Calendar,
   User,
   ExternalLink,
-  ChevronLeft,
-  ChevronRight,
 } from 'lucide-react';
 import type { DayOfWeek, Commission, Slot, ScheduleConflict } from '../../types/schedule';
 import {
@@ -170,6 +168,13 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   );
   const [activePopover, setActivePopover] = useState<ScheduledItem | null>(null);
   const shouldReduceMotion = useReducedMotion();
+  const daysContainerRef = useRef<HTMLDivElement | null>(null);
+  const activeDayButtonRef = useRef<HTMLButtonElement | null>(null);
+
+  // Auto-centrar el día seleccionado en la tira horizontal en mobile
+  useEffect(() => {
+    activeDayButtonRef.current?.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+  }, [selectedMobileDay]);
 
   // Resize listener to adapt layout dynamically between mobile & desktop
   useEffect(() => {
@@ -321,28 +326,8 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   }, [selections, subjectNamesMap]);
 
   // Swipe gesture for mobile view
-  const touchStartX = useRef<number | null>(null);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    const diff = e.changedTouches[0].clientX - touchStartX.current;
-    if (Math.abs(diff) > 50) {
-      const currentIdx = DAYS_ORDER.indexOf(selectedMobileDay);
-      if (diff < 0 && currentIdx < DAYS_ORDER.length - 1) {
-        // Swipe left -> next day
-        setSelectedMobileDay(DAYS_ORDER[currentIdx + 1]);
-      } else if (diff > 0 && currentIdx > 0) {
-        // Swipe right -> prev day
-        setSelectedMobileDay(DAYS_ORDER[currentIdx - 1]);
-      }
-    }
-    touchStartX.current = null;
-  };
-
+  // Gestos de swipe horizontal en canvas removidos en favor de la tira de 6 días sticky con auto-centrado
   const isSingleDayMode = !isDesktop && mobileGridMode === 'day';
   const activeDays = isSingleDayMode ? [selectedMobileDay] : DAYS_ORDER;
   const gridColsClass = isSingleDayMode ? 'grid-cols-[48px_1fr]' : 'grid-cols-[55px_repeat(6,1fr)]';
@@ -350,94 +335,80 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
 
   return (
     <div className="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden lg:overflow-visible backdrop-blur-md min-h-0 relative">
-      {/* Mobile Day Selector & View Mode Switcher */}
-      <div className="lg:hidden flex items-center justify-between p-2 bg-slate-950/90 border-b border-slate-800 gap-1 shrink-0">
-        <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden">
-          <button
-            onClick={() => {
-              const idx = DAYS_ORDER.indexOf(selectedMobileDay);
-              if (idx > 0) setSelectedMobileDay(DAYS_ORDER[idx - 1]);
-            }}
-            disabled={DAYS_ORDER.indexOf(selectedMobileDay) === 0}
-            className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-            title="Día anterior"
-            aria-label="Día anterior"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-
-          <div className="flex items-center gap-1 overflow-x-auto py-0.5 no-scrollbar flex-1">
-            {DAYS_ORDER.map((d) => {
-              const count = scheduledItems.filter((i) => i.slot.day === d).length;
-              const isActive = selectedMobileDay === d;
-              const isToday = todayDay === d;
-              return (
-                <button
-                  key={d}
-                  onClick={() => {
-                    setSelectedMobileDay(d);
-                    setMobileGridMode('day');
-                  }}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 active:scale-95 min-h-[44px] ${
-                    isActive && mobileGridMode === 'day'
-                      ? 'bg-indigo-600 text-white shadow-md'
-                      : 'bg-slate-900 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  <span>{d}</span>
-                  {isToday && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                  )}
-                  {count > 0 && (
-                    <span
-                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                        isActive && mobileGridMode === 'day' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
-                      }`}
-                    >
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+      {/* Mobile Day / Week Selector Strip (Por Día con snap-x o Semana Completa) */}
+      <div className="lg:hidden p-2 bg-slate-950/90 border-b border-slate-800 shrink-0 flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-2">
+          {/* Day / Week Switcher */}
+          <div className="inline-flex rounded-xl bg-slate-900 p-0.5 border border-slate-800 text-[11px] font-bold">
+            <button
+              type="button"
+              onClick={() => setMobileGridMode('day')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all min-h-[36px] cursor-pointer ${
+                mobileGridMode === 'day'
+                  ? 'bg-indigo-600 text-white shadow-sm font-black'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>Por Día</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileGridMode('week')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1 transition-all min-h-[36px] cursor-pointer ${
+                mobileGridMode === 'week'
+                  ? 'bg-indigo-600 text-white shadow-sm font-black'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Semana Completa</span>
+            </button>
           </div>
 
-          <button
-            onClick={() => {
-              const idx = DAYS_ORDER.indexOf(selectedMobileDay);
-              if (idx < DAYS_ORDER.length - 1) setSelectedMobileDay(DAYS_ORDER[idx + 1]);
-            }}
-            disabled={DAYS_ORDER.indexOf(selectedMobileDay) === DAYS_ORDER.length - 1}
-            className="p-2 rounded-lg text-slate-400 hover:text-white disabled:opacity-20 shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
-            title="Día siguiente"
-            aria-label="Día siguiente"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
+          <div className="text-[11px] font-mono text-indigo-300 font-bold shrink-0">
+            {mobileGridMode === 'day' ? DAY_LABELS[selectedMobileDay] : '6 días (scroll horizontal)'}
+          </div>
         </div>
 
-        {/* Day / Week View Mode Toggle on Mobile */}
-        <div className="inline-flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-[10px] font-bold shrink-0">
-          <button
-            onClick={() => setMobileGridMode('day')}
-            className={`px-2.5 py-1.5 rounded-md transition-all min-h-[38px] flex items-center justify-center ${
-              mobileGridMode === 'day'
-                ? 'bg-indigo-600 text-white shadow-sm font-black'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Día
-          </button>
-          <button
-            onClick={() => setMobileGridMode('week')}
-            className={`px-2.5 py-1.5 rounded-md transition-all min-h-[38px] flex items-center justify-center ${
-              mobileGridMode === 'week'
-                ? 'bg-indigo-600 text-white shadow-sm font-black'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Semana
-          </button>
+        {/* Days Strip */}
+        <div
+          ref={daysContainerRef}
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full py-0.5 snap-x snap-mandatory"
+        >
+          {DAYS_ORDER.map((d) => {
+            const count = scheduledItems.filter((i) => i.slot.day === d).length;
+            const isActive = selectedMobileDay === d;
+            const isToday = todayDay === d;
+            return (
+              <button
+                key={d}
+                ref={isActive ? activeDayButtonRef : null}
+                onClick={() => {
+                  setSelectedMobileDay(d);
+                  setMobileGridMode('day');
+                }}
+                className={`flex-1 min-w-[50px] snap-center px-2.5 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center justify-center gap-1 shrink-0 active:scale-95 min-h-[44px] cursor-pointer ${
+                  isActive && mobileGridMode === 'day'
+                    ? 'bg-indigo-600 text-white shadow-md font-black ring-1 ring-indigo-400'
+                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800/80'
+                }`}
+              >
+                <span>{d}</span>
+                {isToday && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+                )}
+                {count > 0 && (
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold shrink-0 ${
+                      isActive && mobileGridMode === 'day' ? 'bg-white/20 text-white' : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -448,8 +419,8 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
           userHasScrolled.current = true;
         }}
         className="flex-1 overflow-auto lg:overflow-visible relative p-2 sm:p-4 min-h-0 select-none"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
+        
+        
       >
         <div className={`${containerWidthClass} flex flex-col`} style={{ height: `${totalGridHeight + 50}px` }}>
           {/* Day Headers: Sticky at top */}

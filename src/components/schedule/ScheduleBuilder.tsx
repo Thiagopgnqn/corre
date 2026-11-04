@@ -213,11 +213,10 @@ export const ScheduleBuilder: React.FC = () => {
 
   // Mobile & layout state
   const isMobile = useIsMobile();
-  const [mobileTab, setMobileTab] = useState<'comisiones' | 'grilla' | 'dividida'>('comisiones');
+  const [mobileTab, setMobileTab] = useState<'comisiones' | 'grilla'>('comisiones');
   const [mobileProposalsOpen, setMobileProposalsOpen] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
-  const [isMobileGridExpanded, setIsMobileGridExpanded] = useState(false);
   const [isDesktop, setIsDesktop] = useState(
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
@@ -250,52 +249,47 @@ export const ScheduleBuilder: React.FC = () => {
       {/* Mobile Header Bar & Controls (< lg) */}
       {!isDesktop && (
         <div className="flex flex-col gap-2 shrink-0">
-          <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-2xl backdrop-blur-md shadow-lg flex items-center justify-between gap-2">
-            {/* Left: icon + title */}
+          <div className="bg-slate-900/80 border border-slate-800 p-2 rounded-2xl backdrop-blur-md shadow-lg flex items-center justify-between gap-2">
+            {/* Left: icon + title + 1C/2C toggle (fits < 160px) */}
             <div className="flex items-center gap-2 min-w-0">
               <div className="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0">
                 <Clock className="w-4 h-4" />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex items-center gap-1.5">
                 <h2 className="text-sm font-bold text-white tracking-tight truncate">
                   Horarios
                 </h2>
-                <div className="text-[10px] text-slate-400 font-mono truncate">
-                  {selectedCount} mat. • {totalHours} hs/sem
+                {/* 1C / 2C compact toggle */}
+                <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800 text-[11px] font-bold shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTerm('1C')}
+                    className={`px-2 py-1 rounded min-h-[36px] flex items-center justify-center transition-colors ${
+                      scheduleTerm === '1C' ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    1C
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleTerm('2C')}
+                    className={`px-2 py-1 rounded min-h-[36px] flex items-center justify-center transition-colors ${
+                      scheduleTerm === '2C' ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    2C
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Right controls */}
-            <div className="flex items-center gap-1.5 shrink-0">
-              {/* 1C / 2C compact toggle */}
-              <div className="inline-flex rounded-lg bg-slate-950 p-0.5 border border-slate-800 text-[11px] font-bold">
-                <button
-                  type="button"
-                  onClick={() => setScheduleTerm('1C')}
-                  className={`px-2.5 py-1.5 rounded min-h-[38px] flex items-center justify-center transition-colors ${
-                    scheduleTerm === '1C' ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  1C
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScheduleTerm('2C')}
-                  className={`px-2.5 py-1.5 rounded min-h-[38px] flex items-center justify-center transition-colors ${
-                    scheduleTerm === '2C' ? 'bg-indigo-600 text-white font-bold shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  2C
-                </button>
-              </div>
-
-              {/* Undo / Redo */}
+            {/* Right controls: Undo + Redo + '...' (40x40 each) */}
+            <div className="flex items-center gap-1 shrink-0">
               <button
                 type="button"
                 onClick={handleUndo}
                 disabled={historyIndex <= 0}
-                className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
+                className="w-10 h-10 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform flex items-center justify-center cursor-pointer"
                 title="Deshacer"
                 aria-label="Deshacer cambio de comisión"
               >
@@ -305,47 +299,23 @@ export const ScheduleBuilder: React.FC = () => {
                 type="button"
                 onClick={handleRedo}
                 disabled={historyIndex >= history.length - 1}
-                className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
+                className="w-10 h-10 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 active:scale-95 transition-transform flex items-center justify-center cursor-pointer"
                 title="Rehacer"
                 aria-label="Rehacer cambio de comisión"
               >
                 <Redo2 className="w-4 h-4" />
               </button>
-
-              {/* Proposals trigger */}
-              <button
-                type="button"
-                onClick={() => setMobileProposalsOpen(true)}
-                className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform min-h-[40px] cursor-pointer"
-                title="Ver y gestionar propuestas guardadas"
-              >
-                <Calendar className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Planes</span>
-              </button>
-
-              {/* Summary drawer button */}
-              <button
-                type="button"
-                onClick={() => setSummaryDrawerOpen(true)}
-                className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-xs font-bold flex items-center gap-1.5 active:scale-95 transition-transform min-h-[40px] cursor-pointer"
-                title="Ver resumen y opciones"
-              >
-                <PieChart className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Resumen</span>
-                {conflicts.length > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                )}
-              </button>
-
-              {/* More Options toggle */}
               <button
                 type="button"
                 onClick={() => setMobileActionsOpen(true)}
-                className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-400 hover:text-white text-xs active:scale-95 transition-transform min-h-[40px] min-w-[40px] flex items-center justify-center cursor-pointer"
+                className="w-10 h-10 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-xs active:scale-95 transition-transform flex items-center justify-center cursor-pointer relative"
                 title="Más opciones"
                 aria-label="Más opciones"
               >
                 <MoreHorizontal className="w-4 h-4" />
+                {scheduleDrafts.length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500" />
+                )}
               </button>
             </div>
           </div>
@@ -369,12 +339,12 @@ export const ScheduleBuilder: React.FC = () => {
             </div>
           )}
 
-          {/* Segmented Mode Switcher on Mobile: Comisiones / Mi Semana / Dividida */}
-          <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold shrink-0">
+          {/* Segmented Mode Switcher on Mobile: Comisiones / Mi Semana */}
+          <div className="grid grid-cols-2 gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold shrink-0">
             <button
               type="button"
               onClick={() => setMobileTab('comisiones')}
-              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all min-h-[40px] cursor-pointer ${
+              className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all min-h-[40px] cursor-pointer ${
                 mobileTab === 'comisiones'
                   ? 'bg-indigo-600 text-white shadow-md font-black'
                   : 'text-slate-400 hover:text-slate-200'
@@ -394,30 +364,17 @@ export const ScheduleBuilder: React.FC = () => {
             <button
               type="button"
               onClick={() => setMobileTab('grilla')}
-              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all min-h-[40px] cursor-pointer ${
+              className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all min-h-[40px] cursor-pointer ${
                 mobileTab === 'grilla'
                   ? 'bg-indigo-600 text-white shadow-md font-black'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>Mi Semana</span>
+              <span>Mi Horario</span>
               {conflicts.length > 0 && (
                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
               )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMobileTab('dividida')}
-              className={`py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all min-h-[40px] cursor-pointer ${
-                mobileTab === 'dividida'
-                  ? 'bg-indigo-600 text-white shadow-md font-black'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Dividida</span>
             </button>
           </div>
         </div>
@@ -733,7 +690,7 @@ export const ScheduleBuilder: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden h-full pb-1">
+        <div className="flex-1 min-h-0 flex flex-col gap-2 overflow-hidden h-full pb-[calc(var(--mobile-nav-height,4rem)+var(--schedule-bar-height,4.5rem)+env(safe-area-inset-bottom,0px))]">
           {mobileTab === 'comisiones' && (
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               <ScheduleLeftPanel
@@ -772,91 +729,77 @@ export const ScheduleBuilder: React.FC = () => {
               />
             </div>
           )}
+        </div>
+      )}
 
-          {mobileTab === 'dividida' && (
-            <>
-              {/* Grilla superior (< 1024px) ocupando ~38-42% del alto visible */}
-              <div
-                className={`shrink-0 transition-all duration-200 ${
-                  isMobileGridExpanded
-                    ? 'fixed inset-0 z-[var(--z-modal)] p-2 sm:p-4 bg-[#090d16] flex flex-col overflow-hidden'
-                    : 'h-[38dvh] max-h-[42%] min-h-[190px] flex flex-col rounded-2xl overflow-hidden shadow-lg border border-slate-800'
-                }`}
+      {/* Persistent Floating Summary Bar on mobile (< lg) */}
+      {!isDesktop && (
+        <div
+          role="region"
+          aria-label="Resumen rápido de horarios"
+          className="fixed bottom-[calc(var(--mobile-nav-height,56px)+env(safe-area-inset-bottom,0px)+0.5rem)] left-2 right-2 sm:left-4 sm:right-4 max-w-lg mx-auto z-[var(--z-planner-bar,35)] bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md rounded-2xl p-2 px-3 flex items-center justify-between gap-2"
+        >
+          <button
+            type="button"
+            onClick={() => setSummaryDrawerOpen(true)}
+            className="flex items-center gap-2 min-w-0 flex-1 text-left cursor-pointer hover:opacity-90 transition-opacity"
+            title="Ver resumen y estadísticas completas"
+          >
+            <div className="flex items-center gap-1.5 text-xs font-bold text-white truncate min-w-0">
+              <span className="flex items-center gap-1 shrink-0">
+                <Clock className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                <span>{selectedCount} <span className="hidden xs:inline">mat.</span></span>
+              </span>
+              <span className="text-slate-500 shrink-0">•</span>
+              <span className="text-slate-300 font-mono text-[11px] shrink-0">{totalHours} hs</span>
+              {conflicts.length > 0 ? (
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-rose-300 bg-rose-500/20 px-1.5 py-0.5 rounded-full border border-rose-500/40 shrink-0">
+                  ⚠️ {conflicts.length}
+                </span>
+              ) : selectedCount > 0 ? (
+                <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full border border-emerald-500/20 shrink-0">
+                  ✓
+                </span>
+              ) : null}
+            </div>
+          </button>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileProposalsOpen(true)}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-indigo-300 text-xs font-bold border border-slate-700 flex items-center gap-1 cursor-pointer min-h-[38px] shrink-0"
+              title="Ver mis propuestas guardadas"
+            >
+              <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Planes</span>
+              {scheduleDrafts.length > 0 && (
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-indigo-500/30 text-indigo-200 font-mono">
+                  {scheduleDrafts.length}
+                </span>
+              )}
+            </button>
+
+            {mobileTab === 'comisiones' ? (
+              <button
+                type="button"
+                onClick={() => setMobileTab('grilla')}
+                className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold shadow-md transition-all flex items-center gap-1 cursor-pointer min-h-[38px] shrink-0"
               >
-                <div className="flex items-center justify-between p-1.5 px-2.5 bg-slate-950 border-b border-slate-800 shrink-0 text-xs">
-                  <div className="flex items-center gap-1.5 min-w-0 font-bold text-white">
-                    <Calendar className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                    <span className="truncate">Tu Semana</span>
-                    <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                      ({selectedCount} mat. • {totalHours} hs)
-                    </span>
-                    {conflicts.length > 0 && (
-                      <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-mono font-bold animate-pulse shrink-0">
-                        !{conflicts.length}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setIsMobileGridExpanded(!isMobileGridExpanded)}
-                      className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-indigo-600/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-600/30 transition-all flex items-center gap-1 active:scale-95 cursor-pointer"
-                      title={isMobileGridExpanded ? 'Cerrar pantalla completa' : 'Ver semana en pantalla completa'}
-                    >
-                      {isMobileGridExpanded ? (
-                        <>
-                          <X className="w-3 h-3" />
-                          <span>Cerrar</span>
-                        </>
-                      ) : (
-                        <>
-                          <Layers className="w-3 h-3" />
-                          <span>Ver mi semana</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                  <ScheduleWeeklyGrid
-                    selections={selectedCommissionsMap}
-                    onRemoveCommission={handleRemoveCommissionWithHistory}
-                    hoveredCommission={hoveredCommission}
-                    conflicts={conflicts}
-                    subjectNamesMap={subjectNamesMap}
-                    focusedConflictId={focusedConflictId}
-                    focusedSubjectId={focusedSubjectId}
-                    onFocusSubject={(sId) => setFocusedSubjectId(sId)}
-                  />
-                </div>
-              </div>
-
-              {/* Lista inferior con scroll propio */}
-              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                <ScheduleLeftPanel
-                  term={scheduleTerm}
-                  availableSubjects={availableSubjects}
-                  allSubjects={allSubjects}
-                  schedulesMap={schedulesMap}
-                  selections={selectedCommissionsMap}
-                  onSelectCommission={handleSelectCommissionWithHistory}
-                  onRemoveCommission={handleRemoveCommissionWithHistory}
-                  onHoverCommission={setHoveredCommission}
-                  subjectNamesMap={subjectNamesMap}
-                  focusedSubjectId={focusedSubjectId}
-                  onViewInGrid={(sId) => {
-                    if (sId) setFocusedSubjectId(sId);
-                    setMobileTab('grilla');
-                  }}
-                  resolveProfessorRating={getRatingForProfessor}
-                  onOpenProfessorDetail={setDetailProfessorId}
-                  isMobileView={true}
-                />
-              </div>
-            </>
-          )}
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Grilla</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSummaryDrawerOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 text-xs font-bold border border-slate-700 transition-all flex items-center gap-1 cursor-pointer min-h-[38px] shrink-0"
+              >
+                <PieChart className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Resumen</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -996,9 +939,50 @@ export const ScheduleBuilder: React.FC = () => {
         isOpen={mobileActionsOpen}
         onClose={() => setMobileActionsOpen(false)}
         title="Más Opciones de Horarios"
-        maxHeightDvh={55}
+        maxHeightDvh={65}
       >
         <div className="space-y-2 py-1">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileActionsOpen(false);
+              setMobileProposalsOpen(true);
+            }}
+            className="w-full text-left p-3 rounded-xl hover:bg-slate-800 bg-slate-950/60 border border-slate-800 text-xs text-white font-semibold flex items-center justify-between min-h-[48px] cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <Calendar className="w-4 h-4 text-indigo-400" />
+              <div>
+                <span className="block font-bold">Mis Propuestas / Planes</span>
+                <span className="text-[10px] text-slate-400">Alternativas guardadas (Plan A, Plan B)</span>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300">
+              {scheduleDrafts.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMobileActionsOpen(false);
+              setSummaryDrawerOpen(true);
+            }}
+            className="w-full text-left p-3 rounded-xl hover:bg-slate-800 bg-slate-950/60 border border-slate-800 text-xs text-white font-semibold flex items-center justify-between min-h-[48px] cursor-pointer"
+          >
+            <div className="flex items-center gap-3">
+              <PieChart className="w-4 h-4 text-indigo-400" />
+              <div>
+                <span className="block font-bold">Resumen y Estadísticas</span>
+                <span className="text-[10px] text-slate-400">Detalle de cursada, carga horaria y choques</span>
+              </div>
+            </div>
+            {conflicts.length > 0 && (
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                ⚠️ {conflicts.length}
+              </span>
+            )}
+          </button>
           {semesterBasket.length > 0 && (
             <button
               type="button"

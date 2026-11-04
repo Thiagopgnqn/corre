@@ -48,24 +48,22 @@ assert(
 );
 
 // 2. Existencia de Archivos de Marca en public/
-const requiredFiles = [
-  'public/brand/stack-logo.svg',
-  'public/favicon.svg',
-  'public/favicon.ico',
-  'public/apple-touch-icon.png',
-  'public/icon-192.png',
-  'public/icon-512.png',
-  'public/icon-maskable.png',
-  'public/og-image.png',
-  'public/site.webmanifest',
-];
-
-for (const relPath of requiredFiles) {
+function assertFile(relPath: string) {
   const fullPath = path.join(rootDir, relPath);
   const exists = fs.existsSync(fullPath);
   const size = exists ? fs.statSync(fullPath).size : 0;
   assert(exists && size > 0, `Archivo ${relPath} existe y no está vacío (${size} bytes)`);
 }
+
+assertFile('public/brand/stack-logo.svg');
+assertFile('public/favicon.svg');
+assertFile('public/favicon.ico');
+assertFile('public/apple-touch-icon.png');
+assertFile('public/icon-192.png');
+assertFile('public/icon-512.png');
+assertFile('public/icon-maskable.png');
+assertFile('public/og-image.png');
+assertFile('public/site.webmanifest');
 
 // 3. Verificación de Web Manifest
 const manifestPath = path.join(rootDir, 'public/site.webmanifest');

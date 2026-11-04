@@ -804,7 +804,7 @@ export const AdminReviewsTab: React.FC = () => {
 
       {/* ── Modal: Merge Professors ── */}
       {mergeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <h3 className="text-base font-bold text-white mb-2 flex items-center gap-2">
               <Users className="w-5 h-5 text-indigo-400" />
@@ -860,7 +860,7 @@ export const AdminReviewsTab: React.FC = () => {
 
       {/* ── Modal: Create Historical Professor ── */}
       {historicalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <h3 className="text-base font-bold text-white mb-2">Registrar Docente Histórico</h3>
             <p className="text-xs text-slate-400 mb-4 leading-relaxed">

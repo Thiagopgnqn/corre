@@ -187,12 +187,12 @@ export const StatsDashboard: React.FC = () => {
   }, [activeState, settings.includeAnalistaTrack]);
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 w-full overflow-hidden">
       {/* Sub Navigation Tabs */}
       <div className="flex items-center gap-1.5 bg-slate-900/70 p-1.5 rounded-2xl border border-slate-800 text-xs overflow-x-auto no-scrollbar scrollbar-none">
         <button
           onClick={() => setActiveTab('overview')}
-          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3.5 sm:px-4 py-2 min-h-[44px] text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all flex items-center justify-center ${
             activeTab === 'overview'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -202,7 +202,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('grades')}
-          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3.5 sm:px-4 py-2 min-h-[44px] text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all flex items-center justify-center ${
             activeTab === 'grades'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -212,7 +212,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('critical')}
-          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3.5 sm:px-4 py-2 min-h-[44px] text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all flex items-center justify-center ${
             activeTab === 'critical'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -222,7 +222,7 @@ export const StatsDashboard: React.FC = () => {
         </button>
         <button
           onClick={() => setActiveTab('badges')}
-          className={`px-3 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all ${
+          className={`px-3.5 sm:px-4 py-2 min-h-[44px] text-xs sm:text-sm rounded-xl font-bold whitespace-nowrap shrink-0 transition-all flex items-center justify-center ${
             activeTab === 'badges'
               ? 'bg-indigo-600 text-white shadow-md'
               : 'text-slate-400 hover:text-white'
@@ -252,7 +252,7 @@ export const StatsDashboard: React.FC = () => {
             <div className="grid grid-cols-2 w-full sm:w-auto p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold shrink-0">
               <button
                 onClick={() => updateSettings({ includeElectivesInProgress: false })}
-                className={`px-2.5 py-1.5 rounded-lg text-center text-[11px] sm:text-xs transition-all ${
+                className={`px-3 py-2 min-h-[44px] rounded-lg text-center text-xs transition-all flex items-center justify-center ${
                   !settings.includeElectivesInProgress
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -262,7 +262,7 @@ export const StatsDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => updateSettings({ includeElectivesInProgress: true })}
-                className={`px-2.5 py-1.5 rounded-lg text-center text-[11px] sm:text-xs transition-all ${
+                className={`px-3 py-2 min-h-[44px] rounded-lg text-center text-xs transition-all flex items-center justify-center ${
                   settings.includeElectivesInProgress
                     ? 'bg-amber-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -274,15 +274,15 @@ export const StatsDashboard: React.FC = () => {
           </div>
 
           {/* Main Progress Rings Grid */}
-          <div data-tour="stats-rings" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div data-tour="stats-rings" className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
             {/* By subjects */}
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex flex-col justify-between">
+            <div className="p-3 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex flex-col justify-between">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Avance por Materias
               </span>
               <div className="flex items-center justify-between my-4">
                 <div className="min-w-0 flex-1 pr-2">
-                  <div className="text-3xl font-black text-white">
+                  <div className="text-xl sm:text-3xl font-black text-white">
                     {computedProgress.careerPercentageBySubjects}%
                   </div>
                   {settings.includeElectivesInProgress ? (
@@ -308,7 +308,7 @@ export const StatsDashboard: React.FC = () => {
                   )}
                 </div>
                 {/* Mini circular progress */}
-                <svg className="w-16 h-16 transform -rotate-90 shrink-0">
+                <svg className="w-12 h-12 sm:w-16 sm:h-16 transform -rotate-90 shrink-0">
                   <circle
                     cx="32"
                     cy="32"
@@ -341,20 +341,20 @@ export const StatsDashboard: React.FC = () => {
             </div>
 
             {/* By weekly hours */}
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex flex-col justify-between">
+            <div className="p-3 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md flex flex-col justify-between">
               <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                 Avance por Carga Horaria
               </span>
               <div className="flex items-center justify-between my-4">
                 <div>
-                  <div className="text-3xl font-black text-cyan-400">
+                  <div className="text-xl sm:text-3xl font-black text-cyan-400">
                     {computedProgress.careerPercentageByHours}%
                   </div>
                   <div className="text-xs text-slate-400 mt-1">
                     {computedProgress.approvedWeeklyHours} de {computedProgress.totalWeeklyHours} hs/sem
                   </div>
                 </div>
-                <svg className="w-16 h-16 transform -rotate-90 shrink-0">
+                <svg className="w-12 h-12 sm:w-16 sm:h-16 transform -rotate-90 shrink-0">
                   <circle
                     cx="32"
                     cy="32"
@@ -412,7 +412,7 @@ export const StatsDashboard: React.FC = () => {
                 <Award className="w-4 h-4 text-emerald-400" />
               </div>
               <div className="my-3">
-                <div className="text-3xl font-black text-emerald-400">
+                <div className="text-xl sm:text-3xl font-black text-emerald-400">
                   {computedProgress.averageGrade > 0 ? computedProgress.averageGrade : '--'}
                 </div>
                 <div className="text-xs text-emerald-200/80 mt-1">
@@ -695,7 +695,7 @@ export const StatsDashboard: React.FC = () => {
 
             <div className="flex flex-wrap items-center gap-4 text-xs">
 
-              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={Boolean(settings.includeFailsInGPA)}
@@ -711,7 +711,7 @@ export const StatsDashboard: React.FC = () => {
                   )}
                 </span>
               </label>
-              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer min-h-[44px]">
                 <input
                   type="checkbox"
                   checked={settings.includePromotionsInGPA}
@@ -726,7 +726,7 @@ export const StatsDashboard: React.FC = () => {
                 <select
                   value={settings.minPassingGrade}
                   onChange={(e) => updateSettings({ minPassingGrade: Number(e.target.value) })}
-                  className="bg-slate-950 border border-slate-700 text-slate-200 rounded px-2 py-0.5 text-xs focus:outline-none"
+                  className="bg-slate-950 border border-slate-700 text-slate-200 rounded-xl px-2.5 py-2 min-h-[44px] text-xs focus:outline-none"
                 >
                   <option value={4}>4 (Aprobación estándar)</option>
                   <option value={6}>6 (Aprobación exigente)</option>
@@ -737,12 +737,12 @@ export const StatsDashboard: React.FC = () => {
 
 
           {/* Grade Metrics & Distribution */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-5 rounded-2xl border border-indigo-500/30 bg-slate-900/60 backdrop-blur-md text-center">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+            <div className="p-3 sm:p-5 rounded-2xl border border-indigo-500/30 bg-slate-900/60 backdrop-blur-md text-center">
               <span className="text-xs font-semibold text-slate-400 uppercase">
                 Promedio {settings.includeFailsInGPA ? '(Con Aplazos)' : '(Sin Aplazos)'}
               </span>
-              <div className="text-4xl font-black text-indigo-400 my-2">
+              <div className="text-2xl sm:text-4xl font-black text-indigo-400 my-2">
                 {computedProgress.averageGrade > 0 ? computedProgress.averageGrade : '--'}
               </div>
               <div className="text-[11px] text-slate-400 space-y-0.5">
@@ -751,9 +751,9 @@ export const StatsDashboard: React.FC = () => {
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
+            <div className="p-3 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
               <span className="text-xs font-semibold text-slate-400 uppercase">Total de Aplazos</span>
-              <div className="text-4xl font-black text-rose-400 my-2">
+              <div className="text-2xl sm:text-4xl font-black text-rose-400 my-2">
                 {computedProgress.totalFailsCount ?? 0}
               </div>
               <span className="text-xs text-slate-500">
@@ -761,17 +761,17 @@ export const StatsDashboard: React.FC = () => {
               </span>
             </div>
 
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
+            <div className="p-3 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
               <span className="text-xs font-semibold text-slate-400 uppercase">Mejor Calificación</span>
-              <div className="text-4xl font-black text-emerald-400 my-2">
+              <div className="text-2xl sm:text-4xl font-black text-emerald-400 my-2">
                 {gradesData.bestGrade > 0 ? gradesData.bestGrade : '--'}
               </div>
               <span className="text-xs text-slate-500">Nota más alta registrada</span>
             </div>
 
-            <div className="p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
+            <div className="p-3 sm:p-5 rounded-2xl border border-slate-800 bg-slate-900/60 backdrop-blur-md text-center">
               <span className="text-xs font-semibold text-slate-400 uppercase">Nota Más Baja</span>
-              <div className="text-4xl font-black text-amber-400 my-2">
+              <div className="text-2xl sm:text-4xl font-black text-amber-400 my-2">
                 {gradesData.lowestGrade > 0 ? gradesData.lowestGrade : '--'}
               </div>
               <span className="text-xs text-slate-500">Nota mínima registrada</span>
