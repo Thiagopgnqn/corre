@@ -238,3 +238,14 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'CheckCircle2',
   },
 ];
+
+/**
+ * Devuelve la lista de pasos del tutorial filtrando pasos que requieran
+ * pantallas de escritorio (como el armador de horarios) si no están disponibles.
+ */
+export function getAvailableTutorialSteps(isScheduleAvailable: boolean = true): TutorialStep[] {
+  if (isScheduleAvailable) {
+    return TUTORIAL_STEPS;
+  }
+  return TUTORIAL_STEPS.filter((s) => s.targetView !== 'schedule');
+}

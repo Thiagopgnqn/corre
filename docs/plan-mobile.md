@@ -882,3 +882,66 @@ Tras realizar pruebas en un dispositivo móvil real (Android, Chrome, ~411 dp) c
    - Agregar en la tabla de `subject_progress` del backend una columna `updated_at`.
    - Política *"Last Write Wins"* basada en timestamp UTC a nivel de atributo/materia individual, de modo que una materia modificada offline no altere materias distintas tocadas desde la web.
    - En caso de choque directo de calificaciones (ej. 8 vs 9), presentar un diálogo no bloqueante al usuario para seleccionar qué versión conservar.
+
+
+---
+
+## 11. Decisión de Diseño: Desactivación del Armador de Horarios en Dispositivos Móviles y Tablets Verticales (Parte A)
+
+### 11.1 Contexto y Decisión del Usuario
+Por decisión de producto y usabilidad, el armador de horarios (`ScheduleBuilder` y componentes asociados) **no está disponible en teléfonos celulares ni en tablets en orientación vertical**.
+
+- **Motivo de usabilidad**: El armador de horarios requiere una pantalla ancha para comparar comisiones simultáneas, visualizar con claridad la grilla horaria semanal completa (de 8:00 a 23:00 con 6 días de cursada), inspeccionar docentes y franjas horarias sin apiñamiento ni recortes.
+- **Disponibilidad estricta**:
+  - Solo disponible en computadoras de escritorio o laptops, y en tablets en posición horizontal donde el ancho efectivo sea **$\ge 1024\text{ px}$** (mismo punto de quiebre `lg` de Tailwind donde inicia el layout de escritorio).
+  - En cualquier dispositivo con ancho $< 1024\text{ px}$, el montaje de `ScheduleBuilder` y la carga de datos de comisiones quedan completamente bloqueados, montándose en su lugar la pantalla de aviso accesible `ScheduleUnavailableNotice`.
+
+### 11.2 Regla Pura de Disponibilidad (`src/utils/scheduleAvailability.ts`)
+Se formaliza la función pura `getScheduleAvailability(width: number, height: number): ScheduleAvailability`:
+- Constantes canónicas:
+  - `SCHEDULE_MIN_DESKTOP_WIDTH = 1024`
+  - `SCHEDULE_TABLET_SHORT_SIDE_MIN = 600`
+- Comportamiento:
+  1. Si `width >= 1024`: retorna `'available'` (pantalla de escritorio o tablet en horizontal).
+  2. Si `width < 1024` y `Math.min(width, height) >= 600`: retorna `'wider-needed'` (tablet en vertical o ventana de PC angostada; se sugiere rotar a horizontal o agrandar ventana).
+  3. Si no: retorna `'desktop-only'` (teléfono móvil en vertical u horizontal; se explica que requiere una computadora).
+- Hook reactivo `useScheduleAvailability()` en `src/hooks/useScheduleAvailability.ts`: escucha eventos de `resize`, `orientationchange` y `matchMedia('(orientation: portrait)')` para recalcular instantáneamente al rotar una tablet o redimensionar la ventana.
+
+### 11.3 Pantalla de Aviso Accesible (`src/components/schedule/ScheduleUnavailableNotice.tsx`)
+- **Semántica y Accesibilidad**: Encabezado con `aria-live="polite"` que anuncia el motivo de indisponibilidad a lectores de pantalla sin interrumpir la navegación.
+- **Iconografía y Estética**: Ícono principal de calendario (`Calendar`) acompañado por `Monitor` (para celulares) o `Tablet` (para tablets).
+- **Mensajes Dinámicos**:
+  - Para `'desktop-only'`: *"El armador de horarios solo está disponible en computadora, porque necesita una pantalla grande para comparar comisiones y ver la semana completa. Entrá a Stack desde una PC para usarlo."*
+  - Para `'wider-needed'`: *"El armador de horarios necesita una pantalla más ancha. Si estás en una tablet, girala en horizontal; si estás en una computadora, agrandá la ventana o bajá el zoom del navegador."*
+- **Acción Primaria**: Botón accesible *"Volver al mapa"* con target táctil $\ge 48\text{ px}$ (`min-h-[48px] px-6 py-3`), cursor pointer y soporte seguro para safe-area.
+
+### 11.4 Reestructuración de la Navegación Móvil (`src/components/common/Navbar.tsx`)
+En pantallas móviles ($< 768\text{ px}$):
+1. **Barra Inferior Principal (`mobilePrimaryNav`)**:
+   - Contiene exactamente 5 botones:
+     1. **Mapa** (`id: 'graph'`, ícono `Compass`)
+     2. **Biblioteca** (`id: 'library'`, ícono `BookOpen`)
+     3. **Profesores** (`id: 'professors'`, ícono `Star`)
+     4. **Estadísticas** (`id: 'stats'`, ícono `BarChart2`) *(asciende desde el Sheet Más)*
+     5. **Más** (botón de apertura del Sheet con ícono `Menu` y selector `data-tour="more-menu-btn"`)
+   - Horarios y Niveles se retiran de la barra inferior principal.
+2. **Sheet "Más" (`mobileSecondaryViews`)**:
+   - Agrupa las vistas secundarias:
+     - **Niveles** (`id: 'kanban'`)
+     - **Cuatrimestre** (`id: 'planner'`)
+     - **Electivas** (`id: 'electives'`)
+     - **Horarios** (`id: 'schedule'`) con badge sutil `Solo en PC` (`tag: 'Solo en PC'`)
+   - Estadísticas se elimina del Sheet Más al estar en la barra principal.
+   - El botón "Más" se marca como activo si la vista actual es una de las vistas secundarias (`['kanban', 'planner', 'electives', 'schedule', 'admin']`).
+
+### 11.5 Otros Accesos y Sincronización del Tutorial
+1. **Planificador de Cuatrimestre (`SemesterPlanner.tsx`)**:
+   - Cuando `!isScheduleAvailable`, el botón de acción principal *"Armar horarios con esta canasta"* se reemplaza en mobile por un aviso informativo accesible con ícono de monitor: *"Armador de horarios disponible desde computadora"*, evitando transiciones a vistas bloqueadas.
+2. **Tutorial Paso a Paso (`src/data/tutorialSteps.ts` y `TutorialSpotlight.tsx`)**:
+   - `getAvailableTutorialSteps(isScheduleAvailable)` filtra automáticamente el paso 11 (`schedule-builder-tour`) en dispositivos móviles o tablets verticales cuando el armador no está disponible, ofreciendo un recorrido de 16 pasos limpios sin pantallas rotas.
+   - En paso 14 (Estadísticas), el spotlight apunta directamente al nuevo botón de Estadísticas ubicado en la barra principal.
+
+### 11.6 Preservación Estricta de Escritorio
+- El layout de escritorio a partir de 1024 px permanece 100% inalterado.
+- La suite preexistente `test/scheduleLayout.test.ts` se mantiene 100% verde sin modificaciones.
+- La suite de verificación de disponibilidad `test/scheduleAvailability.test.ts` valida todos los viewports y casos de borde.

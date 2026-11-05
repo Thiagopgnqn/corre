@@ -8,6 +8,8 @@ import { CorrelativeGraph } from './components/graph/CorrelativeGraph';
 import { KanbanBoard } from './components/kanban/KanbanBoard';
 import { SemesterPlanner } from './components/planner/SemesterPlanner';
 import { ScheduleBuilder } from './components/schedule/ScheduleBuilder';
+import { ScheduleUnavailableNotice } from './components/schedule/ScheduleUnavailableNotice';
+import { useScheduleAvailability } from './hooks/useScheduleAvailability';
 import { ProfessorsDirectory } from './components/professors/ProfessorsDirectory';
 import { ElectivesPicker } from './components/electives/ElectivesPicker';
 import { StatsDashboard } from './components/stats/StatsDashboard';
@@ -81,7 +83,8 @@ const AppContent: React.FC = () => {
   const [hashState, setHashState] = useState(parseHashState);
   const currentView = hashState.view;
   const headerAreaRef = React.useRef<HTMLDivElement>(null);
-  const isScheduleView = currentView === 'schedule';
+  const { availability: scheduleAvailability, isAvailable: isScheduleAvailable } = useScheduleAvailability();
+  const isScheduleView = currentView === 'schedule' && isScheduleAvailable;
 
   React.useEffect(() => {
     const handleHashChange = () => {
@@ -204,7 +207,16 @@ const AppContent: React.FC = () => {
             {currentView === 'planner' && (
               <SemesterPlanner onNavigateToSchedule={() => handleSetView('schedule')} />
             )}
-            {currentView === 'schedule' && <ScheduleBuilder />}
+            {currentView === 'schedule' && (
+              isScheduleAvailable ? (
+                <ScheduleBuilder />
+              ) : (
+                <ScheduleUnavailableNotice
+                  availability={scheduleAvailability as 'wider-needed' | 'desktop-only'}
+                  onNavigateToMap={() => handleSetView('graph')}
+                />
+              )
+            )}
             {currentView === 'professors' && <ProfessorsDirectory />}
             {currentView === 'library' && (
               <LibraryHome

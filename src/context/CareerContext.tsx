@@ -23,7 +23,8 @@ import {
   REQUIRED_ELECTIVE_CREDITS_TOTAL,
   ELECTIVE_SLOTS_EQUIVALENT,
 } from '../data/electives';
-import { TUTORIAL_STEPS } from '../data/tutorialSteps';
+import { getAvailableTutorialSteps } from '../data/tutorialSteps';
+import { getScheduleAvailability } from '../utils/scheduleAvailability';
 import {
   getSubjectStatus,
   isApprovedOrHigher,
@@ -1500,7 +1501,11 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const nextTutorialStep = useCallback(() => {
     setCurrentTutorialStep((prev) => {
-      if (prev < TUTORIAL_STEPS.length - 1) {
+      const isSchedAvail = typeof window !== 'undefined'
+        ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
+        : true;
+      const steps = getAvailableTutorialSteps(isSchedAvail);
+      if (prev < steps.length - 1) {
         soundManager.playClick();
         return prev + 1;
       }
@@ -1517,7 +1522,11 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const goToTutorialStep = useCallback((step: number) => {
-    setCurrentTutorialStep(Math.max(0, Math.min(TUTORIAL_STEPS.length - 1, step)));
+    const isSchedAvail = typeof window !== 'undefined'
+      ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
+      : true;
+    const steps = getAvailableTutorialSteps(isSchedAvail);
+    setCurrentTutorialStep(Math.max(0, Math.min(steps.length - 1, step)));
     soundManager.playClick();
   }, []);
 

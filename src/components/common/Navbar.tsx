@@ -181,9 +181,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     icon: React.ComponentType<{ className?: string }>;
   }> = [
     { id: 'graph', label: 'Mapa', icon: Compass },
-    { id: 'schedule', label: 'Horarios', icon: Clock },
     { id: 'library', label: 'Biblioteca', icon: BookOpen },
     { id: 'professors', label: 'Profesores', icon: Star },
+    { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
   ];
 
   // Destinos secundarios alojados dentro de la hoja "Más" en mobile
@@ -192,11 +192,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     label: string;
     desc: string;
     icon: React.ComponentType<{ className?: string }>;
+    tag?: string;
   }> = [
     { id: 'kanban', label: 'Niveles & Tablero', desc: 'Vista Kanban por nivel o estado de materias', icon: Kanban },
     { id: 'planner', label: 'Armá tu Cuatrimestre', desc: 'Simulá horas semanales y elegí qué cursar', icon: CalendarDays },
     { id: 'electives', label: 'Catálogo de Electivas', desc: 'Créditos electivos libres por nivel', icon: Sparkles },
-    { id: 'stats', label: 'Estadísticas & Camino Crítico', desc: 'Promedios, porcentaje de carrera y avance', icon: BarChart3 },
+    { id: 'schedule', label: 'Horarios', desc: 'Planificá comisiones y detectá choques', icon: Clock, tag: 'Solo en PC' },
   ];
 
   const handleMobileNavigate = (view: AppView) => {
@@ -594,32 +595,38 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         })}
 
         {/* 5th Tab: "Más" Button */}
-        <button
-          type="button"
-          data-tour="more-menu-btn"
-          onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
-          className={`flex-1 min-w-0 min-h-[52px] landscape:min-h-0 h-full py-1.5 landscape:py-0.5 flex flex-col landscape:flex-row items-center justify-center gap-1 landscape:gap-1.5 transition-all relative cursor-pointer active:scale-95 ${
-            isMobile && isMoreMenuOpen
-              ? 'text-indigo-400 font-bold bg-indigo-500/15'
-              : 'text-slate-400 hover:text-slate-200'
-          }`}
-          aria-label="Más secciones y herramientas"
-          aria-haspopup="dialog"
-          aria-expanded={isMobile && isMoreMenuOpen}
-        >
-          <div className="relative">
-            <Menu className={`w-6 h-6 landscape:w-4 landscape:h-4 shrink-0 ${isMobile && isMoreMenuOpen ? 'text-indigo-400' : 'text-slate-400'}`} />
-            {hasMoreAdminBadge && (
-              <span
-                aria-label="Avisos pendientes de administración"
-                className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
-              />
-            )}
-          </div>
-          <span className="leading-tight text-[11px] landscape:text-[10px] font-semibold truncate max-w-full text-center">
-            Más
-          </span>
-        </button>
+        {(() => {
+          const isMoreViewActive = ['kanban', 'planner', 'electives', 'schedule', 'admin'].includes(currentView);
+          const isMoreActive = (isMobile && isMoreMenuOpen) || isMoreViewActive;
+          return (
+            <button
+              type="button"
+              data-tour="more-menu-btn"
+              onClick={() => setIsMoreMenuOpen(!isMoreMenuOpen)}
+              className={`flex-1 min-w-0 min-h-[52px] landscape:min-h-0 h-full py-1.5 landscape:py-0.5 flex flex-col landscape:flex-row items-center justify-center gap-1 landscape:gap-1.5 transition-all relative cursor-pointer active:scale-95 ${
+                isMoreActive
+                  ? 'text-indigo-400 font-bold bg-indigo-500/15'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              aria-label="Más secciones y herramientas"
+              aria-haspopup="dialog"
+              aria-expanded={isMobile && isMoreMenuOpen}
+            >
+              <div className="relative">
+                <Menu className={`w-6 h-6 landscape:w-4 landscape:h-4 shrink-0 ${isMoreActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                {hasMoreAdminBadge && (
+                  <span
+                    aria-label="Avisos pendientes de administración"
+                    className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-slate-950 animate-pulse"
+                  />
+                )}
+              </div>
+              <span className="leading-tight text-[11px] landscape:text-[10px] font-semibold truncate max-w-full text-center">
+                Más
+              </span>
+            </button>
+          );
+        })()}
       </nav>
 
       {/* MOBILE: BottomSheet "Más" (Acceso a las vistas y utilidades secundarias) */}
@@ -655,7 +662,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                         <Icon className="w-5 h-5 text-indigo-400" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold truncate">{item.label}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold truncate">{item.label}</span>
+                          {item.tag && (
+                            <span className="text-[10px] font-bold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 rounded-md shrink-0">
+                              {item.tag}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[11px] text-slate-400 truncate">{item.desc}</div>
                       </div>
                     </div>

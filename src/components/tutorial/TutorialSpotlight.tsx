@@ -22,7 +22,8 @@ import {
   UserCheck,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { TUTORIAL_STEPS } from '../../data/tutorialSteps';
+import { getAvailableTutorialSteps } from '../../data/tutorialSteps';
+import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import type { AppView } from '../common/Navbar';
 
 interface TutorialSpotlightProps {
@@ -181,10 +182,15 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     setIsMoreMenuOpen,
   } = useCareer();
 
-  const step = TUTORIAL_STEPS[currentTutorialStep];
+  const { isAvailable: isScheduleAvailable } = useScheduleAvailability();
+  const availableSteps = React.useMemo(
+    () => getAvailableTutorialSteps(isScheduleAvailable),
+    [isScheduleAvailable]
+  );
+  const step = availableSteps[currentTutorialStep] || availableSteps[availableSteps.length - 1];
 
   const [rect, setRect] = useState<SpotlightRect | null>(() => {
-    const s = TUTORIAL_STEPS[currentTutorialStep];
+    const s = availableSteps[currentTutorialStep];
     return s?.targetSelector ? getElementRect(s.targetSelector) : null;
   });
 
@@ -337,8 +343,8 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
 
   const IconComponent = STEP_ICONS[step.iconName] || Sparkles;
   const isFirstStep = currentTutorialStep === 0;
-  const isLastStep = currentTutorialStep === TUTORIAL_STEPS.length - 1;
-  const progressPercent = Math.round(((currentTutorialStep + 1) / TUTORIAL_STEPS.length) * 100);
+  const isLastStep = currentTutorialStep >= availableSteps.length - 1;
+  const progressPercent = Math.round(((currentTutorialStep + 1) / availableSteps.length) * 100);
 
   const isMobile = windowSize.width < 640;
   const cardWidth = Math.min(420, windowSize.width - 32);
@@ -353,10 +359,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   return (
     <div className="fixed inset-0 z-[var(--z-modal-top)] overflow-hidden pointer-events-none" role="dialog" aria-modal="true">
       {/* Dark Spotlight SVG Mask with smoothly animated cutout */}
-      <svg
-        viewBox={`0 0 ${windowSize.width} ${windowSize.height}`}
-        className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]"
-      >
+      <svg className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]">
         <defs>
           <mask id="tutorial-spotlight-mask">
             {/* White background reveals the overlay */}
@@ -462,7 +465,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
 
               <div className="flex items-center gap-3">
                 <span className="text-xs font-mono font-bold text-slate-400">
-                  {currentTutorialStep + 1} / {TUTORIAL_STEPS.length}
+                  {currentTutorialStep + 1} / {availableSteps.length}
                 </span>
                 <button
                   onClick={() => closeTutorial()}

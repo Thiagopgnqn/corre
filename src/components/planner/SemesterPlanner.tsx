@@ -9,9 +9,11 @@ import {
   AlertCircle,
   CheckCircle2,
   Sparkles,
+  Monitor,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import { BottomSheet } from '../common/BottomSheet';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
@@ -35,6 +37,7 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
   const [termFilter, setTermFilter] = useState<'all' | '1C' | '2C' | 'A'>('all');
   const [includeElectives, setIncludeElectives] = useState<boolean>(true);
   const isMobile = useIsMobile();
+  const { isAvailable: isScheduleAvailable } = useScheduleAvailability();
   const [isMobileBasketOpen, setIsMobileBasketOpen] = useState(false);
 
   // Available subjects pool
@@ -349,14 +352,21 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
             {/* Action buttons */}
             <div className="pt-2 border-t border-slate-800 space-y-2">
               {onNavigateToSchedule && (
-                <button
-                  onClick={onNavigateToSchedule}
-                  disabled={basketSubjects.length === 0}
-                  className="w-full py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 disabled:opacity-40 text-indigo-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
-                >
-                  <Clock className="w-4 h-4 text-indigo-400" />
-                  <span>Armar horarios con esta canasta 🕒</span>
-                </button>
+                isScheduleAvailable ? (
+                  <button
+                    onClick={onNavigateToSchedule}
+                    disabled={basketSubjects.length === 0}
+                    className="w-full py-2.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 disabled:opacity-40 text-indigo-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
+                  >
+                    <Clock className="w-4 h-4 text-indigo-400" />
+                    <span>Armar horarios con esta canasta 🕒</span>
+                  </button>
+                ) : (
+                  <div className="w-full py-2 px-3 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 text-xs text-center flex items-center justify-center gap-1.5">
+                    <Monitor className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                    <span>Armador de horarios disponible desde computadora</span>
+                  </div>
+                )
               )}
 
               <button
@@ -486,18 +496,25 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
           {/* Action buttons */}
           <div className="pt-2 border-t border-slate-800 space-y-2.5">
             {onNavigateToSchedule && (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMobileBasketOpen(false);
-                  onNavigateToSchedule();
-                }}
-                disabled={basketSubjects.length === 0}
-                className="w-full py-3 min-h-[44px] rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 disabled:opacity-40 text-indigo-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
-              >
-                <Clock className="w-4 h-4 text-indigo-400" />
-                <span>Armar horarios con esta canasta 🕒</span>
-              </button>
+              isScheduleAvailable ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMobileBasketOpen(false);
+                    onNavigateToSchedule();
+                  }}
+                  disabled={basketSubjects.length === 0}
+                  className="w-full py-3 min-h-[44px] rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 disabled:opacity-40 text-indigo-300 hover:text-white font-bold text-xs transition-all flex items-center justify-center gap-2"
+                >
+                  <Clock className="w-4 h-4 text-indigo-400" />
+                  <span>Armar horarios con esta canasta 🕒</span>
+                </button>
+              ) : (
+                <div className="w-full py-2.5 px-3 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 text-xs text-center flex items-center justify-center gap-1.5">
+                  <Monitor className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>Armador de horarios disponible desde computadora</span>
+                </div>
+              )
             )}
 
             <button
