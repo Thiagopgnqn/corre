@@ -745,7 +745,7 @@ export const AdminLibraryTab: React.FC = () => {
               {catalogFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-4"
+                  className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
@@ -773,7 +773,7 @@ export const AdminLibraryTab: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handlePreview(file.id)}
-                      className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300"
+                      className="p-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center"
                       title="Previsualizar"
                     >
                       <Eye className="w-4 h-4" />
@@ -781,7 +781,7 @@ export const AdminLibraryTab: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleViewUploader(file)}
-                      className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400"
+                      className="p-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 flex items-center justify-center"
                       title="Ver autor"
                     >
                       <User className="w-4 h-4" />

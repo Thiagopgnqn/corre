@@ -107,7 +107,7 @@ export const VerifyEmailScreen: React.FC<VerifyEmailScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden">
+    <div className="min-h-[100dvh] bg-[#090D16] text-slate-100 flex flex-col justify-center items-center py-6 px-3 sm:p-4 relative overflow-y-auto safe-area-p">
       {/* Glow ambient background with brand indigo & subtle symbol watermark */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] bg-[#2A2E8A]/20 rounded-full blur-[130px] pointer-events-none" />
       <div className="absolute bottom-10 right-1/4 w-[360px] h-[360px] bg-[#171A52]/35 rounded-full blur-[110px] pointer-events-none" />
@@ -119,7 +119,7 @@ export const VerifyEmailScreen: React.FC<VerifyEmailScreenProps> = ({
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.28 }}
-        className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-8 relative z-10 space-y-6"
+        className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-4 sm:p-8 relative z-10 space-y-6"
       >
         {/* Header with Brand Logo */}
         <div className="text-center space-y-3">

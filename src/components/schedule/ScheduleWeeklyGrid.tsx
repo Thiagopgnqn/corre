@@ -20,6 +20,15 @@ import {
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 
+export const PLURAL_DAYS_MAP: Record<DayOfWeek, string> = {
+  LUN: 'los lunes',
+  MAR: 'los martes',
+  MIE: 'los miércoles',
+  JUE: 'los jueves',
+  VIE: 'los viernes',
+  SAB: 'los sábados',
+};
+
 export const SUBJECT_PALETTES = [
   { id: 'indigo', border: 'border-indigo-400', bg: 'bg-indigo-950/90', text: 'text-indigo-200', dot: 'bg-indigo-400', badge: 'bg-indigo-500/20 text-indigo-300' },
   { id: 'cyan', border: 'border-cyan-400', bg: 'bg-cyan-950/90', text: 'text-cyan-200', dot: 'bg-cyan-400', badge: 'bg-cyan-500/20 text-cyan-300' },
@@ -148,6 +157,7 @@ interface ScheduleWeeklyGridProps {
   focusedConflictId?: string | null;
   focusedSubjectId?: number | null;
   onFocusSubject?: (subjectId: number) => void;
+  onSwitchToCommissions?: () => void;
 }
 
 export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
@@ -159,6 +169,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   focusedConflictId,
   focusedSubjectId,
   onFocusSubject,
+  onSwitchToCommissions,
 }) => {
   const isMobile = useIsMobile();
   const [selectedMobileDay, setSelectedMobileDay] = useState<DayOfWeek>('LUN');
@@ -333,6 +344,30 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   const gridColsClass = isSingleDayMode ? 'grid-cols-[48px_1fr]' : 'grid-cols-[55px_repeat(6,1fr)]';
   const containerWidthClass = isSingleDayMode ? 'w-full lg:min-w-0' : 'min-w-[640px] lg:min-w-0';
 
+  const currentDayScheduled = useMemo(() => {
+    return scheduledItems.filter((i) => i.slot.day === selectedMobileDay);
+  }, [scheduledItems, selectedMobileDay]);
+
+  // Auto-scroll a la primera clase del día seleccionado en mobile
+  useEffect(() => {
+    if (!isSingleDayMode || !gridScrollRef.current) return;
+    const dayItems = scheduledItems.filter((i) => i.slot.day === selectedMobileDay);
+    if (dayItems.length === 0) return;
+
+    let earliestDayMin = Infinity;
+    dayItems.forEach((item) => {
+      const m = timeToMinutes(item.slot.start);
+      if (m < earliestDayMin) earliestDayMin = m;
+    });
+
+    if (earliestDayMin !== Infinity) {
+      const targetMin = Math.max(minMinute, earliestDayMin - 30);
+      const targetPct = (targetMin - minMinute) / totalMinutes;
+      const targetScroll = targetPct * totalGridHeight;
+      gridScrollRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    }
+  }, [selectedMobileDay, isSingleDayMode, scheduledItems, minMinute, totalMinutes, totalGridHeight]);
+
   return (
     <div className="flex-1 flex flex-col bg-slate-900/60 rounded-2xl border border-slate-800 shadow-xl overflow-hidden lg:overflow-visible backdrop-blur-md min-h-0 relative">
       {/* Mobile Day / Week Selector Strip (Por Día con snap-x o Semana Completa) */}
@@ -365,15 +400,17 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
             </button>
           </div>
 
-          <div className="text-[11px] font-mono text-indigo-300 font-bold shrink-0">
-            {mobileGridMode === 'day' ? DAY_LABELS[selectedMobileDay] : '6 días (scroll horizontal)'}
-          </div>
+          {mobileGridMode === 'week' && (
+            <div className="text-[11px] font-mono text-indigo-300 font-bold shrink-0">
+              6 días (scroll horizontal)
+            </div>
+          )}
         </div>
 
         {/* Days Strip */}
         <div
           ref={daysContainerRef}
-          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full py-0.5 snap-x snap-mandatory"
+          className="flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth w-full py-0.5 px-3 sm:px-4 scroll-px-3 sm:scroll-px-4 snap-x snap-mandatory"
         >
           {DAYS_ORDER.map((d) => {
             const count = scheduledItems.filter((i) => i.slot.day === d).length;
@@ -418,11 +455,50 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
         onScroll={() => {
           userHasScrolled.current = true;
         }}
-        className="flex-1 overflow-auto lg:overflow-visible relative p-2 sm:p-4 min-h-0 select-none"
-        
-        
+        className="flex-1 overflow-auto lg:overflow-visible relative p-2 sm:p-4 min-h-0 select-none flex flex-col"
       >
-        <div className={`${containerWidthClass} flex flex-col`} style={{ height: `${totalGridHeight + 50}px` }}>
+        {isSingleDayMode && currentDayScheduled.length === 0 ? (
+          <div className="w-full flex-1 flex flex-col min-h-0">
+            {/* Day Header: Sticky at top */}
+            <div className="sticky top-0 bg-[#090d16] border-b border-slate-800 pb-2 mb-2 z-20">
+              <div className="flex items-center justify-between py-1 px-3 rounded-xl bg-slate-900/90 border border-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-white">{DAY_LABELS[selectedMobileDay]}</span>
+                  {todayDay === selectedMobileDay && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 uppercase tracking-wider">
+                      Hoy
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-indigo-300 font-mono font-bold">
+                  Día libre
+                </span>
+              </div>
+            </div>
+
+            {/* Complete Centered Empty State */}
+            <div className="flex-1 flex flex-col items-center justify-center p-6 text-center my-auto min-h-[260px]">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-3 shadow-inner">
+                <Calendar className="w-7 h-7" />
+              </div>
+              <h4 className="text-base font-bold text-white mb-1">¡Día libre!</h4>
+              <p className="text-xs text-slate-400 max-w-xs mb-5 leading-relaxed">
+                No tenés materias programadas para {PLURAL_DAYS_MAP[selectedMobileDay]}.
+              </p>
+              {onSwitchToCommissions && (
+                <button
+                  type="button"
+                  onClick={onSwitchToCommissions}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer min-h-[44px]"
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Ver comisiones disponibles</span>
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className={`${containerWidthClass} flex flex-col`} style={{ height: `${totalGridHeight + 50}px` }}>
           {/* Day Headers: Sticky at top */}
           <div
             className={`grid ${gridColsClass} border-b border-slate-800 pb-2 mb-2 z-20 ${
@@ -538,18 +614,6 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                       : 'bg-transparent'
                   }`}
                 >
-                  {/* Empty day free state in single day mode */}
-                  {dayScheduled.length === 0 && isSingleDayMode && (
-                    <div className="absolute inset-x-4 top-1/3 -translate-y-1/2 p-6 rounded-2xl bg-slate-950/80 border border-slate-800 text-center space-y-2 backdrop-blur-md shadow-2xl pointer-events-none z-10">
-                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 mx-auto flex items-center justify-center">
-                        <Calendar className="w-6 h-6" />
-                      </div>
-                      <h4 className="text-sm font-bold text-white">¡Día libre!</h4>
-                      <p className="text-xs text-slate-400">
-                        No tenés materias programadas para los {DAY_LABELS[day].toLowerCase()}s.
-                      </p>
-                    </div>
-                  )}
                   {/* Horizontal Hour Lines & 30-min Sublines */}
                   {hoursRange.map((hour, hIdx) => {
                     const minute = hour * 60;
@@ -786,6 +850,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
             })}
           </div>
         </div>
+        )}
       </div>
 
       {/* Color Legend & Active Subjects Toolbar underneath the Grid */}

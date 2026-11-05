@@ -353,7 +353,10 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   return (
     <div className="fixed inset-0 z-[var(--z-modal-top)] overflow-hidden pointer-events-none" role="dialog" aria-modal="true">
       {/* Dark Spotlight SVG Mask with smoothly animated cutout */}
-      <svg className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]">
+      <svg
+        viewBox={`0 0 ${windowSize.width} ${windowSize.height}`}
+        className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]"
+      >
         <defs>
           <mask id="tutorial-spotlight-mask">
             {/* White background reveals the overlay */}
@@ -416,7 +419,9 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       <motion.div
         animate={
           isMobile
-            ? { bottom: 16, left: 16, right: 16 }
+            ? (rect && rect.top > windowSize.height / 2
+                ? { top: 16, bottom: 'auto', left: 16, right: 16 }
+                : { bottom: 16, top: 'auto', left: 16, right: 16 })
             : { top: coords.top, left: coords.left }
         }
         transition={{
@@ -427,8 +432,9 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
         }}
         style={{
           position: 'fixed',
-          zIndex: 60,
+          zIndex: 'var(--z-modal-top)' as any,
           width: isMobile ? undefined : `${cardWidth}px`,
+          maxWidth: isMobile ? 'calc(100vw - 2rem)' : undefined,
         }}
         className="pointer-events-auto"
       >
@@ -500,7 +506,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
               {!isLastStep ? (
                 <button
                   onClick={() => closeTutorial()}
-                  className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors"
+                  className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors py-2 px-1 min-h-[44px] flex items-center"
                 >
                   Saltar tutorial
                 </button>
@@ -512,7 +518,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
                 {!isFirstStep && (
                   <button
                     onClick={prevTutorialStep}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all flex items-center gap-1"
+                    className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
                     <span>Anterior</span>

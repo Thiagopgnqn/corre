@@ -726,6 +726,7 @@ export const ScheduleBuilder: React.FC = () => {
                 focusedConflictId={focusedConflictId}
                 focusedSubjectId={focusedSubjectId}
                 onFocusSubject={(sId) => setFocusedSubjectId(sId)}
+                onSwitchToCommissions={() => setMobileTab('comisiones')}
               />
             </div>
           )}

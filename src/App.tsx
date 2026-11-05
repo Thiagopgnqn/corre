@@ -22,7 +22,7 @@ import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
 import { ReviewFormModal } from './components/professors/ReviewFormModal';
 import { LibraryHome } from './components/library/LibraryHome';
-import { Loader2 } from 'lucide-react';
+import { Loader2, WifiOff } from 'lucide-react';
 import { APP_NAME } from './config/brand';
 
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
@@ -53,6 +53,22 @@ const parseHashState = () => {
 
 const AppContent: React.FC = () => {
   const { isAuthenticated, isEmailVerified, isLoading, user } = useAuth();
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  React.useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   const {
     showMigrationModal,
     setShowMigrationModal,
@@ -147,6 +163,14 @@ const AppContent: React.FC = () => {
         isScheduleView ? 'h-[100dvh] max-h-[100dvh] overflow-hidden lg:h-auto lg:max-h-none lg:overflow-visible' : 'min-h-screen'
       }`}
     >
+      {/* Offline Alert Banner */}
+      {!isOnline && (
+        <div className="bg-amber-600 text-slate-950 px-4 py-1.5 text-xs font-bold flex items-center justify-center gap-2 text-center sticky top-0 z-[var(--z-simulation-banner)]">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>Sin conexión a internet. Los cambios se guardan en este dispositivo, pero no se sincronizan con tu cuenta.</span>
+        </div>
+      )}
+
       {/* Top Header Area monitored by ResizeObserver (oculto en panel de administración) */}
       {currentView !== 'admin' && (
         <div ref={headerAreaRef} className={`${isScheduleView ? 'relative lg:static' : 'sticky top-0'} z-[var(--z-header)] w-full shrink-0`}>
@@ -160,8 +184,10 @@ const AppContent: React.FC = () => {
 
       {/* Main content body with smooth transitions */}
       <main
-        className={`flex-1 flex flex-col pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0 ${
-          isScheduleView ? 'min-h-0 overflow-hidden lg:overflow-visible lg:h-auto' : 'overflow-x-hidden'
+        className={`flex-1 flex flex-col ${
+          isScheduleView
+            ? 'min-h-0 overflow-hidden lg:overflow-visible lg:h-auto pb-0'
+            : 'overflow-x-hidden pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px))] md:pb-0'
         }`}
       >
         <AnimatePresence mode="wait">

@@ -82,11 +82,11 @@ export const ElectivesPicker: React.FC = () => {
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
+    <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 min-w-0 max-w-full">
       {/* Top Banner: Global Credits Progress */}
       <div
         data-tour="electives-banner"
-        className="bg-slate-900/70 border border-slate-800 p-5 rounded-2xl backdrop-blur-md space-y-5 shadow-xl"
+        className="bg-slate-900/70 border border-slate-800 p-3 sm:p-5 rounded-2xl backdrop-blur-md space-y-4 sm:space-y-5 shadow-xl w-full min-w-0 max-w-full"
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

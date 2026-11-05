@@ -88,7 +88,7 @@ export const SixDigitInput: React.FC<SixDigitInputProps> = ({
   };
 
   return (
-    <div className="flex items-center justify-center gap-2 sm:gap-3" onPaste={handlePaste}>
+    <div className="flex items-center justify-center gap-1.5 min-[380px]:gap-2 sm:gap-3" onPaste={handlePaste}>
       {Array.from({ length: 6 }).map((_, i) => (
         <input
           key={i}
@@ -105,7 +105,7 @@ export const SixDigitInput: React.FC<SixDigitInputProps> = ({
           onChange={(e) => handleInputChange(i, e)}
           onKeyDown={(e) => handleKeyDown(i, e)}
           aria-label={`Dígito ${i + 1} de 6`}
-          className={`w-11 h-13 sm:w-13 sm:h-16 text-center text-xl sm:text-2xl font-bold font-mono rounded-xl border bg-slate-950/80 transition-all outline-none selection:bg-transparent ${
+          className={`w-9 h-12 min-[380px]:w-11 min-[380px]:h-13 sm:w-13 sm:h-16 text-center text-lg min-[380px]:text-xl sm:text-2xl font-bold font-mono rounded-xl border bg-slate-950/80 transition-all outline-none selection:bg-transparent ${
             hasError
               ? 'border-red-500/60 text-red-300 focus:border-red-400 focus:ring-2 focus:ring-red-500/20'
               : digits[i]

@@ -203,7 +203,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
     <AnimatePresence>
       {isOpen && (
         <div
-          style={{ zIndex: `calc(var(--z-sheet) + ${layerIndex * 10})` }}
+          style={{ zIndex: `calc(var(--z-sheet) + ${Math.min(layerIndex, 3)})` }}
           className="fixed inset-0 flex flex-col justify-end pointer-events-auto pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
         >
           {/* Backdrop con tap para cerrar */}

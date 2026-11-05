@@ -207,14 +207,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   return (
     <>
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-[var(--z-header)] w-full safe-area-x">
-        <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-4 min-w-0">
+        <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-4 lg:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-2 lg:gap-4 min-w-0">
           {/* Logo & Plan */}
-          <div className="flex items-center gap-2 sm:gap-2.5 shrink-0 min-w-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-2.5 shrink-0 min-w-0">
             <BrandLogo variant="full" size="md" responsiveText />
             <button
               type="button"
               onClick={() => setIsPlanSelectorOpen(true)}
-              className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-none truncate min-h-[36px] flex items-center active:scale-95"
+              className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-[105px] lg:max-w-none truncate min-h-[36px] flex items-center active:scale-95"
               title="Cambiar carrera o plan de estudios"
             >
               {currentPlanName}
@@ -234,9 +234,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   key={item.id}
                   onClick={() => setCurrentView(item.id)}
                   title={item.fullLabel}
-                  className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer relative ${
+                  className={`touch-tablet-nav-item flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 cursor-pointer relative ${
                     isActive
-                      ? 'bg-gradient-to-r from-[#2A2E8A] to-[#171A52] text-white shadow-md shadow-[#171A52]/40 border border-indigo-400/25'
+                      ? 'bg-gradient-to-r from-[#2A2E8A] to-[#171A52] text-white shadow-md shadow-[#171A52]/40 border border-indigo-400/25 is-active'
                       : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
                   }`}
                 >
@@ -255,7 +255,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                       />
                     )}
                   </div>
-                  <span className="hidden min-[1500px]:inline whitespace-nowrap">{item.label}</span>
+                  <span className="hidden min-[1500px]:inline whitespace-nowrap touch-tablet-nav-label">{item.label}</span>
                 </button>
               );
             })}
@@ -302,7 +302,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               aria-label="Alternar modo simulación"
             >
               <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="hidden sm:inline whitespace-nowrap">¿Y si...?</span>
+              <span className="hidden lg:inline whitespace-nowrap">¿Y si...?</span>
             </button>
 
             {/* Quick Search Button (Target táctil garantizado >= 44x44px en mobile) */}
@@ -877,7 +877,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl bg-slate-900 border border-slate-800 p-5 shadow-2xl space-y-4">
             <h3 className="text-lg font-bold text-white">¿Reiniciar todos los datos?</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
@@ -886,7 +886,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setResetConfirmOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+                className="px-4 py-2 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
               >
                 Cancelar
               </button>
@@ -895,7 +895,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   resetAll();
                   setResetConfirmOpen(false);
                 }}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-lg shadow-rose-600/30 transition-all cursor-pointer"
+                className="px-4 py-2 min-h-[44px] text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl shadow-lg shadow-rose-600/30 transition-all cursor-pointer flex items-center justify-center"
               >
                 Confirmar reinicio
               </button>

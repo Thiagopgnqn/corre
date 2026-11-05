@@ -10,6 +10,7 @@
   /* Alturas de navegación y áreas seguras */
   --mobile-nav-height: 4rem; /* 64px */
   --schedule-bar-height: 4.5rem; /* 72px para barra flotante de horarios y padding */
+  --planner-bar-height: 4.5rem; /* 72px para barra flotante del planificador y padding */
 
   /* Escala centralizada de capas (Z-Index) */
   --z-graph-controls: 30;
@@ -135,6 +136,10 @@
 }
 
 @media (max-width: 767.98px) {
+  .react-flow__controls {
+    width: auto !important;
+    max-width: 48px !important;
+  }
   .react-flow__controls-button {
     width: 44px !important;
     height: 44px !important;
@@ -219,5 +224,29 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+
+/* Adaptación de Navbar para tablets táctiles (768px a 1023px sin mouse hover): microetiquetas visibles */
+@media (hover: none) and (min-width: 768px) and (max-width: 1023.98px) {
+  .touch-tablet-nav-item {
+    flex-direction: column !important;
+    padding: 0.25rem 0.35rem !important;
+    gap: 0.125rem !important;
+    min-height: 44px !important;
+    justify-content: center !important;
+  }
+  .touch-tablet-nav-item[data-primary="true"] .touch-tablet-nav-label,
+  .touch-tablet-nav-item.is-active .touch-tablet-nav-label {
+    display: inline !important;
+    font-size: 11px !important;
+    line-height: 1.1 !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.01em !important;
+    max-width: 62px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
   }
 }

@@ -308,7 +308,7 @@ export const StatsDashboard: React.FC = () => {
                   )}
                 </div>
                 {/* Mini circular progress */}
-                <svg className="w-12 h-12 sm:w-16 sm:h-16 transform -rotate-90 shrink-0">
+                <svg viewBox="0 0 64 64" className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90 shrink-0 overflow-visible">
                   <circle
                     cx="32"
                     cy="32"
@@ -354,7 +354,7 @@ export const StatsDashboard: React.FC = () => {
                     {computedProgress.approvedWeeklyHours} de {computedProgress.totalWeeklyHours} hs/sem
                   </div>
                 </div>
-                <svg className="w-12 h-12 sm:w-16 sm:h-16 transform -rotate-90 shrink-0">
+                <svg viewBox="0 0 64 64" className="w-14 h-14 sm:w-16 sm:h-16 transform -rotate-90 shrink-0 overflow-visible">
                   <circle
                     cx="32"
                     cy="32"
@@ -420,7 +420,7 @@ export const StatsDashboard: React.FC = () => {
                 </div>
               </div>
               <div className="text-[11px] text-emerald-400/80">
-                {settings.includeFailsInGPA ? 'Con aplazos incluidos' : 'Sin aplazos'} · {computedProgress.totalFailsCount || 0} aplazos
+                {settings.includeFailsInGPA ? 'Con aplazos incluidos' : 'Sin contar aplazos'} ({computedProgress.totalFailsCount || 0} {computedProgress.totalFailsCount === 1 ? 'aplazo' : 'aplazos'})
               </div>
             </div>
           </div>

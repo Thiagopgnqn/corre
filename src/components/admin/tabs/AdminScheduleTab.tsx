@@ -368,6 +368,16 @@ export const AdminScheduleTab: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Mobile Notice: Read-only on mobile devices */}
+      <div className="md:hidden p-3.5 bg-amber-500/10 border border-amber-500/25 rounded-2xl flex items-start gap-2.5 text-xs text-amber-300">
+        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+        <div>
+          <p className="font-bold">Vista de solo lectura en dispositivos móviles</p>
+          <p className="text-amber-200/80 text-[11px] mt-0.5">
+            La creación, edición y descarte de comisiones o carga de archivos de horarios está optimizada para realizarse desde una computadora.
+          </p>
+        </div>
+      </div>
       {/* Notifications */}
       {errorMsg && (
         <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center justify-between text-xs text-red-300">

@@ -303,7 +303,7 @@ export const AdminUsersTab: React.FC = () => {
             placeholder="Buscar usuario por correo electrónico..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+            className="w-full pl-10 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
           />
         </div>
 
@@ -358,7 +358,7 @@ export const AdminUsersTab: React.FC = () => {
       {/* Users Table / List */}
       <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="hidden md:table w-full text-left text-xs">
             <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
                 <th className="py-3 px-4">Usuario</th>
@@ -527,6 +527,114 @@ export const AdminUsersTab: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Cards View (md:hidden) */}
+        <div className="md:hidden divide-y divide-slate-800/60 text-xs">
+          {isLoading ? (
+            <div className="py-12 text-center text-slate-500">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-500 mb-2" />
+              Cargando usuarios...
+            </div>
+          ) : users.length === 0 ? (
+            <div className="py-12 text-center text-slate-500">
+              No se encontraron usuarios coincidentes.
+            </div>
+          ) : (
+            users.map((u) => {
+              const isCurrentAdmin = u.id === currentAdmin?.id;
+              const isSuspended = u.status === 'suspended';
+
+              return (
+                <div key={u.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-xs shrink-0">
+                        {u.email.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-white font-medium truncate flex items-center gap-1.5">
+                          <span>{u.email}</span>
+                          {isCurrentAdmin && (
+                            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-normal shrink-0">
+                              Vos
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
+                          {u.identities?.some((i) => i.provider === 'google') && (
+                            <span className="text-amber-400/80">Google</span>
+                          )}
+                          {u.identities?.some((i) => i.provider === 'local' || i.provider === 'password') && (
+                            <span>Contraseña</span>
+                          )}
+                          <span>·</span>
+                          <span>{u.lastSeenAt ? new Date(u.lastSeenAt).toLocaleDateString() : 'Sin actividad'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {u.role === 'admin' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[11px] font-semibold">
+                        <Shield className="w-3 h-3" /> Admin
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[11px]">
+                        Usuario
+                      </span>
+                    )}
+
+                    {isSuspended ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/15 text-red-300 border border-red-500/30 text-[11px] font-semibold">
+                        <UserX className="w-3 h-3" /> Suspendido
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px]">
+                        <UserCheck className="w-3 h-3" /> Activo
+                      </span>
+                    )}
+
+                    {u.emailVerified ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-400 text-[11px]">
+                        <CheckCircle2 className="w-3 h-3" /> Verificado
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-amber-400 text-[11px]">
+                        <XCircle className="w-3 h-3" /> Sin verificar
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800/40">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedUserId(u.id)}
+                      className="px-3 py-2 min-h-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Detalle</span>
+                    </button>
+                    {!isCurrentAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(u)}
+                        className={`px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer ${
+                          isSuspended
+                            ? 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30'
+                            : 'bg-amber-600/20 text-amber-300 hover:bg-amber-600/30 border border-amber-500/30'
+                        }`}
+                      >
+                        {isSuspended ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+                        <span>{isSuspended ? 'Reactivar' : 'Suspender'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Pagination bar */}
@@ -764,7 +872,7 @@ export const AdminUsersTab: React.FC = () => {
 
       {/* Delete User Modal Confirmation */}
       {deleteModalOpen && userToDelete && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-md bg-slate-900 border border-red-500/40 rounded-2xl p-6 shadow-2xl text-slate-100">
             <div className="flex items-center gap-3 text-red-400 mb-3">
               <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/30 flex items-center justify-center shrink-0">

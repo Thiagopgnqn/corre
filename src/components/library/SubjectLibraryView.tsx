@@ -173,7 +173,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+    <div className="w-full max-w-6xl mx-auto px-3.5 sm:px-6 py-4 sm:py-6 space-y-6 min-w-0 w-full max-w-full">
       {/* Header */}
       <div className="border-b border-slate-800 pb-5 space-y-3">
         <button
@@ -198,7 +198,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                 {total} {total === 1 ? 'material aprobado' : 'materiales aprobados'}
               </span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
+            <h1 className="text-xl sm:text-3xl font-extrabold text-white tracking-tight break-words">
               {subject.name}
             </h1>
           </div>
@@ -215,7 +215,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
       </div>
 
       {/* Kind Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+      <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1 scrollbar-none snap-x flex items-center gap-1.5 px-0.5">
         {[
           { id: 'todos', label: 'Todos' },
           { id: 'parcial', label: 'Parciales' },
@@ -230,7 +230,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             key={tab.id}
             type="button"
             onClick={() => setActiveKindTab(tab.id)}
-            className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center ${
+            className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
               activeKindTab === tab.id
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                 : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'

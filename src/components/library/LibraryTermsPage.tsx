@@ -36,13 +36,13 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) =>
     }
   };
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-8 text-slate-200">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 pb-[calc(var(--mobile-nav-height,4rem)+env(safe-area-inset-bottom,0px)+2rem)] space-y-8 text-slate-200">
       {/* Top Navigation */}
       <div>
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-semibold border border-slate-800 cursor-pointer"
+          className="inline-flex items-center gap-2 px-3.5 py-2 min-h-[44px] rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-semibold border border-slate-800 cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           Volver a la Biblioteca

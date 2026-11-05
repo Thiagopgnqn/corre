@@ -619,3 +619,266 @@ Medición automatizada vía Chrome DevTools Protocol (CDP) con Microsoft Edge he
 - **NO verificado**:
   - **Sensación táctil física (haptics)** y fricción en dedos sobre la pantalla de cristal de un modelo físico específico de smartphone Android o iPhone.
   - **Curvatura física de esquinas de hardware y Dynamic Island real**: se validó la compatibilidad con las variables CSS oficiales `env(safe-area-inset-*)`, pero la apariencia de los radios de curvatura físicos varía por fabricante.
+
+
+---
+
+### 13. Cierre de Ajustes Parte 0.7 (Sección A)
+
+#### A1. Estado de la Suite de Tests y Aclaraciones Técnicas
+1. **useProfessorRatings y normalización de API en `test/reviewsFrontend.test.ts` (líneas 528-588)**:
+   - El test de regresión ya se encuentra implementado en `test/reviewsFrontend.test.ts`. Cubre:
+     - Respuesta vacía del backend `{ success: true, data: [] }` inicializando `byId: {}` y `byNormalizedName: {}`, garantizando que acceder a cualquier docente inexistente devuelva `undefined` sin arrojar excepción.
+     - Forma completa de datos con docentes y umbrales dinámicos (`minReviewsForReliableAverage: 5`).
+     - Respuestas de error o `null` tratadas defensivamente.
+   - El archivo cuenta con **75 aserciones (`assert`) en 11 secciones de prueba** (la mención previa de 10 tests / 64 aserciones correspondía a un reporte anterior al agregado del bloque de regresión).
+2. **Desglose de pruebas de la Fase 4 (Comportamiento real vs Inspección estática)**:
+   - **Barra flotante del planificador**: Inspección estática de código fuente (`test/mobileFrontend.test.ts`, líneas 502-516) verificando la presencia de data-testid, variables de z-index y targets táctiles.
+   - **Calificación por estrellas**: Inspección estática en `mobileFrontend.test.ts` para dimensionamiento táctil (44x44 px) de los botones en `StarRating.tsx`; el cálculo matemático bayesiano se evalúa mediante tests de comportamiento real en `test/reviewsFrontend.test.ts`.
+   - **Validación de tipo y tamaño de archivo en subida**: Test de comportamiento real en `test/libraryFrontend.test.ts` (líneas 31-135) ejecutando la función validadora con archivos simulados de 24 MB, 26 MB, 9 MB, 11 MB y extensiones no permitidas (.exe, .zip, .docx).
+   - **Regla "una electiva no puede estar en dos años a la vez"**: Test de comportamiento real en `test/correlativas.test.ts` (líneas 150-169) ejecutando `sanitizeAssignedElectives` con un estado de prueba que contiene electivas duplicadas en años 1, 3 y 4, comprobando que se deduplican automáticamente.
+3. **Estado de librerías de prueba en el repositorio**:
+   - El repositorio **no cuenta con React Testing Library ni entornos DOM simulados** (`@testing-library/react`, `@testing-library/user-event`, `jsdom` o `happy-dom`). Las pruebas se ejecutan directamente en Node 20+ mediante `tsx` utilizando el módulo nativo `node:test` y `node:assert`.
+   - Para ejecutar pruebas de interacción de componentes en memoria (simulación de eventos DOM de click, scroll, Escape y focus trap de sheets anidados) se requeriría instalar `@testing-library/react`, `@testing-library/user-event` y `jsdom`. Siguiendo la regla de no incorporar dependencias nuevas, la verificación de comportamiento de UI interactiva se realiza en navegador real headless mediante Chrome DevTools Protocol (CDP).
+
+#### A2. Auditoría y Justificación de Z-Index
+Todos los elementos globales de superposición (header, barra inferior, backdrops, modales, sheets, diálogos elevados, toasts y tutorial) utilizan estrictamente la escala centralizada de CSS en `src/index.css`:
+- `--z-graph-controls`: 30
+- `--z-planner-bar`: 35
+- `--z-header`, `--z-mobile-nav`, `--z-simulation-banner`: 40
+- `--z-backdrop`: 45
+- `--z-sheet`, `--z-modal`: 50
+- `--z-modal-elevated`: 55
+- `--z-toast`: 60
+- `--z-modal-top`, `--z-spotlight`: 100
+
+Las 15 apariciones aisladas de `z-10`, `z-20` y `z-30` corresponden a **contextos de apilamiento locales intra-componente**:
+1. `AdminOverviewTab.tsx` (líneas 271, 312): `z-10` en tooltips flotantes sobre las barras del gráfico local.
+2. `AuthScreen.tsx` (línea 89) y `VerifyEmailScreen.tsx` (línea 122): `relative z-10` en la tarjeta para elevarse sobre los halos decorativos ambientales de fondo (`pointer-events-none`).
+3. `SubjectListView.tsx` (línea 62): `sticky top-0 z-10` en la barra de búsqueda y filtros para que las tarjetas pasen por debajo.
+4. `LibraryHome.tsx` (línea 216): `relative z-10` en el texto del banner sobre el degradado decorativo.
+5. `ScheduleBuilder.tsx` (líneas 644, 679): `sticky top-3 z-10` en paneles laterales de escritorio.
+6. `ScheduleWeeklyGrid.tsx` (líneas 428, 494, 543, 653, 693, 700, 752): cabecera pegajosa de días (`z-20`), columna de horas (`z-10`), textos sobre fondos interactivos (`z-10`) y previsualización de bloque (`z-30`).
+
+*(Se eliminó del reporte cualquier conjetura técnica no fundamentada sobre parpadeos en Safari).*
+
+#### A3. Altura y Padding del Planificador Centralizados
+Se declaró la variable `--planner-bar-height: 4.5rem;` en `src/index.css` de manera análoga a `--schedule-bar-height`. En `SemesterPlanner.tsx` se reemplazó el padding hardcodeado de `5rem` por `var(--planner-bar-height, 4.5rem)`.
+
+#### A4. Resumen de Cambios en Navbar, SimulationBar y BottomSheet
+- `src/components/graph/SimulationBar.tsx`: Migración de `z-30` a `z-[var(--z-simulation-banner)]` (40) para integrarse a la escala oficial.
+- `src/components/common/Navbar.tsx`:
+  - Enlace de la altura fija con `--mobile-nav-height` y safe-area bottom.
+  - Soporte de orientación horizontal compacta (`landscape:`) reduciendo íconos a 16 px y texto a 10 px con disposición horizontal.
+- `src/components/common/BottomSheet.tsx`:
+  - Implementación de pila global de capas (`activeSheetStack`, `registerLayer`, `unregisterLayer`).
+  - Bloqueo de scroll de `document.body` preservado hasta que se cierra la última hoja de la pila.
+  - Trampa de foco y tecla Escape delegadas exclusivamente a la capa superior activa (`isTopLayer`).
+  - Z-index dinámico `calc(var(--z-sheet) + index * 10)` que apila visualmente las hojas anidadas de forma ordenada.
+
+#### A5. Tablets (768 a 1023 px): Navbar Táctil sin Hover
+En dispositivos táctiles de 768 a 1023.98 px se aplicó la regla `@media (hover: none)` con flex-col y microetiquetas visibles (8.5 px). Los usuarios de escritorio con mouse preservan al 100% el diseño original con tooltips en hover. Verificado mediante capturas CDP: `screenshot_tablet_navbar_touch_768.png` y `screenshot_tablet_navbar_touch_820.png`.
+
+#### A6. Scripts Centralizados de Verificación (`scripts/mobile-check/`)
+Se organizó la verificación en la carpeta `scripts/mobile-check/`:
+- `mock-server.py`: Servidor HTTP minimalista en Python que sirve `dist/` e implementa endpoints simulados de autenticación, administración, biblioteca y materias. No requiere base de datos ni credenciales.
+- `run-mobile-check.mjs`: Script automatizado en Node.js que lanza Microsoft Edge con CDP en modo headless, evalúa desbordes horizontales (`scrollWidth <= innerWidth`) y toma capturas en alta resolución guardándolas en la carpeta de artefactos.
+- `dist/` se encuentra confirmado en `.gitignore` (línea 16).
+
+---
+
+### 14. Fase 5 y Pantallas Pendientes (Sección B)
+
+#### B1. Login y Verificación de Email
+- `AuthScreen.tsx`: Contenedor `min-h-[100dvh]` con `overflow-y-auto` y `safe-area-p`. Inputs con tamaño `text-base sm:text-sm` (16 px en móvil) para evitar auto-zoom en iOS Safari. Aviso amigable de encendido en frío del servidor backend.
+- `GoogleLoginButton.tsx`: Cálculo dinámico de ancho con límite de 320 px y `max-w-full overflow-hidden [&_iframe]:max-w-full`, evitando desbordes horizontales en dispositivos de 320 px (iPhone SE).
+- `SixDigitInput.tsx`: Casillas adaptables (`w-9` en < 380 px, `w-11` en 380 px+), `inputMode="numeric"`, `autoComplete="one-time-code"`, navegación con backspace y pegado completo de 6 dígitos.
+- `VerifyEmailScreen.tsx`: Temporizador de reenvío de 60 segundos con cooldown visible y cancelación para corregir dirección de correo.
+
+#### B2. Panel de Administración (`/#admin`)
+- `AdminDashboard.tsx`: Pestañas con scroll horizontal táctil (`overflow-x-auto scrollbar-none`) y targets táctiles de al menos 44 px.
+- `AdminUsersTab.tsx`: Tabla de escritorio oculta en móvil (`hidden md:table`); en mobile (`md:hidden`) se despliega una lista de tarjetas con correo, inicial, badges de rol y estado, y botones de acción táctiles. Buscador de 16 px. Modal de eliminación elevado a `z-modal-elevated`.
+- `AdminReviewsTab.tsx`: **Regla de Moderación y Privacidad**: El administrador puede ver el correo del autor de cada reseña para contactar y moderar (y cuenta con la acción "Suspender al autor" operativa). Lo que el administrador NO puede consultar ni renderizar bajo ninguna circunstancia son las notas individuales ni el estado académico detallado de los usuarios (invariante confirmada por grep y tests). Hacia los demás estudiantes, las reseñas se mantienen estrictamente anónimas.
+- `AdminScheduleTab.tsx`: Aviso superior en móvil indicando "Vista de solo lectura en dispositivos móviles. La creación y edición de cátedras y carga de archivos está optimizada para computadora".
+- `AdminAuditTab.tsx`: Tabla de escritorio oculta en móvil (`hidden md:table`), cards legibles en mobile con administrador, acción, fecha, IP y botón de ver detalles. Modal de detalle elevado a `z-modal-elevated`.
+- `AdminOverviewTab.tsx`: Tarjetas KPI ordenadas en grilla de 2 columnas en mobile (`grid-cols-2 md:grid-cols-4`).
+- **Seguridad**: Se verificó que ninguna vista ni endpoint del panel de administración expone notas ni avance de carrera de los alumnos.
+
+#### B3. Pantallas Pendientes Adaptadas
+- `LibraryTermsPage.tsx`: Padding inferior seguro (`pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom)+2rem)]`) y botón de regreso con target $\ge 44\text{ px}$.
+- Diálogos de Confirmación:
+  - Reinicio de carrera (`Navbar.tsx`): Elevado a `z-[var(--z-modal-elevated)]` con botones $\ge 44\text{ px}$.
+  - Eliminación de cuenta (`UserMenu.tsx`): Elevado a `z-[var(--z-modal-elevated)]` con botones $\ge 44\text{ px}$.
+  - Propuestas de Horarios (`ScheduleBuilder.tsx` y `ScheduleSummaryPanel.tsx`): Acciones en `BottomSheet` con botones $\ge 44\text{ px}$.
+
+#### B4. Tutorial Spotlight en Mobile
+- `TutorialSpotlight.tsx`: Posicionamiento inteligente en mobile. Si el elemento objetivo se encuentra en la mitad inferior de la pantalla (`rect.top > windowSize.height / 2`), el popover se ubica en la parte superior (`top: 16`), y viceversa, evitando que la tarjeta tape el control resaltado. Elevado a nivel superior `var(--z-modal-top)`. Botones Anterior, Siguiente y Saltar con target $\ge 44\text{ px}$.
+
+#### B5. Estados de Conexión y Red
+- `App.tsx`: Detector de estado de red (`navigator.onLine`) que muestra un banner persistente cuando se pierde la conexión a internet.
+- Sincronización continua de estado mediante `SyncStatusBadge` en la barra superior.
+
+#### B6 & B7. Resultados de Mediciones CDP (Sin Desbordes Horizontales)
+
+| Pantalla / Vista | Viewport | Ancho Ventana | Scroll Ancho | Desborde Horizontal | Captura Generada |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tablet Touch Navbar** | 768x1024 | 818 px | 818 px | **0 px (PASS ✅)** | `screenshot_tablet_navbar_touch_768.png` |
+| **Tablet Touch Navbar (iPad Air)** | 820x1180 | 820 px | 820 px | **0 px (PASS ✅)** | `screenshot_tablet_navbar_touch_820.png` |
+| **AuthScreen (iPhone SE)** | 320x568 | 320 px | 320 px | **0 px (PASS ✅)** | `screenshot_fase5_auth_320.png` |
+| **AuthScreen (Estándar)** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_auth_360.png` |
+| **Admin: Resumen General** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_overview_360.png` |
+| **Admin: Usuarios (Cards)** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_users_360.png` |
+| **Admin: Horarios (Solo lectura)** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_schedule_360.png` |
+| **Admin: Reseñas (Autor Anónimo)** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_reviews_360.png` |
+| **Admin: Biblioteca** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_library_360.png` |
+| **Admin: Auditoría (Cards)** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_admin_audit_360.png` |
+| **Términos de Biblioteca** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_library_terms_360.png` |
+| **Tutorial Spotlight** | 360x640 | 360 px | 360 px | **0 px (PASS ✅)** | `screenshot_fase5_tutorial_360.png` |
+| **Landscape Corto (Grafo)** | 640x360 | 640 px | 640 px | **0 px (PASS ✅)** | `screenshot_fase5_landscape_640x360.png` |
+| **Pixel / Galaxy (Grafo)** | 412x740 | 412 px | 412 px | **0 px (PASS ✅)** | (Verificado) |
+
+*Aclaración de seguridad y aislamiento*: Todas las pruebas visuales y de renderizado se realizaron contra el servidor de pruebas local (`mock-server.py`). Las operaciones reales de backend (Google Sign-In en producción, subidas físicas a Cloudflare R2, calificaciones reales y peticiones a la base de datos de Neon) **no fueron ejecutadas**.
+
+### 15. Recomendación de Testing de Interacción y Entorno DOM
+
+Se deja formalmente documentado (sin instalar dependencias nuevas en el proyecto) que incorporar `@testing-library/react` y `jsdom` como `devDependencies` permitiría expandir la suite de tests hacia pruebas de integración y comportamiento en memoria:
+- Renderizado de componentes React con su ciclo de vida real en un DOM emulado.
+- Despacho de eventos de teclado (Escape, Tab, Shift+Tab) verificando la trampa de foco y el foco previo.
+- Verificación dinámica de la pila de capas de `BottomSheet` y el bloqueo/desbloqueo del scroll del body (`document.body.style.overflow`).
+- Validación de que al cerrar un diálogo elevado (`z-modal-elevated: 55`), el sheet inferior (`z-sheet: 50`) retiene el foco y el scroll bloqueado hasta que el último sheet se cierre.
+
+
+---
+
+## 16. Correcciones tras prueba en celular real (2) — Parte 0.9
+
+Tras realizar pruebas en un dispositivo móvil real (Android, Chrome, ~411 dp) con la aplicación desplegada, se detectaron desajustes visuales y funcionales en escenarios reales que las tablas de desborde simplificadas anteriores no capturaban. Se aplicaron correcciones de causa raíz (no parches de síntoma) en los componentes afectados y se reestructuró el sistema de medición automatizada.
+
+> [!WARNING]
+> **Aclaración sobre mediciones anteriores**: Las tablas de desborde horizontales previas que reportaban "0 px" comparando `document.documentElement.scrollWidth` contra `window.innerWidth` quedan formalmente invalidadas para estas pantallas. Cuando un elemento hijo fuerza un ensanchamiento sin scroll horizontal intencional o queda contenido dentro de un contenedor con `overflow: hidden`, la comparación global simple daba "PASS falso". La nueva verificación inspecciona cada elemento visible del DOM, su bounding box y la presencia de ancestros con scroll horizontal permitido.
+
+### P1. Biblioteca (`LibraryHome` y `SubjectLibraryView`)
+- **Causa raíz**: En flexbox, los elementos hijos tienen por especificación CSS `min-width: auto`. La fila de pestañas con `whitespace-nowrap` y los textos largos sin wrap forzaban al contenedor padre a expandirse más allá del ancho de pantalla del celular.
+- **Corrección**:
+  - Se aplicó la cadena estructural `min-w-0 w-full max-w-full` en todos los contenedores y tarjetas.
+  - El título de cabecera y la descripción incluyen `break-words` para realizar wrap natural de línea.
+  - La fila de pestañas de años (`Todas las materias`, `1° Año`, `2° Año`...) ahora cuenta con contenedor scrollable horizontal con `snap-x snap-mandatory`, permitiendo deslizamiento táctil suave sin ensanchar la página ni requerir `overflow-x: hidden` en el body o root.
+  - Botones "Mis Aportes" y "Subir Material" reorganizados en grilla de 2 columnas en mobile con touch targets >= 44 px.
+
+### P2. Medición Estricta por CDP y Mock Realista
+- **Revisión profunda del script CDP** (`scripts/mobile-check/run-mobile-check.mjs`):
+  - Fija el ancho exacto mediante `Emulation.setDeviceMetricsOverride` y evalúa contra ese valor pedido (`targetWidth`).
+  - Recorre todos los nodos visibles del DOM: si `rect.right > targetWidth + 1.5` o `rect.left < -1.5` y el nodo no posee un ancestro con scroll horizontal explícito (`overflow-x: auto|scroll`), marca `FAIL` e informa selector, clases y rect exacto.
+  - Detecta contenido recortado en contenedores con `overflow: hidden|clip` donde `scrollWidth > clientWidth + 1.5`.
+- **Datos sintéticos realistas** (`scripts/mobile-check/mock-server.py`):
+  - Usuario con 19 materias aprobadas con notas (promedio 7.26) y 2 exámenes reprobados / aplazos.
+  - Materias en curso en 3er año (#18, #19, #20, #21) con títulos extensos.
+  - Nombres docentes completos ("Prof. Dra. De la Colina Argañaraz, María de las Mercedes", "García, Juan Carlos").
+  - Biblioteca con múltiples archivos aprobados de títulos y descripciones largas.
+  - Borradores y selecciones de horarios en 1C y 2C.
+
+### P3. Mapa de Correlativas: Controles de Zoom Compactos
+- **Causa raíz**: React Flow declara por defecto `position: absolute; left: 10px;`. Al aplicar `!right-3` en Tailwind sin anular la propiedad `left`, el navegador computaba simultáneamente `left: 10px` y `right: 12px`, estirando el panel translúcido oscuro a lo ancho de toda la pantalla (de x≈30 a x≈680).
+- **Corrección**:
+  - Se fijó la posición con `!left-auto !right-3 !top-auto !w-auto !max-w-max` en `CorrelativeGraph.tsx`.
+  - Se limitó en CSS `max-width: 48px !important;` y botones de control táctiles de 44x44 px en `index.css`.
+  - Los controles quedan confinados a una columna compacta en la esquina inferior derecha por encima de la barra de navegación, dejando los nodos del grafo perfectamente visibles detrás.
+
+### P4. Estadísticas (`StatsDashboard`): Anillos de Progreso y Promedio
+- **Causa raíz**: Las etiquetas `<circle>` del SVG estaban centradas en `cx="32" cy="32" r="26"` (requiriendo un lienzo de 64x64 px), pero el `<svg>` carecía del atributo `viewBox="0 0 64 64"` y tenía clases `w-12 h-12` (48 px). El motor de renderizado cortaba los bordes externos de los anillos (53% y 54%).
+- **Corrección**:
+  - Se incorporó `viewBox="0 0 64 64"` y clase `overflow-visible` en ambos gráficos circulares de avance.
+  - Se fijó tamaño armónico `w-14 h-14 sm:w-16 sm:h-16` con `shrink-0`.
+  - Se reformuló el texto informativo del promedio general a: `"Sin contar aplazos (2 aplazos)"` (o `"Con aplazos incluidos (2 aplazos)"` según la preferencia), sin modificar en absoluto la fórmula ni la lógica de cálculo del store.
+
+### P5. Armador de Horarios: Vista "Por Día" en Mobile
+- **Eliminación del doble padding (~190 px recuperados)**:
+  - En `App.tsx`, el elemento `<main>` aplicaba `pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom))]`. Dentro de él, `ScheduleBuilder.tsx` aplicaba su propio padding inferior para la barra flotante. Esto provocaba una doble resta de espacio de navegación.
+  - Se ajustó `App.tsx` para usar `pb-0` cuando `isScheduleView` está activo, permitiendo que la grilla ocupe el 100% de la altura útil del viewport sin huecos vacíos gigantes.
+- **Bug de pluralización corregido**:
+  - Se definió y exportó `PLURAL_DAYS_MAP`:
+    - `LUN`: `"los lunes"`
+    - `MAR`: `"los martes"`
+    - `MIE`: `"los miércoles"`
+    - `JUE`: `"los jueves"`
+    - `VIE`: `"los viernes"`
+    - `SAB`: `"los sábados"`
+  - Se eliminó la concatenación ingenua que producía "los juevess".
+- **Estado de Día Libre Centrado**:
+  - En lugar de renderizar una grilla vacía de 1000 px de altura con horas inútiles detrás del header, se presenta una tarjeta centrada con ícono de calendario, mensaje claro y botón de acción principal: `"Ver comisiones disponibles"` (que conmuta de inmediato a la pestaña de comisiones).
+- **Auto-scroll al primer horario cursado**:
+  - Cuando el día seleccionado contiene clases, la vista realiza un desplazamiento suave automático hasta la primera clase programada, evitando que el usuario aterrice en un bloque vacío matutino.
+- **Tira de días**:
+  - Se eliminó el texto redundante "Jueves" al lado del interruptor Por Día.
+  - Se añadió padding lateral `px-3 sm:px-4 scroll-px-3 sm:scroll-px-4` para que "LUN" y "SAB" no queden pegados a los bordes, y auto-centrado del día activo mediante `scrollIntoView({ inline: 'center' })`.
+
+### P6. Auditoría y Robustez en Pantallas Angostas (320 px)
+- Se auditaron y adaptaron las pantallas de **Kanban**, **Electivas**, **Mapa** y **Autenticación** para garantizar contención total en dispositivos angostos (320 px como iPhone SE):
+  - Controles flotantes del mapa con íconos compactos y textos en `min-[360px]:inline`.
+  - Tarjetas de electivas y kanban con `min-w-0 w-full max-w-full`.
+  - Resplandores decorativos de fondo en `AuthScreen` confinados dentro de `overflow-hidden`.
+
+### Tabla Definitiva de Mediciones CDP (Parte 0.9)
+
+| Pantalla / Vista | Viewport | Target | Ancho Medido | Scroll Medido | Elementos Fuera de Límite | Estado |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Mapa (Grafo)** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Mapa (Lista)** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Horarios (Por Día)** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Horarios (Comisiones)**| 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Kanban** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Cuatrimestre** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Electivas** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Estadísticas** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Profesores** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Biblioteca Home** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Biblioteca Mis Aportes** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Biblioteca Términos** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **AuthScreen** | 320x568 | 320 px | 320 px | 320 px | 0 | **PASS ✅** |
+| **Mapa (Grafo)** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Horarios (Por Día)** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Kanban** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Estadísticas** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Profesores** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Biblioteca Home** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Admin Overview** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **AuthScreen** | 360x640 | 360 px | 360 px | 360 px | 0 | **PASS ✅** |
+| **Mapa (Grafo)** | 412x740 | 412 px | 412 px | 412 px | 0 | **PASS ✅** |
+| **Horarios (Por Día)** | 412x740 | 412 px | 412 px | 412 px | 0 | **PASS ✅** |
+| **Estadísticas** | 412x740 | 412 px | 412 px | 412 px | 0 | **PASS ✅** |
+| **Biblioteca Home** | 412x740 | 412 px | 412 px | 412 px | 0 | **PASS ✅** |
+| **Landscape (Grafo)** | 640x360 | 640 px | 640 px | 640 px | 0 | **PASS ✅** |
+| **Tablet Touch Navbar** | 768x1024 | 768 px | 768 px | 768 px | 0 | **PASS ✅** |
+| **Tablet Touch iPad Air** | 820x1180 | 820 px | 820 px | 820 px | 0 | **PASS ✅** |
+| **Desktop 900x600** | 900x600 | 900 px | 900 px | 900 px | 0 | **PASS ✅** |
+| **Desktop 1280x800** | 1280x800 | 1280 px | 1280 px | 1280 px | 0 | **PASS ✅** |
+
+
+---
+
+## 10. Tarea Arquitectónica Pendiente: Sincronización Offline y Prevención de Sobreescritura (P10)
+
+> [!WARNING]
+> **Riesgo Crítico de Concurrencia e Hidratación Offline**:
+> Cuando el usuario opera sin conexión a internet (modo avión, túnel, señal deficiente) en dispositivos móviles, `CareerContext` almacena las mutaciones localmente (`localStorage`). Al restablecerse la conectividad (`window.addEventListener('online')`), el cliente invoca automáticamente `reloadServerState()` mediante un `GET /api/state`. La respuesta remota consolida únicamente lo previamente persistido en Neon, sobreescribiendo en memoria el progreso de materias, notas, asignaciones de electivas y selecciones de horarios realizados offline, destruyendo los cambios del estudiante sin previo aviso.
+
+### Propuesta de Resolución Arquitectónica (Para fase de backend/sync)
+
+1. **Patrón Outbox Local (Offline Mutation Queue)**:
+   - Almacenar toda mutación generada sin conexión en una cola persistente en `IndexedDB` (`offline_mutation_queue`), registrando:
+     - `mutationId` (UUID v4)
+     - `endpoint` (ej. `/api/progress/18`, `/api/electives`, `/api/basket`)
+     - `method` (`PUT` / `POST` / `DELETE`)
+     - `payload` serializado
+     - `clientTimestamp` (ISO 8601)
+     - `retryCount` y `status` (`pending`, `syncing`, `failed`)
+2. **Protocolo de Hidratación Condicional al Reconectar**:
+   - Al capturar el evento `online`, el hook de sincronización debe interceptar la hidratación:
+     1. Congelar temporalmente la recarga pasiva de `GET /api/state`.
+     2. Drenar la cola de mutaciones en orden cronológico estricto (FIFO).
+     3. Para cada mutación confirmada por el backend con HTTP 200/201, removerla del Outbox.
+     4. Solo tras vaciar con éxito la cola local, ejecutar `GET /api/state` para rehidratar el árbol unificado.
+3. **Resolución de Conflictos Multidispositivo**:
+   - Agregar en la tabla de `subject_progress` del backend una columna `updated_at`.
+   - Política *"Last Write Wins"* basada en timestamp UTC a nivel de atributo/materia individual, de modo que una materia modificada offline no altere materias distintas tocadas desde la web.
+   - En caso de choque directo de calificaciones (ej. 8 vs 9), presentar un diálogo no bloqueante al usuario para seleccionar qué versión conservar.

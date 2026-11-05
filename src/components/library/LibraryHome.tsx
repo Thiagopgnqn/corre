@@ -210,30 +210,30 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8">
+    <div className="w-full max-w-7xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0 w-full max-w-full">
       {/* Hero Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-950 p-6 sm:p-8 border border-indigo-500/20 shadow-2xl">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3 max-w-2xl">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-950 p-4 sm:p-8 border border-indigo-500/20 shadow-2xl min-w-0 w-full max-w-full">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6 w-full min-w-0">
+          <div className="space-y-2 sm:space-y-3 max-w-2xl w-full min-w-0">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-400/25 text-indigo-300 text-xs font-semibold">
               <BookOpen className="w-4 h-4 text-amber-400" />
               Biblioteca Colaborativa de Material
             </div>
-            <h1 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight">
+            <h1 className="text-xl sm:text-4xl font-extrabold text-white tracking-tight leading-tight break-words">
               Material de Estudio para tu carrera
             </h1>
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed break-words">
               Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Ingeniería en Sistemas de Información (UTN FRC).
             </p>
           </div>
 
           {/* Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto shrink-0 min-w-0">
             {/* Mis Aportes Button */}
             <button
               type="button"
               onClick={handleOpenMyUploads}
-              className="relative px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+              className="relative px-3 sm:px-4 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm w-full sm:w-auto min-h-[44px]"
             >
               <FolderOpen className="w-4 h-4 text-indigo-400" />
               <span>Mis Aportes</span>
@@ -249,7 +249,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
             <button
               type="button"
               onClick={() => handleOpenUpload()}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
+              className="px-3 sm:px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer w-full sm:w-auto min-h-[44px]"
             >
               <UploadCloud className="w-4 h-4" />
               <span>Subir Material</span>
@@ -258,7 +258,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
         </div>
 
         {/* Bottom Banner Stats */}
-        <div className="mt-6 pt-5 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400 flex-wrap gap-4">
+        <div className="mt-5 sm:mt-6 pt-4 sm:pt-5 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-400 gap-3 w-full min-w-0">
           <div className="flex items-center gap-6">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
@@ -284,9 +284,9 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
 
       {/* Level Filters & Search */}
       <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 w-full min-w-0 max-w-full">
           {/* Level Filter Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1 scrollbar-none snap-x snap-mandatory flex items-center gap-1.5 px-0.5">
             {[
               { id: 'all', label: 'Todas las materias' },
               { id: 1, label: '1° Año' },
@@ -300,7 +300,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
                 key={String(lvl.id)}
                 type="button"
                 onClick={() => setLevelFilter(lvl.id as any)}
-                className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center ${
+                className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
                   levelFilter === lvl.id
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                     : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
@@ -312,7 +312,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
           </div>
 
           {/* Search Box */}
-          <div className="relative w-full sm:w-72 shrink-0">
+          <div className="relative w-full sm:w-72 shrink-0 min-w-0">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"

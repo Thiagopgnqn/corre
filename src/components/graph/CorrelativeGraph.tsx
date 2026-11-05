@@ -56,7 +56,7 @@ const FitViewButton: React.FC<{ className?: string }> = ({ className = '' }) => 
       aria-label="Ver todo el grafo"
     >
       <Maximize2 className="w-3.5 h-3.5 shrink-0" />
-      <span>Ver todo</span>
+      <span className="hidden min-[360px]:inline">Ver todo</span>
     </button>
   );
 };
@@ -473,7 +473,7 @@ const CorrelativeGraphContent: React.FC = () => {
       <div className="absolute top-2 inset-x-2 sm:top-4 sm:left-4 sm:right-auto z-[var(--z-graph-controls)] flex items-center justify-between sm:justify-start gap-2 pointer-events-none">
         <div
           data-tour="graph-controls"
-          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-2xl border border-slate-800 shadow-xl flex items-center gap-1.5 sm:gap-3 text-xs max-w-full overflow-hidden"
+          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-2xl border border-slate-800 shadow-xl flex items-center gap-1.5 sm:gap-3 text-xs max-w-full overflow-x-auto no-scrollbar"
         >
           {/* Segmented Switcher en Mobile: Lista | Mapa */}
           {isMobile && (
@@ -486,8 +486,11 @@ const CorrelativeGraphContent: React.FC = () => {
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title="Ver lista de materias"
+                aria-label="Ver lista de materias"
               >
-                <span>📋 Lista</span>
+                <span className="min-[360px]:hidden">📋</span>
+                <span className="hidden min-[360px]:inline">📋 Lista</span>
               </button>
               <button
                 type="button"
@@ -497,8 +500,11 @@ const CorrelativeGraphContent: React.FC = () => {
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
+                title="Ver mapa de correlativas"
+                aria-label="Ver mapa de correlativas"
               >
-                <span>🗺️ Mapa</span>
+                <span className="min-[360px]:hidden">🗺️</span>
+                <span className="hidden min-[360px]:inline">🗺️ Mapa</span>
               </button>
             </div>
           )}
@@ -529,10 +535,12 @@ const CorrelativeGraphContent: React.FC = () => {
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
             }`}
+            title={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
+            aria-label={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
           >
             <Sparkles className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden sm:inline">{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
-            <span className="sm:hidden">{showElectivesInGraph ? 'Sin Electivas' : 'Electivas'}</span>
+            <span className="hidden min-[360px]:inline sm:hidden">{showElectivesInGraph ? 'Sin Electivas' : 'Electivas'}</span>
           </button>
 
           {/* Active selection badge */}
@@ -595,7 +603,7 @@ const CorrelativeGraphContent: React.FC = () => {
           />
           <Controls
             showInteractive={false}
-            className="!bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300 !bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+0.75rem)] md:!bottom-4 !right-3 md:!right-auto md:!left-4 z-[var(--z-graph-controls)]"
+            className="!left-auto !right-3 !top-auto !w-auto !max-w-max !bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom,0px)+0.75rem)] md:!bottom-4 md:!left-4 md:!right-auto z-[var(--z-graph-controls)] !bg-slate-900/90 !border !border-slate-800 !rounded-xl !overflow-hidden !shadow-2xl fill-slate-300"
           />
           <MiniMap
             nodeColor={(n) => {

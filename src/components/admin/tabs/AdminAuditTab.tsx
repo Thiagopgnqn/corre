@@ -89,7 +89,7 @@ export const AdminAuditTab: React.FC = () => {
             placeholder="Filtrar por acción (ej. user.suspend, commission.retire)..."
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
           />
 
           <input
@@ -113,7 +113,7 @@ export const AdminAuditTab: React.FC = () => {
       {/* Audit Log Table */}
       <div className="bg-slate-900/80 border border-slate-800/80 rounded-2xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="hidden md:table w-full text-left text-xs">
             <thead className="bg-slate-950/80 border-b border-slate-800 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
                 <th className="py-3 px-4">Fecha y Hora</th>
@@ -204,6 +204,55 @@ export const AdminAuditTab: React.FC = () => {
           </table>
         </div>
 
+        {/* Mobile Audit Cards (md:hidden) */}
+        <div className="md:hidden divide-y divide-slate-800/60 text-xs">
+          {isLoading ? (
+            <div className="py-12 text-center text-slate-500">
+              <Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-500 mb-2" />
+              Cargando registros de auditoría...
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="py-12 text-center text-slate-500">
+              No hay registros de auditoría que coincidan con la búsqueda.
+            </div>
+          ) : (
+            logs.map((log) => (
+              <div key={log.id} className="p-4 space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-white font-medium truncate">
+                    <Shield className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="truncate">{log.adminEmail}</span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                    {new Date(log.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2 py-0.5 rounded bg-indigo-500/15 border border-indigo-500/20 text-[11px] font-mono text-indigo-300">
+                    {log.action}
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {log.targetType} {log.targetEmail ? `(${log.targetEmail})` : log.targetId ? `#${log.targetId.substring(0, 8)}` : ''}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] font-mono text-slate-500">IP: {log.ipAddress || '—'}</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLog(log)}
+                    className="px-3 py-1.5 min-h-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Ver detalles</span>
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
         {/* Pagination */}
         <div className="p-4 bg-slate-950/80 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <div>
@@ -235,7 +284,7 @@ export const AdminAuditTab: React.FC = () => {
 
       {/* Detail JSON Modal */}
       {selectedLog && (
-        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+        <div className="fixed inset-0 z-[var(--z-modal-elevated)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
           <div className="relative w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div>

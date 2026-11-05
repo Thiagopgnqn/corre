@@ -70,12 +70,14 @@ export const AuthScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col justify-center items-center p-4 relative overflow-hidden">
-      {/* Glow ambient background with brand indigo & subtle symbol watermark */}
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] h-[540px] bg-[#2A2E8A]/25 rounded-full blur-[130px] pointer-events-none" />
-      <div className="absolute bottom-10 right-1/4 w-[380px] h-[380px] bg-[#171A52]/40 rounded-full blur-[110px] pointer-events-none" />
-      <div className="absolute -right-16 -bottom-16 w-96 h-96 opacity-[0.035] pointer-events-none rotate-12">
-        <StackSymbol />
+    <div className="min-h-[100dvh] bg-[#090D16] text-slate-100 flex flex-col justify-center items-center py-6 px-3 sm:p-4 relative overflow-y-auto safe-area-p">
+      {/* Decorative ambient background glows clipped to viewport */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] h-[540px] bg-[#2A2E8A]/25 rounded-full blur-[130px]" />
+        <div className="absolute bottom-10 right-1/4 w-[380px] h-[380px] bg-[#171A52]/40 rounded-full blur-[110px]" />
+        <div className="absolute -right-16 -bottom-16 w-96 h-96 opacity-[0.035] rotate-12">
+          <StackSymbol />
+        </div>
       </div>
 
       {/* Cold start warning banner */}
@@ -86,7 +88,7 @@ export const AuthScreen: React.FC = () => {
         </div>
       )}
 
-      <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-6 sm:p-8 relative z-10">
+      <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-4 sm:p-8 relative z-10">
         {/* Brand Header */}
         <div className="text-center mb-6">
           <div className="flex justify-center mb-3">
@@ -173,7 +175,7 @@ export const AuthScreen: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="tu.email@ejemplo.com"
-                className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-base sm:text-sm"
               />
             </div>
           </div>
@@ -190,7 +192,7 @@ export const AuthScreen: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-base sm:text-sm"
               />
             </div>
             {mode === 'register' && (
@@ -211,7 +213,7 @@ export const AuthScreen: React.FC = () => {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-sm"
+                  className="w-full pl-11 pr-4 py-2.5 bg-slate-950/70 border border-slate-700/80 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-colors text-base sm:text-sm"
                 />
               </div>
             </div>

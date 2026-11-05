@@ -111,6 +111,7 @@ export const GoogleLoginButton: React.FC<GoogleLoginButtonProps> = ({
       // Limpiar contenedor antes de renderizar
       containerRef.current.innerHTML = '';
 
+      const calculatedWidth = Math.max(200, Math.min(320, containerRef.current.offsetWidth || 280));
       window.google.accounts.id.renderButton(containerRef.current, {
         type: 'standard',
         theme: 'filled_black',
@@ -118,7 +119,7 @@ export const GoogleLoginButton: React.FC<GoogleLoginButtonProps> = ({
         text: 'continue_with',
         shape: 'rectangular',
         logo_alignment: 'left',
-        width: 320,
+        width: calculatedWidth,
         locale: 'es',
       });
     } catch (err: any) {
@@ -155,7 +156,7 @@ export const GoogleLoginButton: React.FC<GoogleLoginButtonProps> = ({
       )}
       <div
         ref={containerRef}
-        className={`transition-opacity duration-200 flex justify-center w-full ${
+        className={`transition-opacity duration-200 flex justify-center w-full max-w-full overflow-hidden [&>div]:max-w-full [&_iframe]:max-w-full ${
           disabled ? 'opacity-40 pointer-events-none' : ''
         } ${scriptLoaded ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}
       />
