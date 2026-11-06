@@ -79,6 +79,8 @@ function toMyUploads(raw: any): LibraryMyUploadsResponse {
     usedBytes: Number(raw?.quota?.usedBytes || 0),
     maxBytes: Number(raw?.quota?.maxBytes || 0),
     hasStatusUpdates: Boolean(raw?.hasStatusUpdates),
+    pendingCount: Number(raw?.quota?.pendingCount ?? raw?.quota?.pendingFiles ?? 0),
+    maxPending: Number(raw?.quota?.maxPending ?? 30),
   };
 }
 
@@ -207,10 +209,23 @@ export const libraryApi = {
     uploadUrl: string,
     file: File | Blob,
     contentType: string,
-    onProgress?: (percent: number) => void
+    onProgress?: (percent: number) => void,
+    signal?: AbortSignal
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+
+      if (signal) {
+        if (signal.aborted) {
+          reject(new ApiError('Subida cancelada por el usuario.', 0, 'UPLOAD_ABORTED'));
+          return;
+        }
+        signal.addEventListener('abort', () => {
+          xhr.abort();
+          reject(new ApiError('Subida cancelada por el usuario.', 0, 'UPLOAD_ABORTED'));
+        });
+      }
+
       xhr.open('PUT', uploadUrl, true);
       xhr.setRequestHeader('Content-Type', contentType);
 

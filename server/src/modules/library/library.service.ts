@@ -1,9 +1,10 @@
-import { eq, and, or, sql, desc, asc, count, inArray, gte, isNull } from 'drizzle-orm';
+import { eq, and, or, sql, desc, asc, count, inArray, gte, isNull, lt, isNotNull } from 'drizzle-orm';
 import crypto from 'crypto';
 import path from 'path';
 import { db } from '../../db/index.js';
 import {
   users,
+  userSettings,
   subjects,
   professors,
   libraryFiles,
@@ -26,9 +27,51 @@ import {
   notifyAdminNewPendingFile,
   notifyUploaderFileApproved,
   notifyUploaderFileRejected,
+  setMailerDataSource,
+  recordUploadCompleted,
+  recordUploaderAction,
+  IMailerDataSource,
+  LibraryFileNotificationItem,
+  PendingUploaderFileItem,
 } from './library.mailer.js';
+import { validationSemaphore } from '../../utils/semaphore.js';
 import { logAdminAction } from '../admin/admin.audit.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
+
+interface RateLimitEntry {
+  count: number;
+  resetAt: number;
+}
+const initUploadRateLimitMap = new Map<string, RateLimitEntry>();
+
+export function checkInitUploadRateLimit(userId: string): void {
+  const now = Date.now();
+  const entry = initUploadRateLimitMap.get(userId);
+  if (!entry || now > entry.resetAt) {
+    initUploadRateLimitMap.set(userId, {
+      count: 1,
+      resetAt: now + LIBRARY_CONFIG.UPLOAD_INIT_RATE_LIMIT_WINDOW_MS,
+    });
+    return;
+  }
+
+  if (entry.count >= LIBRARY_CONFIG.UPLOAD_INIT_RATE_LIMIT_MAX) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+    const err: any = new Error(
+      'Demasiadas solicitudes de subida en poco tiempo. Por favor esperá unos minutos.'
+    );
+    err.status = 429;
+    err.code = 'LIMIT_RATE_EXCEEDED';
+    err.retryAfter = retryAfterSeconds;
+    throw err;
+  }
+
+  entry.count++;
+}
+
+export function resetInitUploadRateLimits(): void {
+  initUploadRateLimitMap.clear();
+}
 
 export interface InitUploadInput {
   subjectId: string;
@@ -102,11 +145,97 @@ export interface ILibraryService {
 /**
  * Implementación de producción respaldada por PostgreSQL y Cloudflare R2
  */
-export class PgLibraryService implements ILibraryService {
+export class PgLibraryService implements ILibraryService, IMailerDataSource {
   private r2: IR2StorageService;
 
   constructor(r2Service?: IR2StorageService) {
     this.r2 = r2Service || getR2Service();
+    setMailerDataSource(this);
+  }
+
+  async getPendingAdminFiles(): Promise<LibraryFileNotificationItem[]> {
+    const rows = await db
+      .select({
+        id: libraryFiles.id,
+        title: libraryFiles.title,
+        kind: libraryFiles.kind,
+        academicYear: libraryFiles.academicYear,
+        term: libraryFiles.term,
+        sizeBytes: libraryFiles.sizeBytes,
+        mimeType: libraryFiles.mimeType,
+        createdAt: libraryFiles.createdAt,
+        subjectName: subjects.name,
+      })
+      .from(libraryFiles)
+      .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .where(
+        and(
+          eq(libraryFiles.status, 'pending'),
+          isNull(libraryFiles.adminNotifiedAt)
+        )
+      )
+      .orderBy(asc(libraryFiles.createdAt));
+
+    return rows.map((r) => ({
+      ...r,
+      sizeBytes: Number(r.sizeBytes),
+      subjectName: r.subjectName || 'Materia',
+    }));
+  }
+
+  async markAdminNotified(fileIds: string[]): Promise<void> {
+    if (fileIds.length === 0) return;
+    await db
+      .update(libraryFiles)
+      .set({ adminNotifiedAt: new Date() })
+      .where(inArray(libraryFiles.id, fileIds));
+  }
+
+  async getPendingUploaderFiles(): Promise<PendingUploaderFileItem[]> {
+    const rows = await db
+      .select({
+        fileId: libraryFiles.id,
+        uploaderUserId: libraryFiles.uploaderUserId,
+        status: libraryFiles.status,
+        title: libraryFiles.title,
+        rejectionReason: libraryFiles.rejectionReason,
+        subjectName: subjects.name,
+        userEmail: users.email,
+        userStatus: users.status,
+        notifyLibraryEmail: userSettings.notifyLibraryEmail,
+      })
+      .from(libraryFiles)
+      .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(users, eq(libraryFiles.uploaderUserId, users.id))
+      .leftJoin(userSettings, eq(users.id, userSettings.userId))
+      .where(
+        and(
+          sql`${libraryFiles.status} IN ('approved', 'rejected')`,
+          isNull(libraryFiles.uploaderNotifiedAt),
+          isNotNull(libraryFiles.uploaderUserId)
+        )
+      )
+      .orderBy(asc(libraryFiles.updatedAt));
+
+    return rows.map((r) => ({
+      fileId: r.fileId,
+      uploaderUserId: r.uploaderUserId!,
+      userEmail: r.userEmail,
+      userStatus: r.userStatus,
+      notifyLibraryEmail: r.notifyLibraryEmail !== false,
+      status: r.status as 'approved' | 'rejected',
+      title: r.title,
+      subjectName: r.subjectName || 'Materia',
+      rejectionReason: r.rejectionReason,
+    }));
+  }
+
+  async markUploaderNotified(fileIds: string[]): Promise<void> {
+    if (fileIds.length === 0) return;
+    await db
+      .update(libraryFiles)
+      .set({ uploaderNotifiedAt: new Date() })
+      .where(inArray(libraryFiles.id, fileIds));
   }
 
   async acceptTerms(userId: string, version: string = LIBRARY_CONFIG.CURRENT_TERMS_VERSION) {
@@ -144,6 +273,28 @@ export class PgLibraryService implements ILibraryService {
   }
 
   async initUpload(userId: string, input: InitUploadInput) {
+    checkInitUploadRateLimit(userId);
+
+    const currentYear = new Date().getFullYear();
+    if (input.academicYear !== undefined && input.academicYear !== null) {
+      const yearNum = Number(input.academicYear);
+      if (!Number.isInteger(yearNum) || yearNum < LIBRARY_CONFIG.ACADEMIC_YEAR_MIN || yearNum > currentYear) {
+        throw Object.assign(
+          new Error(`El año académico debe ser un número entero entre ${LIBRARY_CONFIG.ACADEMIC_YEAR_MIN} y ${currentYear}.`),
+          { status: 400 }
+        );
+      }
+    }
+
+    if (input.term !== undefined && input.term !== null && (input.term as string) !== '') {
+      if (!['1C', '2C', 'A'].includes(input.term)) {
+        throw Object.assign(
+          new Error("El cuatrimestre debe ser '1C', '2C' o 'A'."),
+          { status: 400 }
+        );
+      }
+    }
+
     if (!LIBRARY_CONFIG.ALLOWED_MIME_TYPES.includes(input.mimeType as AllowedMimeType)) {
       throw Object.assign(
         new Error(
@@ -247,38 +398,69 @@ export class PgLibraryService implements ILibraryService {
         }
       }
 
-      const todayStart = new Date();
-      todayStart.setUTCHours(0, 0, 0, 0);
-
-      const [dailyUploadsRes] = await tx
-        .select({ count: count() })
-        .from(libraryFiles)
+      // Limpieza proactiva de subidas incompletas de más de 30 min para este usuario
+      const staleThreshold = new Date(
+        Date.now() - LIBRARY_CONFIG.UPLOADING_EXPIRATION_MINUTES * 60 * 1000
+      );
+      await tx
+        .delete(libraryFiles)
         .where(
           and(
             eq(libraryFiles.uploaderUserId, userId),
-            gte(libraryFiles.createdAt, todayStart),
-            sql`${libraryFiles.status} != 'removed'`
+            eq(libraryFiles.status, 'uploading'),
+            lt(libraryFiles.createdAt, staleThreshold)
           )
         );
 
-      if ((dailyUploadsRes?.count || 0) >= LIBRARY_CONFIG.MAX_DAILY_UPLOADS) {
-        throw Object.assign(
-          new Error(
-            `Alcanzaste el límite de ${LIBRARY_CONFIG.MAX_DAILY_UPLOADS} subidas diarias. Podrás subir más material mañana.`
-          ),
-          { status: 429, code: 'LIMIT_DAILY_UPLOADS' }
+      // Freno anti-spam: bloqueo temporal si acumula >= MAX_REJECTIONS_THRESHOLD rechazos en REJECTIONS_WINDOW_DAYS
+      if (LIBRARY_CONFIG.MAX_REJECTIONS_THRESHOLD > 0 && LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS > 0) {
+        const windowStart = new Date(
+          Date.now() - LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS * 24 * 60 * 60 * 1000
         );
+        const [rejRes] = await tx
+          .select({
+            count: count(),
+            oldestReviewedAt: sql<Date | null>`MIN(${libraryFiles.reviewedAt})`,
+          })
+          .from(libraryFiles)
+          .where(
+            and(
+              eq(libraryFiles.uploaderUserId, userId),
+              eq(libraryFiles.status, 'rejected'),
+              gte(libraryFiles.reviewedAt, windowStart)
+            )
+          );
+
+        const rejectionsCount = Number(rejRes?.count || 0);
+        if (rejectionsCount >= LIBRARY_CONFIG.MAX_REJECTIONS_THRESHOLD) {
+          const oldestDate = rejRes?.oldestReviewedAt ? new Date(rejRes.oldestReviewedAt) : windowStart;
+          const unlockTime = new Date(
+            oldestDate.getTime() + LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS * 24 * 60 * 60 * 1000
+          );
+          const hoursLeft = Math.max(1, Math.ceil((unlockTime.getTime() - Date.now()) / (1000 * 60 * 60)));
+          throw Object.assign(
+            new Error(
+              `Tu cuenta acumula ${rejectionsCount} archivos rechazados en los últimos ${LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS} días. Podrás volver a subir material en aproximadamente ${hoursLeft} hora(s).`
+            ),
+            { status: 429, code: 'TOO_MANY_REJECTIONS' }
+          );
+        }
       }
 
       const [pendingRes] = await tx
         .select({ count: count() })
         .from(libraryFiles)
-        .where(and(eq(libraryFiles.uploaderUserId, userId), eq(libraryFiles.status, 'pending')));
+        .where(
+          and(
+            eq(libraryFiles.uploaderUserId, userId),
+            sql`${libraryFiles.status} IN ('pending', 'uploading')`
+          )
+        );
 
       if ((pendingRes?.count || 0) >= LIBRARY_CONFIG.MAX_PENDING_UPLOADS) {
         throw Object.assign(
           new Error(
-            `Tenés ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS} archivos en revisión. Esperá a que sean moderados para subir más.`
+            `Tenés ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS} archivos pendientes de revisión (máximo ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS}). Esperá a que se aprueben para subir más.`
           ),
           { status: 429, code: 'LIMIT_PENDING_UPLOADS' }
         );
@@ -302,7 +484,7 @@ export class PgLibraryService implements ILibraryService {
               LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES / (1024 * 1024)
             )} MB). Eliminá material antiguo o esperá la moderación.`
           ),
-          { status: 429, code: 'LIMIT_USER_QUOTA' }
+          { status: 429, code: 'LIMIT_STORAGE_QUOTA' }
         );
       }
 
@@ -359,19 +541,39 @@ export class PgLibraryService implements ILibraryService {
     const [file] = await db
       .select()
       .from(libraryFiles)
-      .where(and(eq(libraryFiles.id, fileId), eq(libraryFiles.uploaderUserId, userId)))
+      .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file) {
-      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (!file || file.uploaderUserId !== userId) {
+      throw Object.assign(
+        new Error('Archivo no encontrado o la sesión de subida expiró por inactividad.'),
+        { status: 404, code: 'UPLOAD_NOT_FOUND_OR_EXPIRED' }
+      );
     }
 
     if (file.status !== 'uploading') {
       if (file.status === 'pending' || file.status === 'approved') {
-        return { success: true, file };
+        return {
+          success: true,
+          file,
+          message: 'Tu archivo quedó en revisión; te avisaremos en "Mis archivos" cuando esté publicado.',
+        };
+      }
+      if (file.status === 'rejected') {
+        throw Object.assign(
+          new Error(`El archivo fue rechazado: ${file.rejectionReason || 'No cumple las pautas de publicación.'}`),
+          { status: 400, code: 'UPLOAD_ALREADY_REJECTED' }
+        );
+      }
+      if (file.status === 'hidden' || file.status === 'removed') {
+        throw Object.assign(
+          new Error(`El archivo se encuentra en estado '${file.status}'.`),
+          { status: 400, code: 'UPLOAD_NOT_ACTIVE' }
+        );
       }
       throw Object.assign(new Error(`El archivo se encuentra en estado '${file.status}'.`), {
         status: 400,
+        code: 'INVALID_STATUS',
       });
     }
 
@@ -403,12 +605,14 @@ export class PgLibraryService implements ILibraryService {
       );
     }
 
-    const stream = await this.r2.getObjectStream(file.storageKey);
-    const validation = await validateFileStream(
-      stream,
-      file.mimeType as AllowedMimeType,
-      file.sizeBytes
-    );
+    const validation = await validationSemaphore.runWithLock(async () => {
+      const stream = await this.r2.getObjectStream(file.storageKey);
+      return await validateFileStream(
+        stream,
+        file.mimeType as AllowedMimeType,
+        file.sizeBytes
+      );
+    });
 
     if (!validation.isValid) {
       await this.r2.deleteObject(file.storageKey);
@@ -456,10 +660,8 @@ export class PgLibraryService implements ILibraryService {
         .where(eq(libraryFiles.id, fileId))
         .returning();
 
-      // Notificar a administradores de forma asíncrona no bloqueante
-      void notifyAdminNewPendingFile(fileId).catch((err) => {
-        console.error('[LibraryService] Error no fatal enviando aviso admin:', err?.message || err);
-      });
+      // Notificar a administradores de forma agrupada
+      recordUploadCompleted();
 
       return {
         success: true,
@@ -754,6 +956,13 @@ export class PgLibraryService implements ILibraryService {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
+    if (file.status === 'rejected' || file.status === 'removed') {
+      throw Object.assign(
+        new Error('El archivo no está disponible para descarga ya que fue rechazado o dado de baja.'),
+        { status: 410, code: 'FILE_NOT_AVAILABLE' }
+      );
+    }
+
     if (file.status !== 'approved' && !isAdmin && file.uploaderUserId !== userId) {
       throw Object.assign(
         new Error('Este archivo se encuentra en revisión y aún no está disponible para descarga.'),
@@ -943,7 +1152,7 @@ export class PgLibraryService implements ILibraryService {
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
-      .where(and(eq(libraryFiles.uploaderUserId, userId), sql`${libraryFiles.status} != 'removed'`))
+      .where(and(eq(libraryFiles.uploaderUserId, userId), sql`${libraryFiles.status} NOT IN ('removed', 'uploading')`))
       .orderBy(desc(libraryFiles.createdAt));
 
     const hasStatusUpdates = uploads.some(
@@ -955,6 +1164,18 @@ export class PgLibraryService implements ILibraryService {
     const totalBytesUsed = uploads
       .filter((u) => u.status !== 'rejected')
       .reduce((acc, curr) => acc + Number(curr.sizeBytes || 0), 0);
+
+    const [pendingRes] = await db
+      .select({ count: count() })
+      .from(libraryFiles)
+      .where(
+        and(
+          eq(libraryFiles.uploaderUserId, userId),
+          sql`${libraryFiles.status} IN ('pending', 'uploading')`
+        )
+      );
+
+    const pendingCount = Number(pendingRes?.count || 0);
 
     // En modo "peek" (markChecked = false) solo se consulta, sin consumir la novedad
     if (markChecked) {
@@ -970,6 +1191,8 @@ export class PgLibraryService implements ILibraryService {
       quota: {
         usedBytes: totalBytesUsed,
         maxBytes: LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES,
+        pendingCount,
+        maxPending: LIBRARY_CONFIG.MAX_PENDING_UPLOADS,
       },
     };
   }
@@ -1009,8 +1232,31 @@ export class PgLibraryService implements ILibraryService {
     if (updates.examInstance !== undefined) {
       payload.examInstance = updates.examInstance ? sanitizeLibraryText(updates.examInstance, 50) : null;
     }
-    if (updates.academicYear !== undefined) payload.academicYear = updates.academicYear || null;
-    if (updates.term !== undefined) payload.term = updates.term || null;
+    if (updates.academicYear !== undefined && updates.academicYear !== null) {
+      const yearNum = Number(updates.academicYear);
+      const currentYear = new Date().getFullYear();
+      if (!Number.isInteger(yearNum) || yearNum < LIBRARY_CONFIG.ACADEMIC_YEAR_MIN || yearNum > currentYear) {
+        throw Object.assign(
+          new Error(`El año académico debe ser un número entero entre ${LIBRARY_CONFIG.ACADEMIC_YEAR_MIN} y ${currentYear}.`),
+          { status: 400 }
+        );
+      }
+      payload.academicYear = yearNum;
+    } else if (updates.academicYear === null) {
+      payload.academicYear = null;
+    }
+
+    if (updates.term !== undefined && updates.term !== null && (updates.term as any) !== '') {
+      if (!['1C', '2C', 'A'].includes(updates.term)) {
+        throw Object.assign(
+          new Error("El cuatrimestre debe ser '1C', '2C' o 'A'."),
+          { status: 400 }
+        );
+      }
+      payload.term = updates.term;
+    } else if (updates.term === null || (updates.term as any) === '') {
+      payload.term = null;
+    }
     if (updates.hasSolution !== undefined) payload.hasSolution = Boolean(updates.hasSolution);
 
     if (
@@ -1203,6 +1449,15 @@ export class PgLibraryService implements ILibraryService {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
+    if (file.status === 'rejected' || file.status === 'removed') {
+      throw Object.assign(
+        new Error(
+          `No se puede previsualizar el archivo porque su estado es '${file.status}' y su contenido fue purgado.`
+        ),
+        { status: 410, code: 'FILE_CONTENT_PURGED' }
+      );
+    }
+
     const previewUrl = await this.r2.getPresignedDownloadUrl({
       key: file.storageKey,
       filename: file.originalFilename,
@@ -1241,11 +1496,9 @@ export class PgLibraryService implements ILibraryService {
       .where(eq(libraryFiles.id, fileId))
       .returning();
 
-    // Notificar al estudiante que subió el archivo (solo en transición pending -> approved y si no fue notificado)
+    // Notificar al estudiante que subió el archivo (agrupado y debounced)
     if (file.status === 'pending' && !file.uploaderNotifiedAt) {
-      void notifyUploaderFileApproved(fileId).catch((err) => {
-        console.error('[LibraryService] Error no fatal enviando aviso de aprobación:', err?.message || err);
-      });
+      recordUploaderAction();
     }
 
     return updated;
@@ -1276,11 +1529,17 @@ export class PgLibraryService implements ILibraryService {
       .where(eq(libraryFiles.id, fileId))
       .returning();
 
-    // Notificar al estudiante del rechazo con el motivo indicado
-    if (!file.uploaderNotifiedAt) {
-      void notifyUploaderFileRejected(fileId, cleanReason).catch((err) => {
-        console.error('[LibraryService] Error no fatal enviando aviso de rechazo:', err?.message || err);
+    // 3a: Encolar el borrado del objeto de R2 en library_orphan_deletions (con reintentos)
+    if (file.storageKey) {
+      await db.insert(libraryOrphanDeletions).values({
+        storageKey: file.storageKey,
+        attempts: 0,
       });
+    }
+
+    // Notificar al estudiante del rechazo con el motivo indicado (agrupado y debounced)
+    if (!file.uploaderNotifiedAt) {
+      recordUploaderAction();
     }
 
     return updated;
@@ -1691,8 +1950,10 @@ export class PgLibraryService implements ILibraryService {
  * Implementación en memoria aislada para tests y desarrollo sin base de datos ni R2 activo.
  * Reproduce fielmente las reglas de negocio, integridad referencial y condiciones de carrera.
  */
-export class InMemoryLibraryService implements ILibraryService {
+export class InMemoryLibraryService implements ILibraryService, IMailerDataSource {
   private r2: IR2StorageService;
+  private userLocks = new Map<string, Promise<void>>();
+
   public users = new Map<string, {
     id: string;
     email: string;
@@ -1718,6 +1979,93 @@ export class InMemoryLibraryService implements ILibraryService {
 
   constructor(r2Service?: IR2StorageService) {
     this.r2 = r2Service || new MemoryMockR2Service();
+    setMailerDataSource(this);
+  }
+
+  private async withUserLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+    const prevLock = this.userLocks.get(userId) || Promise.resolve();
+    let resolveLock!: () => void;
+    const currentLock = new Promise<void>((resolve) => {
+      resolveLock = resolve;
+    });
+    this.userLocks.set(userId, currentLock);
+
+    try {
+      await prevLock;
+      return await fn();
+    } finally {
+      resolveLock();
+      if (this.userLocks.get(userId) === currentLock) {
+        this.userLocks.delete(userId);
+      }
+    }
+  }
+
+  async getPendingAdminFiles(): Promise<LibraryFileNotificationItem[]> {
+    const res: LibraryFileNotificationItem[] = [];
+    for (const f of this.files.values()) {
+      if (f.status === 'pending' && !f.adminNotifiedAt) {
+        const sub = this.subjects.get(f.subjectId);
+        res.push({
+          id: f.id,
+          title: f.title,
+          kind: f.kind,
+          academicYear: f.academicYear,
+          term: f.term,
+          sizeBytes: f.sizeBytes,
+          mimeType: f.mimeType,
+          createdAt: f.createdAt,
+          subjectName: sub?.name || 'Materia',
+        });
+      }
+    }
+    return res.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  }
+
+  async markAdminNotified(fileIds: string[]): Promise<void> {
+    const idSet = new Set(fileIds);
+    for (const f of this.files.values()) {
+      if (idSet.has(f.id)) {
+        f.adminNotifiedAt = new Date();
+      }
+    }
+  }
+
+  async getPendingUploaderFiles(): Promise<PendingUploaderFileItem[]> {
+    const res: PendingUploaderFileItem[] = [];
+    for (const f of this.files.values()) {
+      if (
+        (f.status === 'approved' || f.status === 'rejected') &&
+        !f.uploaderNotifiedAt &&
+        f.uploaderUserId
+      ) {
+        const u = this.users.get(f.uploaderUserId);
+        const sub = this.subjects.get(f.subjectId);
+        if (u) {
+          res.push({
+            fileId: f.id,
+            uploaderUserId: f.uploaderUserId,
+            userEmail: u.email,
+            userStatus: u.status,
+            notifyLibraryEmail: u.notifyLibraryEmail !== false,
+            status: f.status as 'approved' | 'rejected',
+            title: f.title,
+            subjectName: sub?.name || 'Materia',
+            rejectionReason: f.rejectionReason,
+          });
+        }
+      }
+    }
+    return res;
+  }
+
+  async markUploaderNotified(fileIds: string[]): Promise<void> {
+    const idSet = new Set(fileIds);
+    for (const f of this.files.values()) {
+      if (idSet.has(f.id)) {
+        f.uploaderNotifiedAt = new Date();
+      }
+    }
   }
 
   // Métodos auxiliares de seeding para tests
@@ -1773,170 +2121,242 @@ export class InMemoryLibraryService implements ILibraryService {
   }
 
   async initUpload(userId: string, input: InitUploadInput) {
-    if (!LIBRARY_CONFIG.ALLOWED_MIME_TYPES.includes(input.mimeType as AllowedMimeType)) {
-      throw Object.assign(
-        new Error(`Formato de archivo no permitido (${input.mimeType}). Solo se admiten PDF, JPG, PNG y WebP.`),
-        { status: 400 }
-      );
-    }
+    return await this.withUserLock(userId, async () => {
+      checkInitUploadRateLimit(userId);
 
-    const ext = path.extname(input.originalFilename || '').toLowerCase();
-    if (!LIBRARY_CONFIG.ALLOWED_EXTENSIONS.includes(ext as any)) {
-      throw Object.assign(
-        new Error(`Extensión no permitida (${ext}). Solo se admiten archivos .pdf, .jpg, .jpeg, .png y .webp.`),
-        { status: 400 }
-      );
-    }
-
-    const isPdf = input.mimeType === 'application/pdf';
-    const maxSize = isPdf ? LIBRARY_CONFIG.MAX_PDF_SIZE_BYTES : LIBRARY_CONFIG.MAX_IMAGE_SIZE_BYTES;
-    const typeLabel = isPdf ? 'documentos PDF (25 MB)' : 'imágenes (10 MB)';
-
-    if (input.sizeBytes <= 0 || input.sizeBytes > maxSize) {
-      throw Object.assign(new Error(`El archivo excede el tamaño máximo permitido para ${typeLabel}.`), { status: 400 });
-    }
-
-    if (!this.subjects.has(input.subjectId)) {
-      throw Object.assign(new Error('La materia especificada no existe en el catálogo.'), { status: 404 });
-    }
-
-    const cleanTitle = sanitizeLibraryText(input.title, 120);
-    if (!cleanTitle || cleanTitle.length < 3) {
-      throw Object.assign(new Error('El título debe tener al menos 3 caracteres.'), { status: 400 });
-    }
-    const cleanDescription = input.description ? sanitizeLibraryText(input.description, 500) : null;
-    const cleanExamInstance = input.examInstance ? sanitizeLibraryText(input.examInstance, 50) : null;
-
-    if (checkLibraryProfanity(cleanTitle) || (cleanDescription && checkLibraryProfanity(cleanDescription))) {
-      throw Object.assign(
-        new Error('El texto contiene expresiones no permitidas según las normas de la comunidad.'),
-        { status: 400 }
-      );
-    }
-
-    const user = this.users.get(userId);
-    if (!user) {
-      throw Object.assign(new Error('Usuario no encontrado.'), { status: 404 });
-    }
-    if (!user.emailVerifiedAt) {
-      throw Object.assign(new Error('Debés verificar tu correo electrónico para subir material de estudio.'), { status: 403 });
-    }
-    if (!user.libraryTermsAcceptedAt || user.libraryTermsVersion !== LIBRARY_CONFIG.CURRENT_TERMS_VERSION) {
-      if (input.acceptTerms) {
-        user.libraryTermsAcceptedAt = new Date();
-        user.libraryTermsVersion = LIBRARY_CONFIG.CURRENT_TERMS_VERSION;
-      } else {
-        throw Object.assign(new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'), {
-          status: 403,
-          code: 'TERMS_REQUIRED',
-        });
+      const currentYear = new Date().getFullYear();
+      if (input.academicYear !== undefined && input.academicYear !== null) {
+        const yearNum = Number(input.academicYear);
+        if (!Number.isInteger(yearNum) || yearNum < LIBRARY_CONFIG.ACADEMIC_YEAR_MIN || yearNum > currentYear) {
+          throw Object.assign(
+            new Error(`El año académico debe ser un número entero entre ${LIBRARY_CONFIG.ACADEMIC_YEAR_MIN} y ${currentYear}.`),
+            { status: 400 }
+          );
+        }
       }
-    }
 
-    // Topes diarios
-    const today = new Date();
-    today.setUTCHours(0, 0, 0, 0);
-    const userDailyUploads = Array.from(this.files.values()).filter(
-      (f) => f.uploaderUserId === userId && f.createdAt >= today && f.status !== 'removed'
-    ).length;
+      if (input.term !== undefined && input.term !== null && (input.term as string) !== '') {
+        if (!['1C', '2C', 'A'].includes(input.term)) {
+          throw Object.assign(
+            new Error("El cuatrimestre debe ser '1C', '2C' o 'A'."),
+            { status: 400 }
+          );
+        }
+      }
 
-    if (userDailyUploads >= LIBRARY_CONFIG.MAX_DAILY_UPLOADS) {
-      throw Object.assign(
-        new Error(`Alcanzaste el límite de ${LIBRARY_CONFIG.MAX_DAILY_UPLOADS} subidas diarias. Podrás subir más material mañana.`),
-        { status: 429, code: 'LIMIT_DAILY_UPLOADS' }
+      if (!LIBRARY_CONFIG.ALLOWED_MIME_TYPES.includes(input.mimeType as AllowedMimeType)) {
+        throw Object.assign(
+          new Error(`Formato de archivo no permitido (${input.mimeType}). Solo se admiten PDF, JPG, PNG y WebP.`),
+          { status: 400 }
+        );
+      }
+
+      const ext = path.extname(input.originalFilename || '').toLowerCase();
+      if (!LIBRARY_CONFIG.ALLOWED_EXTENSIONS.includes(ext as any)) {
+        throw Object.assign(
+          new Error(`Extensión no permitida (${ext}). Solo se admiten archivos .pdf, .jpg, .jpeg, .png y .webp.`),
+          { status: 400 }
+        );
+      }
+
+      const isPdf = input.mimeType === 'application/pdf';
+      const maxSize = isPdf ? LIBRARY_CONFIG.MAX_PDF_SIZE_BYTES : LIBRARY_CONFIG.MAX_IMAGE_SIZE_BYTES;
+      const typeLabel = isPdf ? 'documentos PDF (25 MB)' : 'imágenes (10 MB)';
+
+      if (input.sizeBytes <= 0 || input.sizeBytes > maxSize) {
+        throw Object.assign(new Error(`El archivo excede el tamaño máximo permitido para ${typeLabel}.`), { status: 400 });
+      }
+
+      if (!this.subjects.has(input.subjectId)) {
+        throw Object.assign(new Error('La materia especificada no existe en el catálogo.'), { status: 404 });
+      }
+
+      const cleanTitle = sanitizeLibraryText(input.title, 120);
+      if (!cleanTitle || cleanTitle.length < 3) {
+        throw Object.assign(new Error('El título debe tener al menos 3 caracteres.'), { status: 400 });
+      }
+      const cleanDescription = input.description ? sanitizeLibraryText(input.description, 500) : null;
+      const cleanExamInstance = input.examInstance ? sanitizeLibraryText(input.examInstance, 50) : null;
+
+      if (checkLibraryProfanity(cleanTitle) || (cleanDescription && checkLibraryProfanity(cleanDescription))) {
+        throw Object.assign(
+          new Error('El texto contiene expresiones no permitidas según las normas de la comunidad.'),
+          { status: 400 }
+        );
+      }
+
+      const user = this.users.get(userId);
+      if (!user) {
+        throw Object.assign(new Error('Usuario no encontrado.'), { status: 404 });
+      }
+      if (!user.emailVerifiedAt) {
+        throw Object.assign(new Error('Debés verificar tu correo electrónico para subir material de estudio.'), { status: 403 });
+      }
+      if (!user.libraryTermsAcceptedAt || user.libraryTermsVersion !== LIBRARY_CONFIG.CURRENT_TERMS_VERSION) {
+        if (input.acceptTerms) {
+          user.libraryTermsAcceptedAt = new Date();
+          user.libraryTermsVersion = LIBRARY_CONFIG.CURRENT_TERMS_VERSION;
+        } else {
+          throw Object.assign(new Error('Debés aceptar los Términos de la Biblioteca antes de subir tu primer archivo.'), {
+            status: 403,
+            code: 'TERMS_REQUIRED',
+          });
+        }
+      }
+
+      // Limpieza proactiva de subidas incompletas de más de 30 min para este usuario
+      const staleThreshold = new Date(
+        Date.now() - LIBRARY_CONFIG.UPLOADING_EXPIRATION_MINUTES * 60 * 1000
       );
-    }
+      for (const [id, f] of this.files.entries()) {
+        if (f.uploaderUserId === userId && f.status === 'uploading' && f.createdAt < staleThreshold) {
+          this.files.delete(id);
+        }
+      }
 
-    // Pendientes simultáneos
-    const userPending = Array.from(this.files.values()).filter(
-      (f) => f.uploaderUserId === userId && f.status === 'pending'
-    ).length;
+      // Freno anti-spam: bloqueo temporal si acumula >= MAX_REJECTIONS_THRESHOLD rechazos en REJECTIONS_WINDOW_DAYS
+      if (LIBRARY_CONFIG.MAX_REJECTIONS_THRESHOLD > 0 && LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS > 0) {
+        const windowStart = new Date(Date.now() - LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const rejectedFiles = Array.from(this.files.values()).filter(
+          (f) =>
+            f.uploaderUserId === userId &&
+            f.status === 'rejected' &&
+            f.reviewedAt &&
+            f.reviewedAt >= windowStart
+        );
+        if (rejectedFiles.length >= LIBRARY_CONFIG.MAX_REJECTIONS_THRESHOLD) {
+          let oldestDate = windowStart;
+          for (const f of rejectedFiles) {
+            if (f.reviewedAt && f.reviewedAt < oldestDate) oldestDate = f.reviewedAt;
+          }
+          const unlockTime = new Date(oldestDate.getTime() + LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+          const hoursLeft = Math.max(1, Math.ceil((unlockTime.getTime() - Date.now()) / (1000 * 60 * 60)));
+          throw Object.assign(
+            new Error(
+              `Tu cuenta acumula ${rejectedFiles.length} archivos rechazados en los últimos ${LIBRARY_CONFIG.REJECTIONS_WINDOW_DAYS} días. Podrás volver a subir material en aproximadamente ${hoursLeft} hora(s).`
+            ),
+            { status: 429, code: 'TOO_MANY_REJECTIONS' }
+          );
+        }
+      }
 
-    if (userPending >= LIBRARY_CONFIG.MAX_PENDING_UPLOADS) {
-      throw Object.assign(
-        new Error(`Tenés ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS} archivos en revisión. Esperá a que sean moderados para subir más.`),
-        { status: 429, code: 'LIMIT_PENDING_UPLOADS' }
-      );
-    }
+      // Pendientes simultáneos (incluye 'pending' y 'uploading' activos)
+      const userPending = Array.from(this.files.values()).filter(
+        (f) => f.uploaderUserId === userId && (f.status === 'pending' || f.status === 'uploading')
+      ).length;
 
-    // Cuota total
-    const currentQuota = Array.from(this.files.values())
-      .filter((f) => f.uploaderUserId === userId && !['removed', 'rejected'].includes(f.status))
-      .reduce((sum, f) => sum + f.sizeBytes, 0);
+      if (userPending >= LIBRARY_CONFIG.MAX_PENDING_UPLOADS) {
+        throw Object.assign(
+          new Error(
+            `Tenés ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS} archivos pendientes de revisión (máximo ${LIBRARY_CONFIG.MAX_PENDING_UPLOADS}). Esperá a que se aprueben para subir más.`
+          ),
+          { status: 429, code: 'LIMIT_PENDING_UPLOADS' }
+        );
+      }
 
-    if (currentQuota + input.sizeBytes > LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES) {
-      throw Object.assign(
-        new Error(`La subida excede tu cuota total de almacenamiento (${Math.round(LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES / (1024 * 1024))} MB). Eliminá material antiguo o esperá la moderación.`),
-        { status: 429, code: 'LIMIT_USER_QUOTA' }
-      );
-    }
+      // Cuota total
+      const currentQuota = Array.from(this.files.values())
+        .filter((f) => f.uploaderUserId === userId && !['removed', 'rejected'].includes(f.status))
+        .reduce((sum, f) => sum + f.sizeBytes, 0);
 
-    const fileId = crypto.randomUUID();
-    const storageKey = `library/${fileId}${ext}`;
-    const safeOriginalName = input.originalFilename.replace(/[^a-zA-Z0-9._\-áéíóúÁÉÍÓÚñÑ ]/g, '_');
+      if (currentQuota + input.sizeBytes > LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES) {
+        throw Object.assign(
+          new Error(`La subida excede tu cuota total de almacenamiento (${Math.round(LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES / (1024 * 1024))} MB). Eliminá material antiguo o esperá la moderación.`),
+          { status: 429, code: 'LIMIT_STORAGE_QUOTA' }
+        );
+      }
 
-    const fileRecord = {
-      id: fileId,
-      uploaderUserId: userId,
-      subjectId: input.subjectId,
-      kind: input.kind,
-      academicYear: input.academicYear || null,
-      term: input.term || null,
-      examInstance: cleanExamInstance,
-      hasSolution: Boolean(input.hasSolution),
-      title: cleanTitle,
-      description: cleanDescription,
-      originalFilename: safeOriginalName,
-      storageKey,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      sha256: null, // Null mientras está en estado uploading (Requisito 1)
-      status: 'uploading',
-      adminNotifiedAt: null,
-      uploaderNotifiedAt: null,
-      rejectionReason: null,
-      reviewedBy: null,
-      reviewedAt: null,
-      downloadCount: 0,
-      helpfulCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+      const fileId = crypto.randomUUID();
+      const storageKey = `library/${fileId}${ext}`;
+      const safeOriginalName = input.originalFilename.replace(/[^a-zA-Z0-9._\-áéíóúÁÉÍÓÚñÑ ]/g, '_');
 
-    this.files.set(fileId, fileRecord);
+      const fileRecord = {
+        id: fileId,
+        uploaderUserId: userId,
+        subjectId: input.subjectId,
+        kind: input.kind,
+        academicYear: input.academicYear || null,
+        term: input.term || null,
+        examInstance: cleanExamInstance,
+        hasSolution: Boolean(input.hasSolution),
+        title: cleanTitle,
+        description: cleanDescription,
+        originalFilename: safeOriginalName,
+        storageKey,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        sha256: null, // Null mientras está en estado uploading (Requisito 1)
+        status: 'uploading' as const,
+        adminNotifiedAt: null,
+        uploaderNotifiedAt: null,
+        rejectionReason: null,
+        reviewedBy: null,
+        reviewedAt: null,
+        downloadCount: 0,
+        helpfulCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-    if (input.professorIds && input.professorIds.length > 0) {
-      this.fileProfessors.set(fileId, new Set(input.professorIds));
-    }
+      this.files.set(fileId, fileRecord);
 
-    const uploadUrl = await this.r2.getPresignedUploadUrl({
-      key: storageKey,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
-      expiresInSeconds: LIBRARY_CONFIG.PRESIGNED_PUT_EXPIRES_SECONDS,
+      if (input.professorIds && input.professorIds.length > 0) {
+        this.fileProfessors.set(fileId, new Set(input.professorIds));
+      }
+
+      const uploadUrl = await this.r2.getPresignedUploadUrl({
+        key: storageKey,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        expiresInSeconds: LIBRARY_CONFIG.PRESIGNED_PUT_EXPIRES_SECONDS,
+      });
+
+      return {
+        fileId,
+        uploadUrl,
+        storageKey,
+        expiresInSeconds: LIBRARY_CONFIG.PRESIGNED_PUT_EXPIRES_SECONDS,
+        headers: {
+          'Content-Type': input.mimeType,
+          'Content-Length': String(input.sizeBytes),
+        },
+      };
     });
-
-    return {
-      fileId,
-      uploadUrl,
-      storageKey,
-      expiresInSeconds: LIBRARY_CONFIG.PRESIGNED_PUT_EXPIRES_SECONDS,
-      headers: {
-        'Content-Type': input.mimeType,
-        'Content-Length': String(input.sizeBytes),
-      },
-    };
   }
 
   async completeUpload(userId: string, fileId: string) {
     const file = this.files.get(fileId);
     if (!file || file.uploaderUserId !== userId) {
-      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+      throw Object.assign(
+        new Error('Archivo no encontrado o la sesión de subida expiró por inactividad.'),
+        { status: 404, code: 'UPLOAD_NOT_FOUND_OR_EXPIRED' }
+      );
     }
 
     if (file.status !== 'uploading') {
-      if (file.status === 'pending' || file.status === 'approved') return { success: true, file };
-      throw Object.assign(new Error(`El archivo se encuentra en estado '${file.status}'.`), { status: 400 });
+      if (file.status === 'pending' || file.status === 'approved') {
+        return {
+          success: true,
+          file,
+          message: 'Tu archivo quedó en revisión; te avisaremos en "Mis archivos" cuando esté publicado.',
+        };
+      }
+      if (file.status === 'rejected') {
+        throw Object.assign(
+          new Error(`El archivo fue rechazado: ${file.rejectionReason || 'No cumple las pautas de publicación.'}`),
+          { status: 400, code: 'UPLOAD_ALREADY_REJECTED' }
+        );
+      }
+      if (file.status === 'hidden' || file.status === 'removed') {
+        throw Object.assign(
+          new Error(`El archivo se encuentra en estado '${file.status}'.`),
+          { status: 400, code: 'UPLOAD_NOT_ACTIVE' }
+        );
+      }
+      throw Object.assign(new Error(`El archivo se encuentra en estado '${file.status}'.`), {
+        status: 400,
+        code: 'INVALID_STATUS',
+      });
     }
 
     const head = await this.r2.headObject(file.storageKey);
@@ -1954,8 +2374,10 @@ export class InMemoryLibraryService implements ILibraryService {
       throw Object.assign(new Error('El tamaño real del archivo difiere del declarado. Subida rechazada por seguridad.'), { status: 400 });
     }
 
-    const stream = await this.r2.getObjectStream(file.storageKey);
-    const validation = await validateFileStream(stream, file.mimeType as AllowedMimeType, file.sizeBytes);
+    const validation = await validationSemaphore.runWithLock(async () => {
+      const stream = await this.r2.getObjectStream(file.storageKey);
+      return await validateFileStream(stream, file.mimeType as AllowedMimeType, file.sizeBytes);
+    });
 
     if (!validation.isValid) {
       await this.r2.deleteObject(file.storageKey);
@@ -1983,21 +2405,7 @@ export class InMemoryLibraryService implements ILibraryService {
     file.rejectionReason = null;
     file.updatedAt = new Date();
 
-    const sub = this.subjects.get(file.subjectId);
-    void notifyAdminNewPendingFile(fileId, {
-      id: file.id,
-      title: file.title,
-      subjectName: sub?.name || 'Materia',
-      kind: file.kind,
-      academicYear: file.academicYear,
-      term: file.term,
-      sizeBytes: file.sizeBytes,
-      mimeType: file.mimeType,
-      createdAt: file.createdAt,
-      adminNotifiedAt: file.adminNotifiedAt,
-    }).then((sent) => {
-      if (sent) file.adminNotifiedAt = new Date();
-    }).catch(() => {});
+    recordUploadCompleted();
 
     return {
       success: true,
@@ -2126,6 +2534,14 @@ export class InMemoryLibraryService implements ILibraryService {
   async getDownloadUrl(fileId: string, userId: string, isAdmin = false) {
     const f = this.files.get(fileId);
     if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+
+    if (f.status === 'rejected' || f.status === 'removed') {
+      throw Object.assign(
+        new Error('El archivo no está disponible para descarga ya que fue rechazado o dado de baja.'),
+        { status: 410, code: 'FILE_NOT_AVAILABLE' }
+      );
+    }
+
     if (f.status !== 'approved' && !isAdmin && f.uploaderUserId !== userId) {
       throw Object.assign(new Error('Este archivo se encuentra en revisión y aún no está disponible para descarga.'), { status: 403 });
     }
@@ -2225,7 +2641,7 @@ export class InMemoryLibraryService implements ILibraryService {
     const lastChecked = u?.libraryLastCheckedAt || new Date(0);
 
     const uploads = Array.from(this.files.values())
-      .filter((f) => f.uploaderUserId === userId && f.status !== 'removed')
+      .filter((f) => f.uploaderUserId === userId && f.status !== 'removed' && f.status !== 'uploading')
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .map((f) => {
         const sub = this.subjects.get(f.subjectId);
@@ -2256,6 +2672,10 @@ export class InMemoryLibraryService implements ILibraryService {
       .filter((up) => up.status !== 'rejected')
       .reduce((sum, up) => sum + up.sizeBytes, 0);
 
+    const pendingCount = Array.from(this.files.values()).filter(
+      (f) => f.uploaderUserId === userId && (f.status === 'pending' || f.status === 'uploading')
+    ).length;
+
     if (u && markChecked) {
       u.libraryLastCheckedAt = new Date();
     }
@@ -2266,6 +2686,8 @@ export class InMemoryLibraryService implements ILibraryService {
       quota: {
         usedBytes: totalBytesUsed,
         maxBytes: LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES,
+        pendingCount,
+        maxPending: LIBRARY_CONFIG.MAX_PENDING_UPLOADS,
       },
     };
   }
@@ -2278,7 +2700,32 @@ export class InMemoryLibraryService implements ILibraryService {
 
     if (updates.title) f.title = sanitizeLibraryText(updates.title, 120);
     if (updates.description !== undefined) f.description = updates.description ? sanitizeLibraryText(updates.description, 500) : null;
-    if (updates.academicYear !== undefined) f.academicYear = updates.academicYear || null;
+
+    if (updates.academicYear !== undefined && updates.academicYear !== null) {
+      const yearNum = Number(updates.academicYear);
+      const currentYear = new Date().getFullYear();
+      if (!Number.isInteger(yearNum) || yearNum < LIBRARY_CONFIG.ACADEMIC_YEAR_MIN || yearNum > currentYear) {
+        throw Object.assign(
+          new Error(`El año académico debe ser un número entero entre ${LIBRARY_CONFIG.ACADEMIC_YEAR_MIN} y ${currentYear}.`),
+          { status: 400 }
+        );
+      }
+      f.academicYear = yearNum;
+    } else if (updates.academicYear === null) {
+      f.academicYear = null;
+    }
+
+    if (updates.term !== undefined && updates.term !== null && updates.term !== '') {
+      if (!['1C', '2C', 'A'].includes(updates.term)) {
+        throw Object.assign(
+          new Error("El cuatrimestre debe ser '1C', '2C' o 'A'."),
+          { status: 400 }
+        );
+      }
+      f.term = updates.term;
+    } else if (updates.term === null || updates.term === '') {
+      f.term = null;
+    }
     if (updates.term !== undefined) f.term = updates.term || null;
     if (updates.examInstance !== undefined) f.examInstance = updates.examInstance ? sanitizeLibraryText(updates.examInstance, 50) : null;
     if (updates.hasSolution !== undefined) f.hasSolution = Boolean(updates.hasSolution);
@@ -2396,6 +2843,13 @@ export class InMemoryLibraryService implements ILibraryService {
     const f = this.files.get(fileId);
     if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
 
+    if (f.status === 'rejected' || f.status === 'removed') {
+      throw Object.assign(
+        new Error(`No se puede previsualizar el archivo porque su estado es '${f.status}' y su contenido fue purgado.`),
+        { status: 410, code: 'FILE_CONTENT_PURGED' }
+      );
+    }
+
     const previewUrl = await this.r2.getPresignedDownloadUrl({
       key: f.storageKey,
       filename: f.originalFilename,
@@ -2423,21 +2877,7 @@ export class InMemoryLibraryService implements ILibraryService {
     f.updatedAt = new Date();
 
     if (wasPending && !f.uploaderNotifiedAt && f.uploaderUserId) {
-      const u = this.users.get(f.uploaderUserId);
-      const sub = this.subjects.get(f.subjectId);
-      if (u) {
-        void notifyUploaderFileApproved(fileId, {
-          title: f.title,
-          subjectName: sub?.name || 'Materia',
-          uploaderUserId: f.uploaderUserId,
-          userEmail: u.email,
-          userStatus: u.status,
-          notifyLibraryEmail: u.notifyLibraryEmail,
-          uploaderNotifiedAt: f.uploaderNotifiedAt,
-        }).then((sent) => {
-          if (sent) f.uploaderNotifiedAt = new Date();
-        }).catch(() => {});
-      }
+      recordUploaderAction();
     }
 
     return f;
@@ -2454,22 +2894,18 @@ export class InMemoryLibraryService implements ILibraryService {
     f.reviewedAt = new Date();
     f.updatedAt = new Date();
 
+    // 3a: Encolar el borrado del objeto en orphanDeletions (simulador de R2)
+    const orphanId = crypto.randomUUID();
+    this.orphanDeletions.set(orphanId, {
+      id: orphanId,
+      storageKey: f.storageKey,
+      attempts: 0,
+      lastError: null,
+      createdAt: new Date(),
+    });
+
     if (!f.uploaderNotifiedAt && f.uploaderUserId) {
-      const u = this.users.get(f.uploaderUserId);
-      const sub = this.subjects.get(f.subjectId);
-      if (u) {
-        void notifyUploaderFileRejected(fileId, cleanReason, {
-          title: f.title,
-          subjectName: sub?.name || 'Materia',
-          uploaderUserId: f.uploaderUserId,
-          userEmail: u.email,
-          userStatus: u.status,
-          notifyLibraryEmail: u.notifyLibraryEmail,
-          uploaderNotifiedAt: f.uploaderNotifiedAt,
-        }).then((sent) => {
-          if (sent) f.uploaderNotifiedAt = new Date();
-        }).catch(() => {});
-      }
+      recordUploaderAction();
     }
 
     return f;
@@ -2716,6 +3152,11 @@ export function getLibraryService(): ILibraryService {
 
 export function setLibraryServiceForTesting(service: ILibraryService | null): void {
   activeLibraryService = service;
+  if (service && 'getPendingAdminFiles' in (service as any)) {
+    setMailerDataSource(service as any);
+  } else if (!service) {
+    setMailerDataSource(null);
+  }
 }
 
 // Alias para compatibilidad con código preexistente

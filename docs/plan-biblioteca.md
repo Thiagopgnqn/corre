@@ -204,15 +204,18 @@ erDiagram
 | :--- | :--- | :--- |
 | **Tamaño por archivo PDF** | 25 MB | Por subida individual |
 | **Tamaño por archivo Imagen** | 10 MB | Por subida individual (JPG, PNG, WebP) |
-| **Cuota total por estudiante** | 300 MB | Suma de bytes de archivos activos del usuario |
-| **Límite diario de subidas** | 5 archivos / día | Ventana rodante de 24 horas por usuario |
-| **Archivos pendientes simultáneos** | 10 archivos | En cola de moderación por usuario |
+| **Cuota total por estudiante** | 300 MB | Suma de bytes de archivos activos del usuario (`status NOT IN ('removed', 'rejected')`) |
+| **Límite diario de subidas** | **Sin límite diario** | Se eliminó el límite anterior de 5/día para permitir aportes masivos legítimos |
+| **Archivos pendientes simultáneos** | 30 archivos | En cola de moderación por usuario (`status IN ('pending', 'uploading')`) |
+| **Expiración de subidas huérfanas** | 30 minutos | Registros en `uploading` sin completar se limpian proactivamente liberando cupo |
+| **Rate limit en `/uploads/init`** | 120 peticiones / 10 min | Ventana rodante defensiva anti-spam (responde 429 con `Retry-After`) |
+| **Semáforo de validación en Node** | 3 streams concurrentes | Valida streams de R2; en saturación encola (timeout 10 s) y responde 503 con `Retry-After: 2` |
 | **Límite de descargas** | 60 descargas / hora | Ventana de 1 hora por usuario |
 | **Umbral de auto-ocultamiento** | ≥ 3 reportes generales<br>≥ 2 derechos de autor | Pasa archivo a `hidden` hasta revisión admin |
 
 > [!IMPORTANT]
 > **Seguridad ante Concurrencia (Race Conditions)**:
-> Para impedir que múltiples peticiones simultáneas evadan la cuota de 300 MB, el límite de 5 subidas diarias o el tope de 10 pendientes, la verificación y reserva en `/uploads/init` se ejecuta dentro de una transacción de base de datos con bloqueo pesimista sobre la fila del usuario (`SELECT ... FROM users WHERE id = $1 FOR UPDATE`).
+> Para impedir que múltiples peticiones simultáneas evadan la cuota de 300 MB o el tope de 30 pendientes, la verificación y reserva en `/uploads/init` se ejecuta dentro de una transacción de base de datos con bloqueo pesimista sobre la fila del usuario (`SELECT ... FROM users WHERE id = $1 FOR UPDATE`) en Postgres y mediante mutex por usuario en memoria. Asimismo, la carrera de duplicados de hash SHA-256 en `/complete` está protegida para que solo un archivo prospere y los duplicados reciban `409 DUPLICATE_FILE`.
 
 ---
 
@@ -244,10 +247,11 @@ erDiagram
 ### Ajuste 4: Control de Cuotas y Límites bajo Transacción de Base de Datos
 * Las comprobaciones de:
   1. Cuota máxima de 300 MB por estudiante.
-  2. Límite de 5 subidas por día.
-  3. Máximo de 10 archivos pendientes.
+  2. Sin límite diario de subidas (removido límite de 5/día).
+  3. Máximo de 30 archivos pendientes simultáneos (`status IN ('pending', 'uploading')`).
   4. Límite de 60 descargas por hora.
-* Se ejecutan bajo transacciones de Postgres con serialización adecuada para neutralizar condiciones de carrera provocadas por llamadas paralelas.
+* Se ejecutan bajo transacciones de Postgres con serialización adecuada (`SELECT ... FOR UPDATE` en Postgres, mutex por usuario en InMemory) para neutralizar condiciones de carrera provocadas por llamadas paralelas. Subidas que queden en `uploading` por más de 30 minutos se limpian proactivamente sin consumir cupo de pendientes de forma permanente.
+* Las notificaciones por email se procesan agrupadas de forma asíncrona mediante un runner periódico (cada 60 s) con debouncing, evitando el envío de correos atómicos por cada archivo individual en subidas o resoluciones en lote.
 
 ### Ajuste 5: Acción "Suspender al Autor" desde el Panel de Administración
 * Desde la previsualización de un material en la cola de moderación o desde la gestión de reportes, el administrador dispone del botón **"Suspender al autor"**.
@@ -377,15 +381,18 @@ erDiagram
 ## 8. Archivos del Proyecto Involucrados
 
 ### Archivos Creados
-* `server/src/config/library.config.ts`: Constantes de cuotas, límites, tipos MIME y versión de términos.
+* `server/src/config/library.config.ts`: Constantes de cuotas, límites, tipos MIME, versión de términos y configuración anti-spam/debouncing.
 * `server/src/services/r2.service.ts`: Abstracción de cliente Cloudflare R2 y mock en memoria.
 * `server/src/modules/library/library.validator.ts`: Validación de magic numbers, sanitización y escáner streaming de PDFs.
 * `server/src/modules/library/library.service.ts`: Lógica de negocio y transacciones de base de datos.
+* `server/src/modules/library/library.mailer.ts`: Sistema de debouncing de correos consolidado y notificaciones batch.
 * `server/src/modules/library/library.controller.ts`: Controladores HTTP para estudiantes.
 * `server/src/modules/library/library.routes.ts`: Definición de rutas `/api/library`.
 * `server/src/modules/admin/admin.library.controller.ts`: Controladores de moderación y auditoría de la biblioteca.
 * `server/drizzle/0005_library_material.sql`: Migración idempotente Drizzle para tablas `library_*`.
-* `server/test/library.test.ts`: Pruebas de integración y seguridad del backend.
+* `server/scripts/check-upload-concurrency.ts`: Script de prueba de concurrencia de subidas y cuotas para ramas de prueba.
+* `server/scripts/purge-rejected-objects.ts`: Script de mantenimiento y auditoría de purga de binarios en R2 (dry-run por defecto).
+* `server/test/library.test.ts`: Pruebas de integración, concurrencia, correos y seguridad del backend.
 * `src/types/library.ts`: Tipos TypeScript compartidos.
 * `src/api/library.api.ts`: Cliente HTTP de la biblioteca para el frontend.
 * `src/components/library/LibraryHome.tsx`
@@ -395,6 +402,38 @@ erDiagram
 * `src/components/library/LibraryTermsPage.tsx`
 * `src/components/admin/tabs/AdminLibraryTab.tsx`
 * `test/libraryFrontend.test.ts`: Pruebas de interfaz y componentes.
+
+---
+
+## 9. Seguridad, Mantenimiento y Scripts Operativos
+
+### 9.1 Política de Archivos Rechazados y Purga de R2
+- Al rechazar un archivo (`rejectFile`), su estado pasa a `rejected` y se registra el motivo de rechazo (`rejectionReason`).
+- El registro en base de datos **se conserva** para que el alumno pueda consultarlo en su panel de "Mis Aportes" y entender por qué no fue publicado.
+- El objeto binario en R2 se encola en `library_orphan_deletions` para que el worker de fondo lo elimine físicamente con reintentos seguros.
+- Si un administrador o estudiante intenta previsualizar (`getPreviewUrl`) o descargar (`getDownloadUrl`) un archivo rechazado o eliminado, la API devuelve HTTP 410 (`FILE_CONTENT_PURGED` o `FILE_NOT_AVAILABLE`).
+- **Script `server/scripts/purge-rejected-objects.ts`**: Herramienta de auditoría para verificar y encolar retroactivamente objetos rechazados en R2. Por defecto opera en modo **dry-run** seguro (solo lectura de diagnóstico). Requiere explícitamente el flag `--apply` o `--execute` para realizar inserciones.
+
+### 9.2 Regla Anti-Spam de Subidas
+- Se protege la cola de moderación contra usuarios que envíen archivos no válidos reiteradamente.
+- Si un estudiante acumula $\ge$ `LIBRARY_MAX_REJECTIONS_THRESHOLD` (por defecto 20) archivos rechazados en los últimos `LIBRARY_REJECTIONS_WINDOW_DAYS` (por defecto 7 días), cualquier intento de iniciar una nueva subida (`initUpload`) es bloqueado con HTTP 429 (`TOO_MANY_REJECTIONS`).
+- El límite es configurable vía variables de entorno opcionales y puede desactivarse asignando el umbral en 0.
+
+### 9.3 Ciclo de Suspensión de Neon y Timer Event-Driven de Notificaciones
+- Para permitir que Neon Postgres suspenda su cómputo a costo cero tras 5 minutos de inactividad, se eliminó cualquier loop de polling periódico (`setInterval`) en segundo plano.
+- Los correos consolidados se gestionan mediante temporizadores event-driven de disparo único (`setTimeout(...).unref()`) que solo se programan cuando efectivamente hay eventos en cola.
+- Al iniciar el servidor Node en Render, se ejecuta una única verificación no bloqueante de arranque para despachar de inmediato notificaciones que hubieran quedado pendientes previo a un reinicio o suspensión del dyno.
+
+### 9.4 Verificación de Concurrencia en Ramas de Prueba (`check-upload-concurrency.ts`)
+- Script de prueba de concurrencia y estrés de cuotas para ejecutar contra ramas efímeras de Neon.
+- **Medidas de seguridad estrictas**:
+  1. No acepta URLs de conexión por argumentos de línea de comandos ni banderas CLI (evita fugas en historial y `ps`).
+  2. Lee la conexión exclusivamente de la variable de entorno `DATABASE_URL`.
+  3. No imprime contraseñas ni la cadena completa; únicamente muestra host y nombre de base de datos.
+  4. Exige confirmación interactiva por teclado ingresando exactamente la frase `SI-ES-RAMA-DE-PRUEBA`.
+  5. Todos los usuarios y registros generados utilizan el prefijo `test_conc_`.
+  6. La limpieza (`cleanTestArtifacts`) borra única y exclusivamente los registros con prefijo de prueba.
+
 
 ### Archivos Modificados
 * `server/src/config/env.ts`: Validación de variables R2 en producción.

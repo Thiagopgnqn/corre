@@ -650,14 +650,27 @@ export const AdminLibraryTab: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handlePreview(report.fileId)}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        Ver Archivo
-                      </button>
+                      {report.file?.status === 'rejected' || report.file?.status === 'removed' ? (
+                        <button
+                          type="button"
+                          disabled
+                          className="px-3 py-1.5 rounded-xl bg-slate-800/40 text-slate-600 text-xs font-semibold flex items-center gap-1.5 cursor-not-allowed opacity-50"
+                          title="Contenido purgado tras rechazo"
+                          aria-label="Contenido purgado tras rechazo"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver Archivo
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handlePreview(report.fileId)}
+                          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          Ver Archivo
+                        </button>
+                      )}
 
                       <button
                         type="button"
@@ -770,14 +783,26 @@ export const AdminLibraryTab: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => handlePreview(file.id)}
-                      className="p-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center"
-                      title="Previsualizar"
-                    >
-                      <Eye className="w-4 h-4" />
-                    </button>
+                    {file.status === 'rejected' || file.status === 'removed' ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="p-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-slate-800/40 text-slate-600 flex items-center justify-center cursor-not-allowed opacity-50"
+                        title="Contenido purgado tras rechazo"
+                        aria-label="Contenido purgado tras rechazo"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handlePreview(file.id)}
+                        className="p-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center"
+                        title="Previsualizar"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleViewUploader(file)}

@@ -9,6 +9,13 @@ import { DEFAULT_SETTINGS } from '../src/utils/storage';
 import { adminLibraryApi } from '../src/api/library.api';
 import { CONTACT_EMAIL } from '../src/config/brand';
 import { LibraryTermsPage } from '../src/components/library/LibraryTermsPage';
+import {
+  parseFilenameSuggestions,
+  applyDefaultYearTerm,
+  validateBatchItem,
+  UploadQueueCoordinator,
+  type BatchFileItem,
+} from '../src/utils/libraryUploadLogic';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,9 +25,12 @@ console.log(' 🧪 TESTS FRONTEND: BIBLIOTECA, VALIDACIONES, PRIVACIDAD Y STORAG
 console.log('======================================================================\n');
 
 let passed = 0;
-function test(name: string, fn: () => void) {
+async function test(name: string, fn: () => void | Promise<void>) {
   try {
-    fn();
+    const res = fn();
+    if (res instanceof Promise) {
+      await res;
+    }
     console.log(`  ✅ ${name}`);
     passed++;
   } catch (err: any) {
@@ -568,6 +578,542 @@ test('Mail de contacto oficial: LibraryTermsPage renderiza CONTACT_EMAIL (stacka
       `El HTML renderizado de LibraryTermsPage no debe incluir el mail inventado ${forbidden}`
     );
   }
+});
+
+// ---------------------------------------------------------------------
+// 14. Sugerencias Inteligentes desde el Nombre de Archivo (parseFilenameSuggestions)
+// ---------------------------------------------------------------------
+await test('14.1 Parser detecta parcial con año, cuatrimestre, instancia y resolución', () => {
+  const parsed = parseFilenameSuggestions('1P-Parcial-Analisis-Matematico-2023-2C-resuelto.pdf');
+  assert.equal(parsed.kind, 'parcial');
+  assert.equal(parsed.academicYear, 2023);
+  assert.equal(parsed.term, '2C');
+  assert.equal(parsed.examInstance, '1° Parcial');
+  assert.equal(parsed.hasSolution, true);
+  assert.ok(parsed.cleanTitle.toLowerCase().includes('analisis matematico'));
+});
+
+await test('14.2 Parser detecta examen final con año sin solución', () => {
+  const parsed = parseFilenameSuggestions('Final-Fisica-1-2022-diciembre.pdf');
+  assert.equal(parsed.kind, 'final');
+  assert.equal(parsed.academicYear, 2022);
+  assert.equal(parsed.examInstance, 'Examen Final');
+  assert.equal(parsed.hasSolution, false);
+});
+
+await test('14.3 Parser detecta resumen, tp y guía sin año forzado', () => {
+  const res = parseFilenameSuggestions('Resumen-Sistemas-Operativos-U1-U5.pdf');
+  assert.equal(res.kind, 'resumen');
+  assert.equal(res.academicYear, null);
+  assert.equal(res.hasSolution, false);
+
+  const tp = parseFilenameSuggestions('TP3-Algoritmos-2024.pdf');
+  assert.equal(tp.kind, 'tp');
+  assert.equal(tp.academicYear, 2024);
+
+  const guia = parseFilenameSuggestions('Guia-Ejercicios-Algebra.pdf');
+  assert.equal(guia.kind, 'guia');
+  assert.equal(guia.hasSolution, false);
+});
+
+await test('14.4 Parser detecta recuperatorio y normaliza mayúsculas/minúsculas y acentos', () => {
+  const recu = parseFilenameSuggestions('2do_parcial_recu_quimica_2021_1c.pdf');
+  assert.equal(recu.kind, 'parcial');
+  assert.equal(recu.examInstance, 'Recuperatorio');
+  assert.equal(recu.academicYear, 2021);
+  assert.equal(recu.term, '1C');
+
+  const upper = parseFilenameSuggestions('PARCIAL_MATEMATICA_2025_SOLUCION.PDF');
+  assert.equal(upper.kind, 'parcial');
+  assert.equal(upper.academicYear, 2025);
+  assert.equal(upper.hasSolution, true);
+
+  // Ignora años fuera de rango (ej. 1990 o 3050)
+  const oldYear = parseFilenameSuggestions('Parcial-Fisica-1990.pdf');
+  assert.equal(oldYear.academicYear, null);
+});
+
+// ---------------------------------------------------------------------
+// 15. Aplicación de Valores por Defecto (applyDefaultYearTerm)
+// ---------------------------------------------------------------------
+await test('15.1 Default Year/Term solo rellena campos vacíos y no pisa valores existentes', () => {
+  const mockItems: BatchFileItem[] = [
+    {
+      id: '1',
+      file: { name: 'p1.pdf', size: 1000, type: 'application/pdf' } as any,
+      title: 'Parcial 1',
+      kind: 'parcial',
+      academicYear: 2022,
+      term: '2C',
+      examInstance: '1P',
+      hasSolution: false,
+      description: '',
+      status: 'idle',
+      progress: 0,
+      retryCount: 0,
+    },
+    {
+      id: '2',
+      file: { name: 'p2.pdf', size: 1000, type: 'application/pdf' } as any,
+      title: 'Parcial 2',
+      kind: 'parcial',
+      academicYear: null,
+      term: null,
+      examInstance: '2P',
+      hasSolution: false,
+      description: '',
+      status: 'idle',
+      progress: 0,
+      retryCount: 0,
+    },
+    {
+      id: '3',
+      file: { name: 'p3.pdf', size: 1000, type: 'application/pdf' } as any,
+      title: 'Parcial 3',
+      kind: 'parcial',
+      academicYear: 2024,
+      term: null,
+      examInstance: '3P',
+      hasSolution: false,
+      description: '',
+      status: 'idle',
+      progress: 0,
+      retryCount: 0,
+    },
+  ];
+
+  // Aplicar con forceAll = false
+  const updated = applyDefaultYearTerm(mockItems, 2025, '1C', false);
+
+  // Item 1 conserva sus valores
+  assert.equal(updated[0].academicYear, 2022, 'Item 1 debe conservar año 2022');
+  assert.equal(updated[0].term, '2C', 'Item 1 debe conservar cuatrimestre 2C');
+
+  // Item 2 se rellena completamente
+  assert.equal(updated[1].academicYear, 2025, 'Item 2 debe recibir año por defecto 2025');
+  assert.equal(updated[1].term, '1C', 'Item 2 debe recibir cuatrimestre por defecto 1C');
+
+  // Item 3 conserva su año y solo rellena el cuatrimestre vacío
+  assert.equal(updated[2].academicYear, 2024, 'Item 3 debe conservar su año 2024');
+  assert.equal(updated[2].term, '1C', 'Item 3 debe recibir cuatrimestre por defecto 1C');
+});
+
+await test('15.2 Aplicar a todos (forceAll = true) sobrescribe todos los archivos', () => {
+  const mockItems: BatchFileItem[] = [
+    {
+      id: '1',
+      file: { name: 'p1.pdf', size: 1000, type: 'application/pdf' } as any,
+      title: 'Parcial 1',
+      kind: 'parcial',
+      academicYear: 2021,
+      term: '2C',
+      examInstance: '1P',
+      hasSolution: false,
+      description: '',
+      status: 'idle',
+      progress: 0,
+      retryCount: 0,
+    },
+    {
+      id: '2',
+      file: { name: 'p2.pdf', size: 1000, type: 'application/pdf' } as any,
+      title: 'Parcial 2',
+      kind: 'parcial',
+      academicYear: 2023,
+      term: '1C',
+      examInstance: '2P',
+      hasSolution: false,
+      description: '',
+      status: 'idle',
+      progress: 0,
+      retryCount: 0,
+    },
+  ];
+
+  const forced = applyDefaultYearTerm(mockItems, 2026, '2C', true);
+  assert.equal(forced[0].academicYear, 2026);
+  assert.equal(forced[0].term, '2C');
+  assert.equal(forced[1].academicYear, 2026);
+  assert.equal(forced[1].term, '2C');
+});
+
+// ---------------------------------------------------------------------
+// 16. Validación de Lotes Mixtos (validateBatchItem)
+// ---------------------------------------------------------------------
+await test('16.1 Validación individual de lote mixto sin bloquear archivos válidos', () => {
+  const subjectId = 'sub-analisis-1';
+
+  // 1. Archivo válido
+  const validItem = {
+    file: { name: 'parcial.pdf', size: 10 * 1024 * 1024, type: 'application/pdf' },
+    title: 'Primer Parcial 2024',
+    kind: 'parcial' as const,
+    academicYear: 2024,
+    term: '1C' as const,
+  };
+  const resValid = validateBatchItem(validItem, subjectId);
+  assert.equal(resValid.valid, true);
+
+  // 2. Archivo PDF excedido en tamaño (>25 MB)
+  const oversizedPdf = {
+    file: { name: 'pesado.pdf', size: 26 * 1024 * 1024, type: 'application/pdf' },
+    title: 'Apunte Gigante',
+    kind: 'apunte' as const,
+    academicYear: 2024,
+  };
+  const resOversized = validateBatchItem(oversizedPdf, subjectId);
+  assert.equal(resOversized.valid, false);
+  assert.ok(resOversized.error?.includes('25 MB'));
+
+  // 3. Parcial sin año obligatorio
+  const missingYearParcial = {
+    file: { name: 'parcial_sin_ano.pdf', size: 2 * 1024 * 1024, type: 'application/pdf' },
+    title: 'Parcial Sin Año',
+    kind: 'parcial' as const,
+    academicYear: null,
+  };
+  const resMissingYear = validateBatchItem(missingYearParcial, subjectId);
+  assert.equal(resMissingYear.valid, false);
+  assert.ok(resMissingYear.error?.includes('año lectivo es obligatorio'));
+
+  // 4. Archivo sin título
+  const missingTitle = {
+    file: { name: 'final.pdf', size: 2 * 1024 * 1024, type: 'application/pdf' },
+    title: '   ',
+    kind: 'final' as const,
+    academicYear: 2023,
+  };
+  const resMissingTitle = validateBatchItem(missingTitle, subjectId);
+  assert.equal(resMissingTitle.valid, false);
+  assert.ok(resMissingTitle.error?.includes('título'));
+
+  // 5. Imagen válida (<10 MB)
+  const validImg = {
+    file: { name: 'foto.jpg', size: 4 * 1024 * 1024, type: 'image/jpeg' },
+    title: 'Foto Pizarrón',
+    kind: 'apunte' as const,
+    academicYear: null,
+  };
+  const resValidImg = validateBatchItem(validImg, subjectId);
+  assert.equal(resValidImg.valid, true);
+});
+
+// ---------------------------------------------------------------------
+// 17. Coordinador de Subidas Múltiples (UploadQueueCoordinator)
+// ---------------------------------------------------------------------
+await test('17.1 Concurrencia limitada: max 3 PUT simultáneos y max 2 completes simultáneos', async () => {
+  let activePuts = 0;
+  let maxObservedPuts = 0;
+  let activeCompletes = 0;
+  let maxObservedCompletes = 0;
+  const initedFileIds: string[] = [];
+
+  const mockApi = {
+    initUpload: async (payload: any) => {
+      initedFileIds.push(payload.originalFilename);
+      return {
+        success: true,
+        data: {
+          fileId: `fid_${payload.originalFilename}`,
+          uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+          storageKey: `key_${payload.originalFilename}`,
+          maxSizeBytes: 25 * 1024 * 1024,
+          headers: {},
+        },
+      };
+    },
+    uploadDirectToR2: async (
+      _url: string,
+      _file: any,
+      _ct: string,
+      onProgress?: (pct: number) => void
+    ) => {
+      activePuts++;
+      if (activePuts > maxObservedPuts) maxObservedPuts = activePuts;
+      if (onProgress) onProgress(50);
+      await new Promise((r) => setTimeout(r, 20));
+      if (onProgress) onProgress(100);
+      activePuts--;
+    },
+    completeUpload: async () => {
+      activeCompletes++;
+      if (activeCompletes > maxObservedCompletes) maxObservedCompletes = activeCompletes;
+      await new Promise((r) => setTimeout(r, 15));
+      activeCompletes--;
+      return { success: true, data: { status: 'pending' } };
+    },
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    maxConcurrentCompletes: 2,
+    backoffDelays: [0, 0, 0, 0],
+    api: mockApi as any,
+  });
+
+  const batchItems: BatchFileItem[] = [1, 2, 3, 4, 5].map((i) => ({
+    id: `item_${i}`,
+    file: { name: `archivo_${i}.pdf`, size: 1000 * i, type: 'application/pdf' } as any,
+    title: `Material ${i}`,
+    kind: 'apunte',
+    academicYear: null,
+    term: null,
+    examInstance: null,
+    hasSolution: false,
+    description: '',
+    status: 'idle',
+    progress: 0,
+    retryCount: 0,
+  }));
+
+  coordinator.setQueue(batchItems, 'sub-mock');
+  await coordinator.start();
+
+  // Esperar a que la cola termine
+  while (coordinator.isBusy()) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.equal(maxObservedPuts <= 3, true, `Max PUTs concurrentes (${maxObservedPuts}) debe ser <= 3`);
+  assert.equal(
+    maxObservedCompletes <= 2,
+    true,
+    `Max Completes concurrentes (${maxObservedCompletes}) debe ser <= 2`
+  );
+  assert.equal(initedFileIds.length, 5, 'Todos los 5 archivos debieron ser procesados');
+
+  const finalItems = coordinator.getAllItems();
+  for (const it of finalItems) {
+    assert.equal(it.status, 'done', `El archivo ${it.id} debe estar en estado 'done'`);
+    assert.equal(it.progress, 100);
+  }
+});
+
+await test('17.2 Reintento automático con backoff ante 503 y finalización exitosa', async () => {
+  let putAttempts = 0;
+
+  const mockApi = {
+    initUpload: async () => ({
+      success: true,
+      data: {
+        fileId: 'fid_retry',
+        uploadUrl: 'https://r2.mock/retry',
+        storageKey: 'key_retry',
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async () => {
+      putAttempts++;
+      if (putAttempts === 1) {
+        const err: any = new Error('Service Unavailable');
+        err.status = 503;
+        throw err;
+      }
+      // Segundo intento exitoso
+    },
+    completeUpload: async () => ({ success: true, data: {} }),
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 1,
+    maxRetries: 3,
+    backoffDelays: [0, 0, 0], // Inmediato para tests veloces
+    api: mockApi as any,
+  });
+
+  const item: BatchFileItem = {
+    id: 'it_retry',
+    file: { name: 'reintento.pdf', size: 2000, type: 'application/pdf' } as any,
+    title: 'Material con 503 transitorio',
+    kind: 'apunte',
+    academicYear: null,
+    term: null,
+    examInstance: null,
+    hasSolution: false,
+    description: '',
+    status: 'idle',
+    progress: 0,
+    retryCount: 0,
+  };
+
+  coordinator.setQueue([item], 'sub-mock');
+  await coordinator.start();
+
+  while (coordinator.isBusy()) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.equal(putAttempts, 2, 'Debe haber realizado exactamente 2 intentos de PUT');
+  const finalItem = coordinator.getItem('it_retry');
+  assert.equal(finalItem?.status, 'done', 'El ítem debe culminar con status done tras el reintento');
+});
+
+await test('17.3 Cancelación individual llama a DELETE en segundo plano para liberar cuota', async () => {
+  let deletedFileId: string | null = null;
+
+  const mockApi = {
+    initUpload: async () => ({
+      success: true,
+      data: {
+        fileId: 'fid_cancel_123',
+        uploadUrl: 'https://r2.mock/cancel',
+        storageKey: 'key_cancel',
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async (_url: any, _f: any, _ct: any, _p: any, signal?: AbortSignal) => {
+      // Queda colgado esperando abort
+      await new Promise((_, reject) => {
+        if (signal) {
+          signal.addEventListener('abort', () => reject(new Error('Aborted')));
+        }
+      });
+    },
+    completeUpload: async () => ({ success: true, data: {} }),
+    deleteMyUpload: async (fileId: string) => {
+      deletedFileId = fileId;
+      return { success: true, data: {} };
+    },
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 1,
+    api: mockApi as any,
+  });
+
+  const item: BatchFileItem = {
+    id: 'it_cancel',
+    file: { name: 'archivo_a_cancelar.pdf', size: 5000, type: 'application/pdf' } as any,
+    title: 'Archivo cancelable',
+    kind: 'apunte',
+    academicYear: null,
+    term: null,
+    examInstance: null,
+    hasSolution: false,
+    description: '',
+    status: 'idle',
+    progress: 0,
+    retryCount: 0,
+  };
+
+  coordinator.setQueue([item], 'sub-mock');
+  coordinator.start(); // Inicia asíncronamente
+
+  // Esperar a que pase a status uploading (ya obtuvo fileId)
+  await new Promise((r) => setTimeout(r, 20));
+
+  // Cancelamos el ítem
+  await coordinator.cancelItem('it_cancel');
+
+  assert.equal(deletedFileId, 'fid_cancel_123', 'Debe haber llamado a deleteMyUpload con el fileId');
+  const finalItem = coordinator.getItem('it_cancel');
+  assert.equal(finalItem?.status, 'cancelled', 'El ítem debe quedar marcado como cancelled');
+});
+
+await test('17.4 Lote con 3 parciales de años distintos sube cada uno con su respectivo año', async () => {
+  const uploadedYears: number[] = [];
+
+  const mockApi = {
+    initUpload: async (payload: any) => {
+      uploadedYears.push(payload.academicYear);
+      return {
+        success: true,
+        data: {
+          fileId: `fid_${payload.academicYear}`,
+          uploadUrl: `https://r2.mock/${payload.academicYear}`,
+          storageKey: `key_${payload.academicYear}`,
+          maxSizeBytes: 25 * 1024 * 1024,
+          headers: {},
+        },
+      };
+    },
+    uploadDirectToR2: async () => {},
+    completeUpload: async () => ({ success: true, data: {} }),
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    api: mockApi as any,
+  });
+
+  const items: BatchFileItem[] = [2022, 2023, 2024].map((year) => ({
+    id: `item_${year}`,
+    file: { name: `parcial_${year}.pdf`, size: 1000, type: 'application/pdf' } as any,
+    title: `Parcial del año ${year}`,
+    kind: 'parcial',
+    academicYear: year,
+    term: '1C',
+    examInstance: '1° Parcial',
+    hasSolution: true,
+    description: '',
+    status: 'idle',
+    progress: 0,
+    retryCount: 0,
+  }));
+
+  coordinator.setQueue(items, 'sub-mock');
+  await coordinator.start();
+
+  while (coordinator.isBusy()) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  assert.deepEqual(uploadedYears.sort(), [2022, 2023, 2024], 'Cada parcial debe conservar y enviar su año exacto');
+});
+
+// ---------------------------------------------------------------------
+// 18. Panel Admin: Botón Previsualizar Deshabilitado tras Rechazo/Purga
+// ---------------------------------------------------------------------
+await test('18.1 AdminLibraryTab deshabilita preview para archivos rejected o removed con tooltip explicativo', () => {
+  const adminTabPath = path.resolve(__dirname, '../src/components/admin/tabs/AdminLibraryTab.tsx');
+  assert.ok(fs.existsSync(adminTabPath), 'AdminLibraryTab.tsx debe existir');
+  const code = fs.readFileSync(adminTabPath, 'utf8');
+
+  assert.match(
+    code,
+    /file\.status === 'rejected' \|\| file\.status === 'removed'/,
+    'Debe evaluar si el archivo fue rechazado o eliminado'
+  );
+  assert.match(
+    code,
+    /title="Contenido purgado tras rechazo"/,
+    'Debe mostrar tooltip "Contenido purgado tras rechazo"'
+  );
+  assert.match(
+    code,
+    /cursor-not-allowed/,
+    'Debe presentar estilo deshabilitado para evitar clics accidentales'
+  );
+});
+
+// ---------------------------------------------------------------------
+// 19. Accesibilidad y Adaptabilidad Móvil en UploadMaterialModal
+// ---------------------------------------------------------------------
+await test('19.1 UploadMaterialModal soporta múltiples archivos sin capture, inputs >= 16px, chips de años y aria-live', () => {
+  const modalPath = path.resolve(__dirname, '../src/components/library/UploadMaterialModal.tsx');
+  assert.ok(fs.existsSync(modalPath), 'UploadMaterialModal.tsx debe existir');
+  const code = fs.readFileSync(modalPath, 'utf8');
+
+  // 1. Selector múltiple sin atributo capture
+  assert.match(code, /<input[^>]*type="file"[^>]*multiple/, 'El input file debe tener atributo multiple');
+  assert.ok(!code.includes('capture="environment"') && !code.includes('capture="user"'), 'No debe tener atributo capture');
+
+  // 2. Fuentes de inputs >= 16px en móvil (evita auto-zoom en Safari iOS)
+  assert.match(code, /text-base\s+sm:text-xs/, 'Inputs deben usar font-size >= 16px en mobile y 12px en desktop');
+
+  // 3. Touch targets >= 44px
+  assert.match(code, /min-h-\[44px\]/, 'Botones y campos interactivos deben disponer de altura >= 44px');
+
+  // 4. Chips de años recientes
+  assert.match(code, /RECENT_YEARS/, 'Debe disponer de chips rápidos de años recientes');
+
+  // 5. Región aria-live para lecturas accesibles
+  assert.match(code, /aria-live="polite"/, 'Debe incluir aria-live polite para accesibilidad de pantalla');
 });
 
 console.log('\n======================================================================');

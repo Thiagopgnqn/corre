@@ -1,7 +1,7 @@
 import { env } from '../../config/env.js';
 import { db } from '../../db/index.js';
 import { users, userSettings, libraryFiles, subjects } from '../../db/schema.js';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, sql, isNull, isNotNull, inArray, asc } from 'drizzle-orm';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { LIBRARY_CONFIG } from '../../config/library.config.js';
 
@@ -30,7 +30,7 @@ export function sanitizeSubject(subject: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Control de Tasa (Rate Limiting) y Resumen Horario en Memoria
+// 2. Control de Tasa (Rate Limiting) y Resumen Horario en Memoria (Safety Caps)
 // ---------------------------------------------------------------------------
 
 interface HourlyAdminTracker {
@@ -73,15 +73,13 @@ export function clearMockSentNotifications(): void {
   adminHourlyTracker.count = 0;
   adminHourlyTracker.lastSummarySentAt = 0;
   userDailyTracker.count = 0;
+  resetMailerTimers();
 }
 
 // ---------------------------------------------------------------------------
 // 3. Destinatarios de Administración
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Destinatarios Mock para Tests
-// ---------------------------------------------------------------------------
 let mockAdminRecipients: string[] | null = null;
 
 export function setMockAdminRecipients(emails: string[] | null): void {
@@ -129,17 +127,6 @@ export async function getAdminNotificationRecipients(): Promise<string[]> {
 // 4. Plantillas HTML y Texto Plano
 // ---------------------------------------------------------------------------
 
-const STACK_BRAND = {
-  name: 'Stack',
-  colorIndigo: '#4f46e5',
-  colorDark: '#171A52',
-  colorAmber: '#f59e0b',
-  colorBg: '#0f172a',
-  colorCard: '#1e293b',
-  colorText: '#f8fafc',
-  colorMuted: '#94a3b8',
-};
-
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;
@@ -147,8 +134,20 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+export interface LibraryFileNotificationItem {
+  id: string;
+  title: string;
+  subjectName: string;
+  kind: string;
+  academicYear?: number | null;
+  term?: string | null;
+  sizeBytes: number;
+  mimeType: string;
+  createdAt: Date;
+}
+
 /**
- * Template (a): Aviso al Administrador sobre nuevo material para revisar.
+ * Template (a): Aviso al Administrador sobre nuevo material para revisar (individual).
  * REGLA ESTRICTA DE PRIVACIDAD: Nunca incluye el email ni la identidad del autor.
  */
 export function buildAdminNewMaterialEmail(data: {
@@ -160,15 +159,19 @@ export function buildAdminNewMaterialEmail(data: {
   sizeBytes: number;
   mimeType: string;
   createdAt: Date;
-  pendingCount?: number;
 }): { subject: string; html: string; text: string } {
   const safeTitle = escapeHtml(data.title);
   const safeSubject = escapeHtml(data.subjectName);
   const safeKind = escapeHtml(data.kind.toUpperCase());
-  const yearTerm = [data.academicYear, data.term].filter(Boolean).join(' - ');
-  const safeYearTerm = yearTerm ? escapeHtml(yearTerm) : 'No especificado';
+  const yearTermParts: string[] = [];
+  if (data.academicYear) yearTermParts.push(String(data.academicYear));
+  if (data.term) yearTermParts.push(data.term);
+  const safeYearTerm = yearTermParts.length > 0 ? escapeHtml(yearTermParts.join(' - ')) : 'No especificado';
   const sizeFormatted = formatBytes(data.sizeBytes);
-  const dateFormatted = data.createdAt.toLocaleString('es-AR', { timeZone: 'America/Argentina/Cordoba' });
+  const dateFormatted = data.createdAt.toLocaleString('es-AR', {
+    timeZone: 'America/Argentina/Cordoba',
+  });
+
   const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
   const adminUrl = `${appOrigin}/#admin`;
 
@@ -184,7 +187,7 @@ Detalles del archivo:
 - Título: ${data.title}
 - Materia: ${data.subjectName}
 - Tipo: ${data.kind.toUpperCase()}
-- Año / Cuatrimestre: ${yearTerm || 'No especificado'}
+- Año / Cuatrimestre: ${safeYearTerm}
 - Tamaño: ${sizeFormatted}
 - Formato: ${data.mimeType}
 - Fecha y hora: ${dateFormatted}
@@ -275,29 +278,84 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
 }
 
 /**
- * Template (a-resumen): Resumen horario cuando se supera el tope de subidas.
+ * Template (a-resumen / lote): Resumen consolidado para administradores con hasta 15 archivos.
  */
-export function buildAdminHourlySummaryEmail(data: {
-  pendingCount: number;
-  newCountInHour: number;
-}): { subject: string; html: string; text: string } {
-  const subject = sanitizeSubject(`Nuevo material para revisar en Stack (${data.pendingCount} pendientes)`);
+export function buildAdminBatchSummaryEmail(items: LibraryFileNotificationItem[]): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const count = items.length;
+  if (count === 1) {
+    const item = items[0];
+    return buildAdminNewMaterialEmail({
+      title: item.title,
+      subjectName: item.subjectName,
+      kind: item.kind,
+      academicYear: item.academicYear,
+      term: item.term,
+      sizeBytes: item.sizeBytes,
+      mimeType: item.mimeType,
+      createdAt: item.createdAt,
+    });
+  }
+
+  const subject = sanitizeSubject(`[Stack] ${count} nuevos materiales para revisar en la Biblioteca`);
   const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
   const adminUrl = `${appOrigin}/#admin`;
 
+  const displayedItems = items.slice(0, 15);
+  const remainingCount = count - displayedItems.length;
+
+  const rowsText = displayedItems
+    .map(
+      (it, idx) =>
+        `${idx + 1}. "${it.title}" - Materia: ${it.subjectName} (${it.kind.toUpperCase()}${
+          it.academicYear ? ` ${it.academicYear}` : ''
+        }${it.term ? `-${it.term}` : ''}) [${formatBytes(it.sizeBytes)}]`
+    )
+    .join('\n');
+
   const text = `
-Resumen de Moderación - Stack
+Nuevos materiales pendientes de moderación - Stack
 ==================================================
 
-Se recibieron ${data.newCountInHour} nuevos archivos para moderar en la última hora.
-Actualmente hay un total de ${data.pendingCount} materiales pendientes de revisión.
+Se cargaron ${count} nuevos archivos en la Biblioteca y se encuentran en espera de revisión:
 
-Revisá la cola de moderación en el panel de administración:
+${rowsText}
+${remainingCount > 0 ? `\n... y ${remainingCount} materiales más en la cola de moderación.` : ''}
+
+Revisá los archivos y aprobá o rechazá desde el panel de administración:
 ${adminUrl}
+
+(La identidad de los estudiantes autores se mantiene confidencial y solo es consultable de forma auditada desde el panel).
 
 --
 Stack - Plataforma Colaborativa de Ingeniería en Sistemas
 `.trim();
+
+  const rowsHtml = displayedItems
+    .map(
+      (it) => `
+    <tr>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 13px; font-weight: 600; color: #ffffff;">
+        ${escapeHtml(it.title)}
+      </td>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #818cf8;">
+        ${escapeHtml(it.subjectName)}
+      </td>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 12px; color: #94a3b8; text-transform: uppercase;">
+        ${escapeHtml(it.kind)}
+      </td>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 12px; color: #cbd5e1;">
+        ${it.academicYear || '-'}${it.term ? ` (${it.term})` : ''}
+      </td>
+      <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 12px; color: #94a3b8;">
+        ${formatBytes(it.sizeBytes)}
+      </td>
+    </tr>`
+    )
+    .join('');
 
   const html = `
 <!DOCTYPE html>
@@ -307,19 +365,53 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
   <title>${escapeHtml(subject)}</title>
 </head>
 <body style="margin: 0; padding: 24px 12px; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #f8fafc;">
-  <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 16px; padding: 28px;">
+  <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width: 620px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 16px; overflow: hidden;">
     <tr>
-      <td>
-        <h1 style="font-size: 18px; color: #ffffff; margin-top: 0;">Resumen horario: ${data.pendingCount} archivos pendientes</h1>
-        <p style="font-size: 14px; color: #cbd5e1; line-height: 1.5;">
-          Se registraron ${data.newCountInHour} nuevas subidas en la última hora que superaron el límite de avisos individuales.
+      <td style="padding: 24px 28px; background: linear-gradient(135deg, #171A52 0%, #1e1b4b 100%); border-bottom: 1px solid #312e81;">
+        <span style="font-size: 20px; font-weight: 800; color: #ffffff;">Stack</span>
+        <span style="margin-left: 8px; font-size: 11px; font-weight: 700; background-color: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 2px 8px; border-radius: 9999px;">Moderación • Lote</span>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 28px;">
+        <h1 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #ffffff;">${count} nuevos materiales pendientes de revisión</h1>
+        <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.5; color: #cbd5e1;">
+          Se completó la carga de ${count} nuevos recursos en la Biblioteca que requieren revisión y moderación antes de su publicación:
         </p>
-        <p style="font-size: 13px; color: #94a3b8;">
-          Ingresá a la cola de moderación para revisarlos:
+
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0b0f19; border: 1px solid #1f2937; border-radius: 12px; margin-bottom: 20px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #1f2937; background-color: #161f30;">
+              <th style="padding: 8px 14px; text-align: left; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Título</th>
+              <th style="padding: 8px 14px; text-align: left; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Materia</th>
+              <th style="padding: 8px 14px; text-align: left; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Tipo</th>
+              <th style="padding: 8px 14px; text-align: left; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Año</th>
+              <th style="padding: 8px 14px; text-align: left; font-size: 11px; color: #94a3b8; text-transform: uppercase;">Tamaño</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+
+        ${remainingCount > 0 ? `<p style="margin: 0 0 20px 0; font-size: 13px; font-weight: 600; color: #fbbf24;">... y ${remainingCount} materiales más en la cola de moderación.</p>` : ''}
+
+        <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
+          Revisá la previsualización y aprobá o rechazá desde la cola de moderación:
         </p>
-        <p style="font-family: monospace; background: #0b0f19; padding: 12px; border-radius: 8px; border: 1px solid #1f2937; color: #a5b4fc;">
+
+        <p style="margin: 0 0 24px 0; font-size: 13px; word-break: break-all; background-color: #0b0f19; padding: 12px 16px; border-radius: 8px; border: 1px solid #1f2937; font-family: monospace; color: #a5b4fc;">
           ${adminUrl}
         </p>
+
+        <div style="background-color: rgba(30, 27, 75, 0.4); border-left: 3px solid #6366f1; padding: 10px 14px; border-radius: 4px; font-size: 12px; color: #a5b4fc;">
+          <strong>Privacidad estudiantil:</strong> Los datos de los autores se mantienen confidenciales y no se incluyen en este correo. Podés consultar las identidades de forma auditada desde el panel si fuera necesario.
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 16px 28px; background-color: #0b0f19; border-top: 1px solid #1f2937; font-size: 11px; color: #64748b; text-align: center;">
+        Stack • Plataforma colaborativa para Ingeniería en Sistemas de Información (UTN FRC)
       </td>
     </tr>
   </table>
@@ -331,7 +423,7 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
 }
 
 /**
- * Template (b): Aviso de aprobación al estudiante uploader.
+ * Template (b): Aviso de aprobación al estudiante uploader (individual).
  */
 export function buildUploaderApprovedEmail(data: {
   title: string;
@@ -421,7 +513,113 @@ Stack - Tu carrera, materia a materia
 }
 
 /**
- * Template (c): Aviso de rechazo al estudiante uploader con el motivo correspondiente.
+ * Template (b-lote): Aviso de aprobación al estudiante para múltiples aportes.
+ */
+export function buildUploaderGroupedApprovedEmail(
+  items: Array<{ title: string; subjectName: string }>
+): { subject: string; html: string; text: string } {
+  if (items.length === 1) {
+    return buildUploaderApprovedEmail(items[0]);
+  }
+
+  const count = items.length;
+  const subject = sanitizeSubject(`Tus ${count} aportes fueron aprobados en Stack`);
+  const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
+  const libraryUrl = `${appOrigin}/#library`;
+
+  const displayed = items.slice(0, 15);
+  const remaining = count - displayed.length;
+
+  const rowsText = displayed.map((it, idx) => `${idx + 1}. ${it.title} (${it.subjectName})`).join('\n');
+  const text = `
+¡Tus materiales ya están disponibles en Stack!
+==================================================
+
+Hola:
+
+El equipo de administración revisó y aprobó ${count} materiales que compartiste en la Biblioteca:
+
+${rowsText}
+${remaining > 0 ? `\n... y ${remaining} materiales más.` : ''}
+
+Ya se encuentran publicados en el catálogo público para que todos los estudiantes puedan consultarlos.
+
+Podés ingresar a la Biblioteca en cualquier momento:
+${libraryUrl}
+
+¡Muchas gracias por colaborar con la comunidad!
+
+--
+Stack - Tu carrera, materia a materia
+`.trim();
+
+  const rowsHtml = displayed
+    .map(
+      (it) => `
+    <li style="margin-bottom: 8px;">
+      <strong style="color: #ffffff;">${escapeHtml(it.title)}</strong>
+      <span style="color: #818cf8;"> — ${escapeHtml(it.subjectName)}</span>
+    </li>`
+    )
+    .join('');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #f8fafc;">
+  <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 16px; overflow: hidden;">
+    <tr>
+      <td style="padding: 24px 28px; background: linear-gradient(135deg, #171A52 0%, #1e1b4b 100%); border-bottom: 1px solid #312e81;">
+        <span style="font-size: 20px; font-weight: 800; color: #ffffff;">Stack</span>
+        <span style="margin-left: 8px; font-size: 11px; font-weight: 700; background-color: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 9999px;">Aportes Aprobados</span>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 28px;">
+        <h1 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #ffffff;">¡Tus materiales ya están disponibles para toda la comunidad!</h1>
+        <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+          Buenas noticias: el equipo de moderación revisó y aprobó ${count} materiales que compartiste en la Biblioteca de Stack:
+        </p>
+
+        <div style="background-color: #0b0f19; border: 1px solid #1f2937; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
+          <ul style="margin: 0; padding-left: 20px; color: #cbd5e1; font-size: 13.5px;">
+            ${rowsHtml}
+          </ul>
+          ${remaining > 0 ? `<p style="margin: 12px 0 0 0; font-size: 12px; font-weight: 600; color: #34d399;">... y ${remaining} materiales más.</p>` : ''}
+        </div>
+
+        <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
+          Tus aportes ayudan a cientos de estudiantes a preparar sus exámenes y avanzar en la carrera. Podés ver tus materiales publicados aquí:
+        </p>
+
+        <p style="margin: 0 0 24px 0; font-size: 13px; word-break: break-all; background-color: #0b0f19; padding: 12px 16px; border-radius: 8px; border: 1px solid #1f2937; font-family: monospace; color: #a5b4fc;">
+          ${libraryUrl}
+        </p>
+
+        <p style="margin: 0; font-size: 13px; color: #cbd5e1; font-weight: 600;">
+          ¡Muchas gracias por colaborar con Stack!
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 16px 28px; background-color: #0b0f19; border-top: 1px solid #1f2937; font-size: 11px; color: #64748b; text-align: center;">
+        Podés desactivar estas notificaciones desde el Menú de tu Cuenta en la plataforma.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  return { subject, html, text };
+}
+
+/**
+ * Template (c): Aviso de rechazo al estudiante uploader (individual).
  */
 export function buildUploaderRejectedEmail(data: {
   title: string;
@@ -451,7 +649,7 @@ Durante la revisión, el equipo de administración indicó el siguiente motivo p
 Motivo:
 ${data.rejectionReason}
 
-Podés corregir las observaciones (por ejemplo, asegurarte de que sea legible, que corresponda a la materia adecuada o que no contenga información privada) y volver a subirlo desde la sección "Mis Aportes":
+Podés corregir las observaciones y volver a subirlo desde la sección "Mis Aportes":
 ${uploadsUrl}
 
 Agradecemos mucho tu predisposición para colaborar con la comunidad.
@@ -514,8 +712,120 @@ Stack - Tu carrera, materia a materia
   return { subject, html, text };
 }
 
+/**
+ * Template (c-lote): Aviso de rechazo al estudiante para múltiples aportes.
+ */
+export function buildUploaderGroupedRejectedEmail(
+  items: Array<{ title: string; subjectName: string; rejectionReason: string }>
+): { subject: string; html: string; text: string } {
+  if (items.length === 1) {
+    return buildUploaderRejectedEmail(items[0]);
+  }
+
+  const count = items.length;
+  const subject = sanitizeSubject(`Observaciones sobre tus ${count} aportes en Stack`);
+  const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
+  const uploadsUrl = `${appOrigin}/#library/my-uploads`;
+
+  const displayed = items.slice(0, 15);
+  const remaining = count - displayed.length;
+
+  const rowsText = displayed
+    .map(
+      (it, idx) =>
+        `${idx + 1}. ${it.title} (${it.subjectName})\n   Motivo: ${it.rejectionReason}`
+    )
+    .join('\n\n');
+
+  const text = `
+Tus aportes necesitan cambios en Stack
+==================================================
+
+Hola:
+
+Te escribimos en relación a los ${count} materiales que subiste a la Biblioteca de Stack:
+
+${rowsText}
+${remaining > 0 ? `\n... y ${remaining} materiales más.` : ''}
+
+Podés corregir las observaciones y volver a subirlos desde la sección "Mis Aportes":
+${uploadsUrl}
+
+Agradecemos mucho tu predisposición para colaborar con la comunidad.
+
+--
+Stack - Tu carrera, materia a materia
+`.trim();
+
+  const rowsHtml = displayed
+    .map(
+      (it) => `
+    <div style="background-color: #0b0f19; border: 1px solid #1f2937; border-left: 3px solid #f43f5e; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
+      <p style="margin: 0 0 4px 0; font-size: 13.5px; font-weight: 700; color: #ffffff;">
+        ${escapeHtml(it.title)} <span style="font-size: 12px; font-weight: normal; color: #818cf8;">(${escapeHtml(it.subjectName)})</span>
+      </p>
+      <p style="margin: 0; font-size: 12.5px; color: #fda4af;">
+        <strong>Motivo:</strong> ${escapeHtml(it.rejectionReason)}
+      </p>
+    </div>`
+    )
+    .join('');
+
+  const html = `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin: 0; padding: 24px 12px; background-color: #0b0f19; font-family: -apple-system, BlinkMacSystemFont, sans-serif; color: #f8fafc;">
+  <table align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width: 580px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 16px; overflow: hidden;">
+    <tr>
+      <td style="padding: 24px 28px; background: linear-gradient(135deg, #171A52 0%, #1e1b4b 100%); border-bottom: 1px solid #312e81;">
+        <span style="font-size: 20px; font-weight: 800; color: #ffffff;">Stack</span>
+        <span style="margin-left: 8px; font-size: 11px; font-weight: 700; background-color: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); padding: 2px 8px; border-radius: 9999px;">Revisión de Aportes</span>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 28px;">
+        <h1 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #ffffff;">Tus materiales no pudieron ser publicados en su estado actual</h1>
+        <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
+          Revisamos ${count} archivos que aportaste. Para mantener la calidad y el cumplimiento de las normas de la Biblioteca, se requiere atender los siguientes motivos:
+        </p>
+
+        <div style="margin-bottom: 24px;">
+          ${rowsHtml}
+          ${remaining > 0 ? `<p style="margin: 12px 0 0 0; font-size: 12px; font-weight: 600; color: #fda4af;">... y ${remaining} materiales más con observaciones.</p>` : ''}
+        </div>
+
+        <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
+          Podés realizar las correcciones necesarias y cargar nuevamente los archivos desde la pestaña <strong>&ldquo;Mis Aportes&rdquo;</strong>:
+        </p>
+
+        <p style="margin: 0 0 24px 0; font-size: 13px; word-break: break-all; background-color: #0b0f19; padding: 12px 16px; border-radius: 8px; border: 1px solid #1f2937; font-family: monospace; color: #a5b4fc;">
+          ${uploadsUrl}
+        </p>
+
+        <p style="margin: 0; font-size: 13px; color: #cbd5e1;">
+          ¡Muchas gracias por tu tiempo y predisposición para sumar a la comunidad!
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding: 16px 28px; background-color: #0b0f19; border-top: 1px solid #1f2937; font-size: 11px; color: #64748b; text-align: center;">
+        Podés desactivar estas notificaciones desde el Menú de tu Cuenta en la plataforma.
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+`.trim();
+
+  return { subject, html, text };
+}
+
 // ---------------------------------------------------------------------------
-// 5. Función de Reintentos con Espera Creciente (Backoff Exponencial)
+// 5. Reintentos y Fuente de Datos Desacoplada (DB vs InMemory)
 // ---------------------------------------------------------------------------
 
 async function sleep(ms: number): Promise<void> {
@@ -548,8 +858,259 @@ export async function sendWithRetry(
   return { success: false, error: lastError };
 }
 
+export interface PendingUploaderFileItem {
+  fileId: string;
+  uploaderUserId: string;
+  userEmail: string;
+  userStatus: string;
+  notifyLibraryEmail: boolean;
+  status: 'approved' | 'rejected';
+  title: string;
+  subjectName: string;
+  rejectionReason?: string | null;
+}
+
+export interface IMailerDataSource {
+  getPendingAdminFiles(): Promise<LibraryFileNotificationItem[]>;
+  markAdminNotified(fileIds: string[]): Promise<void>;
+  getPendingUploaderFiles(): Promise<PendingUploaderFileItem[]>;
+  markUploaderNotified(fileIds: string[]): Promise<void>;
+}
+
+let mailerDataSource: IMailerDataSource | null = null;
+
+export function setMailerDataSource(source: IMailerDataSource | null): void {
+  mailerDataSource = source;
+}
+
 // ---------------------------------------------------------------------------
-// 6. Despachadores de Notificaciones (Lógica de Negocio y Exclusiones)
+// 6. Lógica de Agrupación y Procesamiento de Lotes (Debounced & Cron)
+// ---------------------------------------------------------------------------
+
+let lastAdminUploadTimestamp = 0;
+let adminBatchDebounceTimer: NodeJS.Timeout | null = null;
+let lastUploaderActionTimestamp = 0;
+let uploaderBatchDebounceTimer: NodeJS.Timeout | null = null;
+
+export function resetMailerTimers(): void {
+  if (adminBatchDebounceTimer) {
+    clearTimeout(adminBatchDebounceTimer);
+    adminBatchDebounceTimer = null;
+  }
+  if (uploaderBatchDebounceTimer) {
+    clearTimeout(uploaderBatchDebounceTimer);
+    uploaderBatchDebounceTimer = null;
+  }
+  lastAdminUploadTimestamp = 0;
+  lastUploaderActionTimestamp = 0;
+  adminHourlyTracker.count = 0;
+  adminHourlyTracker.lastSummarySentAt = 0;
+  userDailyTracker.count = 0;
+}
+
+export function recordUploadCompleted(): void {
+  lastAdminUploadTimestamp = Date.now();
+  const cooldownMs = LIBRARY_CONFIG.ADMIN_NOTIFY_COOLDOWN_SECONDS * 1000;
+  if (cooldownMs === 0) {
+    void processPendingAdminNotifications({ force: true }).catch(() => {});
+  } else {
+    if (adminBatchDebounceTimer) clearTimeout(adminBatchDebounceTimer);
+    adminBatchDebounceTimer = setTimeout(() => {
+      void processPendingAdminNotifications({ force: true }).catch(() => {});
+    }, cooldownMs);
+    if (typeof adminBatchDebounceTimer.unref === 'function') {
+      adminBatchDebounceTimer.unref();
+    }
+  }
+}
+
+export function recordUploaderAction(): void {
+  lastUploaderActionTimestamp = Date.now();
+  const cooldownMs = LIBRARY_CONFIG.ADMIN_NOTIFY_COOLDOWN_SECONDS * 1000;
+  if (cooldownMs === 0) {
+    void processPendingUploaderNotifications({ force: true }).catch(() => {});
+  } else {
+    if (uploaderBatchDebounceTimer) clearTimeout(uploaderBatchDebounceTimer);
+    uploaderBatchDebounceTimer = setTimeout(() => {
+      void processPendingUploaderNotifications({ force: true }).catch(() => {});
+    }, cooldownMs);
+    if (typeof uploaderBatchDebounceTimer.unref === 'function') {
+      uploaderBatchDebounceTimer.unref();
+    }
+  }
+}
+
+/**
+ * Procesa todos los archivos en 'pending' con admin_notified_at IS NULL y envía
+ * un único email resumen al administrador.
+ */
+export async function processPendingAdminNotifications(options?: {
+  force?: boolean;
+}): Promise<boolean> {
+  if (!mailerDataSource) return false;
+
+  const now = Date.now();
+  const cooldownMs = LIBRARY_CONFIG.ADMIN_NOTIFY_COOLDOWN_SECONDS * 1000;
+  if (!options?.force && cooldownMs > 0 && now - lastAdminUploadTimestamp < cooldownMs) {
+    return false;
+  }
+
+  try {
+    const items = await mailerDataSource.getPendingAdminFiles();
+    if (!items || items.length === 0) return false;
+
+    // Safety cap horario
+    const oneHour = 60 * 60 * 1000;
+    if (now - adminHourlyTracker.windowStart > oneHour) {
+      adminHourlyTracker.windowStart = now;
+      adminHourlyTracker.count = 0;
+    }
+    if (!options?.force && adminHourlyTracker.count >= LIBRARY_CONFIG.NOTIFY_ADMIN_MAX_PER_HOUR) {
+      console.warn('[LibraryMailer] Safety cap alcanzado para avisos a administradores.');
+      return false;
+    }
+
+    const recipients = await getAdminNotificationRecipients();
+    if (recipients.length === 0) {
+      console.warn('[LibraryMailer] No hay destinatarios de administración configurados.');
+      return false;
+    }
+
+    const emailContent = buildAdminBatchSummaryEmail(items);
+    const result = await sendWithRetry(async () => {
+      return defaultMailer.sendEmail({
+        to: recipients,
+        subject: emailContent.subject,
+        html: emailContent.html,
+        text: emailContent.text,
+      });
+    }, 3);
+
+    mockSentNotifications.push({
+      type: items.length > 1 ? 'admin_summary' : 'admin_pending',
+      to: recipients,
+      subject: emailContent.subject,
+      html: emailContent.html,
+      text: emailContent.text,
+      fileId: items[0]?.id,
+      timestamp: new Date(),
+    });
+
+    if (result.success) {
+      adminHourlyTracker.count++;
+      const ids = items.map((f) => f.id);
+      await mailerDataSource.markAdminNotified(ids);
+      return true;
+    } else {
+      console.warn('[LibraryMailer] Falló el envío de resumen admin. Queda sin marcar para el próximo ciclo.');
+      return false;
+    }
+  } catch (err: any) {
+    console.error('[LibraryMailer] Error procesando notificaciones pendientes a admin:', err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Procesa todos los archivos aprobados o rechazados con uploader_notified_at IS NULL,
+ * agrupándolos por estudiante y por resultado.
+ */
+export async function processPendingUploaderNotifications(options?: {
+  force?: boolean;
+}): Promise<boolean> {
+  if (!mailerDataSource) return false;
+
+  try {
+    const items = await mailerDataSource.getPendingUploaderFiles();
+    if (!items || items.length === 0) return false;
+
+    // Agrupar por uploaderUserId y por status ('approved' | 'rejected')
+    const groups = new Map<string, PendingUploaderFileItem[]>();
+    for (const item of items) {
+      const key = `${item.uploaderUserId}:${item.status}`;
+      const list = groups.get(key) || [];
+      list.push(item);
+      groups.set(key, list);
+    }
+
+    let anySent = false;
+    const today = new Date().setUTCHours(0, 0, 0, 0);
+    if (userDailyTracker.dayStart !== today) {
+      userDailyTracker.dayStart = today;
+      userDailyTracker.count = 0;
+    }
+
+    for (const group of groups.values()) {
+      if (group.length === 0) continue;
+      const first = group[0];
+      const fileIds = group.map((g) => g.fileId);
+
+      // Exclusiones: suspendido o notifyLibraryEmail false
+      if (first.userStatus === 'suspended' || first.notifyLibraryEmail === false) {
+        await mailerDataSource.markUploaderNotified(fileIds);
+        continue;
+      }
+
+      // Safety cap diario
+      if (!options?.force && userDailyTracker.count >= LIBRARY_CONFIG.NOTIFY_USERS_MAX_PER_DAY) {
+        console.warn('[LibraryMailer] Safety cap diario de usuarios alcanzado.');
+        continue;
+      }
+
+      let emailContent: { subject: string; html: string; text: string };
+      if (first.status === 'approved') {
+        emailContent = buildUploaderGroupedApprovedEmail(
+          group.map((g) => ({ title: g.title, subjectName: g.subjectName }))
+        );
+      } else {
+        emailContent = buildUploaderGroupedRejectedEmail(
+          group.map((g) => ({
+            title: g.title,
+            subjectName: g.subjectName,
+            rejectionReason: g.rejectionReason || 'El archivo no cumple con las pautas de publicación.',
+          }))
+        );
+      }
+
+      const result = await sendWithRetry(async () => {
+        return defaultMailer.sendEmail({
+          to: first.userEmail,
+          subject: emailContent.subject,
+          html: emailContent.html,
+          text: emailContent.text,
+        });
+      }, 3);
+
+      mockSentNotifications.push({
+        type: first.status === 'approved' ? 'uploader_approved' : 'uploader_rejected',
+        to: [first.userEmail],
+        subject: emailContent.subject,
+        html: emailContent.html,
+        text: emailContent.text,
+        fileId: first.fileId,
+        timestamp: new Date(),
+      });
+
+      if (result.success) {
+        userDailyTracker.count++;
+        await mailerDataSource.markUploaderNotified(fileIds);
+        anySent = true;
+      } else {
+        console.warn(
+          `[LibraryMailer] Falló aviso a ${first.userEmail}. Queda sin marcar para reintentar en el próximo ciclo.`
+        );
+      }
+    }
+
+    return anySent;
+  } catch (err: any) {
+    console.error('[LibraryMailer] Error procesando notificaciones pendientes a usuarios:', err?.message || err);
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7. Funciones Wrapper de Compatibilidad
 // ---------------------------------------------------------------------------
 
 export interface InMemoryAdminPendingData {
@@ -576,141 +1137,61 @@ export interface InMemoryUploaderData {
 }
 
 /**
- * (a) Notifica a los administradores que hay nuevo material en estado 'pending'.
- * Aplica tope horario de 10 mails/hora; al superarlo, envía un mail resumen agrupado.
+ * Notifica a administradores. Si hay mailerDataSource, registra el evento y dispara
+ * la consolidación.
  */
 export async function notifyAdminNewPendingFile(
   fileId: string,
   inMemoryData?: InMemoryAdminPendingData
 ): Promise<boolean> {
-  try {
-    let title: string;
-    let subjectName: string;
-    let kind: any;
-    let academicYear: number | null | undefined;
-    let term: any;
-    let sizeBytes: number;
-    let mimeType: string;
-    let createdAt: Date;
+  recordUploadCompleted();
+  if (mailerDataSource) {
+    return processPendingAdminNotifications({ force: true });
+  }
 
-    if (inMemoryData) {
-      if (inMemoryData.adminNotifiedAt) return false;
-      title = inMemoryData.title;
-      subjectName = inMemoryData.subjectName || 'Materia';
-      kind = inMemoryData.kind;
-      academicYear = inMemoryData.academicYear;
-      term = inMemoryData.term;
-      sizeBytes = inMemoryData.sizeBytes;
-      mimeType = inMemoryData.mimeType;
-      createdAt = inMemoryData.createdAt;
-    } else {
-      // 1. Obtener datos del archivo de PostgreSQL
-      const [file] = await db
-        .select({
-          id: libraryFiles.id,
-          title: libraryFiles.title,
-          kind: libraryFiles.kind,
-          academicYear: libraryFiles.academicYear,
-          term: libraryFiles.term,
-          sizeBytes: libraryFiles.sizeBytes,
-          mimeType: libraryFiles.mimeType,
-          status: libraryFiles.status,
-          createdAt: libraryFiles.createdAt,
-          adminNotifiedAt: libraryFiles.adminNotifiedAt,
-          subjectId: libraryFiles.subjectId,
-        })
+  // Fallback si no se configuró mailerDataSource
+  try {
+    const recipients = await getAdminNotificationRecipients();
+    if (recipients.length === 0) return false;
+
+    let title = inMemoryData?.title || 'Material';
+    let subjectName = inMemoryData?.subjectName || 'Materia';
+    let kind = inMemoryData?.kind || 'parcial';
+    let academicYear = inMemoryData?.academicYear;
+    let term = inMemoryData?.term;
+    let sizeBytes = inMemoryData?.sizeBytes || 0;
+    let mimeType = inMemoryData?.mimeType || 'application/pdf';
+    let createdAt = inMemoryData?.createdAt || new Date();
+
+    if (!inMemoryData) {
+      const [f] = await db
+        .select()
         .from(libraryFiles)
         .where(eq(libraryFiles.id, fileId))
         .limit(1);
-
-      if (!file || file.status !== 'pending' || file.adminNotifiedAt) {
-        return false;
-      }
-
-      // 2. Obtener nombre de la materia
-      const [sub] = await db
-        .select({ name: subjects.name })
-        .from(subjects)
-        .where(eq(subjects.id, file.subjectId))
-        .limit(1);
-
-      title = file.title;
-      subjectName = sub?.name || 'Materia';
-      kind = file.kind;
-      academicYear = file.academicYear;
-      term = file.term;
-      sizeBytes = Number(file.sizeBytes);
-      mimeType = file.mimeType;
-      createdAt = file.createdAt;
+      if (!f || f.status !== 'pending' || f.adminNotifiedAt) return false;
+      title = f.title;
+      kind = f.kind;
+      academicYear = f.academicYear;
+      term = f.term;
+      sizeBytes = Number(f.sizeBytes);
+      mimeType = f.mimeType;
+      createdAt = f.createdAt;
+      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
+      subjectName = s?.name || 'Materia';
     }
 
-    // 3. Obtener destinatarios de administración
-    const recipients = await getAdminNotificationRecipients();
-    if (recipients.length === 0) {
-      console.warn('[LibraryMailer] No hay destinatarios de administración configurados ni administradores activos.');
-      return false;
-    }
+    const emailContent = buildAdminNewMaterialEmail({
+      title,
+      subjectName,
+      kind,
+      academicYear,
+      term,
+      sizeBytes,
+      mimeType,
+      createdAt,
+    });
 
-    // 4. Rate limit horario para administradores (máx 10 mails individuales por hora)
-    const now = Date.now();
-    const oneHour = 60 * 60 * 1000;
-    if (now - adminHourlyTracker.windowStart > oneHour) {
-      adminHourlyTracker.windowStart = now;
-      adminHourlyTracker.count = 0;
-    }
-
-    adminHourlyTracker.count++;
-
-    let emailContent: { subject: string; html: string; text: string };
-
-    if (adminHourlyTracker.count > LIBRARY_CONFIG.NOTIFY_ADMIN_MAX_PER_HOUR) {
-      // Si ya enviamos el resumen en la última hora, suprimimos el email para no saturar
-      if (now - adminHourlyTracker.lastSummarySentAt < oneHour) {
-        if (!inMemoryData) {
-          await db
-            .update(libraryFiles)
-            .set({ adminNotifiedAt: new Date() })
-            .where(eq(libraryFiles.id, fileId));
-        } else {
-          inMemoryData.adminNotifiedAt = new Date();
-        }
-        return true;
-      }
-
-      // Conteo de pendientes totales
-      let pendingCount = adminHourlyTracker.count;
-      if (!inMemoryData) {
-        try {
-          const [pendingCountRes] = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(libraryFiles)
-            .where(eq(libraryFiles.status, 'pending'));
-          if (pendingCountRes?.count) pendingCount = pendingCountRes.count;
-        } catch {
-          // ignore in fallback
-        }
-      }
-
-      emailContent = buildAdminHourlySummaryEmail({
-        pendingCount,
-        newCountInHour: adminHourlyTracker.count,
-      });
-
-      adminHourlyTracker.lastSummarySentAt = now;
-    } else {
-      emailContent = buildAdminNewMaterialEmail({
-        title,
-        subjectName,
-        kind,
-        academicYear,
-        term,
-        sizeBytes,
-        mimeType,
-        createdAt,
-      });
-    }
-
-    // 5. Enviar con reintentos
     const result = await sendWithRetry(async () => {
       return defaultMailer.sendEmail({
         to: recipients,
@@ -720,9 +1201,8 @@ export async function notifyAdminNewPendingFile(
       });
     }, 3);
 
-    // Registro para tests
     mockSentNotifications.push({
-      type: adminHourlyTracker.count > LIBRARY_CONFIG.NOTIFY_ADMIN_MAX_PER_HOUR ? 'admin_summary' : 'admin_pending',
+      type: 'admin_pending',
       to: recipients,
       subject: emailContent.subject,
       html: emailContent.html,
@@ -741,113 +1221,51 @@ export async function notifyAdminNewPendingFile(
         inMemoryData.adminNotifiedAt = new Date();
       }
       return true;
-    } else {
-      console.warn(`[LibraryMailer] Falló el envío de aviso al admin para archivo ${fileId} tras 3 intentos:`, result.error);
-      return false;
     }
+    return false;
   } catch (err: any) {
-    console.error('[LibraryMailer] Error no fatal enviando notificación al admin:', err?.message || err);
+    console.error('[LibraryMailer] Fallo en notifyAdminNewPendingFile fallback:', err?.message || err);
     return false;
   }
 }
 
-/**
- * (b) Notifica al usuario que su archivo fue aprobado.
- */
 export async function notifyUploaderFileApproved(
   fileId: string,
   inMemoryData?: InMemoryUploaderData
 ): Promise<boolean> {
+  recordUploaderAction();
+  if (mailerDataSource) {
+    return processPendingUploaderNotifications({ force: true });
+  }
+
+  // Fallback directo
   try {
-    let title: string;
-    let subjectName: string;
-    let userEmail: string;
+    let userEmail = inMemoryData?.userEmail;
+    let title = inMemoryData?.title || 'Material';
+    let subjectName = inMemoryData?.subjectName || 'Materia';
 
-    if (inMemoryData) {
-      if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
-      if (inMemoryData.userStatus === 'suspended') return false;
-      if (inMemoryData.notifyLibraryEmail === false) return false;
-      title = inMemoryData.title;
-      subjectName = inMemoryData.subjectName;
-      userEmail = inMemoryData.userEmail;
+    if (!inMemoryData) {
+      const [f] = await db.select().from(libraryFiles).where(eq(libraryFiles.id, fileId)).limit(1);
+      if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
+      const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
+      if (!u || u.status === 'suspended') return false;
+      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
+      if (settings && settings.notifyLibraryEmail === false) return false;
+      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
+      title = f.title;
+      subjectName = s?.name || 'Materia';
+      userEmail = u.email;
     } else {
-      const [file] = await db
-        .select({
-          id: libraryFiles.id,
-          title: libraryFiles.title,
-          status: libraryFiles.status,
-          uploaderUserId: libraryFiles.uploaderUserId,
-          uploaderNotifiedAt: libraryFiles.uploaderNotifiedAt,
-          subjectId: libraryFiles.subjectId,
-        })
-        .from(libraryFiles)
-        .where(eq(libraryFiles.id, fileId))
-        .limit(1);
-
-      if (!file || file.status !== 'approved' || file.uploaderNotifiedAt || !file.uploaderUserId) {
-        return false;
-      }
-
-      // Verificar estado del usuario y preferencias
-      const [user] = await db
-        .select({
-          id: users.id,
-          email: users.email,
-          status: users.status,
-        })
-        .from(users)
-        .where(eq(users.id, file.uploaderUserId))
-        .limit(1);
-
-      if (!user || user.status === 'suspended') {
-        return false;
-      }
-
-      // Verificar preferencia notify_library_email
-      const [settings] = await db
-        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
-        .from(userSettings)
-        .where(eq(userSettings.userId, user.id))
-        .limit(1);
-
-      if (settings && settings.notifyLibraryEmail === false) {
-        // El usuario desactivó la notificación
-        return false;
-      }
-
-      const [sub] = await db
-        .select({ name: subjects.name })
-        .from(subjects)
-        .where(eq(subjects.id, file.subjectId))
-        .limit(1);
-
-      title = file.title;
-      subjectName = sub?.name || 'Materia';
-      userEmail = user.email;
+      if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
+      if (inMemoryData.userStatus === 'suspended' || inMemoryData.notifyLibraryEmail === false) return false;
     }
 
-    // Tope diario de notificaciones a usuarios
-    const today = new Date().setUTCHours(0, 0, 0, 0);
-    if (userDailyTracker.dayStart !== today) {
-      userDailyTracker.dayStart = today;
-      userDailyTracker.count = 0;
-    }
+    if (!userEmail) return false;
 
-    if (userDailyTracker.count >= LIBRARY_CONFIG.NOTIFY_USERS_MAX_PER_DAY) {
-      console.warn('[LibraryMailer] Tope diario de notificaciones a usuarios alcanzado. Preservando cuota para verificación.');
-      return false;
-    }
-
-    userDailyTracker.count++;
-
-    const emailContent = buildUploaderApprovedEmail({
-      title,
-      subjectName,
-    });
-
+    const emailContent = buildUploaderApprovedEmail({ title, subjectName });
     const result = await sendWithRetry(async () => {
       return defaultMailer.sendEmail({
-        to: userEmail,
+        to: userEmail!,
         subject: emailContent.subject,
         html: emailContent.html,
         text: emailContent.text,
@@ -874,111 +1292,52 @@ export async function notifyUploaderFileApproved(
         inMemoryData.uploaderNotifiedAt = new Date();
       }
       return true;
-    } else {
-      console.warn(`[LibraryMailer] Falló aviso de aprobación a ${userEmail} tras 3 intentos:`, result.error);
-      return false;
     }
+    return false;
   } catch (err: any) {
-    console.error('[LibraryMailer] Error no fatal enviando aviso de aprobación:', err?.message || err);
+    console.error('[LibraryMailer] Fallo en notifyUploaderFileApproved fallback:', err?.message || err);
     return false;
   }
 }
 
-/**
- * (c) Notifica al usuario que su archivo fue rechazado con el motivo correspondiente.
- */
 export async function notifyUploaderFileRejected(
   fileId: string,
   reason: string,
   inMemoryData?: InMemoryUploaderData
 ): Promise<boolean> {
+  recordUploaderAction();
+  if (mailerDataSource) {
+    return processPendingUploaderNotifications({ force: true });
+  }
+
+  // Fallback directo
   try {
-    let title: string;
-    let subjectName: string;
-    let userEmail: string;
+    let userEmail = inMemoryData?.userEmail;
+    let title = inMemoryData?.title || 'Material';
+    let subjectName = inMemoryData?.subjectName || 'Materia';
 
-    if (inMemoryData) {
-      if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
-      if (inMemoryData.userStatus === 'suspended') return false;
-      if (inMemoryData.notifyLibraryEmail === false) return false;
-      title = inMemoryData.title;
-      subjectName = inMemoryData.subjectName;
-      userEmail = inMemoryData.userEmail;
+    if (!inMemoryData) {
+      const [f] = await db.select().from(libraryFiles).where(eq(libraryFiles.id, fileId)).limit(1);
+      if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
+      const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
+      if (!u || u.status === 'suspended') return false;
+      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
+      if (settings && settings.notifyLibraryEmail === false) return false;
+      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
+      title = f.title;
+      subjectName = s?.name || 'Materia';
+      userEmail = u.email;
     } else {
-      const [file] = await db
-        .select({
-          id: libraryFiles.id,
-          title: libraryFiles.title,
-          status: libraryFiles.status,
-          uploaderUserId: libraryFiles.uploaderUserId,
-          uploaderNotifiedAt: libraryFiles.uploaderNotifiedAt,
-          subjectId: libraryFiles.subjectId,
-        })
-        .from(libraryFiles)
-        .where(eq(libraryFiles.id, fileId))
-        .limit(1);
-
-      if (!file || file.uploaderNotifiedAt || !file.uploaderUserId) {
-        return false;
-      }
-
-      const [user] = await db
-        .select({
-          id: users.id,
-          email: users.email,
-          status: users.status,
-        })
-        .from(users)
-        .where(eq(users.id, file.uploaderUserId))
-        .limit(1);
-
-      if (!user || user.status === 'suspended') {
-        return false;
-      }
-
-      const [settings] = await db
-        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
-        .from(userSettings)
-        .where(eq(userSettings.userId, user.id))
-        .limit(1);
-
-      if (settings && settings.notifyLibraryEmail === false) {
-        return false;
-      }
-
-      const [sub] = await db
-        .select({ name: subjects.name })
-        .from(subjects)
-        .where(eq(subjects.id, file.subjectId))
-        .limit(1);
-
-      title = file.title;
-      subjectName = sub?.name || 'Materia';
-      userEmail = user.email;
+      if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
+      if (inMemoryData.userStatus === 'suspended' || inMemoryData.notifyLibraryEmail === false) return false;
     }
 
-    const today = new Date().setUTCHours(0, 0, 0, 0);
-    if (userDailyTracker.dayStart !== today) {
-      userDailyTracker.dayStart = today;
-      userDailyTracker.count = 0;
-    }
+    if (!userEmail) return false;
 
-    if (userDailyTracker.count >= LIBRARY_CONFIG.NOTIFY_USERS_MAX_PER_DAY) {
-      console.warn('[LibraryMailer] Tope diario alcanzado.');
-      return false;
-    }
-
-    userDailyTracker.count++;
-
-    const emailContent = buildUploaderRejectedEmail({
-      title,
-      subjectName,
-      rejectionReason: reason,
-    });
-
+    const emailContent = buildUploaderRejectedEmail({ title, subjectName, rejectionReason: reason });
     const result = await sendWithRetry(async () => {
       return defaultMailer.sendEmail({
-        to: userEmail,
+        to: userEmail!,
         subject: emailContent.subject,
         html: emailContent.html,
         text: emailContent.text,
@@ -1005,12 +1364,10 @@ export async function notifyUploaderFileRejected(
         inMemoryData.uploaderNotifiedAt = new Date();
       }
       return true;
-    } else {
-      console.warn(`[LibraryMailer] Falló aviso de rechazo a ${userEmail} tras 3 intentos:`, result.error);
-      return false;
     }
+    return false;
   } catch (err: any) {
-    console.error('[LibraryMailer] Error no fatal enviando aviso de rechazo:', err?.message || err);
+    console.error('[LibraryMailer] Fallo en notifyUploaderFileRejected fallback:', err?.message || err);
     return false;
   }
 }

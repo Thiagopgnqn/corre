@@ -274,14 +274,18 @@ Para permitir subidas directas vía `PUT` desde el navegador y descargas vía `G
 > **Importante para el cliente de subida**:
 > La petición `PUT` enviada desde el frontend a Cloudflare R2 debe incluir estrictamente el header `Content-Type` idéntico al declarado durante `POST /api/library/uploads/init` con el que se firmó la URL. Si no coincide o se omite, Cloudflare R2 rechazará la subida con error de firma (`SignatureDoesNotMatch`).
 
-### 3. Filtro Básico de Seguridad de Archivos
+### 3. Subida de Archivos y Seguridad
+- **Sin límite diario**: Los estudiantes pueden subir múltiples archivos sin restricción de 5 por día, facilitando la carga de exámenes y resúmenes en tanda.
+- **Cupo de pendientes y cuota**: Límite de hasta 30 archivos pendientes de moderación en simultáneo por usuario y cuota total de 500 MB en almacenamiento activo.
+- **Control de concurrencia y semáforo**: Protección atómica ante llamadas concurrentes (`SELECT ... FOR UPDATE` en Postgres y mutex en InMemory), semáforo de validación en Node (máximo 3 streams concurrentes, timeout 10 s con 503 `LIBRARY_BUSY` y `Retry-After: 2`) y rate limiting defensivo en `/uploads/init` (máximo 120 peticiones / 10 min).
 - **Límites de tamaño**: 25 MB para documentos PDF (`application/pdf`) y 10 MB para imágenes (`image/jpeg`, `image/png`, `image/webp`).
 - **Escáner streaming**: Al completarse la subida, el servidor valida los *magic numbers* del stream e inspecciona la presencia de marcas sospechosas en PDFs (`/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFile`, `/OpenAction`).
 - **Aviso de limitación**: Esta inspección constituye una capa de sanitización estática heurística básica; no reemplaza un motor de antivirus / sandbox de ejecución dinámica en profundidad.
 
-### 4. Sistema de Avisos por Email y Moderación
-La Biblioteca cuenta con notificaciones automáticas por correo electrónico para mantener informados a administradores y estudiantes durante el ciclo de moderación:
+### 4. Sistema de Avisos por Email y Moderación Agrupada
+La Biblioteca cuenta con notificaciones automáticas por correo electrónico para mantener informados a administradores y estudiantes durante el ciclo de moderación, optimizadas con debouncing y consolidación event-driven:
 
+- **Envíos agrupados y temporizadores event-driven**: En lugar de consultar periódicamente la base de datos (lo que impediría que Neon suspenda su cómputo a costo cero), el sistema emplea temporizadores de único disparo (`setTimeout(..., cooldown).unref()`) con ventana de espera (`ADMIN_NOTIFY_COOLDOWN_SECONDS`, por defecto 120 s). Subidas múltiples se informan en un único correo resumen con el detalle de archivos subidos, y las revisiones en lote del moderador generan un solo correo consolidado con los archivos aprobados y/o rechazados. Al arrancar el servidor se ejecuta una única pasada no bloqueante para retomar cualquier pendiente previo a un reinicio.
 - **Configuración de destinatarios admin (`ADMIN_NOTIFICATION_EMAIL`)**:
   - Variable opcional en `server/.env`. Puede contener una o varias direcciones de correo separadas por coma (ej: `admin@stack.com,moderador@stack.com`).
   - **Fallback automático**: Si no se define, el backend consulta automáticamente los usuarios con rol `admin`, estado `active` y correo verificado (`email_verified_at IS NOT NULL`). Si no hay ninguna dirección disponible, emite una advertencia informativa al arrancar.
@@ -289,8 +293,8 @@ La Biblioteca cuenta con notificaciones automáticas por correo electrónico par
   - Campo booleano (por defecto `true`). El estudiante puede activar o desactivar los avisos en cualquier momento desde el menú de usuario ("Avisarme por mail sobre mis aportes a la Biblioteca").
   - Aplica exclusivamente a los avisos de aprobación y rechazo dirigidos al usuario; el aviso de material nuevo al administrador no depende de esta preferencia.
 - **Eventos y reglas de privacidad**:
-  1. **(a) Subida completada**: Al pasar a estado `pending`, se envía un aviso a los administradores con el título, materia, tipo, año/cuatrimestre, tamaño y fecha. **Privacidad estricta**: El correo NO contiene el email ni el ID del estudiante autor (el admin consulta la autoría solo desde el panel bajo auditoría).
-  2. **(b) Material aprobado**: Al pasar de `pending` a `approved`, se envía un aviso único al estudiante confirmando que su material ya está publicado y accesible para toda la comunidad.
+  1. **(a) Subida completada**: Al pasar a estado `pending`, se encola para aviso agrupado a los administradores con el título, materia, tipo, año/cuatrimestre, tamaño y fecha. **Privacidad estricta**: El correo NO contiene el email ni el ID del estudiante autor (el admin consulta la autoría solo desde el panel bajo auditoría).
+  2. **(b) Material aprobado**: Al pasar de `pending` a `approved`, se envía un aviso agrupado al estudiante confirmando los materiales publicados y accesibles para toda la comunidad.
   3. **(c) Material rechazado**: Al pasar a `rejected`, se envía un correo con el motivo ingresado por el moderador (debidamente sanitizado y escapado) para que el estudiante pueda corregirlo y volver a subirlo.
   - **Exclusiones**: No se envía email si el autor es anónimo (`uploader_user_id IS NULL`), si el usuario está suspendido (`status === 'suspended'`), o si desactivó su preferencia `notify_library_email`.
 - **Topes de tasa y control de spam**:

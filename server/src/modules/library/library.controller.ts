@@ -121,6 +121,9 @@ export async function initUpload(req: Request, res: Response): Promise<void> {
     res.status(201).json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
+    if ((statusCode === 429 || statusCode === 503) && err.retryAfter) {
+      res.setHeader('Retry-After', String(err.retryAfter));
+    }
     res.status(statusCode).json({
       success: false,
       code: err.code,
@@ -143,6 +146,9 @@ export async function completeUpload(req: Request, res: Response): Promise<void>
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
+    if ((statusCode === 429 || statusCode === 503) && err.retryAfter) {
+      res.setHeader('Retry-After', String(err.retryAfter));
+    }
     res.status(statusCode).json({
       success: false,
       code: err.code,

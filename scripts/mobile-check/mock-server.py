@@ -459,15 +459,30 @@ try {
         if path.startswith('/api/library/my-uploads'):
             self.send_json({
                 "success": True,
-                "data": [
-                    {
-                        "id": "lib-my-1",
-                        "title": "Mis Apuntes de Análisis Matemático I",
-                        "status": "approved",
-                        "sizeBytes": 3200000,
-                        "createdAt": "2026-11-01T10:00:00Z"
-                    }
-                ]
+                "data": {
+                    "uploads": [
+                        {
+                            "id": "lib-my-1",
+                            "subjectId": "1",
+                            "title": "Mis Apuntes de Análisis Matemático I",
+                            "kind": "apunte",
+                            "academicYear": 2024,
+                            "term": "1C",
+                            "status": "approved",
+                            "sizeBytes": 3200000,
+                            "downloadCount": 14,
+                            "helpfulCount": 5,
+                            "createdAt": "2026-11-01T10:00:00Z"
+                        }
+                    ],
+                    "quota": {
+                        "usedBytes": 3200000,
+                        "maxBytes": 524288000,
+                        "pendingCount": 1,
+                        "maxPending": 30
+                    },
+                    "hasStatusUpdates": False
+                }
             })
             return
 
@@ -621,15 +636,71 @@ try {
         return super().do_GET()
 
     def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == '/api/library/uploads/init':
+            import time
+            file_id = f"mock-file-{int(time.time() * 1000)}"
+            self.send_json({
+                "success": True,
+                "data": {
+                    "fileId": file_id,
+                    "uploadUrl": f"/mock-r2-upload/{file_id}",
+                    "storageKey": f"uploads/mock/{file_id}.pdf",
+                    "maxSizeBytes": 26214400,
+                    "headers": {"Content-Type": "application/pdf"}
+                }
+            })
+            return
+
+        if path.startswith('/api/library/uploads/') and path.endswith('/complete'):
+            parts = path.split('/')
+            file_id = parts[4] if len(parts) >= 5 else "mock-file-1"
+            self.send_json({
+                "success": True,
+                "data": {
+                    "id": file_id,
+                    "status": "pending",
+                    "title": "Aporte recibido en moderación"
+                }
+            })
+            return
+
+        if path == '/api/library/terms/accept':
+            self.send_json({"success": True, "data": {"accepted": True}})
+            return
+
         self.send_json({"success": True, "data": {}})
 
     def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith('/mock-r2-upload/'):
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 0:
+                self.rfile.read(min(length, 65536))
+            self.send_response(200)
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+
         self.send_json({"success": True, "data": {}})
 
     def do_PATCH(self):
         self.send_json({"success": True, "data": {}})
 
     def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path.startswith('/api/library/my-uploads/'):
+            parts = path.split('/')
+            file_id = parts[4] if len(parts) >= 5 else "mock-file-1"
+            self.send_json({"success": True, "data": {"deleted": True, "fileId": file_id}})
+            return
+
         self.send_json({"success": True, "data": {}})
 
     def send_json(self, data, code=200):

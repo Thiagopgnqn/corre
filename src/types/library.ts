@@ -64,6 +64,8 @@ export interface LibraryMyUploadsResponse {
   usedBytes: number;
   maxBytes: number;
   hasStatusUpdates: boolean;
+  pendingCount?: number;
+  maxPending?: number;
 }
 
 export interface UploadInitPayload {
@@ -150,6 +152,7 @@ export const LIBRARY_CONFIG = {
   MAX_PDF_SIZE_BYTES: 25 * 1024 * 1024, // 25 MB
   MAX_IMAGE_SIZE_BYTES: 10 * 1024 * 1024, // 10 MB
   MAX_USER_QUOTA_BYTES: 300 * 1024 * 1024, // 300 MB
+  MAX_PENDING_UPLOADS: 30,
   CURRENT_TERMS_VERSION: 'v1.0',
   ALLOWED_MIME_TYPES: [
     'application/pdf',

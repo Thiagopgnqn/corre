@@ -39,6 +39,14 @@ const baseSchema = z.object({
     }, {
       message: 'ADMIN_NOTIFICATION_EMAIL debe contener una o varias direcciones de correo válidas separadas por coma',
     }),
+  // Configuración opcional de la Biblioteca de Material
+  LIBRARY_MAX_PENDING_UPLOADS: z.coerce.number().int().positive().optional(),
+  LIBRARY_UPLOAD_INIT_RATE_LIMIT_MAX: z.coerce.number().int().positive().optional(),
+  LIBRARY_UPLOAD_INIT_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().optional(),
+  LIBRARY_UPLOADING_EXPIRATION_MINUTES: z.coerce.number().int().positive().optional(),
+  LIBRARY_ADMIN_NOTIFY_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().optional(),
+  LIBRARY_MAX_REJECTIONS_THRESHOLD: z.coerce.number().int().nonnegative().optional(),
+  LIBRARY_REJECTIONS_WINDOW_DAYS: z.coerce.number().int().positive().optional(),
 });
 
 const envSchema = baseSchema.superRefine((data, ctx) => {

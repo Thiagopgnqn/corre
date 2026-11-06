@@ -200,15 +200,22 @@ if (process.env.NODE_ENV !== 'test' && currentFile === entryFile) {
     libraryService.cleanupAbandonedUploads().catch(() => {});
   }, 12 * 60 * 60 * 1000).unref();
 
-  // Verificación no bloqueante de avisos de administración de Biblioteca
+  // Verificación no bloqueante de avisos de administración de Biblioteca y arranque de lotes
   import('./modules/library/library.mailer.js')
-    .then((m) => m.getAdminNotificationRecipients())
-    .then((recipients) => {
-      if (recipients.length === 0) {
-        console.warn('⚠️ [Library] No hay direcciones de notificación para administradores configuradas en ADMIN_NOTIFICATION_EMAIL ni administradores activos con email verificado.');
-      } else {
-        console.log(`📧 [Library] Avisos a administradores configurados para: ${recipients.join(', ')}`);
-      }
+    .then((m) => {
+      m.getAdminNotificationRecipients()
+        .then((recipients) => {
+          if (recipients.length === 0) {
+            console.warn('⚠️ [Library] No hay direcciones de notificación para administradores configuradas en ADMIN_NOTIFICATION_EMAIL ni administradores activos con email verificado.');
+          } else {
+            console.log(`📧 [Library] Avisos a administradores configurados para: ${recipients.join(', ')}`);
+          }
+        })
+        .catch(() => {});
+
+      // Chequeo único de arranque para retomar notificaciones pendientes previas (ej. reinicio de contenedor)
+      m.processPendingAdminNotifications({ force: true }).catch(() => {});
+      m.processPendingUploaderNotifications({ force: true }).catch(() => {});
     })
     .catch(() => {});
 

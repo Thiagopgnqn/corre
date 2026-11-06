@@ -13,15 +13,27 @@ import { validateFileStream, sanitizeLibraryText } from '../src/modules/library/
 import {
   InMemoryLibraryService,
   setLibraryServiceForTesting,
+  resetInitUploadRateLimits,
 } from '../src/modules/library/library.service.js';
-import { LIBRARY_CONFIG } from '../src/config/library.config.js';
+import {
+  LIBRARY_CONFIG,
+  setAdminNotifyCooldownOverride,
+} from '../src/config/library.config.js';
 import {
   mockSentNotifications,
   clearMockSentNotifications,
   setMockAdminRecipients,
   escapeHtml,
   sanitizeSubject,
+  buildAdminBatchSummaryEmail,
+  buildUploaderGroupedApprovedEmail,
+  buildUploaderGroupedRejectedEmail,
+  processPendingAdminNotifications,
+  processPendingUploaderNotifications,
+  resetMailerTimers,
 } from '../src/modules/library/library.mailer.js';
+import { defaultMailer } from '../src/modules/mailer/mailer.service.js';
+import { Semaphore, validationSemaphore } from '../src/utils/semaphore.js';
 import { setLiveUserResolverForTesting } from '../src/middlewares/auth.middleware.js';
 import { createApp } from '../src/app.js';
 
@@ -619,6 +631,8 @@ async function main() {
   // 14. SISTEMA DE NOTIFICACIONES POR CORREO ELECTRÓNICO (BIBLIOTECA)
   // ---------------------------------------------------------------------------
   console.log('📌 14. Avisos por Mail: Subida, Aprobación, Rechazo, Exclusiones y Seguridad');
+  // En sección 14 se evalúan envíos individuales inmediatos (cooldown 0 explícito en tests)
+  setAdminNotifyCooldownOverride(0);
 
   // 14.1 Seguridad y sanitizado
   const xssStr = '<script>alert("hack")</script>&"\'';
@@ -899,6 +913,1172 @@ async function main() {
     adminToken
   );
   assert(invalidResend.status === 400, 'Reenviar aviso sobre archivo no pendiente responde 400 Bad Request');
+  setAdminNotifyCooldownOverride(null);
+
+  // ---------------------------------------------------------------------------
+  // 15. SUBIDA MÚLTIPLE, SIN TOPE DIARIO, CUPO DE 30 PENDIENTES Y CONCURRENCIA
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 15. Subida Múltiple, Eliminación del Tope Diario y Cupo de Pendientes (Fase 1)');
+
+  // 15.1 Eliminación del límite diario (más de 5 subidas en un mismo día)
+  const multiUserId = '88888888-8888-4888-8888-888888888888';
+  libraryStore.seedUser({
+    id: multiUserId,
+    email: 'multi.upload@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const multiUserToken = signToken({
+    id: multiUserId,
+    email: 'multi.upload@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const dailyFilesCreated: string[] = [];
+  let dailyUploadsSuccessCount = 0;
+  for (let i = 1; i <= 7; i++) {
+    const pdfBuf = Buffer.from(`%PDF-1.4 %%EOF content-${i}-${Date.now()}`);
+    const res = await api('POST', '/api/library/uploads/init', multiUserToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'parcial',
+      academicYear: 2026,
+      term: '1C',
+      title: `Parcial Nro ${i} del mismo día`,
+      originalFilename: `parcial_dia_${i}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: pdfBuf.length,
+      acceptTerms: true,
+    });
+    if (res.status === 201) {
+      dailyUploadsSuccessCount++;
+      dailyFilesCreated.push(res.data.data.fileId);
+      await mockR2.putObjectDirect(res.data.data.storageKey, pdfBuf, 'application/pdf');
+      await api('POST', `/api/library/uploads/${res.data.data.fileId}/complete`, multiUserToken);
+    }
+  }
+  assert(
+    dailyUploadsSuccessCount === 7,
+    'Eliminación del límite diario: Se pueden subir 7 archivos (> 5) en un mismo día sin recibir 429'
+  );
+
+  // 15.2 Tope de 30 archivos pendientes simultáneos
+  // El usuario ya tiene 7 archivos en estado 'pending'. Agregamos 23 más para llegar a 30.
+  let pendingCreatedCount = 7;
+  for (let i = 8; i <= 30; i++) {
+    const pdfBuf = Buffer.from(`%PDF-1.4 %%EOF content-${i}-${Date.now()}`);
+    const res = await api('POST', '/api/library/uploads/init', multiUserToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'resumen',
+      title: `Resumen de prueba ${i}`,
+      originalFilename: `resumen_${i}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: pdfBuf.length,
+      acceptTerms: true,
+    });
+    if (res.status === 201) {
+      pendingCreatedCount++;
+      dailyFilesCreated.push(res.data.data.fileId);
+      await mockR2.putObjectDirect(res.data.data.storageKey, pdfBuf, 'application/pdf');
+      await api('POST', `/api/library/uploads/${res.data.data.fileId}/complete`, multiUserToken);
+    }
+  }
+  assert(pendingCreatedCount === 30, 'Usuario alcanza exactamente 30 archivos pendientes de revisión');
+
+  // Intento 31 debe ser bloqueado con 429 LIMIT_PENDING_UPLOADS
+  const res31 = await api('POST', '/api/library/uploads/init', multiUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'resumen',
+    title: 'Resumen intento 31 bloqueado',
+    originalFilename: 'resumen_31.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    res31.status === 429 && res31.data.code === 'LIMIT_PENDING_UPLOADS',
+    'Tope de pendientes (30): Intento 31 es rechazado con 429 LIMIT_PENDING_UPLOADS'
+  );
+  assert(
+    Boolean(res31.data.error?.includes('30')),
+    'Mensaje de error indica el máximo permitido de 30 pendientes'
+  );
+
+  // 15.3 Liberación de cupo de pendientes al moderar (aprobar o rechazar)
+  const fileToApprove = dailyFilesCreated[0];
+  const fileToReject = dailyFilesCreated[1];
+  await api('PATCH', `/api/admin/library/files/${fileToApprove}/approve`, adminToken);
+  await api('PATCH', `/api/admin/library/files/${fileToReject}/reject`, adminToken, {
+    reason: 'Prueba de liberación de cupo',
+  });
+
+  // Ahora quedan 28 pendientes. Se pueden subir exactamente 2 archivos más.
+  const resRecharge1 = await api('POST', '/api/library/uploads/init', multiUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'tp',
+    title: 'TP liberado 1',
+    originalFilename: 'tp_liberado_1.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(resRecharge1.status === 201, 'Liberación de cupo: Permite subir nuevamente al aprobar');
+
+  const resRecharge2 = await api('POST', '/api/library/uploads/init', multiUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'tp',
+    title: 'TP liberado 2',
+    originalFilename: 'tp_liberado_2.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(resRecharge2.status === 201, 'Liberación de cupo: Permite subir nuevamente al rechazar');
+
+  const resRecharge3Blocked = await api('POST', '/api/library/uploads/init', multiUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'tp',
+    title: 'TP liberado 3 bloqueado',
+    originalFilename: 'tp_liberado_3.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    resRecharge3Blocked.status === 429 && resRecharge3Blocked.data.code === 'LIMIT_PENDING_UPLOADS',
+    'Liberación de cupo: Se vuelve a bloquear al alcanzar 30 pendientes nuevamente'
+  );
+
+  // 15.4 Concurrencia real con Promise.all (35 inits simultáneos para cupo de 30)
+  const concurrentUserId = '77777777-1111-4777-8777-111111111111';
+  libraryStore.seedUser({
+    id: concurrentUserId,
+    email: 'concurrent.upload@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const concurrentUserToken = signToken({
+    id: concurrentUserId,
+    email: 'concurrent.upload@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const concurrentPromises = Array.from({ length: 35 }, (_, idx) =>
+    api('POST', '/api/library/uploads/init', concurrentUserToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'apunte',
+      title: `Apunte concurrente ${idx + 1}`,
+      originalFilename: `apunte_conc_${idx + 1}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: 1024,
+      acceptTerms: true,
+    })
+  );
+  const concurrentResults = await Promise.all(concurrentPromises);
+  const count201 = concurrentResults.filter((r) => r.status === 201).length;
+  const count429 = concurrentResults.filter(
+    (r) => r.status === 429 && r.data.code === 'LIMIT_PENDING_UPLOADS'
+  ).length;
+  assert(
+    count201 === 30 && count429 === 5,
+    `Concurrencia con Promise.all (35 simultáneos): Exactamente 30 exitosos (201) y 5 bloqueados (429) [obt: ${count201} y ${count429}]`
+  );
+
+  // 15.5 Concurrencia en cuota de almacenamiento
+  const quotaUserId = '66666666-2222-4666-8666-222222222222';
+  libraryStore.seedUser({
+    id: quotaUserId,
+    email: 'quota.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const quotaUserToken = signToken({
+    id: quotaUserId,
+    email: 'quota.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  // Consumir cuota hasta que queden exactamente 5 MB (LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES - 5MB)
+  const fiveMb = 5 * 1024 * 1024;
+  const initialLargeSize = LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES - fiveMb;
+  // Creamos directamente un registro previo en memory store para simular cuota existente
+  libraryStore.files.set('large-file-quota', {
+    id: 'large-file-quota',
+    uploaderUserId: quotaUserId,
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Archivo pesado base',
+    originalFilename: 'heavy.pdf',
+    storageKey: 'library/heavy.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: initialLargeSize,
+    sha256: 'sha256-heavy-sample',
+    status: 'approved',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  // Lanzar 5 subidas concurrentes de 2 MB cada una (2 MB * 2 = 4 MB <= 5 MB; la 3ra excede)
+  const twoMb = 2 * 1024 * 1024;
+  const quotaPromises = Array.from({ length: 5 }, (_, idx) =>
+    api('POST', '/api/library/uploads/init', quotaUserToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'apunte',
+      title: `Apunte cuota ${idx + 1}`,
+      originalFilename: `cuota_${idx + 1}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: twoMb,
+      acceptTerms: true,
+    })
+  );
+  const quotaResults = await Promise.all(quotaPromises);
+  const quota201 = quotaResults.filter((r) => r.status === 201).length;
+  const quota429 = quotaResults.filter((r) => r.status === 429 && (r.data.code === 'LIMIT_STORAGE_QUOTA' || r.data.code === 'LIMIT_USER_QUOTA')).length;
+  assert(
+    quota201 === 2 && quota429 === 3,
+    `Concurrencia de cuota con Promise.all: Exactamente 2 aprobados y 3 rechazados por cuota [obt: ${quota201} y ${quota429}]`
+  );
+
+  // 15.6 Carrera de duplicados SHA-256 en /complete
+  const dupUserId = '55555555-3333-4555-8555-333333333333';
+  libraryStore.seedUser({
+    id: dupUserId,
+    email: 'dup.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const dupUserToken = signToken({
+    id: dupUserId,
+    email: 'dup.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const identicalBuf = Buffer.from('%PDF-1.4 %%EOF identical-content-for-both-' + Date.now());
+  const dupInitA = await api('POST', '/api/library/uploads/init', dupUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'guia',
+    title: 'Guía de ejercicios A',
+    originalFilename: 'guia_a.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: identicalBuf.length,
+    acceptTerms: true,
+  });
+  const dupInitB = await api('POST', '/api/library/uploads/init', dupUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'guia',
+    title: 'Guía de ejercicios B',
+    originalFilename: 'guia_b.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: identicalBuf.length,
+    acceptTerms: true,
+  });
+  await mockR2.putObjectDirect(dupInitA.data.data.storageKey, identicalBuf, 'application/pdf');
+  await mockR2.putObjectDirect(dupInitB.data.data.storageKey, identicalBuf, 'application/pdf');
+
+  const dupCompleteResults = await Promise.all([
+    api('POST', `/api/library/uploads/${dupInitA.data.data.fileId}/complete`, dupUserToken),
+    api('POST', `/api/library/uploads/${dupInitB.data.data.fileId}/complete`, dupUserToken),
+  ]);
+  const dupStatus200 = dupCompleteResults.filter((r) => r.status === 200).length;
+  const dupStatus409 = dupCompleteResults.filter(
+    (r) => r.status === 409 && r.data.code === 'DUPLICATE_FILE'
+  ).length;
+  assert(
+    dupStatus200 === 1 && dupStatus409 === 1,
+    'Carrera de duplicados SHA-256 en /complete: Uno pasa exitosamente (200) y el otro recibe 409 DUPLICATE_FILE'
+  );
+
+  // 15.7 Validación estricta de academicYear y term
+  const yearTermUserId = '11112222-3333-4444-8555-666677778888';
+  libraryStore.seedUser({
+    id: yearTermUserId,
+    email: 'year.term@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const yearTermToken = signToken({
+    id: yearTermUserId,
+    email: 'year.term@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const validYearTermRes = await api('POST', '/api/library/uploads/init', yearTermToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 2024,
+    term: '2C',
+    title: 'Examen con año y término válidos',
+    originalFilename: 'valido.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(validYearTermRes.status === 201, 'Validación de academicYear y term: Acepta año 2024 y término 2C');
+
+  const annualTermRes = await api('POST', '/api/library/uploads/init', yearTermToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'final',
+    academicYear: 2022,
+    term: 'A',
+    title: 'Examen anual válido',
+    originalFilename: 'anual.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(annualTermRes.status === 201, 'Validación de academicYear y term: Acepta término anual "A"');
+
+  const invalidYearOldRes = await api('POST', '/api/library/uploads/init', yearTermToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 1999,
+    term: '1C',
+    title: 'Año anterior a 2000 rechazado',
+    originalFilename: 'invalido_year.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(invalidYearOldRes.status === 400, 'Validación: Rechaza año anterior a 2000 con 400 Bad Request');
+
+  const invalidYearFutureRes = await api('POST', '/api/library/uploads/init', yearTermToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 2099,
+    term: '1C',
+    title: 'Año futuro rechazado',
+    originalFilename: 'invalido_future.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(invalidYearFutureRes.status === 400, 'Validación: Rechaza año futuro con 400 Bad Request');
+
+  const invalidTermRes = await api('POST', '/api/library/uploads/init', yearTermToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 2024,
+    term: '3C',
+    title: 'Término inválido 3C rechazado',
+    originalFilename: 'invalido_term.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(invalidTermRes.status === 400, "Validación: Rechaza término distinto de '1C', '2C', 'A' con 400 Bad Request");
+
+  // 15.8 Idempotencia en /complete
+  const idempFileId = dupCompleteResults.find((r) => r.status === 200)!.data.data.file.id;
+  const idempCall1 = await api('POST', `/api/library/uploads/${idempFileId}/complete`, dupUserToken);
+  assert(
+    idempCall1.status === 200 && idempCall1.data.success === true,
+    'Idempotencia: Segunda llamada a /complete sobre archivo en estado pending retorna 200 OK'
+  );
+
+  // 15.9 Semáforo de concurrencia y 503 LIBRARY_BUSY
+  const testSemaphore = new Semaphore(1, 50);
+  const releaseFirst = await testSemaphore.acquire();
+  let caughtBusyError: any = null;
+  try {
+    await testSemaphore.acquire();
+  } catch (err: any) {
+    caughtBusyError = err;
+  }
+  releaseFirst();
+  assert(
+    caughtBusyError?.status === 503 && caughtBusyError?.code === 'LIBRARY_BUSY',
+    'Semáforo de concurrencia: En saturación o timeout responde 503 con código LIBRARY_BUSY'
+  );
+  assert(
+    caughtBusyError?.retryAfter === 2,
+    'Semáforo de concurrencia: Retorna retryAfter: 2 para que el cliente espere antes de reintentar'
+  );
+  // Reintento tras liberar debe funcionar inmediatamente
+  const releaseSecond = await testSemaphore.acquire();
+  assert(typeof releaseSecond === 'function', 'Semáforo de concurrencia: Al liberarse permite procesar el siguiente');
+  releaseSecond();
+
+  // 15.10 Expiración proactiva de archivos en estado uploading
+  const expireUserId = '44444444-5555-4444-8444-555555555555';
+  libraryStore.seedUser({
+    id: expireUserId,
+    email: 'expire.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const expireUserToken = signToken({
+    id: expireUserId,
+    email: 'expire.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const staleInit = await api('POST', '/api/library/uploads/init', expireUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte que quedará abandonado',
+    originalFilename: 'stale.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  const staleFileId = staleInit.data.data.fileId;
+  const staleRecord = libraryStore.files.get(staleFileId);
+  // Simular que pasaron 35 minutos desde su creación
+  staleRecord.createdAt = new Date(Date.now() - 35 * 60 * 1000);
+
+  // Al llamar a initUpload para un nuevo archivo, el registro stale debe ser purgado
+  await api('POST', '/api/library/uploads/init', expireUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Nuevo apunte tras expiración',
+    originalFilename: 'new_after_stale.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    !libraryStore.files.has(staleFileId),
+    'Expiración proactiva: Archivo en uploading de más de 30 minutos fue eliminado al iniciar nueva subida'
+  );
+
+  // 15.11 Rate limiting en /uploads/init
+  resetInitUploadRateLimits();
+  const originalLimit = LIBRARY_CONFIG.UPLOAD_INIT_RATE_LIMIT_MAX;
+  (LIBRARY_CONFIG as any).UPLOAD_INIT_RATE_LIMIT_MAX = 2; // bajamos temporalmente a 2 para testear
+  resetInitUploadRateLimits();
+  const rlRes1 = await api('POST', '/api/library/uploads/init', expireUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'RL 1',
+    originalFilename: 'rl1.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  const rlRes2 = await api('POST', '/api/library/uploads/init', expireUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'RL 2',
+    originalFilename: 'rl2.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  const rlRes3 = await api('POST', '/api/library/uploads/init', expireUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'RL 3 bloqueado',
+    originalFilename: 'rl3.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(rlRes1.status === 201 && rlRes2.status === 201, 'Rate limiting: Peticiones dentro del cupo son aceptadas (201)');
+  assert(
+    rlRes3.status === 429 && rlRes3.data.code === 'LIMIT_RATE_EXCEEDED',
+    'Rate limiting: Al superar el máximo por ventana responde 429 LIMIT_RATE_EXCEEDED'
+  );
+  assert(
+    Boolean(rlRes3.headers['retry-after']),
+    'Rate limiting: Respuesta 429 incluye cabecera HTTP Retry-After'
+  );
+  (LIBRARY_CONFIG as any).UPLOAD_INIT_RATE_LIMIT_MAX = originalLimit; // restaurar
+  resetInitUploadRateLimits();
+
+  // 15.12 Plantillas de email en lote (Admin y Alumno)
+  const batchAdminEmail = buildAdminBatchSummaryEmail([
+    {
+      id: 'f1',
+      title: 'Parcial 1 Resuelto',
+      subjectName: 'Sintaxis',
+      kind: 'parcial',
+      academicYear: 2024,
+      term: '1C',
+      sizeBytes: 2048,
+      mimeType: 'application/pdf',
+      createdAt: new Date(),
+    },
+    {
+      id: 'f2',
+      title: 'Resumen Unidad 2',
+      subjectName: 'Paradigmas',
+      kind: 'resumen',
+      academicYear: 2025,
+      term: '2C',
+      sizeBytes: 4096,
+      mimeType: 'application/pdf',
+      createdAt: new Date(),
+    },
+  ]);
+  assert(
+    batchAdminEmail.subject.includes('2 nuevos materiales para revisar'),
+    'Plantilla lote admin: Asunto consolida conteo de materiales pendientes'
+  );
+  assert(
+    batchAdminEmail.text.includes('Parcial 1 Resuelto') && batchAdminEmail.text.includes('Resumen Unidad 2'),
+    'Plantilla lote admin: Texto incluye títulos de todos los archivos del lote'
+  );
+
+  const batchUploaderApproved = buildUploaderGroupedApprovedEmail([
+    { title: 'Parcial 1', subjectName: 'Sintaxis' },
+    { title: 'Guía Práctica 3', subjectName: 'Paradigmas' },
+  ]);
+  assert(
+    batchUploaderApproved.subject.includes('Tus 2 aportes fueron aprobados en Stack'),
+    'Plantilla lote uploader (aprobados): Asunto consolida cantidad de archivos aprobados'
+  );
+
+  const batchUploaderRejected = buildUploaderGroupedRejectedEmail([
+    { title: 'Foto Borrosa', subjectName: 'Sintaxis', rejectionReason: 'No es legible' },
+    { title: 'Apunte Incompleto', subjectName: 'Paradigmas', rejectionReason: 'Faltan páginas 3 y 4' },
+  ]);
+  assert(
+    batchUploaderRejected.subject.includes('Observaciones sobre tus 2 aportes en Stack'),
+    'Plantilla lote uploader (rechazados): Asunto consolida cantidad de rechazos'
+  );
+  assert(
+    batchUploaderRejected.text.includes('No es legible') && batchUploaderRejected.text.includes('Faltan páginas 3 y 4'),
+    'Plantilla lote uploader (rechazados): Texto detalla motivos individuales de rechazo'
+  );
+
+  // 15.13 listMyUploads excluye uploading y expone pendingCount y maxPending en quota
+  const listUserId = '12121212-7777-4212-8212-777777777777';
+  libraryStore.seedUser({
+    id: listUserId,
+    email: 'list.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const listUserToken = signToken({
+    id: listUserId,
+    email: 'list.user@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const listBuf = Buffer.from('%PDF-1.4 %%EOF list-pdf');
+  const uploadForList = await api('POST', '/api/library/uploads/init', listUserToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte para listar',
+    originalFilename: 'listar.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: listBuf.length,
+    acceptTerms: true,
+  });
+  // Consultar Mis Aportes mientras está en 'uploading'
+  const listResWhileUploading = await api('GET', '/api/library/my-uploads', listUserToken);
+  assert(
+    listResWhileUploading.data.data.uploads.length === 0,
+    'listMyUploads: Archivo en estado uploading NO aparece en la lista de aportes del usuario'
+  );
+  assert(
+    listResWhileUploading.data.data.quota.pendingCount === 1,
+    'listMyUploads: quota.pendingCount cuenta archivos activos en uploading'
+  );
+  assert(
+    listResWhileUploading.data.data.quota.maxPending === 30,
+    'listMyUploads: quota.maxPending refleja el límite configurado de 30'
+  );
+
+  // Completar subida -> pasa a pending
+  await mockR2.putObjectDirect(uploadForList.data.data.storageKey, listBuf, 'application/pdf');
+  await api('POST', `/api/library/uploads/${uploadForList.data.data.fileId}/complete`, listUserToken);
+
+  const listResAfterComplete = await api('GET', '/api/library/my-uploads', listUserToken);
+  assert(
+    listResAfterComplete.data.data.uploads.length === 1,
+    'listMyUploads: Tras completeUpload el archivo en estado pending aparece en la lista'
+  );
+  assert(
+    listResAfterComplete.data.data.quota.pendingCount === 1,
+    'listMyUploads: quota.pendingCount se mantiene en 1 tras pasar a pending'
+  );
+
+  // ---------------------------------------------------------------------------
+  // 15.14 Mails: Comportamiento Real de Lotes, Esperas y Resiliencia
+  // ---------------------------------------------------------------------------
+  setAdminNotifyCooldownOverride(120); // Ventana de cooldown real de producción (120 s)
+  // Limpiar cola previa de notificaciones pendientes para aislar las pruebas de lote
+  for (const f of libraryStore.files.values()) {
+    if (!f.adminNotifiedAt) f.adminNotifiedAt = new Date();
+  }
+  clearMockSentNotifications();
+  const batchUserAId = '91919191-1111-4111-8111-111111111111';
+  libraryStore.seedUser({
+    id: batchUserAId,
+    email: 'batch.usera@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const batchUserAToken = signToken({
+    id: batchUserAId,
+    email: 'batch.usera@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  const fileIdsBatchA: string[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const fileBuf = Buffer.from(`%PDF-1.4 %%EOF batch-mini-pdf-${i}-${Date.now()}-${Math.random()}`);
+    const initRes = await api('POST', '/api/library/uploads/init', batchUserAToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'parcial',
+      title: `Parcial Lote A ${i}`,
+      originalFilename: `parcial_lote_a_${i}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: fileBuf.length,
+      acceptTerms: true,
+    });
+    fileIdsBatchA.push(initRes.data.data.fileId);
+    await mockR2.putObjectDirect(initRes.data.data.storageKey, fileBuf, 'application/pdf');
+  }
+
+  clearMockSentNotifications();
+  // Completar los 3 archivos seguidos dentro de la ventana de espera
+  for (const fId of fileIdsBatchA) {
+    await api('POST', `/api/library/uploads/${fId}/complete`, batchUserAToken);
+  }
+
+  // Al vencer la ventana (forzado con force: true), se procesa el lote
+  await processPendingAdminNotifications({ force: true });
+
+  const adminPendingEmails = mockSentNotifications.filter(
+    (n) => n.type === 'admin_summary' || n.type === 'admin_pending'
+  );
+  assert(
+    adminPendingEmails.length === 1,
+    'Mails real (a): Lote de 3 archivos completados produce UN solo mail al admin',
+    `obt: ${adminPendingEmails.length}`
+  );
+  assert(
+    adminPendingEmails[0]?.text.includes('Parcial Lote A 1') &&
+      adminPendingEmails[0]?.text.includes('Parcial Lote A 2') &&
+      adminPendingEmails[0]?.text.includes('Parcial Lote A 3'),
+    'Mails real (a): El correo consolidado incluye los 3 archivos'
+  );
+  const allNotifiedInDb = fileIdsBatchA.every((id) => libraryStore.files.get(id)?.adminNotifiedAt !== null);
+  assert(allNotifiedInDb, 'Mails real (a): Marca adminNotifiedAt en todos los archivos del lote');
+
+  // (b) Ventana de espera (cooldown): dentro de la ventana NO envía inmediatamente
+  setAdminNotifyCooldownOverride(120); // 120 segundos
+  clearMockSentNotifications();
+  const coolBuf = Buffer.from(`%PDF-1.4 %%EOF cooldown-pdf-${Date.now()}-${Math.random()}`);
+  const initCool = await api('POST', '/api/library/uploads/init', batchUserAToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte con Cooldown',
+    originalFilename: 'cooldown.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: coolBuf.length,
+    acceptTerms: true,
+  });
+  await mockR2.putObjectDirect(initCool.data.data.storageKey, coolBuf, 'application/pdf');
+  await api('POST', `/api/library/uploads/${initCool.data.data.fileId}/complete`, batchUserAToken);
+
+  assert(
+    mockSentNotifications.length === 0,
+    'Mails real (b): Dentro de la ventana de espera (120 s) NO dispara mail inmediato'
+  );
+  // Al vencer la ventana (simulada con force: true tras el cooldown), se procesa el envío
+  await processPendingAdminNotifications({ force: true });
+  assert(
+    mockSentNotifications.length === 1 && mockSentNotifications[0].text.includes('Apunte con Cooldown'),
+    'Mails real (b): Al vencer la ventana de espera se despacha el correo al admin'
+  );
+  setAdminNotifyCooldownOverride(null); // Restaurar a default
+
+  // (c) Filas pendientes de antes (simulación de reinicio del servidor)
+  clearMockSentNotifications();
+  const fPendingOld1 = '11111111-9999-4111-8111-999999999991';
+  const fPendingOld2 = '11111111-9999-4111-8111-999999999992';
+  libraryStore.files.set(fPendingOld1, {
+    id: fPendingOld1,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 2024,
+    term: '1C',
+    examInstance: null,
+    hasSolution: false,
+    title: 'Archivo Previo Reinicio 1',
+    description: null,
+    originalFilename: 'previo1.pdf',
+    storageKey: `library/${fPendingOld1}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    sha256: 'prev1',
+    status: 'pending',
+    adminNotifiedAt: null,
+    uploaderNotifiedAt: null,
+    rejectionReason: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(Date.now() - 10 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+  });
+  libraryStore.files.set(fPendingOld2, {
+    id: fPendingOld2,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    academicYear: 2024,
+    term: '1C',
+    examInstance: null,
+    hasSolution: false,
+    title: 'Archivo Previo Reinicio 2',
+    description: null,
+    originalFilename: 'previo2.pdf',
+    storageKey: `library/${fPendingOld2}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    sha256: 'prev2',
+    status: 'pending',
+    adminNotifiedAt: null,
+    uploaderNotifiedAt: null,
+    rejectionReason: null,
+    reviewedBy: null,
+    reviewedAt: null,
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(Date.now() - 10 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 10 * 60 * 1000),
+  });
+
+  // Chequeo de arranque (el mismo que ejecuta app.ts al iniciar)
+  await processPendingAdminNotifications({ force: true });
+  assert(
+    mockSentNotifications.length === 1 &&
+      mockSentNotifications[0].text.includes('Archivo Previo Reinicio 1') &&
+      mockSentNotifications[0].text.includes('Archivo Previo Reinicio 2'),
+    'Mails real (c): Filas pendientes previas al reinicio son retomadas en el chequeo de arranque'
+  );
+
+  // (d) Tolerancia a fallos: si falla el proveedor de mail, las filas quedan SIN marcar y se reintentan
+  clearMockSentNotifications();
+  defaultMailer.setAdapterForTesting({
+    sendEmail: async () => ({ success: false, error: 'Resend API 500 Outage' }),
+    sendVerificationCode: async () => ({ success: true, provider: 'mock' }),
+  });
+
+  const failBuf = Buffer.from(`%PDF-1.4 %%EOF fail-pdf-${Date.now()}-${Math.random()}`);
+  const initFail = await api('POST', '/api/library/uploads/init', batchUserAToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Archivo con Falla de Mail',
+    originalFilename: 'fail_mail.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: failBuf.length,
+    acceptTerms: true,
+  });
+  await mockR2.putObjectDirect(initFail.data.data.storageKey, failBuf, 'application/pdf');
+  const completeFailRes = await api(
+    'POST',
+    `/api/library/uploads/${initFail.data.data.fileId}/complete`,
+    batchUserAToken
+  );
+  assert(
+    completeFailRes.status === 200,
+    'Mails real (d): Falla de red en envío de mail NO rompe la subida del archivo (200 OK)'
+  );
+  // Ejecutar el envío con el adaptador que falla
+  await processPendingAdminNotifications({ force: true });
+  const fileFailInDb = libraryStore.files.get(initFail.data.data.fileId);
+  assert(
+    fileFailInDb?.status === 'pending' && fileFailInDb.adminNotifiedAt === null,
+    'Mails real (d): El archivo queda en pending sin marcar adminNotifiedAt tras fallo de mail'
+  );
+
+  // Restaurar mailer y reintentar
+  defaultMailer.setAdapterForTesting(null);
+  await processPendingAdminNotifications({ force: true });
+  assert(
+    fileFailInDb?.adminNotifiedAt !== null,
+    'Mails real (d): En el siguiente ciclo el archivo pendiente se reintenta y se marca notificado'
+  );
+
+  // (e) Mails al estudiante: aprobar o rechazar varios archivos del mismo estudiante en lote
+  clearMockSentNotifications();
+  const fApprove1 = '22222222-1111-4222-8222-111111111111';
+  const fApprove2 = '22222222-2222-4222-8222-222222222222';
+  libraryStore.files.set(fApprove1, {
+    id: fApprove1,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte Aprobado 1',
+    storageKey: `library/${fApprove1}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'pending',
+    uploaderNotifiedAt: null,
+    adminNotifiedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+  libraryStore.files.set(fApprove2, {
+    id: fApprove2,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte Aprobado 2',
+    storageKey: `library/${fApprove2}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'pending',
+    uploaderNotifiedAt: null,
+    adminNotifiedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+
+  // Aprobar ambos archivos
+  await api('PATCH', `/api/admin/library/files/${fApprove1}/approve`, adminToken);
+  await api('PATCH', `/api/admin/library/files/${fApprove2}/approve`, adminToken);
+  await processPendingUploaderNotifications({ force: true });
+
+  const uploaderApprovedEmails = mockSentNotifications.filter(
+    (n) => n.type === 'uploader_approved' && n.to.includes('batch.usera@frc.utn.edu.ar')
+  );
+  assert(
+    uploaderApprovedEmails.length === 1,
+    'Mails real (e): Aprobar varios archivos del estudiante produce UN solo mail consolidado'
+  );
+  assert(
+    uploaderApprovedEmails[0].text.includes('Apunte Aprobado 1') &&
+      uploaderApprovedEmails[0].text.includes('Apunte Aprobado 2'),
+    'Mails real (e): El mail de aprobación lista todos los archivos aprobados'
+  );
+
+  // Rechazar varios archivos del estudiante en lote
+  clearMockSentNotifications();
+  const fReject1 = '33333333-1111-4333-8333-111111111111';
+  const fReject2 = '33333333-2222-4333-8333-222222222222';
+  libraryStore.files.set(fReject1, {
+    id: fReject1,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    title: 'Foto Parcial Borrosa',
+    storageKey: `library/${fReject1}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'pending',
+    uploaderNotifiedAt: null,
+    adminNotifiedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+  libraryStore.files.set(fReject2, {
+    id: fReject2,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    title: 'Parcial Hoja Incompleta',
+    storageKey: `library/${fReject2}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'pending',
+    uploaderNotifiedAt: null,
+    adminNotifiedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+
+  await api('PATCH', `/api/admin/library/files/${fReject1}/reject`, adminToken, {
+    reason: 'La imagen está fuera de foco y no se lee el enunciado.',
+  });
+  await api('PATCH', `/api/admin/library/files/${fReject2}/reject`, adminToken, {
+    reason: 'Falta la segunda hoja con el ejercicio práctico.',
+  });
+  await processPendingUploaderNotifications({ force: true });
+
+  const uploaderRejectedEmails = mockSentNotifications.filter(
+    (n) => n.type === 'uploader_rejected' && n.to.includes('batch.usera@frc.utn.edu.ar')
+  );
+  assert(
+    uploaderRejectedEmails.length === 1,
+    'Mails real (e): Rechazar varios archivos del estudiante produce UN solo mail consolidado'
+  );
+  assert(
+    uploaderRejectedEmails[0].text.includes('fuera de foco') &&
+      uploaderRejectedEmails[0].text.includes('Falta la segunda hoja'),
+    'Mails real (e): El mail de rechazo detalla los motivos individuales de cada archivo'
+  );
+
+  // (f) Respeto de notifyLibraryEmail y exclusión de usuarios suspendidos; anonimato en mail admin
+  clearMockSentNotifications();
+  const suspendedUserId = '44444444-9999-4444-8444-999999999999';
+  libraryStore.seedUser({
+    id: suspendedUserId,
+    email: 'suspendido@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+    status: 'suspended',
+  });
+  const fSuspended = '44444444-1111-4444-8444-111111111111';
+  libraryStore.files.set(fSuspended, {
+    id: fSuspended,
+    uploaderUserId: suspendedUserId,
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Apunte Usuario Suspendido',
+    storageKey: `library/${fSuspended}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'pending',
+    uploaderNotifiedAt: null,
+    adminNotifiedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+
+  await api('PATCH', `/api/admin/library/files/${fSuspended}/approve`, adminToken);
+  await processPendingUploaderNotifications({ force: true });
+
+  const emailsToSuspended = mockSentNotifications.filter((n) =>
+    n.to.includes('suspendido@frc.utn.edu.ar')
+  );
+  assert(
+    emailsToSuspended.length === 0,
+    'Mails real (f): Usuario suspendido NO recibe emails de aprobación ni de rechazo'
+  );
+
+  // Verificación de privacidad: El mail al admin no contiene email ni id del autor
+  const adminNotification = mockSentNotifications.find(
+    (n) => n.type === 'admin_pending' || n.type === 'admin_summary'
+  );
+  if (adminNotification) {
+    assert(
+      !adminNotification.text.includes(batchUserAId) &&
+        !adminNotification.text.includes('batch.usera@frc.utn.edu.ar'),
+      'Mails real (f): El mail al admin NO contiene el uploaderUserId ni el email del autor'
+    );
+  } else {
+    const batchTpl = buildAdminBatchSummaryEmail([
+      {
+        id: 'f-anon',
+        title: 'Prueba Anonimato',
+        subjectName: 'Sintaxis',
+        kind: 'parcial',
+        sizeBytes: 1024,
+        mimeType: 'application/pdf',
+        createdAt: new Date(),
+      },
+    ]);
+    assert(
+      !batchTpl.text.includes(batchUserAId) && !batchTpl.text.includes('batch.usera@frc.utn.edu.ar'),
+      'Mails real (f): Plantilla al admin NO contiene uploaderUserId ni email de autor'
+    );
+  }
+  setAdminNotifyCooldownOverride(null); // Restaurar cooldown a default
+
+  // ---------------------------------------------------------------------------
+  // 15.15 Archivos Rechazados, Encolado de Huérfanos en R2 y Freno Anti-Spam
+  // ---------------------------------------------------------------------------
+  // (a) Encolado en orphanDeletions al rechazar
+  const rejFileId = fReject1;
+  const rejFileRecord = libraryStore.files.get(rejFileId);
+  const orphanEntry = Array.from(libraryStore.orphanDeletions.values()).find(
+    (o) => o.storageKey === rejFileRecord?.storageKey
+  );
+  assert(
+    Boolean(orphanEntry),
+    'Archivos rechazados (3a): Al rechazar, el storageKey queda encolado en orphanDeletions para borrado de R2'
+  );
+
+  // (b) Imposibilidad de previsualizar o descargar archivo rechazado (410 Gone)
+  const prevRejectedRes = await api('GET', `/api/admin/library/files/${rejFileId}/preview-url`, adminToken);
+  assert(
+    prevRejectedRes.status === 410 && prevRejectedRes.data.code === 'FILE_CONTENT_PURGED',
+    'Archivos rechazados (3a): getPreviewUrl sobre archivo rechazado devuelve 410 FILE_CONTENT_PURGED'
+  );
+
+  const dlRejectedRes = await api('GET', `/api/library/files/${rejFileId}/download`, batchUserAToken);
+  assert(
+    dlRejectedRes.status === 410 && dlRejectedRes.data.code === 'FILE_NOT_AVAILABLE',
+    'Archivos rechazados (3a): getDownloadUrl sobre archivo rechazado devuelve 410 FILE_NOT_AVAILABLE'
+  );
+
+  // (c) Freno anti-spam: 20 o más rechazos en los últimos 7 días bloquea nuevas subidas
+  const spammerId = '55555555-8888-4555-8555-888888888888';
+  libraryStore.seedUser({
+    id: spammerId,
+    email: 'spammer@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const spammerToken = signToken({
+    id: spammerId,
+    email: 'spammer@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  // Sembrar 20 archivos rechazados hace 2 días para spammerId
+  for (let i = 1; i <= 20; i++) {
+    const sId = `spam-rej-${i}`;
+    libraryStore.files.set(sId, {
+      id: sId,
+      uploaderUserId: spammerId,
+      subjectId: 'sub-sintaxis',
+      kind: 'parcial',
+      title: `Parcial Rechazado Basura ${i}`,
+      storageKey: `library/${sId}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: 1024,
+      status: 'rejected',
+      rejectionReason: 'Contenido spam repetitivo.',
+      reviewedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000), // Hace 2 días
+      downloadCount: 0,
+      helpfulCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+  }
+
+  const spammerInitRes = await api('POST', '/api/library/uploads/init', spammerToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Nuevo intento spam',
+    originalFilename: 'spam.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    spammerInitRes.status === 429 && spammerInitRes.data.code === 'TOO_MANY_REJECTIONS',
+    'Anti-spam (3c): Bloquea con 429 TOO_MANY_REJECTIONS al alcanzar 20 rechazos en 7 días'
+  );
+  assert(
+    spammerInitRes.data.error.includes('acumula 20 archivos rechazados') &&
+      spammerInitRes.data.error.includes('hora(s)'),
+    'Anti-spam (3c): Mensaje de error indica cantidad de rechazos y en cuántas horas se levanta'
+  );
+
+  // Valor 0 desactiva la regla
+  const origThreshold = LIBRARY_CONFIG.MAX_REJECTIONS_THRESHOLD;
+  (LIBRARY_CONFIG as any).MAX_REJECTIONS_THRESHOLD = 0;
+  const spammerDisabledRes = await api('POST', '/api/library/uploads/init', spammerToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Intento con regla desactivada',
+    originalFilename: 'desactivado.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    spammerDisabledRes.status === 201,
+    'Anti-spam (3c): Umbral en 0 desactiva la regla anti-spam y permite subir'
+  );
+  (LIBRARY_CONFIG as any).MAX_REJECTIONS_THRESHOLD = origThreshold; // Restaurar
+
+  // ---------------------------------------------------------------------------
+  // 15.16 Casos Borde en /complete: Expiración, No Dueño e Idempotencia
+  // ---------------------------------------------------------------------------
+  // (a) Fila inexistente o expirada
+  const nonExistentFileId = '00000000-0000-4000-8000-000000000000';
+  const completeExpiredRes = await api(
+    'POST',
+    `/api/library/uploads/${nonExistentFileId}/complete`,
+    batchUserAToken
+  );
+  assert(
+    completeExpiredRes.status === 404 && completeExpiredRes.data.code === 'UPLOAD_NOT_FOUND_OR_EXPIRED',
+    '/complete (4a): Fila inexistente o expirada devuelve 404 UPLOAD_NOT_FOUND_OR_EXPIRED'
+  );
+
+  // (b) Usuario que no es el dueño
+  const completeNotOwnerRes = await api(
+    'POST',
+    `/api/library/uploads/${fReject1}/complete`,
+    spammerToken
+  );
+  assert(
+    completeNotOwnerRes.status === 404 && completeNotOwnerRes.data.code === 'UPLOAD_NOT_FOUND_OR_EXPIRED',
+    '/complete (4c): Usuario no dueño recibe 404 UPLOAD_NOT_FOUND_OR_EXPIRED sin filtrar datos'
+  );
+
+  // (c) Idempotencia con estados de ciclo de vida
+  // approved -> 200 OK
+  const completeApprovedRes = await api(
+    'POST',
+    `/api/library/uploads/${fApprove1}/complete`,
+    batchUserAToken
+  );
+  assert(
+    completeApprovedRes.status === 200 && completeApprovedRes.data.success === true,
+    '/complete (4b): Archivo ya en approved responde 200 OK idéntico al pending'
+  );
+
+  // rejected -> 400 UPLOAD_ALREADY_REJECTED
+  const completeRejectedRes = await api(
+    'POST',
+    `/api/library/uploads/${fReject1}/complete`,
+    batchUserAToken
+  );
+  assert(
+    completeRejectedRes.status === 400 && completeRejectedRes.data.code === 'UPLOAD_ALREADY_REJECTED',
+    '/complete (4b): Archivo en rejected responde 400 UPLOAD_ALREADY_REJECTED con motivo'
+  );
+
+  // removed / hidden -> 400 UPLOAD_NOT_ACTIVE
+  const fRemoved = '66666666-1111-4666-8666-111111111111';
+  libraryStore.files.set(fRemoved, {
+    id: fRemoved,
+    uploaderUserId: batchUserAId,
+    subjectId: 'sub-sintaxis',
+    kind: 'parcial',
+    title: 'Archivo Removido',
+    storageKey: `library/${fRemoved}.pdf`,
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    status: 'removed',
+    rejectionReason: 'Dado de baja por infracción',
+    reviewedAt: new Date(),
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  } as any);
+
+  const completeRemovedRes = await api(
+    'POST',
+    `/api/library/uploads/${fRemoved}/complete`,
+    batchUserAToken
+  );
+  assert(
+    completeRemovedRes.status === 400 && completeRemovedRes.data.code === 'UPLOAD_NOT_ACTIVE',
+    '/complete (4b): Archivo en removed responde 400 UPLOAD_NOT_ACTIVE'
+  );
 
   server.close();
 

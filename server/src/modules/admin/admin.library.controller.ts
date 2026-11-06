@@ -33,7 +33,7 @@ export async function getPreviewUrl(req: Request, res: Response): Promise<void> 
     const result = await getLibraryService().getPreviewUrl(id);
     res.json({ success: true, data: result });
   } catch (err: any) {
-    res.status(err.status || 500).json({ success: false, error: err.message || 'Error al obtener previsualización' });
+    res.status(err.status || 500).json({ success: false, code: err.code, error: err.message || 'Error al obtener previsualización' });
   }
 }
 
