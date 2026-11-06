@@ -73,15 +73,15 @@ export const LibraryDownloadToast: React.FC<LibraryDownloadToastProps> = ({
           ? DOWNLOAD_TOAST_MOBILE_BOTTOM_STYLE
           : DOWNLOAD_TOAST_DESKTOP_BOTTOM_STYLE,
       }}
-      className="fixed left-3 right-3 sm:left-auto sm:right-6 sm:w-[420px] max-w-[calc(100vw-1.5rem)] z-[var(--z-toast,1300)] pointer-events-auto bg-slate-900/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl p-4 sm:p-5 shadow-2xl text-slate-100 flex flex-col gap-3 animate-in slide-in-from-bottom-4 duration-200"
+      className="fixed left-3 right-3 sm:left-auto sm:right-6 sm:w-[420px] max-w-[calc(100vw-1.5rem)] z-[var(--z-toast,1300)] pointer-events-auto bg-slate-900/95 backdrop-blur-xl border border-indigo-500/40 rounded-2xl p-3 sm:p-4 shadow-2xl text-slate-100 flex flex-col gap-2 sm:gap-3 animate-in slide-in-from-bottom-4 duration-200"
     >
       {/* Cabecera del cartel con badge y botón cerrar >= 44x44 */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-            <HeartHandshake className="w-4 h-4 text-indigo-400" />
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="p-1 sm:p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shrink-0">
+            <HeartHandshake className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-indigo-400" />
           </span>
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 uppercase tracking-wider flex items-center gap-1">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/20 uppercase tracking-wider flex items-center gap-1 shrink-0">
             <Sparkles className="w-3 h-3 text-amber-400" />
             Comunidad Stack
           </span>
@@ -91,32 +91,34 @@ export const LibraryDownloadToast: React.FC<LibraryDownloadToastProps> = ({
           type="button"
           onClick={onClose}
           aria-label={COMMUNITY_TEXTS.download.closeLabel}
-          className="min-w-[44px] min-h-[44px] -mr-2 -mt-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer"
+          className="min-w-[44px] min-h-[44px] -mr-2 -my-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer shrink-0"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Título y Mensaje Oficial */}
-      <div className="space-y-1">
-        <h3 className="text-sm sm:text-base font-extrabold text-white leading-tight">
-          {COMMUNITY_TEXTS.download.title}
-        </h3>
-        <p className="text-xs text-slate-300 leading-relaxed break-words">
-          {COMMUNITY_TEXTS.download.body}
-        </p>
-      </div>
+      {/* Título, Mensaje Oficial y Botón de acción (en landscape móvil bajo se alinea en fila para ocupar menos alto y no tapar el botón Descargar) */}
+      <div className="flex flex-col landscape:max-md:flex-row landscape:max-md:items-center gap-2 sm:gap-2.5">
+        <div className="space-y-0.5 flex-1 min-w-0">
+          <h3 className="text-xs sm:text-sm md:text-base font-extrabold text-white leading-tight">
+            {COMMUNITY_TEXTS.download.title}
+          </h3>
+          <p className="text-[11px] md:text-xs text-slate-300 leading-snug md:leading-relaxed break-words">
+            {COMMUNITY_TEXTS.download.body}
+          </p>
+        </div>
 
-      {/* Botón de acción */}
-      <div className="pt-1 flex items-center justify-end">
-        <button
-          type="button"
-          onClick={handleUploadClick}
-          className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <UploadCloud className="w-4 h-4" />
-          <span>{COMMUNITY_TEXTS.download.primaryButton}</span>
-        </button>
+        {/* Botón de acción */}
+        <div className="pt-0.5 sm:pt-1 landscape:max-md:pt-0 flex items-center justify-end shrink-0">
+          <button
+            type="button"
+            onClick={handleUploadClick}
+            className="w-full sm:w-auto px-3.5 sm:px-4 py-2 min-h-[44px] rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap"
+          >
+            <UploadCloud className="w-4 h-4 shrink-0" />
+            <span>{COMMUNITY_TEXTS.download.primaryButton}</span>
+          </button>
+        </div>
       </div>
     </aside>
   );

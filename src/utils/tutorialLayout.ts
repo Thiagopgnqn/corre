@@ -33,18 +33,57 @@ export interface TutorialLayoutResult {
   placement: 'top' | 'bottom' | 'center';
   cardCoords: { top: number; left: number };
   cardMaxHeight: number;
+  cardMaxWidth?: number;
   shouldCollapseText: boolean;
   overlapDetected: boolean;
   clearancePx: number;
 }
 
 export const MIN_AIR_GAP_PX = 12;
+export const MIN_TARGET_VISIBILITY_RATIO = 0.9;
 export const DEFAULT_SAFE_INSETS: Required<SafeInsetsLike> = {
   top: 12,
   bottom: 12,
   left: 12,
   right: 12,
 };
+
+/**
+ * Calcula qué proporción (0..1) del área del elemento objetivo se encuentra
+ * efectivamente dentro del visualViewport.
+ */
+export function getTargetVisibilityRatio(
+  targetRect: RectLike | null,
+  viewport: ViewportLike
+): number {
+  if (!targetRect || targetRect.width <= 0 || targetRect.height <= 0) {
+    return 0;
+  }
+  const vpTop = viewport.offsetTop ?? 0;
+  const vpLeft = viewport.offsetLeft ?? 0;
+  const vpRight = vpLeft + viewport.width;
+  const vpBottom = vpTop + viewport.height;
+
+  const targetBottom = targetRect.bottom ?? targetRect.top + targetRect.height;
+  const targetRight = targetRect.right ?? targetRect.left + targetRect.width;
+
+  const visibleWidth = Math.max(0, Math.min(targetRight, vpRight) - Math.max(targetRect.left, vpLeft));
+  const visibleHeight = Math.max(0, Math.min(targetBottom, vpBottom) - Math.max(targetRect.top, vpTop));
+
+  const totalArea = targetRect.width * targetRect.height;
+  return totalArea > 0 ? (visibleWidth * visibleHeight) / totalArea : 0;
+}
+
+/**
+ * Comprueba si el objetivo es al menos un 90% visible dentro del visualViewport.
+ */
+export function isTargetVisiblyInViewport(
+  targetRect: RectLike | null,
+  viewport: ViewportLike,
+  minRatio: number = MIN_TARGET_VISIBILITY_RATIO
+): boolean {
+  return getTargetVisibilityRatio(targetRect, viewport) >= minRatio;
+}
 
 /**
  * Calcula la colocación óptima de la tarjeta del tutorial garantizando que
@@ -95,10 +134,47 @@ export function computeTutorialLayout(
 
   const targetBottom = targetRect.bottom ?? (targetRect.top + targetRect.height);
   const targetTop = targetRect.top;
+  const targetLeft = targetRect.left;
+  const targetRight = targetRect.right ?? (targetRect.left + targetRect.width);
 
-  // Espacio libre real arriba y abajo del objetivo
+  // Espacio libre real arriba, abajo, izquierda y derecha del objetivo
   const availableAbove = Math.max(0, targetTop - (vpOffsetTop + insets.top) - MIN_AIR_GAP_PX);
   const availableBelow = Math.max(0, (vpOffsetTop + vpHeight - insets.bottom) - targetBottom - MIN_AIR_GAP_PX);
+  const availableLeft = Math.max(0, targetLeft - (vpOffsetLeft + insets.left) - MIN_AIR_GAP_PX);
+  const availableRight = Math.max(0, (vpOffsetLeft + vpWidth - insets.right) - targetRight - MIN_AIR_GAP_PX);
+
+  // Si tanto arriba como abajo tienen poco espacio vertical (< 170px, ej. 640x360 horizontal)
+  // pero a un costado del objetivo hay buen espacio horizontal (>= 220px), ubicar la tarjeta del lado libre lateral
+  const maxVerticalSpace = Math.max(availableAbove, availableBelow);
+  const maxHorizontalSpace = Math.max(availableLeft, availableRight);
+  if (maxVerticalSpace < 170 && maxHorizontalSpace >= 220) {
+    const placeRight = availableRight >= availableLeft;
+    const sideAvailableW = placeRight ? availableRight : availableLeft;
+    const sideCardWidth = Math.min(effectiveCardWidth, sideAvailableW);
+    const sideMaxHeight = Math.max(120, vpHeight - insets.top - insets.bottom);
+    const sideEffectiveHeight = Math.min(cardSize.height, sideMaxHeight);
+
+    const sideLeft = placeRight
+      ? Math.round(targetRight + MIN_AIR_GAP_PX)
+      : Math.round(targetLeft - MIN_AIR_GAP_PX - sideCardWidth);
+    const sideTop = Math.max(
+      vpOffsetTop + insets.top,
+      Math.min(
+        vpOffsetTop + vpHeight - insets.bottom - sideEffectiveHeight,
+        Math.round(vpOffsetTop + (vpHeight - sideEffectiveHeight) / 2)
+      )
+    );
+
+    return {
+      placement: 'bottom',
+      cardCoords: { top: sideTop, left: sideLeft },
+      cardMaxHeight: Math.floor(sideMaxHeight),
+      cardMaxWidth: Math.floor(sideCardWidth),
+      shouldCollapseText: sideMaxHeight < cardSize.height || vpHeight < 700,
+      overlapDetected: false,
+      clearancePx: MIN_AIR_GAP_PX,
+    };
+  }
 
   // Regla especial: si el objetivo está anclado a la barra inferior (< 80px del borde inferior),
   // la tarjeta SIEMPRE va arriba para no tapar la navegación.
@@ -138,14 +214,15 @@ export function computeTutorialLayout(
     }
   } else {
     // placement === 'top'
-    top = targetTop - MIN_AIR_GAP_PX - effectiveCardHeight;
+    const maxBottom = Math.min(targetTop - MIN_AIR_GAP_PX, vpOffsetTop + vpHeight - insets.bottom);
+    top = maxBottom - effectiveCardHeight;
     // Si la tarjeta compactada desborda el tope de la pantalla, fijarla contra el borde seguro superior
     if (top < vpOffsetTop + insets.top) {
       top = vpOffsetTop + insets.top;
     }
-    // Garantizar que la base de la tarjeta nunca supere targetTop - MIN_AIR_GAP_PX
-    if (top + effectiveCardHeight > targetTop - MIN_AIR_GAP_PX) {
-      effectiveCardHeight = Math.max(48, targetTop - MIN_AIR_GAP_PX - top);
+    // Garantizar que la base de la tarjeta nunca supere maxBottom
+    if (top + effectiveCardHeight > maxBottom) {
+      effectiveCardHeight = Math.max(48, maxBottom - top);
     }
   }
 
@@ -170,7 +247,6 @@ export function computeTutorialLayout(
   // Comprobar estrictamente si existe intersección
   const cardBottom = top + effectiveCardHeight;
   const cardRight = left + effectiveCardWidth;
-  const targetRight = targetRect.right ?? (targetRect.left + targetRect.width);
 
   const horizontalIntersect = Math.max(0, Math.min(cardRight, targetRight) - Math.max(left, targetRect.left)) > 0;
   const verticalIntersect = Math.max(0, Math.min(cardBottom, targetBottom) - Math.max(top, targetTop)) > 0;

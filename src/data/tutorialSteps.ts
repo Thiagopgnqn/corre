@@ -155,7 +155,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Planificá tu semana eligiendo comisiones, detectá superposiciones con alertas visuales rayadas, previsualizá bloques al posar el mouse y generá combinaciones automáticas sin choques.',
     badge: 'Grilla Semanal',
-    targetSelector: '[data-tour="nav-tabs"]',
+    targetSelector: '[data-tour="schedule-builder-toolbar"]',
     targetView: 'schedule',
     placement: 'bottom',
     iconName: 'Clock',
@@ -168,7 +168,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Consultá puntuaciones y opiniones 100% anónimas por docente y materia, filtrá comisiones mejor valoradas directamente en el Armador de Horarios y puntuá a tus profesores en materias regularizadas o aprobadas.',
     badge: 'Comunidad & Elección',
-    targetSelector: '[data-tour="professors-directory"]',
+    targetSelector: '[data-tour="professors-directory-header"]',
     targetView: 'professors',
     placement: 'bottom',
     iconName: 'Star',
@@ -181,7 +181,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Indicá con qué comisión y docentes cursaste cada materia desde su ficha o al pasar tu horario a cursando. El sistema te sugerirá automáticamente a quiénes reseñar y tus opiniones llevarán el distintivo "Cursó con este docente".',
     badge: 'Mi Cursada',
-    targetSelector: '[data-tour="professors-directory"]',
+    targetSelector: '[data-tour="enrollments-recommendations-banner"]',
     targetView: 'professors',
     placement: 'bottom',
     iconName: 'UserCheck',
@@ -207,7 +207,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Todo tu progreso se sincroniza con tu cuenta y podés exportar un respaldo JSON descargable desde el menú para llevarlo a otra computadora o celular.',
     badge: 'Privacidad & Respaldo',
-    targetSelector: '[data-tour="more-menu-btn"]',
+    targetSelector: '[data-tour="sync-status-badge"]',
     targetView: 'graph',
     placement: 'bottom',
     iconName: 'Download',

@@ -4,17 +4,20 @@ import path from 'node:path';
 
 const EDGE_PATH = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const ARTIFACTS_DIR = 'C:\\Users\\msgar\\.gemini\\antigravity\\brain\\bbbcea45-94e2-4984-ab70-c1fbef39a5f5';
-const PROFILE_DIR = path.join(process.cwd(), 'node_modules', '.tmp_edge_cdp_profile_audit');
+const DIST_DIR = process.argv[2] ? path.resolve(process.argv[2]) : path.resolve('dist');
+const REPORT_NAME = process.argv[3] || 'audit_and_measures_report.json';
+const TAKE_SCREENSHOTS = process.argv[4] !== 'no-screenshots';
 
+const PROFILE_DIR = path.join(process.cwd(), 'node_modules', '.tmp_edge_cdp_profile_audit_' + Math.floor(Math.random() * 10000));
 if (!fs.existsSync(PROFILE_DIR)) {
   fs.mkdirSync(PROFILE_DIR, { recursive: true });
 }
 
-console.log('1. Iniciando servidor Mock Python en puerto 8093...');
+console.log(`1. Iniciando servidor Mock Python en puerto 8093 sirviendo ${DIST_DIR}...`);
 const serverProc = spawn('python', [
   path.join(process.cwd(), 'scripts', 'mobile-check', 'mock-server.py'),
   '8093',
-  path.resolve('dist')
+  DIST_DIR,
 ], { stdio: 'ignore' });
 
 await new Promise((r) => setTimeout(r, 1500));
@@ -41,6 +44,69 @@ async function getWsUrl() {
     await new Promise((r) => setTimeout(r, 500));
   }
   throw new Error('No se pudo conectar a CDP');
+}
+
+function getExpectedSelector(stepIndex1Based, isMobile, vpHeight, isLegacy397abb9) {
+  const isShort = vpHeight < 480;
+  const isCompact = vpHeight < 680;
+  if (isMobile) {
+    switch (stepIndex1Based) {
+      case 1: return null; // welcome
+      case 2: return null; // graph-overview
+      case 3: return '[data-tour="graph-controls"]';
+      case 4: return '[data-tour="sample-subject"]';
+      case 5: return '[data-tour="drawer-status-btn"]';
+      case 6: return '[data-tour="edge-legend"]';
+      case 7: return '[data-tour="simulation-button"]';
+      case 8:
+        if (isLegacy397abb9) {
+          return isShort ? '[data-tour="electives-banner"] > div:first-child' : '[data-tour="electives-banner"]';
+        }
+        return isCompact ? '[data-tour="electives-banner"] > div:first-child' : '[data-tour="electives-banner"]';
+      case 9: return '[data-tour="analista-button"]';
+      case 10: return '[data-tour="more-menu-btn"]';
+      case 11:
+        if (isLegacy397abb9) {
+          return isShort ? '[data-tour="professors-directory"] > div:first-child h1' : '[data-tour="professors-directory"] > div:first-child';
+        }
+        return '[data-tour="professors-directory-header"]';
+      case 12:
+        if (isLegacy397abb9) {
+          return isShort ? '[data-tour="professors-directory"] > div:first-child h1' : '[data-tour="professors-directory"] > div:first-child';
+        }
+        return '[data-tour="enrollments-recommendations-banner"]';
+      case 13: return '[data-tour="stats-rings"] > div:first-child';
+      case 14: return isLegacy397abb9 ? '[data-tour="more-menu-btn"]' : '[data-tour="sync-status-badge"]';
+      case 15:
+        if (isLegacy397abb9) {
+          return isShort ? '[data-tour="library-header"] h1' : '[data-tour="library-header"]';
+        }
+        return isCompact ? '[data-tour="library-header"] h1' : '[data-tour="library-header"]';
+      case 16: return '[data-tour="onboarding-menu-item"]';
+      default: return null;
+    }
+  } else {
+    switch (stepIndex1Based) {
+      case 1: return null;
+      case 2: return null;
+      case 3: return '[data-tour="graph-controls"]';
+      case 4: return '[data-tour="sample-subject"]';
+      case 5: return '[data-tour="drawer-status-btn"]';
+      case 6: return '[data-tour="edge-legend"]';
+      case 7: return '[data-tour="simulation-button"]';
+      case 8: return '[data-tour="electives-banner"]';
+      case 9: return '[data-tour="analista-button"]';
+      case 10: return '[data-tour="nav-tabs"]';
+      case 11: return isLegacy397abb9 ? '[data-tour="nav-tabs"]' : '[data-tour="schedule-builder-toolbar"]';
+      case 12: return isLegacy397abb9 ? '[data-tour="professors-directory"] > div:first-child' : '[data-tour="professors-directory-header"]';
+      case 13: return isLegacy397abb9 ? '[data-tour="professors-directory"] > div:first-child' : '[data-tour="enrollments-recommendations-banner"]';
+      case 14: return '[data-tour="stats-rings"] > div:first-child';
+      case 15: return isLegacy397abb9 ? '[data-tour="more-menu-btn"]' : '[data-tour="sync-status-badge"]';
+      case 16: return '[data-tour="library-header"]';
+      case 17: return '[data-tour="onboarding-menu-item"]';
+      default: return null;
+    }
+  }
 }
 
 async function run() {
@@ -74,13 +140,6 @@ async function run() {
     await send('Runtime.enable');
     await send('DOM.enable');
 
-    const downloadDir = path.join(process.cwd(), 'node_modules', '.tmp_downloads');
-    if (!fs.existsSync(downloadDir)) fs.mkdirSync(downloadDir, { recursive: true });
-    await send('Page.setDownloadBehavior', {
-      behavior: 'allow',
-      downloadPath: downloadDir,
-    });
-
     async function evaluate(expression) {
       const res = await send('Runtime.evaluate', {
         expression,
@@ -90,27 +149,28 @@ async function run() {
       return res?.result?.value;
     }
 
-    async function setViewport(w, h, isMobile, visualH = null, fontScale = 1.0) {
+    // Punto 3b: simular barra del navegador reduciendo el viewport real de CDP (sin hack de getter)
+    async function setViewport(w, h, isMobile, fontScale = 1.0) {
       await send('Emulation.setDeviceMetricsOverride', {
         width: w,
         height: h,
         deviceScaleFactor: 1,
         mobile: isMobile,
+        screenWidth: w,
+        screenHeight: h,
       });
-      if (visualH) {
-        await send('Emulation.setVisibleSize', { width: w, height: visualH });
-      } else {
-        await send('Emulation.setVisibleSize', { width: w, height: h });
-      }
+      await send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
       if (fontScale !== 1.0) {
         await evaluate(`document.documentElement.style.fontSize = '${Math.round(fontScale * 100)}%';`);
       } else {
         await evaluate(`document.documentElement.style.fontSize = '';`);
       }
+      await evaluate(`window.dispatchEvent(new Event('resize'));`);
       await new Promise((r) => setTimeout(r, 250));
     }
 
     async function captureScreenshot(filename) {
+      if (!TAKE_SCREENSHOTS) return null;
       const res = await send('Page.captureScreenshot', { format: 'png' });
       const filepath = path.join(ARTIFACTS_DIR, filename);
       fs.writeFileSync(filepath, Buffer.from(res.data, 'base64'));
@@ -121,323 +181,255 @@ async function run() {
     await send('Page.navigate', { url: 'http://127.0.0.1:8093/#/' });
     await new Promise((r) => setTimeout(r, 2000));
 
+    // Cerrar tutorial inicial si abrió por defecto
+    await evaluate(`
+      (() => {
+        const closeBtn = document.querySelector('[data-tour="tutorial-card"] button[title*="Cerrar tutorial"]');
+        if (closeBtn) closeBtn.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 300));
+
     // =========================================================================
-    // AUDITORÍA 1: MEDICIONES DE SubjectLibraryView CON ARCHIVOS REALISTAS (4.a)
+    // PUNTO 4: BARRA SUPERIOR DEL MAPA EN CELULAR (Mapa y Lista, 320/360/411/430, 100/130/150%)
     // =========================================================================
-    console.log('\n--- AUDITORÍA 1: SubjectLibraryView (Anchos x Fuentes) ---');
-    const libraryTestWidths = [320, 360, 411];
-    const fontScales = [1.0, 1.15, 1.30, 1.50];
-    const subjectLibraryMatrix = [];
+    console.log('\n--- PUNTO 4: Barra superior del mapa en celular (Mapa y Lista) ---');
+    const mapBarViewports = [
+      { w: 320, h: 568 },
+      { w: 360, h: 640 },
+      { w: 411, h: 740 },
+      { w: 430, h: 932 },
+    ];
+    const mapBarFonts = [1.0, 1.30, 1.50];
+    const mapBarModes = ['mapa', 'lista'];
+    const mapTopBarMatrix = [];
 
-    // Navigate to subject 1
-    await evaluate(`window.location.hash = 'library/1';`);
-    await new Promise((r) => setTimeout(r, 1000));
+    await evaluate(`window.location.hash = 'graph';`);
+    await new Promise((r) => setTimeout(r, 800));
 
-    for (const w of libraryTestWidths) {
-      for (const scale of fontScales) {
-        await setViewport(w, 740, true, null, scale);
-        await new Promise((r) => setTimeout(r, 300));
+    for (const mode of mapBarModes) {
+      for (const vp of mapBarViewports) {
+        for (const scale of mapBarFonts) {
+          if (vp.w === 430 && scale !== 1.0) continue; // 430 pedido al 100% + las 18 combinaciones
+          await setViewport(vp.w, vp.h, true, scale);
+          await evaluate(`
+            (() => {
+              const bar = document.querySelector('[data-tour="graph-controls"]');
+              if (!bar) return;
+              const targetText = ${JSON.stringify(mode === 'mapa' ? 'Mapa' : 'Lista')};
+              const btn = Array.from(bar.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes(targetText));
+              if (btn) btn.click();
+            })()
+          `);
+          await new Promise((r) => setTimeout(r, 350));
 
-        const m = await evaluate(`
+          const m = await evaluate(`
+            (() => {
+              const bar = document.querySelector('[data-tour="graph-controls"]');
+              const barRect = bar ? bar.getBoundingClientRect() : null;
+              const buttons = bar ? Array.from(bar.querySelectorAll('button')).filter(b => {
+                const s = window.getComputedStyle(b);
+                return s.display !== 'none' && s.visibility !== 'hidden' && b.getBoundingClientRect().width > 0;
+              }) : [];
+
+              const btnRects = buttons.map(b => {
+                const r = b.getBoundingClientRect();
+                return {
+                  label: b.textContent.trim() || b.getAttribute('aria-label') || 'icon',
+                  top: Math.round(r.top),
+                  left: Math.round(r.left),
+                  right: Math.round(r.right),
+                  bottom: Math.round(r.bottom),
+                  width: Math.round(r.width),
+                  height: Math.round(r.height),
+                  clippedText: b.scrollWidth > b.clientWidth + 2,
+                };
+              });
+
+              let buttonOverlaps = 0;
+              for (let i = 0; i < btnRects.length; i++) {
+                for (let j = i + 1; j < btnRects.length; j++) {
+                  const a = btnRects[i];
+                  const b = btnRects[j];
+                  const ix = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+                  const iy = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+                  if (ix > 1 && iy > 1) buttonOverlaps++;
+                }
+              }
+
+              const uniqueRowTops = [];
+              for (const b of btnRects) {
+                if (!uniqueRowTops.some(t => Math.abs(t - b.top) <= 8)) {
+                  uniqueRowTops.push(b.top);
+                }
+              }
+
+              const sw = document.documentElement.scrollWidth;
+              const barOutRight = barRect ? Math.max(0, Math.round(barRect.right - ${vp.w})) : 0;
+              const barOutLeft = barRect ? Math.max(0, Math.round(-barRect.left)) : 0;
+              const minBtnHeight = btnRects.length ? Math.min(...btnRects.map(b => b.height)) : 0;
+              const anyClipped = btnRects.some(b => b.clippedText);
+
+              return {
+                mode: ${JSON.stringify(mode)},
+                viewport: '${vp.w}x${vp.h}',
+                fontPct: '${Math.round(scale * 100)}%',
+                scrollWidth: sw,
+                overflowPx: Math.max(0, sw - ${vp.w}, barOutRight, barOutLeft),
+                rowsCount: uniqueRowTops.length,
+                barRect: barRect ? {
+                  top: Math.round(barRect.top),
+                  left: Math.round(barRect.left),
+                  right: Math.round(barRect.right),
+                  bottom: Math.round(barRect.bottom),
+                  width: Math.round(barRect.width),
+                  height: Math.round(barRect.height),
+                } : null,
+                buttonOverlaps,
+                minBtnHeight,
+                anyClipped,
+                buttons: btnRects,
+              };
+            })()
+          `);
+          mapTopBarMatrix.push(m);
+          console.log(`[MapBar] ${m.mode} ${m.viewport} @ ${m.fontPct} -> rows=${m.rowsCount}, barH=${m.barRect?.height}px, overflow=${m.overflowPx}px, overlaps=${m.buttonOverlaps}, minBtnH=${m.minBtnHeight}px`);
+
+          if (mode === 'mapa' && vp.w === 411 && scale === 1.0) {
+            await captureScreenshot('verify_map_bar_mapa_411_100.png');
+          }
+        }
+      }
+    }
+
+    // Volver a modo Mapa
+    await setViewport(411, 630, true, 1.0);
+    await evaluate(`
+      (() => {
+        const bar = document.querySelector('[data-tour="graph-controls"]');
+        if (!bar) return;
+        const btn = Array.from(bar.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Mapa'));
+        if (btn) btn.click();
+      })()
+    `);
+    await new Promise((r) => setTimeout(r, 300));
+
+    // =========================================================================
+    // PUNTO 3: MATRIZ COMPLETA DEL TUTORIAL CON MÉTRICA INDEPENDIENTE Y 411x630 REAL
+    // =========================================================================
+    console.log('\n--- PUNTO 3: Matriz completa del tutorial (81 filas) ---');
+    const isLegacy397abb9 = REPORT_NAME.includes('397abb9');
+
+    async function startTutorialViaUI() {
+      await evaluate(`
+        (() => {
+          const closeBtn = document.querySelector('[data-tour="tutorial-card"] button[title*="Cerrar tutorial"]');
+          if (closeBtn) closeBtn.click();
+        })()
+      `);
+      await new Promise((r) => setTimeout(r, 200));
+
+      const startedDirect = await evaluate(`
+        (() => {
+          const directBtn = document.querySelector('button[title="Ver Tutorial Interactivo"]');
+          if (directBtn && directBtn.getBoundingClientRect().width > 0) {
+            directBtn.click();
+            return true;
+          }
+          const moreBtns = Array.from(document.querySelectorAll('[data-tour="more-menu-btn"]')).filter(el => el.getBoundingClientRect().width > 0);
+          if (moreBtns.length > 0) {
+            moreBtns[moreBtns.length - 1].click();
+          }
+          return false;
+        })()
+      `);
+      if (!startedDirect) {
+        await new Promise((r) => setTimeout(r, 350));
+        await evaluate(`
           (() => {
-            const sw = document.documentElement.scrollWidth;
-            const iw = window.innerWidth;
-            const searchInput = document.querySelector('input[placeholder*="Buscar por"]');
-            const sortSelect = document.querySelector('select');
-            const fileCards = Array.from(document.querySelectorAll('.rounded-2xl.border'));
-            let maxCardW = 0;
-            fileCards.forEach(c => {
-              maxCardW = Math.max(maxCardW, c.getBoundingClientRect().width);
-            });
-
-            return {
-              width: ${w},
-              fontScale: ${scale},
-              scrollWidth: sw,
-              innerWidth: iw,
-              overflowPx: Math.max(0, sw - ${w}),
-              searchWidth: searchInput ? Math.round(searchInput.getBoundingClientRect().width) : 0,
-              sortSelectWidth: sortSelect ? Math.round(sortSelect.getBoundingClientRect().width) : 0,
-              maxCardWidth: Math.round(maxCardW)
-            };
+            const tutBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Ver tutorial interactivo'));
+            if (tutBtn) tutBtn.click();
           })()
         `);
-        subjectLibraryMatrix.push(m);
-        console.log(`[SubjectView] ${w}px @ ${Math.round(scale*100)}% font -> scrollWidth: ${m.scrollWidth}px (Desborde: ${m.overflowPx}px)`);
       }
+      await new Promise((r) => setTimeout(r, 750));
     }
 
-    // =========================================================================
-    // AUDITORÍA 2: VISTAS RESTANTES DE BIBLIOTECA CON FUENTE 130% (4.c)
-    // =========================================================================
-    console.log('\n--- AUDITORÍA 2: Portada, Mis Aportes, Términos y Modales (4.c) ---');
-    await setViewport(411, 740, true, null, 1.30);
-    const libraryViewsAudit = {};
-
-    // 1. Portada
-    await evaluate(`window.location.hash = 'library';`);
-    await new Promise((r) => setTimeout(r, 800));
-    libraryViewsAudit.portada = await evaluate(`
-      (() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        overflow: document.documentElement.scrollWidth > 411,
-        hasHeader: Boolean(document.querySelector('[data-tour="library-header"]')),
-      }))()
-    `);
-
-    // 2. Mis Aportes
-    await evaluate(`window.location.hash = 'library/my-uploads';`);
-    await new Promise((r) => setTimeout(r, 800));
-    libraryViewsAudit.myUploads = await evaluate(`
-      (() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        overflow: document.documentElement.scrollWidth > 411,
-        hasList: Boolean(document.querySelector('main')),
-      }))()
-    `);
-
-    // 3. Términos
-    await evaluate(`window.location.hash = 'library/terms';`);
-    await new Promise((r) => setTimeout(r, 800));
-    libraryViewsAudit.terms = await evaluate(`
-      (() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        overflow: document.documentElement.scrollWidth > 411,
-        hasEmail: !document.body.innerText.includes('frba'),
-      }))()
-    `);
-
-    // 4. Modal de Subida
-    await evaluate(`
-      const uploadBtn = document.querySelector('button[title*="Subir"], button:has(svg)');
-      // disparar modal de subida desde el hash de portada
-      window.location.hash = 'library';
-    `);
-    await new Promise((r) => setTimeout(r, 600));
-    await evaluate(`
-      const btn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Subir Material'));
-      if (btn) btn.click();
-    `);
-    await new Promise((r) => setTimeout(r, 600));
-    libraryViewsAudit.uploadModal = await evaluate(`
-      (() => {
-        const modal = document.querySelector('[role="dialog"]') || document.querySelector('form');
-        return {
-          isOpen: Boolean(modal),
-          scrollWidth: document.documentElement.scrollWidth,
-          overflow: document.documentElement.scrollWidth > 411,
-        };
-      })()
-    `);
-    // Cerrar modal de subida
-    await evaluate(`
-      const closeBtn = document.querySelector('button[aria-label*="Cerrar"], button:has(.lucide-x)');
-      if (closeBtn) closeBtn.click();
-    `);
-    await new Promise((r) => setTimeout(r, 400));
-
-    // 5. Modal de Reporte
-    await evaluate(`window.location.hash = 'library/1';`);
-    await new Promise((r) => setTimeout(r, 800));
-    await evaluate(`
-      const reportBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Reportar'));
-      if (reportBtn) reportBtn.click();
-    `);
-    await new Promise((r) => setTimeout(r, 600));
-    libraryViewsAudit.reportModal = await evaluate(`
-      (() => {
-        const form = document.querySelector('form');
-        const reasonSelect = form ? form.querySelector('select') : null;
-        return {
-          isOpen: Boolean(form),
-          selectMinHeight: reasonSelect ? reasonSelect.getBoundingClientRect().height : 0,
-          overflow: document.documentElement.scrollWidth > 411,
-        };
-      })()
-    `);
-    await evaluate(`
-      const cancelBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Cancelar'));
-      if (cancelBtn) cancelBtn.click();
-    `);
-    await new Promise((r) => setTimeout(r, 400));
-
-    // Reset root font size
-    await evaluate(`document.documentElement.style.fontSize = '';`);
-
-    // =========================================================================
-    // AUDITORÍA 3: CARTELES DE COMUNIDAD (5)
-    // =========================================================================
-    console.log('\n--- AUDITORÍA 3: Carteles de Comunidad (5) ---');
-    const bannersViewports = [
-      { name: '320x568', w: 320, h: 568, isMobile: true },
-      { name: '360x640', w: 360, h: 640, isMobile: true },
-      { name: '411x740', w: 411, h: 740, isMobile: true },
-      { name: '640x360', w: 640, h: 360, isMobile: true },
-      { name: '1280x800', w: 1280, h: 800, isMobile: false },
-      { name: '411x740_font130', w: 411, h: 740, isMobile: true, fontScale: 1.30 },
-    ];
-
-    const bannersAuditResults = [];
-
-    for (const vp of bannersViewports) {
-      await setViewport(vp.w, vp.h, vp.isMobile, null, vp.fontScale || 1.0);
-
-      // Limpiar localStorage y navegar para disparar Bienvenida limpia
+    async function clickNextTutorialStepUI() {
       await evaluate(`
-        localStorage.removeItem('stack:library-welcome-seen:mock-admin-1');
-        localStorage.removeItem('stack:library-welcome-seen:anon');
-        window.location.hash = 'graph';
-      `);
-      await new Promise((r) => setTimeout(r, 400));
-      await evaluate(`window.location.hash = 'library';`);
-      await new Promise((r) => setTimeout(r, 800));
-
-      const welcomeMetrics = await evaluate(`
         (() => {
-          const titleEl = Array.from(document.querySelectorAll('h2')).find(h => h.textContent && h.textContent.includes('La Biblioteca la hacemos entre todos'));
-          const buttons = Array.from(document.querySelectorAll('button')).filter(b => {
+          const card = document.querySelector('[data-tour="tutorial-card"]');
+          if (!card) return;
+          const nextBtn = Array.from(card.querySelectorAll('button')).find(b => {
             const t = b.textContent ? b.textContent.trim() : '';
-            return t === 'Subir un archivo' || t === 'Ahora no' || b.getAttribute('aria-label') === 'Cerrar bienvenida';
+            return t.includes('Comenzar') || t.includes('Siguiente') || t.includes('¡Empezar!') || t.includes('Empezar solo');
           });
-          const buttonMetrics = buttons.map(b => ({
-            text: b.textContent?.trim() || b.getAttribute('aria-label'),
-            width: Math.round(b.getBoundingClientRect().width),
-            height: Math.round(b.getBoundingClientRect().height),
-            touchTargetPass: b.getBoundingClientRect().height >= 44
-          }));
-          const termsLink = Array.from(document.querySelectorAll('a')).find(a => a.textContent && a.textContent.includes('Términos'));
-
-          return {
-            titleFound: Boolean(titleEl),
-            buttonMetrics,
-            termsLinkFound: Boolean(termsLink),
-            scrollWidth: document.documentElement.scrollWidth,
-            overflow: document.documentElement.scrollWidth > ${vp.w}
-          };
+          if (nextBtn) nextBtn.click();
         })()
       `);
-
-      if (vp.name === '411x740') {
-        await captureScreenshot('verify_banner_welcome_411x740.png');
-      }
-
-      // Cerrar bienvenida
-      await evaluate(`
-        const ahoraNoBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Ahora no'));
-        if (ahoraNoBtn) ahoraNoBtn.click();
-      `);
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Ir a materia 1 y descargar un archivo para evaluar cartel de descarga
-      await evaluate(`
-        window.location.hash = 'graph';
-      `);
-      await new Promise((r) => setTimeout(r, 300));
-      await evaluate(`
-        window.location.hash = 'library/1';
-      `);
-      await new Promise((r) => setTimeout(r, 1200));
-
-      await evaluate(`
-        const dlBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Descargar'));
-        if (dlBtn) dlBtn.click();
-      `);
-      await new Promise((r) => setTimeout(r, 1000));
-
-      const downloadToastMetrics = await evaluate(`
-        (() => {
-          const toastEl = document.querySelector('aside[role="status"]');
-          const navEl = document.querySelector('nav.fixed.bottom-0') ||
-                        document.querySelector('nav[data-tour="nav-tabs"]') ||
-                        Array.from(document.querySelectorAll('nav')).pop();
-          const toastRect = toastEl ? {
-            top: Math.round(toastEl.getBoundingClientRect().top),
-            bottom: Math.round(toastEl.getBoundingClientRect().bottom),
-            left: Math.round(toastEl.getBoundingClientRect().left),
-            right: Math.round(toastEl.getBoundingClientRect().right),
-            height: Math.round(toastEl.getBoundingClientRect().height),
-          } : null;
-          const navRect = navEl ? {
-            top: Math.round(navEl.getBoundingClientRect().top),
-            height: Math.round(navEl.getBoundingClientRect().height),
-          } : null;
-
-          const toastTitle = toastEl ? toastEl.querySelector('h3')?.textContent?.trim() : null;
-          const uploadBtn = toastEl ? Array.from(toastEl.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Subir un archivo')) : null;
-          const closeBtn = toastEl ? toastEl.querySelector('button[aria-label="Cerrar aviso"]') : null;
-
-          let clearanceAboveNav = null;
-          if (toastRect && navRect) {
-            clearanceAboveNav = navRect.top - toastRect.bottom;
-          }
-
-          return {
-            toastPresent: Boolean(toastEl),
-            toastTitle,
-            clearanceAboveNav,
-            toastRect,
-            navRect,
-            uploadBtnHeight: uploadBtn ? Math.round(uploadBtn.getBoundingClientRect().height) : 0,
-            closeBtnHeight: closeBtn ? Math.round(closeBtn.getBoundingClientRect().height) : 0,
-            overflow: document.documentElement.scrollWidth > ${vp.w}
-          };
-        })()
-      `);
-
-      if (vp.name === '411x740') {
-        await captureScreenshot('verify_banner_download_411x740.png');
-      }
-
-      bannersAuditResults.push({
-        viewport: vp.name,
-        welcome: welcomeMetrics,
-        download: downloadToastMetrics
-      });
-      console.log(`[Banners] ${vp.name} -> Welcome OK: ${welcomeMetrics.titleFound}, Toast OK: ${downloadToastMetrics.toastPresent}, Clearance Nav: ${downloadToastMetrics.clearanceAboveNav}px`);
+      await new Promise((r) => setTimeout(r, 800));
     }
 
-    // Reset font
-    await evaluate(`document.documentElement.style.fontSize = '';`);
-
-    // =========================================================================
-    // AUDITORÍA 4: TUTORIAL MULTI-VIEWPORT CON CAPTURAS PASO A PASO (3.b & 3.g)
-    // =========================================================================
-    console.log('\n--- AUDITORÍA 4: Tutorial Completo y Capturas Paso a Paso ---');
     const tutorialViewports = [
-      { name: '360x640', w: 360, h: 640, isMobile: true },
-      { name: '411x740 (visual 630)', w: 411, h: 740, isMobile: true, visualH: 630 },
-      { name: '640x360', w: 640, h: 360, isMobile: true },
-      { name: '820x1180', w: 820, h: 1180, isMobile: true },
-      { name: '1024x768', w: 1024, h: 768, isMobile: false },
-      { name: '1280x800', w: 1280, h: 800, isMobile: false },
-      { name: '411x740_font130', w: 411, h: 740, isMobile: true, fontScale: 1.30 },
+      { name: '360x640', w: 360, h: 640, isMobile: true, fontScale: 1.0 },
+      { name: '411x630', w: 411, h: 630, isMobile: true, fontScale: 1.0 },
+      { name: '640x360', w: 640, h: 360, isMobile: true, fontScale: 1.0 },
+      { name: '1280x800', w: 1280, h: 800, isMobile: false, fontScale: 1.0 },
+      { name: '411x630_font130', w: 411, h: 630, isMobile: true, fontScale: 1.30 },
     ];
 
     const tutorialFullMatrix = {};
+    let bottomNavAt411x630 = null;
 
     for (const vp of tutorialViewports) {
-      console.log(`\nVerificando tutorial en ${vp.name}...`);
-      await setViewport(vp.w, vp.h, vp.isMobile, vp.visualH || null, vp.fontScale || 1.0);
-      await evaluate(`window.location.hash = 'graph';`);
-      await new Promise((r) => setTimeout(r, 400));
+      console.log(`\nRecorriendo tutorial en ${vp.name}...`);
+      await setViewport(vp.w, vp.h, vp.isMobile, vp.fontScale);
+      await send('Page.navigate', { url: 'http://127.0.0.1:8093/?graph_view=mapa#graph' });
+      await new Promise((r) => setTimeout(r, 1200));
+      if (vp.fontScale !== 1.0) {
+        await evaluate(`document.documentElement.style.fontSize = '${Math.round(vp.fontScale * 100)}%';`);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      // Cerrar tutorial inicial si hubiera abierto
+      await evaluate(`
+        (() => {
+          const closeBtn = document.querySelector('[data-tour="tutorial-card"] button[title*="Cerrar tutorial"]');
+          if (closeBtn) closeBtn.click();
+        })()
+      `);
+      await new Promise((r) => setTimeout(r, 250));
+
+      if (vp.name === '411x630') {
+        bottomNavAt411x630 = await evaluate(`
+          (() => {
+            const nav = document.querySelector('nav.fixed.bottom-0');
+            if (!nav) return null;
+            const r = nav.getBoundingClientRect();
+            return {
+              innerWidth: window.innerWidth,
+              innerHeight: window.innerHeight,
+              visualViewportHeight: window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight,
+              navRect: { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), height: Math.round(r.height) },
+            };
+          })()
+        `);
+        console.log('[411x630 BottomNav Check]', JSON.stringify(bottomNavAt411x630));
+      }
+
+      await startTutorialViaUI();
 
       const numSteps = vp.w < 1024 ? 16 : 17;
       const stepsRecord = [];
 
       for (let sIdx = 0; sIdx < numSteps; sIdx++) {
-        await evaluate(`
-          if (typeof window.__closeTutorial === 'function') window.__closeTutorial();
-        `);
-        await new Promise((r) => setTimeout(r, 100));
-        await evaluate(`
-          if (typeof window.__startTutorial === 'function') {
-            window.__startTutorial(${sIdx});
-          }
-        `);
-        await new Promise((r) => setTimeout(r, 700));
+        const stepNum = sIdx + 1;
+        const expectedSelector = getExpectedSelector(stepNum, vp.isMobile, vp.h, isLegacy397abb9);
 
         const stepData = await evaluate(`
           (() => {
+            const selector = ${JSON.stringify(expectedSelector)};
+            const vpW = ${vp.w};
+            const vpH = ${vp.h};
             const cardEl = document.querySelector('[data-tour="tutorial-card"]');
             const ringEl = document.querySelector('[data-tour="tutorial-spotlight-ring"]');
             const titleEl = cardEl ? cardEl.querySelector('h3') : null;
@@ -461,63 +453,151 @@ async function run() {
               height: Math.round(ringEl.getBoundingClientRect().height),
             } : null;
 
-            let distance = null;
-            let overlap = false;
-            if (cardRect && ringRect) {
-              if (cardRect.top >= ringRect.bottom) {
-                distance = cardRect.top - ringRect.bottom;
-              } else if (cardRect.bottom <= ringRect.top) {
-                distance = ringRect.top - cardRect.bottom;
-              } else {
-                overlap = true;
-                distance = -Math.min(cardRect.bottom - ringRect.top, ringRect.bottom - cardRect.top);
+            // Medir el objetivo directamente desde el DOM con el selector real del paso (SIN usar el estado interno del tutorial ni Math.max(0,...))
+            let domTargetEl = null;
+            if (selector) {
+              const candidates = Array.from(document.querySelectorAll(selector));
+              for (const el of candidates) {
+                const s = window.getComputedStyle(el);
+                if (s.display !== 'none' && s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0) {
+                  const r = el.getBoundingClientRect();
+                  if (r.width > 0 && r.height > 0) {
+                    domTargetEl = el;
+                    break;
+                  }
+                }
               }
             }
 
-            const targetFound = Boolean(ringEl);
-            const vpHeight = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-            const cardInVisualVp = cardRect ? (cardRect.top >= 0 && cardRect.bottom <= vpHeight + 2) : false;
-            const horizontalOverflow = document.documentElement.scrollWidth > ${vp.w};
+            let domTargetRect = null;
+            let targetVisiblePct = null;
+            let spotlightDiffPx = null;
+
+            if (domTargetEl) {
+              const tr = domTargetEl.getBoundingClientRect();
+              domTargetRect = {
+                top: Math.round(tr.top),
+                bottom: Math.round(tr.bottom),
+                left: Math.round(tr.left),
+                right: Math.round(tr.right),
+                width: Math.round(tr.width),
+                height: Math.round(tr.height),
+              };
+              const visW = Math.max(0, Math.min(tr.right, vpW) - Math.max(tr.left, 0));
+              const visH = Math.max(0, Math.min(tr.bottom, vpH) - Math.max(tr.top, 0));
+              const area = tr.width * tr.height;
+              targetVisiblePct = area > 0 ? Math.round((visW * visH * 100) / area) : 0;
+
+              if (ringRect) {
+                // Comparar el rect del objetivo directo del DOM contra el recuadro del spotlight dibujado menos el padding declarado (8 px), SIN clampear a 0
+                const pad = 8;
+                const spotlightInnerTop = ringRect.top + pad;
+                const spotlightInnerLeft = ringRect.left + pad;
+                const spotlightInnerRight = ringRect.right - pad;
+                const spotlightInnerBottom = ringRect.bottom - pad;
+
+                const dTop = Math.abs(spotlightInnerTop - domTargetRect.top);
+                const dLeft = Math.abs(spotlightInnerLeft - domTargetRect.left);
+                const dRight = Math.abs(spotlightInnerRight - domTargetRect.right);
+                const dBottom = Math.abs(spotlightInnerBottom - domTargetRect.bottom);
+                spotlightDiffPx = Math.round(Math.max(dTop, dLeft, dRight, dBottom));
+              }
+            }
+
+            let distance = null;
+            let overlap = false;
+            if (cardRect && ringRect) {
+              const dx = Math.max(0, cardRect.left - ringRect.right, ringRect.left - cardRect.right);
+              const dy = Math.max(0, cardRect.top - ringRect.bottom, ringRect.top - cardRect.bottom);
+              if (dx > 0 || dy > 0) {
+                distance = Math.max(dx, dy);
+                overlap = false;
+              } else {
+                overlap = true;
+                const ox = Math.min(cardRect.right, ringRect.right) - Math.max(cardRect.left, ringRect.left);
+                const oy = Math.min(cardRect.bottom, ringRect.bottom) - Math.max(cardRect.top, ringRect.top);
+                distance = -Math.min(ox, oy);
+              }
+            }
+
+            const isCenteredStep = selector === null;
+            const targetFound = isCenteredStep ? 'N/A (centrado)' : (domTargetEl ? 'Sí' : 'No');
+            const cardInVisualVp = cardRect
+              ? (cardRect.top >= 0 && cardRect.bottom <= vpH + 2 && cardRect.left >= 0 && cardRect.right <= vpW + 2)
+              : false;
+
+            let pass = true;
+            const failReasons = [];
+            if (!cardInVisualVp) {
+              pass = false;
+              failReasons.push('cardOutVp');
+            }
+            if (overlap) {
+              pass = false;
+              failReasons.push('overlap');
+            }
+            if (!isCenteredStep) {
+              if (!domTargetEl) {
+                pass = false;
+                failReasons.push('targetNotFoundInDOM');
+              } else if (targetVisiblePct < 90) {
+                pass = false;
+                failReasons.push('targetVisiblePct=' + targetVisiblePct + '% (<90%)');
+              } else if (!ringRect) {
+                pass = false;
+                failReasons.push('noSpotlightRing');
+              } else if (spotlightDiffPx > 2) {
+                pass = false;
+                failReasons.push('spotlightDiffPx=' + spotlightDiffPx + 'px (>2px)');
+              }
+            }
 
             return {
-              stepIndex: ${sIdx + 1},
+              stepIndex: ${stepNum},
               title,
+              selector: selector || '(centrado)',
               targetFound,
+              domTargetRect,
+              targetVisiblePct,
               ringRect,
+              spotlightDiffPx,
               cardRect,
               distance,
               overlap,
               cardInVisualVp,
-              horizontalOverflow
+              status: pass ? 'PASS' : 'FAIL',
+              failReasons,
             };
           })()
         `);
 
         stepsRecord.push(stepData);
+        console.log(
+          `  Paso ${stepData.stepIndex} [${stepData.status}] (${stepData.title}): sel=${stepData.selector}, vis=${stepData.targetVisiblePct ?? 'N/A'}%, diff=${stepData.spotlightDiffPx ?? 'N/A'}px, dist=${stepData.distance ?? 'N/A'}px` +
+          (stepData.failReasons.length ? ` -> FAIL: ${stepData.failReasons.join(', ')}` : '')
+        );
 
-        // Si es 411x740 (font normal), capturar cada paso
-        if (vp.name === '411x740 (visual 630)') {
-          const capName = `verify_step_${sIdx + 1}_411x740.png`;
-          await captureScreenshot(capName);
+        if (vp.name === '411x630' && [4, 10, 11, 12, 14].includes(stepNum)) {
+          await captureScreenshot(`verify_step_${stepNum}_411x630.png`);
         }
+
+        await clickNextTutorialStepUI();
       }
 
       tutorialFullMatrix[vp.name] = stepsRecord;
     }
 
-    // Guardar resultados completos en archivo JSON
     const finalReport = {
-      subjectLibraryMatrix,
-      libraryViewsAudit,
-      bannersAuditResults,
+      mapTopBarMatrix,
+      bottomNavAt411x630,
       tutorialFullMatrix,
     };
+
     fs.writeFileSync(
-      path.join(ARTIFACTS_DIR, 'audit_and_measures_report.json'),
+      path.join(ARTIFACTS_DIR, REPORT_NAME),
       JSON.stringify(finalReport, null, 2)
     );
-    console.log('\nReporte completo guardado en audit_and_measures_report.json');
-
+    console.log(`\nReporte completo guardado en ${REPORT_NAME}`);
   } catch (err) {
     console.error('Error durante la verificación:', err);
   } finally {

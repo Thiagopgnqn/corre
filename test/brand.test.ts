@@ -1,13 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   APP_NAME,
   APP_TAGLINE,
   APP_DESCRIPTION,
   SITE_URL,
+  CONTACT_EMAIL,
+  CREATOR_NAME,
+  CREATOR_URL,
+  resolveCreatorUrl,
   BRAND_COLORS,
 } from '../src/config/brand.ts';
+import { CreatorCredit } from '../src/components/common/CreatorCredit.tsx';
+import { AboutStackModal } from '../src/components/common/AboutStackModal.tsx';
 import { buildVerificationEmail } from '../server/src/modules/mailer/templates/verificationEmail.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -102,6 +110,66 @@ assert(email.subject === 'Tu código de verificación de Stack: 482910', 'Email 
 assert(email.text.includes('Tu código de verificación de Stack es:'), 'Email text menciona "Stack"');
 assert(email.html.includes('Stack') && email.html.includes('#FFB938'), 'Email HTML incluye "Stack" y color ámbar oficial');
 assert(!email.html.includes('<img') && !email.html.includes('<a '), 'Email no incluye imágenes ni enlaces externos');
+
+// 6. Constancia de Autoría ("Hecho por Scroll Studio") y Ficha Acerca de Stack
+assert(CREATOR_NAME === 'Scroll Studio', 'CREATOR_NAME vale "Scroll Studio"');
+assert(
+  CREATOR_URL === 'https://thiagopgnqn.github.io/ScrollStudio/' &&
+    resolveCreatorUrl('') === null &&
+    resolveCreatorUrl('COMPLETAR') === null &&
+    resolveCreatorUrl('https://thiagopgnqn.github.io/ScrollStudio/') === 'https://thiagopgnqn.github.io/ScrollStudio/',
+  'CREATOR_URL apunta a Scroll Studio y resolveCreatorUrl trata vacío o COMPLETAR como sin link'
+);
+
+const creditWithoutUrlHtml = renderToStaticMarkup(
+  React.createElement(CreatorCredit, { variant: 'inline', creatorUrl: '' })
+);
+const creditPlaceholderUrlHtml = renderToStaticMarkup(
+  React.createElement(CreatorCredit, { variant: 'inline', creatorUrl: 'COMPLETAR' })
+);
+assert(
+  creditWithoutUrlHtml.includes('Hecho por') &&
+    creditWithoutUrlHtml.includes('Scroll Studio') &&
+    !creditWithoutUrlHtml.includes('<a ') &&
+    !creditPlaceholderUrlHtml.includes('<a '),
+  'CreatorCredit sin CREATOR_URL (o con COMPLETAR) renderiza texto plano "Hecho por Scroll Studio" sin link'
+);
+
+const creditWithUrlHtml = renderToStaticMarkup(
+  React.createElement(CreatorCredit, {
+    variant: 'inline',
+    creatorUrl: 'https://thiagopgnqn.github.io/ScrollStudio/',
+  })
+);
+assert(
+  creditWithUrlHtml.includes('Hecho por') &&
+    creditWithUrlHtml.includes('Scroll Studio') &&
+    creditWithUrlHtml.includes('href="https://thiagopgnqn.github.io/ScrollStudio/"') &&
+    creditWithUrlHtml.includes('target="_blank"') &&
+    creditWithUrlHtml.includes('rel="noopener noreferrer"'),
+  'CreatorCredit con CREATOR_URL renderiza link con href, target="_blank" y rel="noopener noreferrer"'
+);
+
+const aboutModalHtml = renderToStaticMarkup(
+  React.createElement(AboutStackModal, { isOpen: true, onClose: () => {} })
+);
+assert(
+  aboutModalHtml.includes(APP_NAME) &&
+    aboutModalHtml.includes(APP_TAGLINE) &&
+    aboutModalHtml.includes('Hecho por') &&
+    aboutModalHtml.includes('Scroll Studio') &&
+    aboutModalHtml.includes('#library/terms') &&
+    aboutModalHtml.includes('Términos y Condiciones de la Biblioteca') &&
+    aboutModalHtml.includes(CONTACT_EMAIL) &&
+    aboutModalHtml.includes(`mailto:${CONTACT_EMAIL}`),
+  'Ficha Acerca de Stack contiene nombre, lema, crédito Hecho por Scroll Studio, link a Términos y CONTACT_EMAIL'
+);
+
+assert(
+  indexHtml.includes('<meta name="author" content="Scroll Studio"'),
+  'index.html declara <meta name="author" content="Scroll Studio">'
+);
+assertFile('public/humans.txt');
 
 console.log('\n======================================================================');
 console.log(` 📊 RESULTADO TESTS BRAND: ${passed} pasaron, ${failed} fallaron`);

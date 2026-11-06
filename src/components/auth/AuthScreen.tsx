@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { Lock, Mail, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { BrandLogo, StackSymbol } from '../common/BrandLogo';
+import { CreatorCredit } from '../common/CreatorCredit';
 import { APP_NAME, APP_TAGLINE } from '../../config/brand';
 
 export const AuthScreen: React.FC = () => {
@@ -70,7 +71,7 @@ export const AuthScreen: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#090D16] text-slate-100 flex flex-col justify-center items-center py-6 px-3 sm:p-4 relative overflow-y-auto safe-area-p">
+    <div className="min-h-[100dvh] bg-[#090D16] text-slate-100 flex flex-col justify-center items-center py-4 sm:py-6 px-3 sm:p-4 relative overflow-y-auto safe-area-p">
       {/* Decorative ambient background glows clipped to viewport */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[540px] h-[540px] bg-[#2A2E8A]/25 rounded-full blur-[130px]" />
@@ -82,7 +83,7 @@ export const AuthScreen: React.FC = () => {
 
       {/* Cold start warning banner */}
       {isWakingServer && (
-        <div className="mb-6 max-w-md w-full bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-3 rounded-xl flex items-center gap-3 text-sm animate-pulse">
+        <div className="mb-4 sm:mb-6 max-w-md w-full bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-3 rounded-xl flex items-center gap-3 text-sm animate-pulse">
           <Loader2 className="w-5 h-5 animate-spin shrink-0 text-amber-400" />
           <span>Despertando el servidor en Render, esto puede demorar unos segundos en la primera petición...</span>
         </div>
@@ -90,8 +91,8 @@ export const AuthScreen: React.FC = () => {
 
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-4 sm:p-8 relative z-10">
         {/* Brand Header */}
-        <div className="text-center mb-6">
-          <div className="flex justify-center mb-3">
+        <div className="text-center mb-4 sm:mb-6">
+          <div className="flex justify-center mb-2 sm:mb-3">
             <BrandLogo variant="symbol" size="lg" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center justify-center gap-2">
@@ -100,7 +101,7 @@ export const AuthScreen: React.FC = () => {
           <p className="text-amber-400 font-semibold text-xs tracking-wide uppercase mt-1">
             {APP_TAGLINE}
           </p>
-          <p className="text-slate-400 text-xs mt-1.5">
+          <p className="text-slate-400 text-xs mt-1">
             {mode === 'login'
               ? 'Iniciá sesión para acceder a tu carrera y horarios sincronizados'
               : 'Creá tu cuenta para guardar tu avance en la nube'}
@@ -108,11 +109,11 @@ export const AuthScreen: React.FC = () => {
         </div>
 
         {/* Tab switch */}
-        <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl mb-5 border border-slate-800">
+        <div className="grid grid-cols-2 p-1 bg-slate-950/60 rounded-xl mb-4 sm:mb-5 border border-slate-800">
           <button
             type="button"
             onClick={() => { setMode('login'); setError(null); }}
-            className={`py-2 text-sm font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`min-h-[44px] py-2 text-sm font-semibold rounded-lg transition-all cursor-pointer ${
               mode === 'login'
                 ? 'bg-gradient-to-r from-[#2A2E8A] to-[#171A52] text-white shadow-md shadow-[#171A52]/40 border border-indigo-400/30'
                 : 'text-slate-400 hover:text-slate-200'
@@ -123,7 +124,7 @@ export const AuthScreen: React.FC = () => {
           <button
             type="button"
             onClick={() => { setMode('register'); setError(null); }}
-            className={`py-2 text-sm font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`min-h-[44px] py-2 text-sm font-semibold rounded-lg transition-all cursor-pointer ${
               mode === 'register'
                 ? 'bg-gradient-to-r from-[#2A2E8A] to-[#171A52] text-white shadow-md shadow-[#171A52]/40 border border-indigo-400/30'
                 : 'text-slate-400 hover:text-slate-200'
@@ -222,7 +223,7 @@ export const AuthScreen: React.FC = () => {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full mt-2 py-3 px-4 bg-gradient-to-r from-[#2A2E8A] to-[#171A52] hover:from-[#353AA8] hover:to-[#1E2269] text-white font-semibold rounded-xl border border-indigo-400/30 shadow-lg shadow-[#171A52]/50 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="w-full min-h-[44px] mt-2 py-3 px-4 bg-gradient-to-r from-[#2A2E8A] to-[#171A52] hover:from-[#353AA8] hover:to-[#1E2269] text-white font-semibold rounded-xl border border-indigo-400/30 shadow-lg shadow-[#171A52]/50 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             {isSubmitting ? (
               <>
@@ -239,11 +240,14 @@ export const AuthScreen: React.FC = () => {
         </form>
 
         {/* Feature badge */}
-        <div className="mt-6 pt-5 border-t border-slate-800 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+        <div className="mt-4 pt-3.5 sm:mt-6 sm:pt-5 border-t border-slate-800 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
           <span>Tus notas, electivas y horarios seguros y accesibles en cualquier dispositivo</span>
         </div>
       </div>
+
+      {/* Constancia de autoría */}
+      <CreatorCredit variant="inline" className="mt-2 relative z-10" />
     </div>
   );
 };

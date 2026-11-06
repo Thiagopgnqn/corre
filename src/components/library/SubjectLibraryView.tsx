@@ -90,7 +90,8 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
     fetchFiles();
   }, [subject.id, activeKindTab, search, sort, onlyWithSolution]);
 
-  const handleDownload = async (file: LibraryFilePublic) => {
+  const handleDownload = async (file: LibraryFilePublic, e?: React.MouseEvent<HTMLButtonElement>) => {
+    const clickedBtn = e?.currentTarget ?? null;
     setDownloadingId(file.id);
     try {
       const res = await libraryApi.getDownloadUrl(file.id);
@@ -106,6 +107,22 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        // Si el botón recién tocado cae en la franja inferior donde aparece el toast flotante,
+        // desplazamos suavemente la vista para que el botón "Descargar" permanezca 100% visible encima del cartel.
+        if (clickedBtn && typeof window !== 'undefined') {
+          const rect = clickedBtn.getBoundingClientRect();
+          const isShortScreen = window.innerHeight < 480;
+          const safeBottomLimit = isShortScreen
+            ? Math.max(96, window.innerHeight - 224)
+            : Math.max(120, window.innerHeight - 260);
+          if (rect.bottom > safeBottomLimit) {
+            window.scrollBy({
+              top: rect.bottom - safeBottomLimit,
+              behavior: 'instant' as ScrollBehavior,
+            });
+          }
+        }
 
         // Disparar cartel posterior a la descarga de la comunidad
         setShowDownloadToast(true);
@@ -422,28 +439,28 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 w-full min-w-0">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 w-full min-w-0">
                     {/* Helpful Vote Button */}
                     <button
                       type="button"
                       onClick={() => handleToggleHelpful(file)}
-                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] w-full sm:w-auto rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                         file.hasVotedHelpful
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                           : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
                       }`}
                       title={file.hasVotedHelpful ? 'Quitar voto útil' : 'Marcar como útil'}
                     >
-                      <ThumbsUp className={`w-3.5 h-3.5 ${file.hasVotedHelpful ? 'text-amber-400' : ''}`} />
+                      <ThumbsUp className={`w-3.5 h-3.5 shrink-0 ${file.hasVotedHelpful ? 'text-amber-400' : ''}`} />
                       <span>{file.helpfulCount > 0 ? file.helpfulCount : 'Es útil'}</span>
                     </button>
 
                     {/* Download Button */}
                     <button
                       type="button"
-                      onClick={() => handleDownload(file)}
+                      onClick={(e) => handleDownload(file, e)}
                       disabled={downloadingId === file.id}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] w-full sm:w-auto rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
                     >
                       {downloadingId === file.id ? (
                         <>

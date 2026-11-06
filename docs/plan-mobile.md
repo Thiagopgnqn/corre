@@ -994,3 +994,12 @@ En pantallas móviles ($< 768\text{ px}$):
   - **Temporizador Inteligente de 10s**: Cuenta regresiva de 10.000 ms que se pausa automáticamente si el usuario hace hover con el puntero (`onMouseEnter`) o coloca el foco (`onFocusCapture`), reanudándose al salir (`onMouseLeave`, `onBlurCapture`).
   - **Accesibilidad**: Declarado con `role="status"` y `aria-live="polite"`, botón de cierre (X) accesible de $44 \times 44\text{ px}$ con `aria-label="Cerrar aviso"`, y botón de acción *"Subir un aporte"* para incentivar la colaboración recíproca.
 
+---
+
+## 13. Constancia de Autoría ("Hecho por Scroll Studio")
+
+Para dejar constancia visible y sobria de la autoría de Stack sin alterar los layouts de pantalla completa (Mapa, Horarios, Tutorial), **no se agrega un footer global en `App.tsx`**. El crédito se centraliza en `src/config/brand.ts` (`CREATOR_NAME = 'Scroll Studio'`, `CREATOR_URL = 'https://thiagopgnqn.github.io/ScrollStudio/'`) mediante el componente reutilizable `CreatorCredit` (`src/components/common/CreatorCredit.tsx`) y se ubica exclusivamente en:
+1. **Pantallas de ingreso (`AuthScreen.tsx` y `VerifyEmailScreen.tsx`)**: variante `inline` al pie del contenido dentro del contenedor con scroll, con área táctil $\ge 44\text{ px}$.
+2. **Ficha "Acerca de Stack" (`AboutStackModal.tsx`)**: accesible desde el menú de usuario (`UserMenu.tsx`, dropdown en desktop y `BottomSheet` en celular) y desde el menú/sheet **"Más"** (`Navbar.tsx`). Se despliega como `BottomSheet` en móvil y modal centrado en escritorio, mostrando identidad de la app, `CreatorCredit` en variante `card`, enlace a los Términos de la Biblioteca y canal oficial de contacto (`CONTACT_EMAIL`).
+
+

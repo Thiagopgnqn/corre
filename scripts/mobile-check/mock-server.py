@@ -298,6 +298,9 @@ try {
                             "normalizedName": "garcia, juan carlos",
                             "reviewCount": 7,
                             "averageOverall": 4.6,
+                            "averageClarity": 4.5,
+                            "recommendPercent": 92,
+                            "ratingStatus": "confiable",
                             "hasReliableAverage": True,
                             "subjects": [{"id": "1", "name": "Análisis Matemático I", "code": 1}]
                         },
@@ -307,6 +310,9 @@ try {
                             "normalizedName": "de la colina arganaraz, maria de las mercedes",
                             "reviewCount": 14,
                             "averageOverall": 4.8,
+                            "averageClarity": 4.7,
+                            "recommendPercent": 95,
+                            "ratingStatus": "confiable",
                             "hasReliableAverage": True,
                             "subjects": [{"id": "21", "name": "Comunicaciones y Redes de Datos", "code": 21}]
                         }

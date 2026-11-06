@@ -47,6 +47,7 @@ export const ProfessorsDirectory: React.FC = () => {
     markReviewRecommendationsSeen,
     dismissReviewRecommendation,
     refreshReviewableSummary,
+    isTutorialOpen,
   } = useCareer();
   const { reloadRatings } = useProfessorRatings(true);
   const shouldReduceMotion = useReducedMotion();
@@ -259,7 +260,10 @@ export const ProfessorsDirectory: React.FC = () => {
       className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 py-4 sm:py-6 flex-1 flex flex-col gap-4 sm:gap-5"
     >
       {/* Hero Banner */}
-      <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 backdrop-blur-md shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div
+        data-tour="professors-directory-header"
+        className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 backdrop-blur-md shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+      >
         <div className="flex items-start sm:items-center gap-3.5">
           <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 via-indigo-500 to-cyan-400 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center shrink-0">
             <div className="w-full h-full bg-slate-950 rounded-[14px] flex items-center justify-center text-amber-400">
@@ -427,8 +431,11 @@ export const ProfessorsDirectory: React.FC = () => {
       </AnimatePresence>
 
       {/* Banner amable: Contanos con quién cursaste */}
-      {missingEnrollmentSubjects.length > 0 && (
-        <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-3.5 sm:p-4 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+      {(missingEnrollmentSubjects.length > 0 || isTutorialOpen) && (
+        <div
+          data-tour="enrollments-recommendations-banner"
+          className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-3.5 sm:p-4 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md"
+        >
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shrink-0">
               <BookOpen className="w-4 h-4" />

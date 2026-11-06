@@ -1,0 +1,10 @@
+/* TEAM */
+Creator: Scroll Studio
+Website: https://thiagopgnqn.github.io/ScrollStudio/
+
+/* SITE */
+Name: Stack — Tu carrera, materia a materia
+URL: https://corre-ten.vercel.app
+Language: es-AR
+Standards: HTML5, CSS3, TypeScript, React
+

@@ -22,6 +22,7 @@ export interface SubjectNodeData {
   isPrereqHighlight?: boolean; // Highlighted as prerequisite (upstream)
   isUnlockHighlight?: boolean; // Highlighted as dependent (downstream)
   isDimmed?: boolean;
+  isSampleSubject?: boolean;
   onOpenStatusModal?: (id: number) => void;
   [key: string]: unknown;
 }
@@ -37,6 +38,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
     isPrereqHighlight,
     isUnlockHighlight,
     isDimmed,
+    isSampleSubject,
     onOpenStatusModal,
   } = nodeData;
 
@@ -155,7 +157,8 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
 
   return (
     <div
-      data-tour={subject.id === 1 ? 'sample-subject' : undefined}
+      data-tour={isSampleSubject ? 'sample-subject' : undefined}
+      data-subject-id={subject.id}
       className={`relative w-[230px] sm:w-[245px] rounded-xl overflow-hidden backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
         style.bg
       } ${

@@ -2,9 +2,13 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { LIBRARY_CONFIG, type LibraryFilePublic, type LibraryFileKind } from '../src/types/library';
 import { DEFAULT_SETTINGS } from '../src/utils/storage';
 import { adminLibraryApi } from '../src/api/library.api';
+import { CONTACT_EMAIL } from '../src/config/brand';
+import { LibraryTermsPage } from '../src/components/library/LibraryTermsPage';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -532,6 +536,38 @@ test('B1. SubjectLibraryView: buscador 100%, filtros en columna con touch target
 
   // 4. Disparo de LibraryDownloadToast al descargar
   assert.match(viewContent, /setShowDownloadToast\(true\)/, 'Debe activar el toast de comunidad al completar la descarga');
+});
+
+// ---------------------------------------------------------------------
+// 13. Mail de Contacto Oficial en LibraryTermsPage (Comportamiento Renderizado)
+// ---------------------------------------------------------------------
+test('Mail de contacto oficial: LibraryTermsPage renderiza CONTACT_EMAIL (stackacademicapp@gmail.com) y ningún mail inventado', () => {
+  const forbiddenEmails = [
+    'contacto@stack.app',
+    'soporte.stack@gmail.com',
+    'soporte.stack.frba@gmail.com',
+  ];
+
+  assert.equal(CONTACT_EMAIL, 'stackacademicapp@gmail.com');
+  for (const forbidden of forbiddenEmails) {
+    assert.notEqual(CONTACT_EMAIL, forbidden, `CONTACT_EMAIL no debe ser ${forbidden}`);
+  }
+
+  const html = renderToStaticMarkup(React.createElement(LibraryTermsPage, { onBack: () => {} }));
+  assert.ok(
+    html.includes(CONTACT_EMAIL),
+    `El HTML renderizado de LibraryTermsPage debe incluir ${CONTACT_EMAIL}`
+  );
+  assert.ok(
+    html.includes(`mailto:${CONTACT_EMAIL}`),
+    `El HTML renderizado de LibraryTermsPage debe incluir el enlace mailto:${CONTACT_EMAIL}`
+  );
+  for (const forbidden of forbiddenEmails) {
+    assert.ok(
+      !html.includes(forbidden),
+      `El HTML renderizado de LibraryTermsPage no debe incluir el mail inventado ${forbidden}`
+    );
+  }
 });
 
 console.log('\n======================================================================');

@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { userStateApi } from '../../api/userState.api';
 import { adminLibraryApi } from '../../api/library.api';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from './BottomSheet';
+import { AboutStackModal } from './AboutStackModal';
+import { APP_NAME } from '../../config/brand';
 import {
   User as UserIcon,
   LogOut,
@@ -16,6 +19,7 @@ import {
   AlertTriangle,
   Mail,
   GraduationCap,
+  Info,
 } from 'lucide-react';
 
 interface UserMenuProps {
@@ -35,6 +39,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAboutModal, setShowAboutModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [pendingCount, setPendingCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -238,152 +243,181 @@ export const UserMenu: React.FC<UserMenuProps> = ({
           <div className="pt-1 border-t border-slate-800">
             <button
               type="button"
-              onClick={() => setShowDeleteConfirm(true)}
-              className="w-full px-4 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 transition-colors cursor-pointer"
+              data-testid="usermenu-about-btn"
+              onClick={() => {
+                setIsOpen(false);
+                setShowAboutModal(true);
+              }}
+              className="w-full min-h-[44px] px-4 py-2 text-left text-xs text-slate-300 hover:bg-slate-800 hover:text-white flex items-center gap-2.5 transition-colors cursor-pointer"
             >
-              <Trash2 className="w-4 h-4 text-red-400" />
+              <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>Acerca de {APP_NAME}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowDeleteConfirm(true)}
+              className="w-full min-h-[44px] px-4 py-2 text-left text-xs text-red-400 hover:bg-red-500/10 flex items-center gap-2.5 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4 text-red-400 shrink-0" />
               <span>Eliminar cuenta...</span>
             </button>
-          </div>
-
-          <div className="mt-1 pt-2 pb-1 border-t border-slate-800/80 px-4 text-center">
-            <span className="text-[10.5px] text-slate-400 font-medium">
-              Hecho por estudiantes de la UTN
-            </span>
           </div>
         </div>
       )}
 
       {/* MOBILE: BottomSheet de Cuenta y Sesión */}
-      {isMobile && (
-        <BottomSheet
-          isOpen={isOpen}
-          onClose={() => setIsOpen(false)}
-          title="Mi Cuenta"
-          subtitle={user.email}
-        >
-          <div className="space-y-4 py-2">
-            {/* Tarjeta de información del usuario */}
-            <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/90 flex items-center gap-3">
-              <div className="w-11 h-11 rounded-xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-base shrink-0">
-                {user.email.charAt(0)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-bold text-white truncate">{user.email}</p>
-                  {user.role === 'admin' && (
-                    <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
-                      <Shield className="w-3 h-3" /> Admin
-                    </span>
-                  )}
+      {isMobile && (() => {
+        const sheetNode = (
+          <BottomSheet
+            isOpen={isOpen}
+            onClose={() => setIsOpen(false)}
+            title="Mi Cuenta"
+            subtitle={user.email}
+          >
+            <div className="space-y-4 py-2">
+              {/* Tarjeta de información del usuario */}
+              <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800/90 flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-base shrink-0">
+                  {user.email.charAt(0)}
                 </div>
-                <div className="flex items-center gap-1.5 mt-1 text-xs text-indigo-400 font-medium">
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span>{currentPlanName}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-bold text-white truncate">{user.email}</p>
+                    {user.role === 'admin' && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
+                        <Shield className="w-3 h-3" /> Admin
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-1 text-xs text-indigo-400 font-medium">
+                    <GraduationCap className="w-3.5 h-3.5" />
+                    <span>{currentPlanName}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Acciones principales con touch targets >= 48px */}
-            <div className="space-y-1.5">
-              {user.role === 'admin' && (
+              {/* Acciones principales con touch targets >= 48px */}
+              <div className="space-y-1.5">
+                {user.role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={navigateToAdmin}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center justify-between gap-3 text-sm font-semibold transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Shield className="w-5 h-5 text-amber-400 shrink-0" />
+                      <span>Panel de administración</span>
+                    </div>
+                    {pendingCount !== null && pendingCount > 0 && (
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/25 text-amber-200 border border-amber-500/40">
+                        {pendingCount} pend.
+                      </span>
+                    )}
+                  </button>
+                )}
+
+                {onOpenPlanSelector && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsOpen(false);
+                      onOpenPlanSelector();
+                    }}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <UserIcon className="w-5 h-5 text-indigo-400 shrink-0" />
+                    <span>Cambiar de Carrera / Plan</span>
+                  </button>
+                )}
+
+                {/* Preferencia de Notificaciones de Biblioteca */}
+                <div className="min-h-[48px] px-4 py-3 rounded-xl bg-slate-950/40 border border-slate-800/80 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Mail className="w-5 h-5 text-indigo-400 shrink-0" />
+                    <span className="text-xs text-slate-300 leading-snug">
+                      Avisarme por mail sobre mis aportes a la Biblioteca
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={settings.notifyLibraryEmail !== false}
+                    onClick={() =>
+                      updateSettings({ notifyLibraryEmail: settings.notifyLibraryEmail === false })
+                    }
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      settings.notifyLibraryEmail !== false ? 'bg-indigo-600' : 'bg-slate-700'
+                    }`}
+                    title="Activar/desactivar notificaciones por email de la Biblioteca"
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.notifyLibraryEmail !== false ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
                 <button
                   type="button"
-                  onClick={navigateToAdmin}
-                  className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 flex items-center justify-between gap-3 text-sm font-semibold transition-colors cursor-pointer"
+                  onClick={handleExport}
+                  disabled={isExporting}
+                  className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
                 >
-                  <div className="flex items-center gap-3">
-                    <Shield className="w-5 h-5 text-amber-400 shrink-0" />
-                    <span>Panel de administración</span>
-                  </div>
-                  {pendingCount !== null && pendingCount > 0 && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-amber-500/25 text-amber-200 border border-amber-500/40">
-                      {pendingCount} pend.
-                    </span>
+                  {isExporting ? (
+                    <Loader2 className="w-5 h-5 animate-spin text-indigo-400 shrink-0" />
+                  ) : (
+                    <Download className="w-5 h-5 text-slate-400 shrink-0" />
                   )}
+                  <span>Descargar copia de seguridad</span>
                 </button>
-              )}
 
-              {onOpenPlanSelector && (
                 <button
                   type="button"
                   onClick={() => {
                     setIsOpen(false);
-                    onOpenPlanSelector();
+                    setShowAboutModal(true);
                   }}
                   className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
                 >
-                  <UserIcon className="w-5 h-5 text-indigo-400 shrink-0" />
-                  <span>Cambiar de Carrera / Plan</span>
+                  <Info className="w-5 h-5 text-indigo-400 shrink-0" />
+                  <span>Acerca de {APP_NAME}</span>
                 </button>
-              )}
 
-              {/* Preferencia de Notificaciones de Biblioteca */}
-              <div className="min-h-[48px] px-4 py-3 rounded-xl bg-slate-950/40 border border-slate-800/80 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Mail className="w-5 h-5 text-indigo-400 shrink-0" />
-                  <span className="text-xs text-slate-300 leading-snug">
-                    Avisarme por mail sobre mis aportes a la Biblioteca
-                  </span>
-                </div>
                 <button
                   type="button"
-                  role="switch"
-                  aria-checked={settings.notifyLibraryEmail !== false}
-                  onClick={() =>
-                    updateSettings({ notifyLibraryEmail: settings.notifyLibraryEmail === false })
-                  }
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    settings.notifyLibraryEmail !== false ? 'bg-indigo-600' : 'bg-slate-700'
-                  }`}
-                  title="Activar/desactivar notificaciones por email de la Biblioteca"
+                  onClick={() => {
+                    setIsOpen(false);
+                    logout();
+                  }}
+                  className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
                 >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      settings.notifyLibraryEmail !== false ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  <LogOut className="w-5 h-5 text-slate-400 shrink-0" />
+                  <span>Cerrar Sesión</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer mt-2"
+                >
+                  <Trash2 className="w-5 h-5 text-rose-400 shrink-0" />
+                  <span>Eliminar cuenta...</span>
                 </button>
               </div>
-
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={isExporting}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                {isExporting ? (
-                  <Loader2 className="w-5 h-5 animate-spin text-indigo-400 shrink-0" />
-                ) : (
-                  <Download className="w-5 h-5 text-slate-400 shrink-0" />
-                )}
-                <span>Descargar copia de seguridad</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsOpen(false);
-                  logout();
-                }}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <LogOut className="w-5 h-5 text-slate-400 shrink-0" />
-                <span>Cerrar Sesión</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowDeleteConfirm(true)}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer mt-2"
-              >
-                <Trash2 className="w-5 h-5 text-rose-400 shrink-0" />
-                <span>Eliminar cuenta...</span>
-              </button>
             </div>
-          </div>
-        </BottomSheet>
-      )}
+          </BottomSheet>
+        );
+        return typeof document !== 'undefined' && document.body
+          ? createPortal(sheetNode, document.body)
+          : sheetNode;
+      })()}
+
+      {/* Modal / Sheet Acerca de Stack */}
+      <AboutStackModal
+        isOpen={showAboutModal}
+        onClose={() => setShowAboutModal(false)}
+      />
 
       {/* Modal de confirmación para eliminar cuenta */}
       {showDeleteConfirm && (

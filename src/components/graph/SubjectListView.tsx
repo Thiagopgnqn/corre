@@ -17,6 +17,7 @@ interface SubjectListViewProps {
   onSelectSubject: (id: number) => void;
   selectedSubjectId: number | null;
   isSimulationActive?: boolean;
+  sampleSubjectId?: number;
 }
 
 export const SubjectListView: React.FC<SubjectListViewProps> = ({
@@ -25,6 +26,7 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
   onSelectSubject,
   selectedSubjectId,
   isSimulationActive = false,
+  sampleSubjectId = 1,
 }) => {
   // Agrupar materias por nivel (1° a 5° año)
   const groupedByLevel = useMemo(() => {
@@ -106,7 +108,8 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                 return (
                   <div
                     key={subject.id}
-                    data-tour={subject.id === 1 ? 'sample-subject' : undefined}
+                    data-tour={subject.id === sampleSubjectId ? 'sample-subject' : undefined}
+                    data-subject-id={subject.id}
                     onClick={() => onSelectSubject(subject.id)}
                     className={`p-3.5 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer shadow-sm ${
                       isSelected

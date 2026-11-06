@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   computeTutorialLayout,
   adaptTutorialText,
+  getTargetVisibilityRatio,
+  isTargetVisiblyInViewport,
   MIN_AIR_GAP_PX,
 } from '../src/utils/tutorialLayout';
 
@@ -146,6 +148,19 @@ describe('A2. adaptTutorialText (Adaptación de Textos por Dispositivo)', () => 
     const mobileText = adaptTutorialText(stepCursada, true);
     assert.doesNotMatch(mobileText.description, /o al pasar tu horario a cursando/);
     assert.match(mobileText.description, /desde su ficha/);
+  });
+});
+
+describe('A2. getTargetVisibilityRatio & isTargetVisiblyInViewport (Visibilidad >= 90%)', () => {
+  it('Rechaza objetivos fuera del viewport (ej. left: -428..-249) y aprueba objetivos >= 90% visibles', () => {
+    const vp = { width: 411, height: 630, offsetTop: 0, offsetLeft: 0 };
+    const offscreenNode = { top: 202, left: -428, width: 179, height: 87, right: -249, bottom: 290 };
+    assert.equal(getTargetVisibilityRatio(offscreenNode, vp), 0);
+    assert.equal(isTargetVisiblyInViewport(offscreenNode, vp), false);
+
+    const visibleNode = { top: 140, left: 116, width: 179, height: 87, right: 295, bottom: 227 };
+    assert.equal(getTargetVisibilityRatio(visibleNode, vp), 1);
+    assert.equal(isTargetVisiblyInViewport(visibleNode, vp), true);
   });
 });
 

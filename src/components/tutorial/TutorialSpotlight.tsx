@@ -29,6 +29,7 @@ import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import {
   computeTutorialLayout,
   adaptTutorialText,
+  isTargetVisiblyInViewport,
   type RectLike,
   type ViewportLike,
   type SafeInsetsLike,
@@ -65,17 +66,24 @@ function getVisualViewport(): ViewportLike {
   if (typeof window === 'undefined') {
     return { width: 1200, height: 800, offsetTop: 0, offsetLeft: 0 };
   }
+  const innerW = window.innerWidth;
+  const innerH = window.innerHeight;
   if (window.visualViewport) {
-    return {
-      width: Math.round(window.visualViewport.width),
-      height: Math.round(window.visualViewport.height),
-      offsetTop: Math.round(window.visualViewport.offsetTop),
-      offsetLeft: Math.round(window.visualViewport.offsetLeft),
-    };
+    const vvW = Math.round(window.visualViewport.width);
+    const vvH = Math.round(window.visualViewport.height);
+    // Solo usar visualViewport si se encuentra dentro del layout viewport (ej. barra de direcciones móvil o teclado virtual)
+    if (vvW > 0 && vvW <= innerW + 2 && vvH > 0 && vvH <= innerH + 2 && Math.abs(vvW - innerW) < 40) {
+      return {
+        width: vvW,
+        height: vvH,
+        offsetTop: Math.round(window.visualViewport.offsetTop),
+        offsetLeft: Math.round(window.visualViewport.offsetLeft),
+      };
+    }
   }
   return {
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width: innerW,
+    height: innerH,
     offsetTop: 0,
     offsetLeft: 0,
   };
@@ -153,16 +161,38 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   const [measuredCardHeight, setMeasuredCardHeight] = useState<number>(270);
   const cardRef = useRef<HTMLDivElement>(null);
 
-  // Medir dinámicamente la altura real de la tarjeta en el DOM
+  // Medir dinámicamente la altura real de la tarjeta en el DOM (incluyendo tras transiciones de AnimatePresence)
   useEffect(() => {
     if (!isTutorialOpen) return;
-    if (cardRef.current) {
-      const h = cardRef.current.offsetHeight;
-      if (h > 0 && Math.abs(h - measuredCardHeight) > 4) {
-        setMeasuredCardHeight(h);
+    let rafId: number | null = null;
+    const syncHeight = () => {
+      if (cardRef.current) {
+        const h = cardRef.current.offsetHeight;
+        if (h > 0 && Math.abs(h - measuredCardHeight) >= 1) {
+          setMeasuredCardHeight(h);
+        }
       }
+    };
+    syncHeight();
+    const timer1 = setTimeout(syncHeight, 60);
+    const timer2 = setTimeout(syncHeight, 200);
+    const timer3 = setTimeout(syncHeight, 380);
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && cardRef.current) {
+      ro = new ResizeObserver(() => {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(syncHeight);
+      });
+      ro.observe(cardRef.current);
     }
-  }, [isTutorialOpen, step?.id, isTextExpanded, measuredCardHeight]);
+    return () => {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      clearTimeout(timer3);
+      if (rafId) cancelAnimationFrame(rafId);
+      if (ro) ro.disconnect();
+    };
+  }, [isTutorialOpen, step?.id, isTextExpanded, rect, viewport.height, measuredCardHeight]);
 
   const isMobile = viewport.width < 768;
 
@@ -207,9 +237,12 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     // Resetear expansión de texto en cada paso nuevo
     setIsTextExpanded(false);
 
-    // Paso 5 (interactive-status): abrir SubjectDrawer seleccionando materia 1
+    // Paso 5 (interactive-status): abrir SubjectDrawer seleccionando la materia visible (sample-subject) o materia 1
     if (step.id === 'interactive-status' && !selectedSubjectId) {
-      setSelectedSubjectId(1);
+      const sampleEl = findVisibleElement('[data-tour="sample-subject"]');
+      const sampleIdAttr = sampleEl?.getAttribute('data-subject-id');
+      const sampleId = sampleIdAttr ? Number(sampleIdAttr) : 1;
+      setSelectedSubjectId(Number.isFinite(sampleId) && sampleId > 0 ? sampleId : 1);
     }
 
     // Paso 6 (edge-types): cerrar el drawer para ver el lienzo de correlativas despejado
@@ -217,19 +250,22 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       setSelectedSubjectId(null);
     }
 
-    // Paso 9 (analista-switch) o Paso 16 (finish) en mobile: abrir Sheet "Más"
-    const isMobileNow = typeof window !== 'undefined' && window.innerWidth < 768;
-    if (
-      isMobileNow &&
+    // Paso 9 (analista-switch) o Paso 16 (finish): abrir Sheet "Más" en mobile o menú "Más" en desktop (< 1900px)
+    const needsMoreMenuForAnalista =
+      viewport.width < 1900 &&
       (step.id === 'analista-switch' ||
-        (step.targetSelector && step.targetSelector.includes('analista-button')))
-    ) {
+        (step.targetSelector && step.targetSelector.includes('analista-button')));
+    const needsMoreMenuForFinish =
+      step.id === 'finish' ||
+      (step.targetSelector && step.targetSelector.includes('onboarding-menu-item'));
+
+    if (needsMoreMenuForAnalista || needsMoreMenuForFinish) {
       setIsMoreMenuOpen(true);
-    } else if (step.id !== 'analista-switch' && step.id !== 'finish') {
-      // Cerrar Sheet Más en pasos que no lo requieran
+    } else {
+      // Cerrar Sheet/Menú Más en pasos que no lo requieran
       setIsMoreMenuOpen(false);
     }
-  }, [isTutorialOpen, step?.id, step?.targetSelector, selectedSubjectId, setSelectedSubjectId, setIsMoreMenuOpen]);
+  }, [isTutorialOpen, step?.id, step?.targetSelector, viewport.width, selectedSubjectId, setSelectedSubjectId, setIsMoreMenuOpen]);
 
   // Selector efectivo según viewport
   const effectiveTargetSelector = React.useMemo(() => {
@@ -238,9 +274,20 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     if (step.id === 'graph-overview' || step.targetSelector === '[data-tour="graph-canvas"]') {
       return null;
     }
-    // Paso de profesores: apuntar al banner principal de cabecera en lugar de la lista infinita
-    if (step.targetSelector === '[data-tour="professors-directory"]') {
-      return '[data-tour="professors-directory"] > div:first-child';
+    const isShortViewport = viewport.height < 480;
+    const isTallTargetInCompactScreen = viewport.height < 680;
+    // En viewports bajos (ej. 640x360 landscape o 630px con fuente al 130%), apuntar al título/cabecera del banner para dejar aire vertical
+    if (
+      (isShortViewport || isTallTargetInCompactScreen) &&
+      step.targetSelector === '[data-tour="electives-banner"]'
+    ) {
+      return '[data-tour="electives-banner"] > div:first-child';
+    }
+    if (
+      (isShortViewport || isTallTargetInCompactScreen) &&
+      step.targetSelector === '[data-tour="library-header"]'
+    ) {
+      return '[data-tour="library-header"] h1';
     }
     // Paso de estadísticas: apuntar al primer anillo ("Avance por materias")
     if (step.id === 'stats-tour' || step.targetSelector === '[data-tour="stats-rings"]') {
@@ -251,14 +298,16 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       return '[data-tour="more-menu-btn"]';
     }
     return step.targetSelector;
-  }, [step?.targetSelector, step?.id, isMobile]);
+  }, [step?.targetSelector, step?.id, isMobile, viewport.height]);
 
   // Medición reactiva y estabilización mediante requestAnimationFrame
   useEffect(() => {
     if (!isTutorialOpen || !step) return;
 
+    // Limpiar el rect anterior inmediatamente al cambiar de paso para no reutilizar una caja vieja
+    setRect(null);
+
     if (!effectiveTargetSelector || step.placement === 'center') {
-      setRect(null);
       return;
     }
 
@@ -270,7 +319,60 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     let lastWidth = -9999;
     let lastHeight = -9999;
     let frameCount = 0;
-    const maxFrames = 45; // ~750ms de tope para animaciones de entrada
+    const maxFrames = 75; // ~1200ms de tope para animaciones de entrada (ej. AnimatePresence mode="wait")
+
+    const ensureScrolledIntoView = (el: HTMLElement) => {
+      const scrollParent = findScrollContainer(el);
+      if (scrollParent) {
+        const parentRect = scrollParent.getBoundingClientRect();
+        const elRect = el.getBoundingClientRect();
+        if (elRect.top < parentRect.top + 8 || elRect.bottom > parentRect.bottom - 8) {
+          el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'center' });
+        }
+      } else {
+        const elStyle = window.getComputedStyle(el);
+        const vp = getVisualViewport();
+        if (elStyle.position !== 'fixed' && document.documentElement.scrollHeight > vp.height + 10) {
+          const rawRect = el.getBoundingClientRect();
+          const desiredTop = vp.height < 480 ? 58 : 68;
+          if (rawRect.top > desiredTop + 16 || rawRect.top < 52 || rawRect.bottom > vp.height - 56) {
+            const targetScrollY = Math.max(0, window.scrollY + rawRect.top - desiredTop);
+            if (Math.abs(window.scrollY - targetScrollY) > 2) {
+              window.scrollTo({ top: targetScrollY, behavior: 'instant' as ScrollBehavior });
+            }
+          }
+        }
+      }
+      const afterRect = el.getBoundingClientRect();
+      if (!isTargetVisiblyInViewport(afterRect, getVisualViewport())) {
+        try {
+          el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'center', inline: 'center' });
+        } catch {
+          // ignore if unsupported in environment
+        }
+      }
+    };
+
+    const buildValidatedRect = (el: HTMLElement): SpotlightRect | null => {
+      const b = el.getBoundingClientRect();
+      if (b.width <= 0 || b.height <= 0) return null;
+      if (!isTargetVisiblyInViewport(b, getVisualViewport())) {
+        return null;
+      }
+      const pad = 8;
+      const top = Math.round(b.top - pad);
+      const left = Math.round(b.left - pad);
+      const width = Math.round(b.width + pad * 2);
+      const height = Math.round(b.height + pad * 2);
+      return {
+        top,
+        left,
+        width,
+        height,
+        bottom: top + height,
+        right: left + width,
+      };
+    };
 
     const checkFrame = () => {
       if (!isMounted) return;
@@ -278,31 +380,15 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
 
       const el = findVisibleElement(effectiveTargetSelector);
       if (el) {
-        // Scrollear el contenedor interno si el elemento se encuentra fuera de la zona visible
-        const scrollParent = findScrollContainer(el);
-        if (scrollParent) {
-          const parentRect = scrollParent.getBoundingClientRect();
-          const elRect = el.getBoundingClientRect();
-          if (elRect.top < parentRect.top || elRect.bottom > parentRect.bottom) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        }
-
+        ensureScrolledIntoView(el);
         const b = el.getBoundingClientRect();
-        const pad = 8;
-        const currentRect: SpotlightRect = {
-          top: Math.max(0, Math.round(b.top - pad)),
-          left: Math.max(0, Math.round(b.left - pad)),
-          width: Math.round(b.width + pad * 2),
-          height: Math.round(b.height + pad * 2),
-          bottom: Math.round(b.bottom + pad),
-          right: Math.round(b.right + pad),
-        };
+        const currentRect = buildValidatedRect(el);
 
-        // Mantener actualizado el rect durante la animación para que el spotlight siga el movimiento
         setRect(currentRect);
 
+        const isWithinScreen = currentRect !== null;
         const isStable =
+          isWithinScreen &&
           Math.abs(b.top - lastTop) < 1.0 &&
           Math.abs(b.left - lastLeft) < 1.0 &&
           Math.abs(b.width - lastWidth) < 1.0 &&
@@ -320,6 +406,12 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
 
         // Exigir al menos 10 frames (~160ms) para dar tiempo a que comience la transición antes de congelar
         if ((consecutiveMatches >= STABLE_FRAMES_REQUIRED && frameCount >= 10) || frameCount >= maxFrames) {
+          if (!currentRect) {
+            console.warn(
+              `[TutorialSpotlight] Objetivo fuera del viewport visual (< 90% visible) para paso: ${step.id} (selector: ${effectiveTargetSelector})`
+            );
+            setRect(null);
+          }
           return;
         }
       }
@@ -327,9 +419,11 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       if (frameCount < maxFrames) {
         requestAnimationFrame(checkFrame);
       } else {
-        if (!el) {
+        const finalEl = findVisibleElement(effectiveTargetSelector);
+        const finalRect = finalEl ? buildValidatedRect(finalEl) : null;
+        if (!finalRect) {
           console.warn(
-            `[TutorialSpotlight] Objetivo no visible para paso: ${step.id} (selector: ${effectiveTargetSelector})`
+            `[TutorialSpotlight] Objetivo no visible en viewport para paso: ${step.id} (selector: ${effectiveTargetSelector})`
           );
           setRect(null);
         }
@@ -341,9 +435,37 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       requestAnimationFrame(checkFrame);
     }, 40);
 
+    // Mantener el rect sincronizado ante cargas asíncronas de datos (ej. Profesores, Biblioteca) o scroll/resize
+    const syncTargetRectNow = () => {
+      if (!isMounted) return;
+      if (cardRef.current) {
+        const h = cardRef.current.offsetHeight;
+        if (h > 0) setMeasuredCardHeight((prev) => (Math.abs(h - prev) >= 1 ? h : prev));
+      }
+      const el = findVisibleElement(effectiveTargetSelector);
+      if (!el) {
+        setRect(null);
+        return;
+      }
+      ensureScrolledIntoView(el);
+      const validRect = buildValidatedRect(el);
+      setRect(validRect);
+    };
+
+    const lateTimer1 = setTimeout(syncTargetRectNow, 260);
+    const lateTimer2 = setTimeout(syncTargetRectNow, 480);
+    const lateTimer3 = setTimeout(syncTargetRectNow, 680);
+    window.addEventListener('scroll', syncTargetRectNow, true);
+    window.addEventListener('resize', syncTargetRectNow);
+
     return () => {
       isMounted = false;
       clearTimeout(initialTimer);
+      clearTimeout(lateTimer1);
+      clearTimeout(lateTimer2);
+      clearTimeout(lateTimer3);
+      window.removeEventListener('scroll', syncTargetRectNow, true);
+      window.removeEventListener('resize', syncTargetRectNow);
     };
   }, [isTutorialOpen, step?.id, effectiveTargetSelector, currentView]);
 
@@ -388,9 +510,19 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
       ? 320
       : 240;
 
+  const isShortViewport = viewport.height < 480;
+  const isReducedVisualViewport =
+    typeof window !== 'undefined' && viewport.height < window.innerHeight - 20;
+
   const safeInsets: SafeInsetsLike = {
-    top: 12,
-    bottom: isMobile ? 80 : 16, // Dejar espacio a la barra inferior en mobile
+    top: isShortViewport ? 8 : 12,
+    bottom: isMobile
+      ? isReducedVisualViewport
+        ? 12
+        : isShortViewport
+        ? 52
+        : 76
+      : 16,
     left: 12,
     right: 12,
   };
@@ -417,19 +549,11 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
             <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
             {/* Rectángulo negro perfora la ventana del spotlight */}
             {rect && (
-              <motion.rect
-                animate={{
-                  x: rect.left,
-                  y: rect.top,
-                  width: rect.width,
-                  height: rect.height,
-                }}
-                transition={{
-                  type: 'spring',
-                  damping: 32,
-                  stiffness: 320,
-                  mass: 0.8,
-                }}
+              <rect
+                x={rect.left}
+                y={rect.top}
+                width={rect.width}
+                height={rect.height}
                 rx="14"
                 ry="14"
                 fill="black"
@@ -451,39 +575,24 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
 
       {/* Anillo dorado pulsante alrededor del objetivo */}
       {rect && (
-        <motion.div
+        <div
           data-tour="tutorial-spotlight-ring"
-          animate={{
+          style={{
             top: rect.top,
             left: rect.left,
             width: rect.width,
             height: rect.height,
-            opacity: 1,
-          }}
-          transition={{
-            type: 'spring',
-            damping: 32,
-            stiffness: 320,
-            mass: 0.8,
           }}
           className="fixed rounded-2xl border-2 border-amber-400 shadow-[0_0_24px_rgba(251,191,36,0.4)] pointer-events-none z-[var(--z-modal-top)] animate-pulse"
         />
       )}
 
       {/* Tarjeta flotante interactiva */}
-      <motion.div
-        animate={{
+      <div
+        style={{
           top: layout.cardCoords.top,
           left: layout.cardCoords.left,
-        }}
-        transition={{
-          type: 'spring',
-          damping: 30,
-          stiffness: 300,
-          mass: 0.8,
-        }}
-        style={{
-          width: cardWidth,
+          width: layout.cardMaxWidth ?? cardWidth,
           maxHeight: layout.cardMaxHeight,
         }}
         className="fixed z-[var(--z-modal-top)] pointer-events-auto"
@@ -630,7 +739,7 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
             </div>
           </motion.div>
         </AnimatePresence>
-      </motion.div>
+      </div>
     </div>
   );
 };

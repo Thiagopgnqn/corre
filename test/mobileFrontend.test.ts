@@ -653,7 +653,7 @@ describe('Fase 5: Autenticación, Panel de Administración, Tutorial y Pantallas
     assert.match(verifyContent, /cooldownSeconds/, 'Debe implementar cooldown de reenvío de código');
   });
 
-  it('3. Panel de Administración: pestañas scrollables, tablas a cards en mobile y anonimato estricto de autores', () => {
+  it('3. Panel de Administración: pestañas scrollables, tablas a cards en mobile y visibilidad de autor exclusiva para administradores', () => {
     // AdminDashboard tabs scrollables
     const dashPath = path.join(rootDir, 'src/components/admin/AdminDashboard.tsx');
     const dashContent = fs.readFileSync(dashPath, 'utf8');

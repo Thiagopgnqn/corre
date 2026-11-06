@@ -20,9 +20,11 @@ import {
   Users,
   X,
   Maximize2,
+  GitBranch,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { BottomSheet } from '../common/BottomSheet';
 import { CORE_SUBJECTS } from '../../data/plan2023';
 import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
@@ -56,9 +58,45 @@ const FitViewButton: React.FC<{ className?: string }> = ({ className = '' }) => 
       aria-label="Ver todo el grafo"
     >
       <Maximize2 className="w-3.5 h-3.5 shrink-0" />
-      <span className="hidden min-[360px]:inline">Ver todo</span>
+      <span className="hidden sm:inline">Ver todo</span>
     </button>
   );
+};
+
+const TutorialSampleSubjectCameraSync: React.FC<{
+  sampleSubjectId: number;
+  nodes: Node[];
+}> = ({ sampleSubjectId, nodes }) => {
+  const { isTutorialOpen, currentTutorialStep } = useCareer();
+  const { setCenter } = useReactFlow();
+
+  useEffect(() => {
+    if (!isTutorialOpen) return;
+    // Paso 4 (índice 3: interactive-click): garantizar que la materia de ejemplo esté centrada en pantalla
+    if (currentTutorialStep !== 3) return;
+    const targetNode = nodes.find((n) => Number(n.id) === sampleSubjectId);
+    if (!targetNode) return;
+
+    const timer = setTimeout(() => {
+      const el = document.querySelector('[data-tour="sample-subject"]');
+      if (el instanceof HTMLElement) {
+        const r = el.getBoundingClientRect();
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        if (r.left >= 8 && r.right <= w - 8 && r.top >= 60 && r.bottom <= h - 72) {
+          return;
+        }
+      }
+      setCenter(targetNode.position.x + 115, targetNode.position.y + 110, {
+        zoom: 0.78,
+        duration: 0,
+      });
+    }, 10);
+
+    return () => clearTimeout(timer);
+  }, [isTutorialOpen, currentTutorialStep, sampleSubjectId, nodes, setCenter]);
+
+  return null;
 };
 
 const CorrelativeGraphContent: React.FC = () => {
@@ -94,6 +132,7 @@ const CorrelativeGraphContent: React.FC = () => {
 
   const [hoveredNodeId, setHoveredNodeId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<NodeContextMenuState | null>(null);
+  const [isLegendSheetOpen, setIsLegendSheetOpen] = useState<boolean>(false);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -247,11 +286,13 @@ const CorrelativeGraphContent: React.FC = () => {
   // Generate edges: dashed for regular, solid for approved
   
   // Dynamic initial viewport and translateExtent based on actual nodes
-  const { initialViewport, dynamicTranslateExtent, isDegreeComplete } = useMemo(() => {
+  const { initialViewport, dynamicTranslateExtent, isDegreeComplete, sampleSubjectId } = useMemo(() => {
     if (currentNodes.length === 0) {
       return {
         initialViewport: { x: 50, y: 120, zoom: 0.78 },
         dynamicTranslateExtent: [[-400, -200], [3200, 2200]] as [[number, number], [number, number]],
+        isDegreeComplete: false,
+        sampleSubjectId: 1,
       };
     }
 
@@ -351,12 +392,26 @@ const CorrelativeGraphContent: React.FC = () => {
     const calcX = Math.round(screenWidth / 2 - targetCenterX * zoom);
     const calcY = Math.round(140 - tMinY * zoom);
 
+    const topTargetNode = [...targetNodes].sort((a, b) => a.position.y - b.position.y)[0];
+    const sampleSubjectId = topTargetNode ? Number(topTargetNode.id) : 1;
+
     return {
       initialViewport: { x: calcX, y: calcY, zoom },
       dynamicTranslateExtent,
       isDegreeComplete,
+      sampleSubjectId,
     };
   }, [currentNodes]);
+
+  const nodesWithSampleSubject = useMemo(() => {
+    return currentNodes.map((n) => ({
+      ...n,
+      data: {
+        ...n.data,
+        isSampleSubject: Number(n.id) === sampleSubjectId,
+      },
+    }));
+  }, [currentNodes, sampleSubjectId]);
 
   const currentEdges = useMemo(() => {
     const edges: Edge[] = [];
@@ -470,10 +525,16 @@ const CorrelativeGraphContent: React.FC = () => {
       className="relative w-full h-[calc(100dvh-var(--app-header-height,3.5rem)-var(--mobile-nav-height)-env(safe-area-inset-bottom,0px))] md:h-[calc(100dvh-var(--app-header-height,4rem))] bg-slate-950 overflow-hidden flex flex-col"
     >
       {/* Top Floating Controls & View Switcher */}
-      <div className="absolute top-2 inset-x-2 sm:top-4 sm:left-4 sm:right-auto z-[var(--z-graph-controls)] flex items-center justify-between sm:justify-start gap-2 pointer-events-none">
+      <div
+        className={
+          isMobile && mobileGraphView === 'lista'
+            ? 'relative px-2 pt-2 pb-1 z-[var(--z-graph-controls)] flex items-center justify-between gap-2 shrink-0'
+            : 'absolute top-2 inset-x-2 sm:top-4 sm:left-4 sm:right-auto z-[var(--z-graph-controls)] flex items-center justify-between sm:justify-start gap-2 pointer-events-none'
+        }
+      >
         <div
           data-tour="graph-controls"
-          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1.5 sm:p-2 sm:px-3 rounded-2xl border border-slate-800 shadow-xl flex items-center gap-1.5 sm:gap-3 text-xs max-w-full overflow-x-auto no-scrollbar"
+          className="pointer-events-auto bg-slate-900/90 backdrop-blur-md p-1 sm:p-2 sm:px-3 rounded-2xl border border-slate-800 shadow-xl flex flex-wrap sm:flex-nowrap items-center gap-1 sm:gap-3 text-xs w-full sm:w-auto max-w-full"
         >
           {/* Segmented Switcher en Mobile: Lista | Mapa */}
           {isMobile && (
@@ -481,7 +542,7 @@ const CorrelativeGraphContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleSetMobileGraphView('lista')}
-                className={`min-h-[38px] px-2.5 py-1 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                className={`min-h-[44px] min-w-[44px] px-2 sm:px-2.5 py-1 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition-all cursor-pointer ${
                   mobileGraphView === 'lista'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -495,7 +556,7 @@ const CorrelativeGraphContent: React.FC = () => {
               <button
                 type="button"
                 onClick={() => handleSetMobileGraphView('mapa')}
-                className={`min-h-[38px] px-2.5 py-1 rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer ${
+                className={`min-h-[44px] min-w-[44px] px-2 sm:px-2.5 py-1 rounded-lg font-bold text-xs flex items-center justify-center gap-1 transition-all cursor-pointer ${
                   mobileGraphView === 'mapa'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -509,8 +570,8 @@ const CorrelativeGraphContent: React.FC = () => {
             </div>
           )}
 
-          {/* Edge Legend */}
-          <div data-tour="edge-legend" className="flex items-center gap-2 shrink-0">
+          {/* Edge Legend (Desktop inline / Mobile botón que abre Sheet de Leyenda) */}
+          <div data-tour="edge-legend" className="hidden sm:flex items-center gap-2 shrink-0">
             <span className="flex items-center gap-1.5 font-medium text-amber-400 whitespace-nowrap">
               <span className="w-4 sm:w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
               <span>Regular</span>
@@ -522,7 +583,19 @@ const CorrelativeGraphContent: React.FC = () => {
             </span>
           </div>
 
-          <FitViewButton className="min-h-[38px] px-2.5 py-1 rounded-lg font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 flex items-center gap-1.5 cursor-pointer text-xs transition-colors shrink-0" />
+          <button
+            type="button"
+            data-tour="edge-legend"
+            onClick={() => setIsLegendSheetOpen(true)}
+            className="sm:hidden min-h-[44px] min-w-[44px] px-2 py-1 rounded-lg font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 flex items-center justify-center gap-1 cursor-pointer text-xs transition-colors shrink-0"
+            title="Ver leyenda de correlativas y estados"
+            aria-label="Ver leyenda de correlativas"
+          >
+            <GitBranch className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Leyenda</span>
+          </button>
+
+          <FitViewButton className="min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2 sm:px-2.5 py-1 rounded-lg font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 flex items-center justify-center gap-1 cursor-pointer text-xs transition-colors shrink-0" />
 
           <div className="h-3 w-[1px] bg-slate-800 hidden sm:block" />
 
@@ -530,7 +603,7 @@ const CorrelativeGraphContent: React.FC = () => {
           <button
             type="button"
             onClick={() => setShowElectivesInGraph(!showElectivesInGraph)}
-            className={`min-h-[38px] px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer ${
+            className={`min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2 sm:px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
               showElectivesInGraph
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                 : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
@@ -540,7 +613,6 @@ const CorrelativeGraphContent: React.FC = () => {
           >
             <Sparkles className="w-3.5 h-3.5 shrink-0" />
             <span className="hidden sm:inline">{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
-            <span className="hidden min-[360px]:inline sm:hidden">{showElectivesInGraph ? 'Sin Electivas' : 'Electivas'}</span>
           </button>
 
           {/* Active selection badge */}
@@ -548,7 +620,7 @@ const CorrelativeGraphContent: React.FC = () => {
             <button
               type="button"
               onClick={() => setSelectedSubjectId(null)}
-              className="min-h-[38px] px-2 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1 hover:bg-indigo-500/30 whitespace-nowrap shrink-0 cursor-pointer"
+              className="min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-medium flex items-center justify-center gap-1 hover:bg-indigo-500/30 whitespace-nowrap shrink-0 cursor-pointer"
               title="Limpiar selección"
             >
               <span>Foco</span>
@@ -560,18 +632,19 @@ const CorrelativeGraphContent: React.FC = () => {
 
       {/* Render Mode: Mobile List vs Interactive Canvas Graph */}
       {isMobile && mobileGraphView === 'lista' ? (
-        <div className="flex-1 min-h-0 pt-16 flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 pt-1 flex flex-col overflow-hidden">
           <SubjectListView
             subjects={activeSubjects}
             activeState={activeState}
             onSelectSubject={(id) => setSelectedSubjectId(id)}
             selectedSubjectId={selectedSubjectId}
             isSimulationActive={isSimulationMode}
+            sampleSubjectId={1}
           />
         </div>
       ) : (
         <ReactFlow
-          nodes={currentNodes}
+          nodes={nodesWithSampleSubject}
           edges={currentEdges}
           nodeTypes={nodeTypes}
           onNodeClick={onNodeClick}
@@ -594,6 +667,10 @@ const CorrelativeGraphContent: React.FC = () => {
           defaultEdgeOptions={{ type: 'smoothstep' }}
           className="bg-slate-950 flex-1"
         >
+          <TutorialSampleSubjectCameraSync
+            sampleSubjectId={sampleSubjectId}
+            nodes={nodesWithSampleSubject}
+          />
           <Background
             variant={BackgroundVariant.Dots}
             gap={24}
@@ -710,6 +787,40 @@ const CorrelativeGraphContent: React.FC = () => {
 
       {/* Drawer with details for selected node */}
       <SubjectDrawer />
+
+      {/* Sheet de Leyenda de Correlativas en Mobile */}
+      <BottomSheet
+        isOpen={isLegendSheetOpen}
+        onClose={() => setIsLegendSheetOpen(false)}
+        title="Leyenda de Correlativas"
+        maxHeightDvh={75}
+      >
+        <div className="space-y-4 text-xs text-slate-300 pb-2">
+          <div className="p-3.5 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-3">
+            <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+              Líneas del Mapa
+            </h3>
+            <div className="flex items-center gap-3">
+              <span className="w-8 h-0 border-t-2 border-dashed border-amber-400 inline-block shrink-0" />
+              <div>
+                <div className="font-bold text-amber-400">Regularizada requerida</div>
+                <div className="text-[11px] text-slate-400">
+                  Necesitás tener la cursada regularizada para poder cursar la correlativa.
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="w-8 h-0 border-t-2 border-emerald-400 inline-block shrink-0" />
+              <div>
+                <div className="font-bold text-emerald-400">Aprobada requerida</div>
+                <div className="text-[11px] text-slate-400">
+                  Exige tener la materia previa aprobada con final o promoción.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </BottomSheet>
     </div>
   );
 };

@@ -23,6 +23,7 @@ import {
   Menu,
   Shield,
   ChevronRight,
+  Info,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
@@ -33,6 +34,8 @@ import { UserMenu } from './UserMenu';
 import { PlanSelectorModal } from './PlanSelectorModal';
 import { BrandLogo } from './BrandLogo';
 import { BottomSheet } from './BottomSheet';
+import { AboutStackModal } from './AboutStackModal';
+import { APP_NAME } from '../../config/brand';
 
 export type AppView =
   | 'graph'
@@ -78,6 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   const isMobile = useIsMobile();
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [isPlanSelectorOpen, setIsPlanSelectorOpen] = useState(false);
+  const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [hasLibraryNovelty, setHasLibraryNovelty] = useState(false);
   const [adminPendingCount, setAdminPendingCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -207,15 +211,15 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
   return (
     <>
-      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-[var(--z-header)] w-full safe-area-x">
-        <div className="w-full max-w-[1920px] mx-auto px-2.5 sm:px-4 lg:px-6 flex items-center justify-between h-14 sm:h-16 gap-1.5 sm:gap-2 lg:gap-4 min-w-0">
+      <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-xl sticky top-0 z-[var(--z-header)] w-full max-w-full overflow-x-clip safe-area-x">
+        <div className="w-full max-w-[1920px] mx-auto px-1.5 min-[380px]:px-2.5 sm:px-4 lg:px-6 flex items-center justify-between h-14 sm:h-16 gap-1 min-[380px]:gap-1.5 sm:gap-2 lg:gap-4 min-w-0">
           {/* Logo & Plan */}
-          <div className="flex items-center gap-1.5 sm:gap-2 lg:gap-2.5 shrink-0 min-w-0">
+          <div className="flex items-center gap-1 min-[380px]:gap-1.5 sm:gap-2 lg:gap-2.5 shrink min-w-0">
             <BrandLogo variant="full" size="md" responsiveText />
             <button
               type="button"
               onClick={() => setIsPlanSelectorOpen(true)}
-              className="text-[10px] font-bold px-2 py-1 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[95px] sm:max-w-[105px] lg:max-w-none truncate min-h-[36px] flex items-center active:scale-95"
+              className="text-[10px] font-bold px-1.5 min-[380px]:px-2 py-1 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[82px] min-[380px]:max-w-[95px] sm:max-w-[105px] lg:max-w-none truncate min-h-[36px] flex items-center shrink min-w-0 active:scale-95"
               title="Cambiar carrera o plan de estudios"
             >
               {currentPlanName}
@@ -263,7 +267,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </nav>
 
           {/* Actions & Utilities */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1 min-[380px]:gap-1.5 sm:gap-2 shrink-0">
             {/* Secondary Actions (Desktop >= 1900px) */}
             <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
               <button
@@ -294,7 +298,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <button
               data-tour="simulation-button"
               onClick={toggleSimulationMode}
-              className={`p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shrink-0 cursor-pointer active:scale-95 ${
+              className={`p-1 min-[380px]:p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shrink-0 cursor-pointer active:scale-95 ${
                 isSimulationMode
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
                   : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
@@ -310,7 +314,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             <button
               data-tour="search-button"
               onClick={() => setIsSearchOpen(true)}
-              className="p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
+              className="p-1 min-[380px]:p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-medium bg-slate-900/80 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer active:scale-95"
               title="Buscar materias (Ctrl+K)"
               aria-label="Buscar materias en el plan de estudios"
             >
@@ -387,6 +391,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   <div className="py-1">
                     {/* Analista toggle in dropdown */}
                     <button
+                      data-tour="analista-button"
                       onClick={() => {
                         updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
                       }}
@@ -531,10 +536,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                     </div>
                   )}
 
-                  <div className="mt-1 pt-2 pb-1 border-t border-slate-800/80 px-3 text-center">
-                    <span className="text-[10.5px] text-slate-400 font-medium">
-                      Hecho por estudiantes de la UTN
-                    </span>
+                  <div className="pt-1 border-t border-slate-800/80">
+                    <button
+                      type="button"
+                      data-testid="more-menu-about-btn"
+                      onClick={() => {
+                        setIsMoreMenuOpen(false);
+                        setIsAboutModalOpen(true);
+                      }}
+                      className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                      <span>Acerca de {APP_NAME}</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -860,6 +874,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 type="button"
                 onClick={() => {
                   setIsMoreMenuOpen(false);
+                  setIsAboutModalOpen(true);
+                }}
+                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+              >
+                <Info className="w-5 h-5 text-indigo-400 shrink-0" />
+                <span>Acerca de {APP_NAME}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreMenuOpen(false);
                   setResetConfirmOpen(true);
                 }}
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
@@ -888,6 +914,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           )}
         </div>
       </BottomSheet>
+
+      {/* Modal / Sheet Acerca de Stack */}
+      <AboutStackModal
+        isOpen={isAboutModalOpen}
+        onClose={() => setIsAboutModalOpen(false)}
+      />
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (

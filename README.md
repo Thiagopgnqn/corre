@@ -304,3 +304,8 @@ La Biblioteca cuenta con notificaciones automáticas por correo electrónico par
 
 - **Render (Backend `server/`)**: Root Directory `server`, Build Command `npm install && npm run build && npm run db:migrate`, Start Command `npm run start`, Health Check `/api/health`.
 - **Vercel (Frontend)**: `vercel.json` reescribe `/api/:path*` hacia el backend en Render permitiendo cookies `HttpOnly` first-party en el mismo dominio.
+
+---
+
+Hecho por [Scroll Studio](https://thiagopgnqn.github.io/ScrollStudio/).
+

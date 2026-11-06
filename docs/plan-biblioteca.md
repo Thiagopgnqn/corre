@@ -1,6 +1,6 @@
 # Plan Completo: Biblioteca de Material de Estudio ("Stack")
 
-Este documento detalla la arquitectura, modelo de datos, seguridad, contratos de API, pantallas y matriz de pruebas para la **Biblioteca de Material de Estudio** de la plataforma **Stack** (UTN - ISI).
+Este documento detalla la arquitectura, modelo de datos, seguridad, contratos de API, pantallas y matriz de pruebas para la **Biblioteca de Material de Estudio** de la plataforma **Stack** (UTN FRC - ISI).
 
 ---
 

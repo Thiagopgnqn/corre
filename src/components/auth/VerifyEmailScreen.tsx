@@ -12,6 +12,7 @@ import {
   Edit3,
 } from 'lucide-react';
 import { BrandLogo, StackSymbol } from '../common/BrandLogo';
+import { CreatorCredit } from '../common/CreatorCredit';
 
 interface VerifyEmailScreenProps {
   initialDeliveryFailed?: boolean;
@@ -251,6 +252,9 @@ export const VerifyEmailScreen: React.FC<VerifyEmailScreenProps> = ({
           </button>
         </div>
       </motion.div>
+
+      {/* Constancia de autoría */}
+      <CreatorCredit variant="inline" className="mt-2 relative z-10" />
     </div>
   );
 };

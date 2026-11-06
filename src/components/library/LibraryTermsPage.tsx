@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ShieldCheck, AlertCircle, Mail, CheckCircle2, Check, Loader2 } from 'lucide-react';
-import { APP_NAME } from '../../config/brand';
+import { APP_NAME, CONTACT_EMAIL } from '../../config/brand';
 import { libraryApi } from '../../api/library.api';
 
 interface LibraryTermsPageProps {
@@ -153,11 +153,11 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) =>
               <Mail className="w-5 h-5 text-indigo-400 shrink-0" />
               <div>
                 <p className="text-xs text-slate-400">Canal oficial de reclamos y contacto DMCA:</p>
-                <p className="text-sm font-semibold text-white">soporte.stack@gmail.com</p>
+                <p className="text-sm font-semibold text-white">{CONTACT_EMAIL}</p>
               </div>
             </div>
             <a
-              href="mailto:soporte.stack@gmail.com?subject=Reclamo%20de%20Material%20-%20Stack"
+              href={`mailto:${CONTACT_EMAIL}?subject=Reclamo%20de%20Material%20-%20Stack`}
               className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
             >
               Enviar correo de reclamo

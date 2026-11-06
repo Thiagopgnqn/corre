@@ -60,6 +60,27 @@ export const LibraryWelcomeModal: React.FC<LibraryWelcomeModalProps> = ({
     }
   };
 
+  const actionButtons = (
+    <div className="flex flex-col-reverse min-[480px]:flex-row min-[480px]:items-center justify-end gap-2.5 w-full">
+      <button
+        type="button"
+        onClick={onClose}
+        className="w-full min-[480px]:w-auto px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer border border-slate-800/80"
+      >
+        {COMMUNITY_TEXTS.welcome.secondaryButton}
+      </button>
+
+      <button
+        type="button"
+        onClick={handleUploadClick}
+        className="w-full min-[480px]:w-auto px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+      >
+        <UploadCloud className="w-4 h-4" />
+        <span>{COMMUNITY_TEXTS.welcome.primaryButton}</span>
+      </button>
+    </div>
+  );
+
   const modalBody = (
     <div className="space-y-4 sm:space-y-5 text-slate-100">
       <div className="flex items-start gap-3">
@@ -97,29 +118,16 @@ export const LibraryWelcomeModal: React.FC<LibraryWelcomeModalProps> = ({
         {COMMUNITY_TEXTS.welcome.noteSuffix}
       </p>
 
-      {/* Botones de acción accesibles */}
-      <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-end gap-2.5 pt-2 border-t border-slate-800/80">
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer border border-slate-800/80"
-        >
-          {COMMUNITY_TEXTS.welcome.secondaryButton}
-        </button>
-
-        <button
-          type="button"
-          onClick={handleUploadClick}
-          className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
-        >
-          <UploadCloud className="w-4 h-4" />
-          <span>{COMMUNITY_TEXTS.welcome.primaryButton}</span>
-        </button>
-      </div>
+      {/* Botones de acción accesibles (en escritorio van dentro del cuerpo; en mobile van en el footer fijo del BottomSheet) */}
+      {!isMobile && (
+        <div className="pt-2 border-t border-slate-800/80">
+          {actionButtons}
+        </div>
+      )}
     </div>
   );
 
-  // En celular: renderizar dentro de BottomSheet con swipe to close
+  // En celular: renderizar dentro de BottomSheet con swipe to close y botones fijos en footer
   if (isMobile) {
     return (
       <BottomSheet
@@ -127,6 +135,7 @@ export const LibraryWelcomeModal: React.FC<LibraryWelcomeModalProps> = ({
         onClose={onClose}
         title="Bienvenida a la Biblioteca"
         maxHeightDvh={85}
+        footer={actionButtons}
       >
         <div className="pb-2">{modalBody}</div>
       </BottomSheet>
