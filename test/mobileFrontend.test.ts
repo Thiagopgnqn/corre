@@ -938,4 +938,31 @@ describe('Parte 0.9: Correcciones tras prueba en celular real (P1 a P6)', () => 
     const viewContent = fs.readFileSync(viewPath, 'utf8');
     assert.match(viewContent, /min-w-0 w-full max-w-full/, 'SubjectLibraryView debe restringir anchos con min-w-0 w-full max-w-full');
   });
+
+  it('7. Tutorial Interactivo: Regresión de 4 fallas observadas en celular real (Paso 5, 9, 10 y 14)', () => {
+    const tutCompPath = path.join(rootDir, 'src/components/tutorial/TutorialSpotlight.tsx');
+    assert.ok(fs.existsSync(tutCompPath), 'TutorialSpotlight.tsx debe existir');
+    const tutContent = fs.readFileSync(tutCompPath, 'utf8');
+
+    // Regresión Paso 5: Espera rAF a que finalice animación de BottomSheet (3 frames consecutivos sin movimiento)
+    assert.match(tutContent, /STABLE_FRAMES_REQUIRED\s*=\s*3/, 'Debe requerir 3 frames rAF estables para no medir durante animación');
+    assert.match(tutContent, /requestAnimationFrame/, 'Debe emplear requestAnimationFrame para verificar estabilidad');
+
+    // Regresión Paso 9: Auto-scroll en contenedor padre del BottomSheet Más
+    assert.match(tutContent, /findScrollContainer/, 'Debe implementar búsqueda de contenedor scroll más cercano');
+    assert.match(tutContent, /scrollIntoView/, 'Debe realizar scrollIntoView del elemento dentro del sheet');
+
+    // Regresión Paso 10: Prevención de pantalla negra y selector adaptado a mobile
+    assert.match(tutContent, /data-tour="more-menu-btn"/, 'En mobile debe apuntar al menú Más en lugar de nav-tabs desktop');
+    assert.match(tutContent, /rect\s*\?\s*'rgba\(2,\s*6,\s*23,\s*0\.78\)'\s*:\s*'transparent'/, 'Si el objetivo no es visible, el fondo debe ser transparente para NO dejar la pantalla negra');
+    assert.match(tutContent, /console\.warn/, 'Debe emitir advertencia en consola si el objetivo no está en el DOM');
+
+    // Regresión Paso 14: computeTutorialLayout evita solapamiento con anillos de estadísticas
+    const tutUtilsPath = path.join(rootDir, 'src/utils/tutorialLayout.ts');
+    assert.ok(fs.existsSync(tutUtilsPath), 'tutorialLayout.ts debe existir');
+    const tutUtilsContent = fs.readFileSync(tutUtilsPath, 'utf8');
+    assert.match(tutUtilsContent, /MIN_AIR_GAP_PX\s*=\s*12/, 'Debe garantizar separación mínima de 12px');
+    assert.match(tutUtilsContent, /adaptTutorialText/, 'Debe exportar función de adaptación de texto por dispositivo');
+    assert.match(tutContent, /visualViewport/, 'Debe consultar visualViewport para tener en cuenta la barra del navegador');
+  });
 });

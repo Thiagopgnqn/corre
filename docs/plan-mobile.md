@@ -945,3 +945,52 @@ En pantallas móviles ($< 768\text{ px}$):
 - El layout de escritorio a partir de 1024 px permanece 100% inalterado.
 - La suite preexistente `test/scheduleLayout.test.ts` se mantiene 100% verde sin modificaciones.
 - La suite de verificación de disponibilidad `test/scheduleAvailability.test.ts` valida todos los viewports y casos de borde.
+
+---
+
+## 12. Tutorial Interactivo, Rediseño de Biblioteca y Carteles de Comunidad
+
+### 12.1 Motor Unificado de Posicionamiento del Tutorial (`src/utils/tutorialLayout.ts` y `TutorialSpotlight.tsx`)
+- **Adaptación a `visualViewport`**: Se miden siempre las coordenadas relativas al `window.visualViewport` real, deduciendo la barra de direcciones dinámicas de navegadores móviles (Android Chrome resta aprox. 110 px).
+- **Estabilidad rAF (3 Frames)**: Para resolver el desfasaje en el Paso 5 ("Cambiar Estado") causado por la animación de entrada del BottomSheet de `SubjectDrawer`, el motor espera al menos 3 frames consecutivos de `requestAnimationFrame` en los que las coordenadas del objetivo varíen menos de 1.5 px (con un timeout máximo de seguridad de ~650 ms).
+- **Auto-scroll en Contenedores Anidados**: Para el Paso 9 ("Título Intermedio de Analista") dentro del Sheet "Más", se localiza el contenedor con scroll más cercano (`findScrollContainer`) y se ejecuta `scrollIntoView({ block: 'nearest' })` antes de la medición.
+- **Función Pura de Layout (`computeTutorialLayout`)**:
+  - Garantiza una separación mínima vertical de $12\text{ px}$ entre objetivo y tarjeta flotante (`MIN_AIR_GAP_PX = 12`).
+  - Si el objetivo está en la mitad superior de la pantalla, la tarjeta se coloca abajo; si está en la mitad inferior, arriba; si está en el centro, evalúa el lado con mayor espacio libre útil.
+  - En viewports con altura reducida ($< 700\text{ px}$), limita la altura máxima (`cardMaxHeight`) y activa colapso de texto (`shouldCollapseText`) con botón interactivo *"Ver más"* / *"Ver menos"*.
+- **Prevención de Pantalla Negra (Fallback Seguro)**: Si un selector no encuentra el objetivo en mobile (como en el paso 10 con nav tabs de desktop), la máscara SVG permanece con fondo transparente (`fill="transparent"` en lugar de `fill="rgba(2, 6, 23, 0.78)"`), la tarjeta se muestra centrada y se emite un `console.warn`, impidiendo bloquear la pantalla.
+- **Adaptación Táctil de Textos (`adaptTutorialText`)**:
+  - Reemplaza atajos de teclado ("Ctrl + K") por la acción táctil equivalente ("la lupa en la barra superior").
+  - Reemplaza "rueda del mouse" por "deslizar la pantalla y hacer zoom con dos dedos".
+  - Reemplaza "Hacé click" por "Tocá".
+
+### 12.2 Rediseño de Filtros en Vista de Materia (`SubjectLibraryView.tsx`)
+- **Jerarquía en Columna en Mobile ($< 768\text{ px}$)**:
+  1. **Buscador de material**: ocupa el 100% del ancho con `text-base` ($\ge 16\text{ px}$) para evitar auto-zoom en iOS Safari.
+  2. **Filtros secundarios**:
+     - *Fila 1*: checkbox *"Solo con resolución"*, con target táctil accesible $\ge 44\text{ px}$ (`min-h-[44px]`).
+     - *Fila 2*: selector de orden (*"Más recientes"*, *"Más descargados"*, *"Más útiles"*), ocupando el 100% del ancho, rotulado con su etiqueta arriba (*"Ordenar por:"*) y estilo con tipografía de 16 px, `min-w-0` y `max-w-full`.
+  3. **Fila de chips de tipo de material**:
+     - Scroll horizontal suave y fluido con `snap-x snap-mandatory scroll-smooth`.
+     - Padding de escape al final (`pe-6`) para que el último chip no quede pegado al margen derecho.
+     - Indicador sutil de gradiente (fade) en el borde derecho (`bg-gradient-to-l from-slate-950 ...`) indicando visualmente más contenido scrolleable.
+- **Auditoría Responsiva**: `LibraryHome`, `MyUploadsView`, `LibraryTermsPage` y modales de subida, reporte y edición verificados con anchos flexibles (`w-full min-w-0 max-w-full`), sin anchos fijos $> 280\text{ px}$, y wrap seguro con `break-words`.
+
+### 12.3 Carteles de Comunidad de la Biblioteca (`LibraryWelcomeModal.tsx` y `LibraryDownloadToast.tsx`)
+- **Cartel de Bienvenida (C1)**:
+  - **Condición de Aparición**: Primera visita a cualquier sección de la Biblioteca (catálogo o carpeta de materia).
+  - **Persistencia en LocalStorage**: Almacenado bajo la clave `stack:library-welcome-seen:<userId>` (o `stack:library-welcome-seen:anon` si el usuario no inició sesión).
+  - **Regla de Coexistencia con Tutorial**: Si el tutorial interactivo está abierto (`isTutorialOpen === true`), el cartel de bienvenida NO se muestra para no superponer modales.
+  - **Formato Adaptativo**:
+    - En celular: renderizado dentro de `BottomSheet` accesible con gesto swipe-to-close.
+    - En escritorio: modal centrado accesible con `role="dialog"`, trampa de foco y tecla Escape.
+  - **Contenido**: Título *"¡Te damos la bienvenida a la Biblioteca!"*, mensaje explicativo de moderación comunitaria, botón principal *"Subir un archivo"* (abre directamente el modal de subida) y secundario *"Ahora no"*.
+- **Cartel Posterior a la Descarga (C2)**:
+  - **Condición de Aparición**: Se dispara de forma inmediata tras completar una descarga exitosa de material público (obtención de URL firmada).
+  - **Posicionamiento Seguro sobre la Barra Móvil**:
+    - En celular: `bottom: calc(var(--mobile-nav-height, 4rem) + env(safe-area-inset-bottom, 0px) + 12px)`, flotando con holgura por encima de la barra de navegación inferior.
+    - En escritorio: `bottom: 24px` a la derecha.
+  - **Interacción No Bloqueante**: Toast elegante con `z-[var(--z-toast,1300)]`, que permite al estudiante continuar navegando libremente.
+  - **Temporizador Inteligente de 10s**: Cuenta regresiva de 10.000 ms que se pausa automáticamente si el usuario hace hover con el puntero (`onMouseEnter`) o coloca el foco (`onFocusCapture`), reanudándose al salir (`onMouseLeave`, `onBlurCapture`).
+  - **Accesibilidad**: Declarado con `role="status"` y `aria-live="polite"`, botón de cierre (X) accesible de $44 \times 44\text{ px}$ con `aria-label="Cerrar aviso"`, y botón de acción *"Subir un aporte"* para incentivar la colaboración recíproca.
+

@@ -510,7 +510,7 @@ const CorrelativeGraphContent: React.FC = () => {
           )}
 
           {/* Edge Legend */}
-          <div data-tour="edge-legend" className="hidden sm:flex items-center gap-2">
+          <div data-tour="edge-legend" className="flex items-center gap-2 shrink-0">
             <span className="flex items-center gap-1.5 font-medium text-amber-400 whitespace-nowrap">
               <span className="w-4 sm:w-5 h-0 border-t-2 border-dashed border-amber-400 inline-block" />
               <span>Regular</span>

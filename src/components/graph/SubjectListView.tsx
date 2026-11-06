@@ -106,6 +106,7 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                 return (
                   <div
                     key={subject.id}
+                    data-tour={subject.id === 1 ? 'sample-subject' : undefined}
                     onClick={() => onSelectSubject(subject.id)}
                     className={`p-3.5 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer shadow-sm ${
                       isSelected

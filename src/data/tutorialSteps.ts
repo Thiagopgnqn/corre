@@ -220,8 +220,9 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     description:
       'Accedé a exámenes parciales y finales resueltos, apuntes de clase y guías prácticas compartidos por la comunidad estudiantil. Todo el material cuenta con moderación previa antes de publicarse.',
     badge: 'Biblioteca Colaborativa',
-    placement: 'center',
+    targetSelector: '[data-tour="library-header"]',
     targetView: 'library',
+    placement: 'bottom',
     iconName: 'BookOpen',
   },
 

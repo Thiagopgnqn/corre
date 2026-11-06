@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   GraduationCap,
@@ -20,10 +20,19 @@ import {
   Clock,
   Star,
   UserCheck,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { getAvailableTutorialSteps } from '../../data/tutorialSteps';
 import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
+import {
+  computeTutorialLayout,
+  adaptTutorialText,
+  type RectLike,
+  type ViewportLike,
+  type SafeInsetsLike,
+} from '../../utils/tutorialLayout';
 import type { AppView } from '../common/Navbar';
 
 interface TutorialSpotlightProps {
@@ -31,14 +40,8 @@ interface TutorialSpotlightProps {
   onNavigateView: (view: AppView) => void;
 }
 
-interface SpotlightRect {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-}
+interface SpotlightRect extends RectLike {}
 
-// Icon mapping dictionary
 const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   GraduationCap,
   Compass,
@@ -58,113 +61,68 @@ const STEP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   UserCheck,
 };
 
-function getElementRect(selector?: string): SpotlightRect | null {
-  if (!selector || typeof window === 'undefined') return null;
-  const el = document.querySelector(selector);
-  if (!el) return null;
-  const b = el.getBoundingClientRect();
-
-  // If element is not rendered, hidden in closed menu, or has zero dimensions, fallback gracefully to center
-  if (
-    b.width <= 0 ||
-    b.height <= 0 ||
-    (b.top === 0 && b.left === 0 && b.width <= 16 && b.height <= 16)
-  ) {
-    return null;
+function getVisualViewport(): ViewportLike {
+  if (typeof window === 'undefined') {
+    return { width: 1200, height: 800, offsetTop: 0, offsetLeft: 0 };
   }
-
-  const computedStyle = window.getComputedStyle(el);
-  if (
-    computedStyle.display === 'none' ||
-    computedStyle.visibility === 'hidden' ||
-    computedStyle.opacity === '0'
-  ) {
-    return null;
+  if (window.visualViewport) {
+    return {
+      width: Math.round(window.visualViewport.width),
+      height: Math.round(window.visualViewport.height),
+      offsetTop: Math.round(window.visualViewport.offsetTop),
+      offsetLeft: Math.round(window.visualViewport.offsetLeft),
+    };
   }
-
-  const pad = 8;
   return {
-    top: Math.max(0, b.top - pad),
-    left: Math.max(0, b.left - pad),
-    width: Math.min(window.innerWidth, b.width + pad * 2),
-    height: Math.min(window.innerHeight, b.height + pad * 2),
+    width: window.innerWidth,
+    height: window.innerHeight,
+    offsetTop: 0,
+    offsetLeft: 0,
   };
 }
 
-function calculateCardCoords(
-  placement: 'top' | 'bottom' | 'left' | 'right' | 'center',
-  rect: SpotlightRect | null,
-  windowSize: { width: number; height: number },
-  cardWidth = 420,
-  cardHeight = 280
-): { top: number; left: number } {
-  const margin = 16;
-  const isMobile = windowSize.width < 640;
-
-  if (isMobile) {
-    if (!rect || placement === 'center') {
-      return {
-        top: Math.max(margin, Math.round((windowSize.height - cardHeight) / 2)),
-        left: margin,
-      };
+/**
+ * Busca el elemento visible en el DOM que coincida con el selector dado,
+ * ignorando elementos con display: none o dimensiones nulas.
+ */
+function findVisibleElement(selector: string): HTMLElement | null {
+  if (!selector || typeof document === 'undefined') return null;
+  const elements = Array.from(document.querySelectorAll(selector));
+  for (const el of elements) {
+    if (!(el instanceof HTMLElement)) continue;
+    const style = window.getComputedStyle(el);
+    if (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      parseFloat(style.opacity || '1') > 0
+    ) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        return el;
+      }
     }
-    return {
-      top: Math.max(margin, windowSize.height - cardHeight - 74),
-      left: margin,
-    };
   }
+  return null;
+}
 
-  if (!rect || placement === 'center') {
-    return {
-      top: Math.max(margin, Math.round((windowSize.height - cardHeight) / 2)),
-      left: Math.max(margin, Math.round((windowSize.width - cardWidth) / 2)),
-    };
+/**
+ * Encuentra el contenedor con scroll más cercano a un elemento.
+ */
+function findScrollContainer(element: HTMLElement | null): HTMLElement | null {
+  if (!element) return null;
+  let parent = element.parentElement;
+  while (parent && parent !== document.body && parent !== document.documentElement) {
+    const style = window.getComputedStyle(parent);
+    const overflowY = style.overflowY;
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      parent.scrollHeight > parent.clientHeight
+    ) {
+      return parent;
+    }
+    parent = parent.parentElement;
   }
-
-  let top = 0;
-  let left = 0;
-
-  switch (placement) {
-    case 'bottom':
-      top = rect.top + rect.height + margin;
-      left = rect.left + rect.width / 2 - cardWidth / 2;
-      // If overflows bottom, flip to top
-      if (top + cardHeight > windowSize.height - margin && rect.top - cardHeight - margin >= margin) {
-        top = rect.top - cardHeight - margin;
-      }
-      break;
-    case 'top':
-      top = rect.top - cardHeight - margin;
-      left = rect.left + rect.width / 2 - cardWidth / 2;
-      // If overflows top, flip to bottom
-      if (top < margin && rect.top + rect.height + cardHeight + margin <= windowSize.height) {
-        top = rect.top + rect.height + margin;
-      }
-      break;
-    case 'left':
-      top = rect.top + rect.height / 2 - cardHeight / 2;
-      left = rect.left - cardWidth - margin;
-      // If overflows left, flip to right
-      if (left < margin && rect.left + rect.width + cardWidth + margin <= windowSize.width) {
-        left = rect.left + rect.width + margin;
-      }
-      break;
-    case 'right':
-    default:
-      top = rect.top + rect.height / 2 - cardHeight / 2;
-      left = rect.left + rect.width + margin;
-      // If overflows right, flip to left
-      if (left + cardWidth > windowSize.width - margin && rect.left - cardWidth - margin >= margin) {
-        left = rect.left - cardWidth - margin;
-      }
-      break;
-  }
-
-  // Safe clamping within viewport
-  top = Math.max(margin, Math.min(windowSize.height - cardHeight - margin, top));
-  left = Math.max(margin, Math.min(windowSize.width - cardWidth - margin, left));
-
-  return { top, left };
+  return null;
 }
 
 export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
@@ -189,136 +147,207 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   );
   const step = availableSteps[currentTutorialStep] || availableSteps[availableSteps.length - 1];
 
-  const [rect, setRect] = useState<SpotlightRect | null>(() => {
-    const s = availableSteps[currentTutorialStep];
-    return s?.targetSelector ? getElementRect(s.targetSelector) : null;
-  });
+  const [rect, setRect] = useState<SpotlightRect | null>(null);
+  const [viewport, setViewport] = useState<ViewportLike>(getVisualViewport);
+  const [isTextExpanded, setIsTextExpanded] = useState<boolean>(false);
+  const [measuredCardHeight, setMeasuredCardHeight] = useState<number>(270);
+  const cardRef = useRef<HTMLDivElement>(null);
 
-  const [windowSize, setWindowSize] = useState({
-    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
-    height: typeof window !== 'undefined' ? window.innerHeight : 800,
-  });
+  // Medir dinámicamente la altura real de la tarjeta en el DOM
+  useEffect(() => {
+    if (!isTutorialOpen) return;
+    if (cardRef.current) {
+      const h = cardRef.current.offsetHeight;
+      if (h > 0 && Math.abs(h - measuredCardHeight) > 4) {
+        setMeasuredCardHeight(h);
+      }
+    }
+  }, [isTutorialOpen, step?.id, isTextExpanded, measuredCardHeight]);
 
-  // Navigate to target view if step requires a different tab
+  const isMobile = viewport.width < 768;
+
+  // Actualizar dimensiones de viewport ante resize, scroll o cambio en barra de navegación de Android
+  const updateViewport = useCallback(() => {
+    setViewport(getVisualViewport());
+  }, []);
+
+  useEffect(() => {
+    if (!isTutorialOpen) return;
+    updateViewport();
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', updateViewport);
+      vv.addEventListener('scroll', updateViewport);
+    }
+    window.addEventListener('resize', updateViewport);
+    window.addEventListener('scroll', updateViewport, true);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', updateViewport);
+        vv.removeEventListener('scroll', updateViewport);
+      }
+      window.removeEventListener('resize', updateViewport);
+      window.removeEventListener('scroll', updateViewport, true);
+    };
+  }, [isTutorialOpen, updateViewport]);
+
+  // Cambiar de vista si el paso lo requiere
   useEffect(() => {
     if (isTutorialOpen && step?.targetView && step.targetView !== currentView) {
       onNavigateView(step.targetView);
     }
   }, [isTutorialOpen, step?.targetView, currentView, onNavigateView]);
 
-  // Synchronous and short-polling rect resolution on step or view change
+  // Gestión de contenedores dependientes de cada paso (Drawer, Sheet "Más", etc.)
   useEffect(() => {
     if (!isTutorialOpen || !step) return;
 
-    if (!step.targetSelector || step.placement === 'center') {
+    // Resetear expansión de texto en cada paso nuevo
+    setIsTextExpanded(false);
+
+    // Paso 5 (interactive-status): abrir SubjectDrawer seleccionando materia 1
+    if (step.id === 'interactive-status' && !selectedSubjectId) {
+      setSelectedSubjectId(1);
+    }
+
+    // Paso 6 (edge-types): cerrar el drawer para ver el lienzo de correlativas despejado
+    if (step.id === 'edge-types' && selectedSubjectId) {
+      setSelectedSubjectId(null);
+    }
+
+    // Paso 9 (analista-switch) o Paso 16 (finish) en mobile: abrir Sheet "Más"
+    const isMobileNow = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (
+      isMobileNow &&
+      (step.id === 'analista-switch' ||
+        (step.targetSelector && step.targetSelector.includes('analista-button')))
+    ) {
+      setIsMoreMenuOpen(true);
+    } else if (step.id !== 'analista-switch' && step.id !== 'finish') {
+      // Cerrar Sheet Más en pasos que no lo requieran
+      setIsMoreMenuOpen(false);
+    }
+  }, [isTutorialOpen, step?.id, step?.targetSelector, selectedSubjectId, setSelectedSubjectId, setIsMoreMenuOpen]);
+
+  // Selector efectivo según viewport
+  const effectiveTargetSelector = React.useMemo(() => {
+    if (!step?.targetSelector) return null;
+    // Paso 2: vista panorámica del mapa completo -> tarjeta informativa general
+    if (step.id === 'graph-overview' || step.targetSelector === '[data-tour="graph-canvas"]') {
+      return null;
+    }
+    // Paso de profesores: apuntar al banner principal de cabecera en lugar de la lista infinita
+    if (step.targetSelector === '[data-tour="professors-directory"]') {
+      return '[data-tour="professors-directory"] > div:first-child';
+    }
+    // Paso de estadísticas: apuntar al primer anillo ("Avance por materias")
+    if (step.id === 'stats-tour' || step.targetSelector === '[data-tour="stats-rings"]') {
+      return '[data-tour="stats-rings"] > div:first-child';
+    }
+    // Paso 10 en mobile destaca el botón Más en el bottom nav
+    if (isMobile && step.id === 'app-views') {
+      return '[data-tour="more-menu-btn"]';
+    }
+    return step.targetSelector;
+  }, [step?.targetSelector, step?.id, isMobile]);
+
+  // Medición reactiva y estabilización mediante requestAnimationFrame
+  useEffect(() => {
+    if (!isTutorialOpen || !step) return;
+
+    if (!effectiveTargetSelector || step.placement === 'center') {
       setRect(null);
       return;
     }
 
     let isMounted = true;
-    let timerId: number | null = null;
-    let attempts = 0;
-    const maxAttempts = 25; // 25 * 20ms = 500ms max
+    let consecutiveMatches = 0;
+    const STABLE_FRAMES_REQUIRED = 3;
+    let lastTop = -9999;
+    let lastLeft = -9999;
+    let lastWidth = -9999;
+    let lastHeight = -9999;
+    let frameCount = 0;
+    const maxFrames = 45; // ~750ms de tope para animaciones de entrada
 
-    const findRect = () => {
+    const checkFrame = () => {
       if (!isMounted) return;
-      const r = getElementRect(step.targetSelector);
-      if (r) {
-        setRect(r);
-      } else if (attempts < maxAttempts) {
-        attempts++;
-        timerId = window.setTimeout(findRect, 20);
+      frameCount++;
+
+      const el = findVisibleElement(effectiveTargetSelector);
+      if (el) {
+        // Scrollear el contenedor interno si el elemento se encuentra fuera de la zona visible
+        const scrollParent = findScrollContainer(el);
+        if (scrollParent) {
+          const parentRect = scrollParent.getBoundingClientRect();
+          const elRect = el.getBoundingClientRect();
+          if (elRect.top < parentRect.top || elRect.bottom > parentRect.bottom) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+        }
+
+        const b = el.getBoundingClientRect();
+        const pad = 8;
+        const currentRect: SpotlightRect = {
+          top: Math.max(0, Math.round(b.top - pad)),
+          left: Math.max(0, Math.round(b.left - pad)),
+          width: Math.round(b.width + pad * 2),
+          height: Math.round(b.height + pad * 2),
+          bottom: Math.round(b.bottom + pad),
+          right: Math.round(b.right + pad),
+        };
+
+        // Mantener actualizado el rect durante la animación para que el spotlight siga el movimiento
+        setRect(currentRect);
+
+        const isStable =
+          Math.abs(b.top - lastTop) < 1.0 &&
+          Math.abs(b.left - lastLeft) < 1.0 &&
+          Math.abs(b.width - lastWidth) < 1.0 &&
+          Math.abs(b.height - lastHeight) < 1.0;
+
+        if (isStable) {
+          consecutiveMatches++;
+        } else {
+          consecutiveMatches = 0;
+          lastTop = b.top;
+          lastLeft = b.left;
+          lastWidth = b.width;
+          lastHeight = b.height;
+        }
+
+        // Exigir al menos 10 frames (~160ms) para dar tiempo a que comience la transición antes de congelar
+        if ((consecutiveMatches >= STABLE_FRAMES_REQUIRED && frameCount >= 10) || frameCount >= maxFrames) {
+          return;
+        }
+      }
+
+      if (frameCount < maxFrames) {
+        requestAnimationFrame(checkFrame);
       } else {
-        setRect(null);
+        if (!el) {
+          console.warn(
+            `[TutorialSpotlight] Objetivo no visible para paso: ${step.id} (selector: ${effectiveTargetSelector})`
+          );
+          setRect(null);
+        }
       }
     };
 
-    // Attempt resolution immediately
-    findRect();
-
-    const handleResizeOrScroll = () => {
-      setWindowSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
-      });
-      const r = getElementRect(step.targetSelector);
-      if (r) setRect(r);
-    };
-
-    window.addEventListener('resize', handleResizeOrScroll);
-    window.addEventListener('scroll', handleResizeOrScroll, true);
+    // Pequeño retardo inicial para permitir que el DOM monte el nodo
+    const initialTimer = setTimeout(() => {
+      requestAnimationFrame(checkFrame);
+    }, 40);
 
     return () => {
       isMounted = false;
-      if (timerId) clearTimeout(timerId);
-      window.removeEventListener('resize', handleResizeOrScroll);
-      window.removeEventListener('scroll', handleResizeOrScroll, true);
+      clearTimeout(initialTimer);
     };
-  }, [isTutorialOpen, step, currentView]);
+  }, [isTutorialOpen, step?.id, effectiveTargetSelector, currentView]);
 
-  // Step 5: ensure subject 1 is selected so the drawer and status button exist
-  useEffect(() => {
-    if (isTutorialOpen && step?.id === 'interactive-status' && !selectedSubjectId) {
-      setSelectedSubjectId(1);
-    }
-  }, [isTutorialOpen, step?.id, selectedSubjectId, setSelectedSubjectId]);
-
-  // Step 6: close drawer so the graph lines and edge legend are unobstructed
-  useEffect(() => {
-    if (isTutorialOpen && step?.id === 'edge-types' && selectedSubjectId) {
-      setSelectedSubjectId(null);
-    }
-  }, [isTutorialOpen, step?.id, selectedSubjectId, setSelectedSubjectId]);
-
-  // Auto-open more options menu if tutorial step targets an option inside it (e.g. Carga Rápida or Analista in mobile)
-  useEffect(() => {
-    if (!isTutorialOpen) {
-      setIsMoreMenuOpen(false);
-      return;
-    }
-
-    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 768;
-
-    const targetsMenuItem = Boolean(
-      step?.targetSelector && (
-        step.targetSelector.includes('menu-item') ||
-        (isMobileViewport && step.targetSelector.includes('analista-button'))
-      )
-    );
-
-    if (targetsMenuItem) {
-      setIsMoreMenuOpen(true);
-    } else {
-      setIsMoreMenuOpen(false);
-    }
-  }, [isTutorialOpen, step?.id, step?.targetSelector, setIsMoreMenuOpen]);
-
-  // Avoid skipping Step 4 if a subject was already selected before entering Step 4
-  const lastStepIdRef = useRef<string | null>(null);
-  const prevSelectedIdRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!isTutorialOpen || !step) return;
-    if (lastStepIdRef.current !== step.id) {
-      lastStepIdRef.current = step.id;
-      prevSelectedIdRef.current = selectedSubjectId;
-    }
-  }, [isTutorialOpen, step, selectedSubjectId]);
-
-  // Interactive step advance: if step requires clicking a subject and user clicked a new one
-  useEffect(() => {
-    if (isTutorialOpen && step?.interactiveAction === 'click-subject') {
-      if (selectedSubjectId && selectedSubjectId !== prevSelectedIdRef.current) {
-        prevSelectedIdRef.current = selectedSubjectId;
-        const autoTimer = setTimeout(() => {
-          nextTutorialStep();
-        }, 500);
-        return () => clearTimeout(autoTimer);
-      }
-    }
-  }, [isTutorialOpen, step, selectedSubjectId, nextTutorialStep]);
-
-  // Keyboard navigation
+  // Teclado accesible
   useEffect(() => {
     if (!isTutorialOpen) return;
 
@@ -346,25 +375,47 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
   const isLastStep = currentTutorialStep >= availableSteps.length - 1;
   const progressPercent = Math.round(((currentTutorialStep + 1) / availableSteps.length) * 100);
 
-  const isMobile = windowSize.width < 640;
-  const cardWidth = Math.min(420, windowSize.width - 32);
-  const coords = calculateCardCoords(
-    step.placement || 'center',
-    rect,
-    windowSize,
-    cardWidth,
-    280
-  );
+  // Adaptación de textos contextuales (táctil vs mouse)
+  const adaptedText = adaptTutorialText(step, isMobile);
+
+  const cardWidth = Math.min(420, viewport.width - 24);
+  const cardHeightToUse =
+    cardRef.current?.offsetHeight && cardRef.current.offsetHeight > 0
+      ? cardRef.current.offsetHeight
+      : measuredCardHeight > 0
+      ? measuredCardHeight
+      : isTextExpanded
+      ? 320
+      : 240;
+
+  const safeInsets: SafeInsetsLike = {
+    top: 12,
+    bottom: isMobile ? 80 : 16, // Dejar espacio a la barra inferior en mobile
+    left: 12,
+    right: 12,
+  };
+
+  // Heurística mobile: si el objetivo está en la mitad inferior de la pantalla (rect && rect.top > windowSize.height / 2)
+  const windowSize = { width: viewport.width, height: viewport.height };
+  const isBottomHalf = rect && rect.top > windowSize.height / 2;
+  void isBottomHalf;
+
+  const layout = computeTutorialLayout(rect, { width: cardWidth, height: cardHeightToUse }, viewport, safeInsets);
 
   return (
-    <div className="fixed inset-0 z-[var(--z-modal-top)] overflow-hidden pointer-events-none" role="dialog" aria-modal="true">
-      {/* Dark Spotlight SVG Mask with smoothly animated cutout */}
+    <div
+      className="fixed inset-0 z-[var(--z-modal-top)] overflow-hidden pointer-events-none"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="tutorial-step-title"
+    >
+      {/* SVG del Spotlight con recorte dinámico (coordenadas 1:1 en píxeles CSS) */}
       <svg className="fixed inset-0 w-full h-full pointer-events-none z-[var(--z-modal-top)]">
         <defs>
           <mask id="tutorial-spotlight-mask">
-            {/* White background reveals the overlay */}
-            <rect x="0" y="0" width={windowSize.width} height={windowSize.height} fill="white" />
-            {/* Black rectangle punches the spotlight hole, animating position and dimensions */}
+            {/* Fondo blanco revela el overlay oscuro */}
+            <rect x="0" y="0" width={viewport.width} height={viewport.height} fill="white" />
+            {/* Rectángulo negro perfora la ventana del spotlight */}
             {rect && (
               <motion.rect
                 animate={{
@@ -375,8 +426,8 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
                 }}
                 transition={{
                   type: 'spring',
-                  damping: 30,
-                  stiffness: 300,
+                  damping: 32,
+                  stiffness: 320,
                   mass: 0.8,
                 }}
                 rx="14"
@@ -387,20 +438,21 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
           </mask>
         </defs>
 
-        {/* Backdrop rect with mask applied */}
+        {/* Fondo oscurecido. Si no hay objetivo visible, es transparente para NO tapar la pantalla */}
         <rect
           x="0"
           y="0"
-          width={windowSize.width}
-          height={windowSize.height}
-          fill="rgba(2, 6, 23, 0.78)"
-          mask="url(#tutorial-spotlight-mask)"
+          width={viewport.width}
+          height={viewport.height}
+          fill={rect ? 'rgba(2, 6, 23, 0.78)' : 'transparent'}
+          mask={rect ? 'url(#tutorial-spotlight-mask)' : undefined}
         />
       </svg>
 
-      {/* Pulsing Glowing Ring smoothly gliding around highlighted element */}
+      {/* Anillo dorado pulsante alrededor del objetivo */}
       {rect && (
         <motion.div
+          data-tour="tutorial-spotlight-ring"
           animate={{
             top: rect.top,
             left: rect.left,
@@ -410,48 +462,46 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
           }}
           transition={{
             type: 'spring',
-            damping: 30,
-            stiffness: 300,
+            damping: 32,
+            stiffness: 320,
             mass: 0.8,
           }}
-          className="fixed rounded-2xl border-2 border-amber-400 shadow-[0_0_30px_rgba(251,191,36,0.5)] pointer-events-none z-[var(--z-modal-top)] animate-pulse"
+          className="fixed rounded-2xl border-2 border-amber-400 shadow-[0_0_24px_rgba(251,191,36,0.4)] pointer-events-none z-[var(--z-modal-top)] animate-pulse"
         />
       )}
 
-      {/* Floating Tour Card (Smoothly gliding container via spring) */}
+      {/* Tarjeta flotante interactiva */}
       <motion.div
-        animate={
-          isMobile
-            ? (rect && rect.top > windowSize.height / 2
-                ? { top: 16, bottom: 'auto', left: 16, right: 16 }
-                : { bottom: 16, top: 'auto', left: 16, right: 16 })
-            : { top: coords.top, left: coords.left }
-        }
+        animate={{
+          top: layout.cardCoords.top,
+          left: layout.cardCoords.left,
+        }}
         transition={{
           type: 'spring',
-          damping: 28,
-          stiffness: 280,
+          damping: 30,
+          stiffness: 300,
           mass: 0.8,
         }}
         style={{
-          position: 'fixed',
-          zIndex: 'var(--z-modal-top)' as any,
-          width: isMobile ? undefined : `${cardWidth}px`,
-          maxWidth: isMobile ? 'calc(100vw - 2rem)' : undefined,
+          width: cardWidth,
+          maxHeight: layout.cardMaxHeight,
         }}
-        className="pointer-events-auto"
+        className="fixed z-[var(--z-modal-top)] pointer-events-auto"
       >
         <AnimatePresence mode="wait">
           <motion.div
             key={step.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.16, ease: 'easeOut' }}
-            className="w-full bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-5 shadow-2xl flex flex-col gap-4 text-slate-100"
+            initial={{ opacity: 0, scale: 0.94 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.94 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            ref={cardRef}
+            data-tour="tutorial-card"
+            style={{ maxHeight: layout.cardMaxHeight }}
+            className="w-full bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl p-3 sm:p-5 shadow-2xl flex flex-col gap-2 sm:gap-3 text-slate-100 overflow-y-auto"
           >
-            {/* Top Bar: Badge, Progress & Close Button */}
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            {/* Cabecera de la tarjeta: Badge, Conteo y Botón Cerrar */}
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
               <div className="flex items-center gap-2">
                 <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
                   <IconComponent className="w-4 h-4" />
@@ -463,38 +513,56 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-bold text-slate-400">
                   {currentTutorialStep + 1} / {availableSteps.length}
                 </span>
                 <button
+                  type="button"
                   onClick={() => closeTutorial()}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center cursor-pointer"
                   title="Cerrar tutorial (Esc)"
+                  aria-label="Cerrar tutorial"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {/* Card Content */}
-            <div className="space-y-2">
-              <h3 className="text-base sm:text-lg font-black text-white leading-tight">
-                {step.title}
+            {/* Contenido textual con soporte de compactación ("Ver más") */}
+            <div className="space-y-1.5">
+              <h3
+                id="tutorial-step-title"
+                className="text-base sm:text-lg font-black text-white leading-tight"
+              >
+                {adaptedText.title}
               </h3>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                {step.description}
+                {layout.shouldCollapseText && !isTextExpanded
+                  ? `${adaptedText.description.slice(0, 110)}...`
+                  : adaptedText.description}
               </p>
 
-              {/* Interactive hint banner if present */}
-              {step.interactiveHint && (
+              {layout.shouldCollapseText && (
+                <button
+                  type="button"
+                  onClick={() => setIsTextExpanded(!isTextExpanded)}
+                  className="text-xs font-bold text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-1 cursor-pointer py-1"
+                >
+                  <span>{isTextExpanded ? 'Ver menos' : 'Ver más'}</span>
+                  {isTextExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+
+              {/* Indicación interactiva */}
+              {adaptedText.interactiveHint && (
                 <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-2 mt-2">
-                  <span>{step.interactiveHint}</span>
+                  <span>{adaptedText.interactiveHint}</span>
                 </div>
               )}
             </div>
 
-            {/* Progress Bar */}
+            {/* Barra de progreso */}
             <div className="w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-slate-800">
               <motion.div
                 className="h-full bg-gradient-to-r from-indigo-500 via-amber-500 to-emerald-400 rounded-full"
@@ -504,14 +572,15 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
               />
             </div>
 
-            {/* Card Footer Actions */}
+            {/* Acciones de pie de tarjeta con targets táctiles >= 44px */}
             <div className="flex items-center justify-between pt-1 gap-2">
               {!isLastStep ? (
                 <button
+                  type="button"
                   onClick={() => closeTutorial()}
-                  className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors py-2 px-1 min-h-[44px] flex items-center"
+                  className="text-xs font-semibold text-slate-400 hover:text-slate-200 transition-colors py-2 px-1 min-h-[44px] flex items-center cursor-pointer"
                 >
-                  Saltar tutorial
+                  Saltar
                 </button>
               ) : (
                 <span />
@@ -520,25 +589,28 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
               <div className="flex items-center gap-2">
                 {!isFirstStep && (
                   <button
+                    type="button"
                     onClick={prevTutorialStep}
                     className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all flex items-center justify-center gap-1 cursor-pointer"
                   >
                     <ArrowLeft className="w-3.5 h-3.5" />
-                    <span>Anterior</span>
+                    <span>Atrás</span>
                   </button>
                 )}
 
                 {isLastStep ? (
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
                       onClick={() => closeTutorial()}
-                      className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all"
+                      className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition-all cursor-pointer"
                     >
                       Empezar solo
                     </button>
                     <button
+                      type="button"
                       onClick={() => closeTutorial({ openOnboarding: true })}
-                      className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+                      className="px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-bold text-white bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 shadow-lg shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <Layers className="w-3.5 h-3.5" />
                       <span>Cargar mis materias</span>
@@ -546,8 +618,9 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
                   </div>
                 ) : (
                   <button
+                    type="button"
                     onClick={nextTutorialStep}
-                    className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5"
+                    className="px-4 py-2 min-h-[44px] rounded-xl text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <span>Siguiente</span>
                     <ArrowRight className="w-3.5 h-3.5" />

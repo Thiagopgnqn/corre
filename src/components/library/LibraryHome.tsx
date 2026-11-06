@@ -15,6 +15,10 @@ import { UploadMaterialModal } from './UploadMaterialModal';
 import { SubjectLibraryView } from './SubjectLibraryView';
 import { MyUploadsView } from './MyUploadsView';
 import { LibraryTermsPage } from './LibraryTermsPage';
+import { useAuth } from '../../context/AuthContext';
+import { useCareer } from '../../context/CareerContext';
+import { LibraryWelcomeModal } from './LibraryWelcomeModal';
+import { shouldShowLibraryWelcome, markLibraryWelcomeSeen } from '../../utils/libraryCommunityLogic';
 
 interface SubjectItem {
   id: string; // UUID
@@ -60,6 +64,35 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   // Upload modal
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [uploadTargetSubjectId, setUploadTargetSubjectId] = useState<string | undefined>(undefined);
+
+  // Cartel de bienvenida comunitario (C1)
+  const { user } = useAuth();
+  const { isTutorialOpen } = useCareer();
+  const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(() =>
+    shouldShowLibraryWelcome({ isTutorialOpen, userId: user?.id })
+  );
+
+  // Si el tutorial está abierto o se activa, el cartel de bienvenida no debe mostrarse.
+  // Al navegar o si no está marcado como visto, lo activa en cualquier subvista.
+  useEffect(() => {
+    if (isTutorialOpen && showWelcomeModal) {
+      setShowWelcomeModal(false);
+    } else if (!isTutorialOpen && !showWelcomeModal) {
+      if (shouldShowLibraryWelcome({ isTutorialOpen, userId: user?.id })) {
+        setShowWelcomeModal(true);
+      }
+    }
+  }, [isTutorialOpen, showWelcomeModal, user?.id, subView]);
+
+  const handleCloseWelcome = () => {
+    markLibraryWelcomeSeen(user?.id);
+    setShowWelcomeModal(false);
+  };
+
+  const handleWelcomeUpload = () => {
+    handleCloseWelcome();
+    handleOpenUpload();
+  };
 
   // Load subjects summary & novelty check
   const loadData = async () => {
@@ -161,9 +194,19 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   // Calculate totals
   const totalApprovedFiles = subjects.reduce((acc, s) => acc + (s.approvedFilesCount || 0), 0);
 
-  // Render Sub-Views
+  // Render Sub-Views inside the unified Library Container
   if (subView === 'terms') {
-    return <LibraryTermsPage onBack={handleBackToCatalog} />;
+    return (
+      <>
+        <LibraryTermsPage onBack={handleBackToCatalog} />
+        <LibraryWelcomeModal
+          isOpen={showWelcomeModal}
+          onClose={handleCloseWelcome}
+          onOpenUpload={handleWelcomeUpload}
+          onOpenTerms={handleOpenTerms}
+        />
+      </>
+    );
   }
 
   if (subView === 'my-uploads') {
@@ -183,26 +226,44 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
           subjects={subjects}
           onOpenTerms={handleOpenTerms}
         />
+        <LibraryWelcomeModal
+          isOpen={showWelcomeModal}
+          onClose={handleCloseWelcome}
+          onOpenUpload={handleWelcomeUpload}
+          onOpenTerms={handleOpenTerms}
+        />
       </>
     );
   }
 
-  if (subView === 'subject' && selectedSubject) {
+  if (subView === 'subject') {
     return (
       <>
-        <SubjectLibraryView
-          subject={selectedSubject}
-          onBack={handleBackToCatalog}
-          onOpenUpload={() => handleOpenUpload(selectedSubject.id)}
-        />
+        {selectedSubject ? (
+          <SubjectLibraryView
+            subject={selectedSubject}
+            onBack={handleBackToCatalog}
+            onOpenUpload={() => handleOpenUpload(selectedSubject.id)}
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center p-12 text-slate-400">
+            <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+          </div>
+        )}
         <UploadMaterialModal
           isOpen={isUploadOpen}
           onClose={() => setIsUploadOpen(false)}
           onSuccess={() => {
             loadData();
           }}
-          initialSubjectId={selectedSubject.id}
+          initialSubjectId={selectedSubject?.id}
           subjects={subjects}
+          onOpenTerms={handleOpenTerms}
+        />
+        <LibraryWelcomeModal
+          isOpen={showWelcomeModal}
+          onClose={handleCloseWelcome}
+          onOpenUpload={handleWelcomeUpload}
           onOpenTerms={handleOpenTerms}
         />
       </>
@@ -212,7 +273,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   return (
     <div className="w-full max-w-7xl mx-auto px-3.5 sm:px-6 py-4 sm:py-8 space-y-6 sm:space-y-8 min-w-0 w-full max-w-full">
       {/* Hero Header */}
-      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-950 p-4 sm:p-8 border border-indigo-500/20 shadow-2xl min-w-0 w-full max-w-full">
+      <div data-tour="library-header" className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-950 p-4 sm:p-8 border border-indigo-500/20 shadow-2xl min-w-0 w-full max-w-full">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5 sm:gap-6 w-full min-w-0">
           <div className="space-y-2 sm:space-y-3 max-w-2xl w-full min-w-0">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/15 border border-indigo-400/25 text-indigo-300 text-xs font-semibold">
@@ -223,7 +284,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
               Material de Estudio para tu carrera
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed break-words">
-              Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Ingeniería en Sistemas de Información (UTN FRC).
+              Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Ingeniería en Sistemas de Información.
             </p>
           </div>
 
@@ -285,30 +346,34 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
       {/* Level Filters & Search */}
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 w-full min-w-0 max-w-full">
-          {/* Level Filter Tabs */}
-          <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1 scrollbar-none snap-x snap-mandatory flex items-center gap-1.5 px-0.5">
-            {[
-              { id: 'all', label: 'Todas las materias' },
-              { id: 1, label: '1° Año' },
-              { id: 2, label: '2° Año' },
-              { id: 3, label: '3° Año' },
-              { id: 4, label: '4° Año' },
-              { id: 5, label: '5° Año' },
-              { id: 'electives', label: 'Electivas' },
-            ].map((lvl) => (
-              <button
-                key={String(lvl.id)}
-                type="button"
-                onClick={() => setLevelFilter(lvl.id as any)}
-                className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
-                  levelFilter === lvl.id
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                    : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-                }`}
-              >
-                {lvl.label}
-              </button>
-            ))}
+          {/* Level Filter Tabs con scroll horizontal suave, snap-x mandatory, pe-6 y fade lateral */}
+          <div className="relative flex-1 min-w-0 max-w-full">
+            <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory scroll-smooth flex items-center gap-1.5 px-0.5 pe-6">
+              {[
+                { id: 'all', label: 'Todas las materias' },
+                { id: 1, label: '1° Año' },
+                { id: 2, label: '2° Año' },
+                { id: 3, label: '3° Año' },
+                { id: 4, label: '4° Año' },
+                { id: 5, label: '5° Año' },
+                { id: 'electives', label: 'Electivas' },
+              ].map((lvl) => (
+                <button
+                  key={String(lvl.id)}
+                  type="button"
+                  onClick={() => setLevelFilter(lvl.id as any)}
+                  className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
+                    levelFilter === lvl.id
+                      ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                      : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800/80'
+                  }`}
+                >
+                  {lvl.label}
+                </button>
+              ))}
+            </div>
+            {/* Indicador sutil de gradiente (fade) en el borde derecho en mobile */}
+            <div className="pointer-events-none absolute right-0 top-0 bottom-1.5 w-6 bg-gradient-to-l from-slate-950 via-slate-950/70 to-transparent sm:hidden" />
           </div>
 
           {/* Search Box */}
@@ -400,6 +465,14 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
         }}
         initialSubjectId={uploadTargetSubjectId}
         subjects={subjects}
+        onOpenTerms={handleOpenTerms}
+      />
+
+      {/* Cartel de bienvenida comunitario (C1) */}
+      <LibraryWelcomeModal
+        isOpen={showWelcomeModal}
+        onClose={handleCloseWelcome}
+        onOpenUpload={handleWelcomeUpload}
         onOpenTerms={handleOpenTerms}
       />
     </div>

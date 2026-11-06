@@ -369,53 +369,77 @@ try {
             self.send_json({
                 "success": True,
                 "data": [
-                    {"id": "s-1", "code": 1, "name": "Análisis Matemático I", "year": 1, "approvedCount": 5},
-                    {"id": "s-2", "code": 2, "name": "Álgebra y Geometría Analítica", "year": 1, "approvedCount": 3},
-                    {"id": "s-21", "code": 21, "name": "Comunicaciones y Redes de Datos", "year": 3, "approvedCount": 4}
+                    {"id": "s-1", "codeInPlan": 1, "name": "Análisis Matemático I", "level": 1, "approvedFilesCount": 5},
+                    {"id": "s-2", "codeInPlan": 2, "name": "Álgebra y Geometría Analítica", "level": 1, "approvedFilesCount": 3},
+                    {"id": "s-21", "codeInPlan": 21, "name": "Comunicaciones y Redes de Datos", "level": 3, "approvedFilesCount": 4}
                 ]
             })
             return
 
         # server/src/modules/library/library.routes.ts:16 -> router.get('/files', searchMaterials)
-        # server/src/modules/library/library.controller.ts:58 -> searchMaterials
-        if path.startswith('/api/library/files') or path.startswith('/api/library/materials'):
+        # Mock download file
+        if path == '/mock-file.pdf':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Disposition', 'attachment; filename="mock-material.pdf"')
+            self.end_headers()
+            self.wfile.write(b'%PDF-1.4 mock pdf content')
+            return
+
+        # server/src/modules/library/library.controller.ts -> getDownloadUrl
+        if '/download' in path:
             self.send_json({
                 "success": True,
                 "data": {
-                    "files": [
-                        {
-                            "id": "lib-1",
-                            "title": "Primer Parcial Resuelto 2024 (Tema 1)",
-                            "description": "Límites, continuidad y derivadas con desarrollos detallados paso a paso.",
-                            "mimeType": "application/pdf",
-                            "kind": "parcial",
-                            "sizeBytes": 2450000,
-                            "academicYear": 2024,
-                            "term": "1C",
-                            "examInstance": "1° Parcial",
-                            "hasSolution": True,
-                            "downloadCount": 42,
-                            "helpfulCount": 18,
-                            "hasVotedHelpful": False,
-                            "professorNames": ["García, Juan Carlos"]
-                        },
-                        {
-                            "id": "lib-2",
-                            "title": "Resumen Completo Teórico y Práctico con Demostraciones de Teoremas de Continuidad y Derivabilidad",
-                            "description": "Apunte exhaustivo elaborado por estudiantes de la cátedra con gráficos explicativos y ejercicios resueltos.",
-                            "mimeType": "application/pdf",
-                            "kind": "apunte",
-                            "sizeBytes": 8900000,
-                            "academicYear": 2025,
-                            "term": "2C",
-                            "examInstance": "Teórico",
-                            "hasSolution": False,
-                            "downloadCount": 115,
-                            "helpfulCount": 54,
-                            "hasVotedHelpful": True,
-                            "professorNames": ["Prof. Dra. De la Colina Argañaraz, María de las Mercedes"]
-                        }
-                    ],
+                    "downloadUrl": "/mock-file.pdf",
+                    "fileName": "mock-material.pdf"
+                }
+            })
+            return
+
+        # server/src/modules/library/library.controller.ts:58 -> searchMaterials
+        if path.startswith('/api/library/files') or path.startswith('/api/library/materials'):
+            mock_items = [
+                {
+                    "id": "lib-1",
+                    "title": "Primer Parcial Resuelto 2024 (Tema 1)",
+                    "description": "Límites, continuidad y derivadas con desarrollos detallados paso a paso.",
+                    "mimeType": "application/pdf",
+                    "kind": "parcial",
+                    "sizeBytes": 2450000,
+                    "academicYear": 2024,
+                    "term": "1C",
+                    "examInstance": "1° Parcial",
+                    "hasSolution": True,
+                    "downloadCount": 42,
+                    "helpfulCount": 18,
+                    "hasVotedHelpful": False,
+                    "professorNames": ["García, Juan Carlos"],
+                    "createdAt": "2024-05-10T12:00:00Z"
+                },
+                {
+                    "id": "lib-2",
+                    "title": "Resumen Completo Teórico y Práctico con Demostraciones de Teoremas de Continuidad y Derivabilidad",
+                    "description": "Apunte exhaustivo elaborado por estudiantes de la cátedra con gráficos explicativos y ejercicios resueltos.",
+                    "mimeType": "application/pdf",
+                    "kind": "apunte",
+                    "sizeBytes": 8900000,
+                    "academicYear": 2025,
+                    "term": "2C",
+                    "examInstance": "Teórico",
+                    "hasSolution": False,
+                    "downloadCount": 115,
+                    "helpfulCount": 54,
+                    "hasVotedHelpful": True,
+                    "professorNames": ["Prof. Dra. De la Colina Argañaraz, María de las Mercedes"],
+                    "createdAt": "2025-06-15T15:30:00Z"
+                }
+            ]
+            self.send_json({
+                "success": True,
+                "data": {
+                    "items": mock_items,
+                    "files": mock_items,
                     "total": 2,
                     "page": 1,
                     "pageSize": 20,

@@ -371,6 +371,169 @@ test('Preferencia notifyLibraryEmail habilitada por defecto y cliente de reenví
   assert(typeof adminLibraryApi.resendAdminNotification === 'function', 'adminLibraryApi debe exponer resendAdminNotification');
 });
 
+// ---------------------------------------------------------------------
+// 10. Cartel de Bienvenida de la Biblioteca (C1)
+// ---------------------------------------------------------------------
+import {
+  shouldShowLibraryWelcome,
+  markLibraryWelcomeSeen,
+  getLibraryWelcomeStorageKey,
+  COMMUNITY_TEXTS,
+  DOWNLOAD_TOAST_DURATION_MS,
+  DOWNLOAD_TOAST_MOBILE_BOTTOM_STYLE,
+  DOWNLOAD_TOAST_DESKTOP_BOTTOM_STYLE,
+} from '../src/utils/libraryCommunityLogic';
+
+test('C1. Cartel de Bienvenida: regla de primera visita, persistencia por usuario, textos oficiales y bloqueo si tutorial activo', () => {
+  const mockStorage: Record<string, string> = {};
+  const fakeStorage = {
+    getItem: (key: string) => mockStorage[key] ?? null,
+    setItem: (key: string, val: string) => {
+      mockStorage[key] = val;
+    },
+  };
+
+  const userId = 'usr-test-999';
+  const expectedKey = 'stack:library-welcome-seen:usr-test-999';
+  assert.equal(getLibraryWelcomeStorageKey(userId), expectedKey);
+  assert.equal(getLibraryWelcomeStorageKey(null), 'stack:library-welcome-seen:anon');
+
+  // 1. Primera visita sin tutorial activo: debe mostrarse
+  const showFirstTime = shouldShowLibraryWelcome({
+    isTutorialOpen: false,
+    userId,
+    storage: fakeStorage,
+  });
+  assert.equal(showFirstTime, true, 'Debe mostrarse en la primera visita');
+
+  // 2. Si el tutorial interactivo está activo: NO debe mostrarse y NO se marca como visto
+  const showDuringTutorial = shouldShowLibraryWelcome({
+    isTutorialOpen: true,
+    userId,
+    storage: fakeStorage,
+  });
+  assert.equal(showDuringTutorial, false, 'No debe mostrarse simultáneamente con el tutorial');
+  assert.equal(fakeStorage.getItem(expectedKey), null, 'Durante el tutorial NO se marca como visto');
+
+  // 3. Al marcar como visto (por Ahora no, X, Escape, backdrop, Subir o Términos): se almacena en localStorage
+  markLibraryWelcomeSeen(userId, fakeStorage);
+  assert.equal(fakeStorage.getItem(expectedKey), 'true');
+
+  const showAfterSeen = shouldShowLibraryWelcome({
+    isTutorialOpen: false,
+    userId,
+    storage: fakeStorage,
+  });
+  assert.equal(showAfterSeen, false, 'Una vez visto ya no debe mostrarse');
+
+  // 4. Verificación de los textos oficiales exactos (Item 1.a)
+  assert.equal(COMMUNITY_TEXTS.welcome.title, 'La Biblioteca la hacemos entre todos');
+  assert.equal(
+    COMMUNITY_TEXTS.welcome.body,
+    'Esto es una comunidad de estudiantes y va a ir creciendo con lo que aportemos cada uno. Si rendiste algo hace poco, tomate unos minutos y subí aunque sea 1 archivo: un parcial, un final, un resumen, un apunte, lo que tengas a mano, de cualquier materia. Con que cada uno ponga uno, la Biblioteca deja de estar vacía y le sirve a todos.'
+  );
+  assert.ok(COMMUNITY_TEXTS.welcome.notePrefix.includes('Todo archivo se revisa antes de publicarse'));
+  assert.equal(COMMUNITY_TEXTS.welcome.noteLinkText, 'Términos');
+  assert.equal(COMMUNITY_TEXTS.welcome.primaryButton, 'Subir un archivo');
+  assert.equal(COMMUNITY_TEXTS.welcome.secondaryButton, 'Ahora no');
+
+  // 5. Verificación de implementación en LibraryWelcomeModal.tsx
+  const welcomeModalPath = path.resolve(__dirname, '../src/components/library/LibraryWelcomeModal.tsx');
+  assert.ok(fs.existsSync(welcomeModalPath), 'LibraryWelcomeModal.tsx debe existir');
+  const welcomeContent = fs.readFileSync(welcomeModalPath, 'utf8');
+
+  assert.match(welcomeContent, /COMMUNITY_TEXTS\.welcome\.title/, 'Debe utilizar el título oficial exacto');
+  assert.match(welcomeContent, /COMMUNITY_TEXTS\.welcome\.body/, 'Debe utilizar el cuerpo oficial exacto');
+  assert.match(welcomeContent, /COMMUNITY_TEXTS\.welcome\.primaryButton/, 'Debe ofrecer botón principal "Subir un archivo"');
+  assert.match(welcomeContent, /COMMUNITY_TEXTS\.welcome\.secondaryButton/, 'Debe ofrecer botón secundario "Ahora no"');
+  assert.match(welcomeContent, /handleTermsClick/, 'Debe manejar el clic en Términos cerrando y navegando');
+  assert.match(welcomeContent, /href="#library\/terms"/, 'Debe enlazar a la ruta hash de términos');
+  assert.match(welcomeContent, /onClick=\{onClose\}/, 'El backdrop y botones de cierre deben invocar onClose');
+  assert.match(welcomeContent, /key === 'Escape'/, 'La tecla Escape debe invocar onClose');
+  assert.match(welcomeContent, /aria-label="Cerrar bienvenida"/, 'Debe incluir botón de cierre accesible');
+  assert.match(welcomeContent, /BottomSheet/, 'En celular debe utilizar BottomSheet');
+  assert.match(welcomeContent, /role="dialog"/, 'En escritorio debe utilizar modal centrado accesible');
+
+  // 6. Router / Contenedor LibraryHome monta el modal para todas las rutas (#library, #library/<id>, #library/my-uploads, #library/terms)
+  const homePath = path.resolve(__dirname, '../src/components/library/LibraryHome.tsx');
+  const homeContent = fs.readFileSync(homePath, 'utf8');
+  assert.match(homeContent, /subView === 'terms'[\s\S]*?<LibraryWelcomeModal/, 'Montado en subView terms');
+  assert.match(homeContent, /subView === 'my-uploads'[\s\S]*?<LibraryWelcomeModal/, 'Montado en subView my-uploads');
+  assert.match(homeContent, /subView === 'subject'[\s\S]*?<LibraryWelcomeModal/, 'Montado en subView subject');
+});
+
+// ---------------------------------------------------------------------
+// 11. Cartel Posterior a la Descarga de Material (C2)
+// ---------------------------------------------------------------------
+test('C2. Cartel de Descarga: temporizador de 10s, no invasivo, flotante sobre navbar, textos oficiales y no bloquea descarga', () => {
+  assert.equal(DOWNLOAD_TOAST_DURATION_MS, 10000, 'Debe auto-cerrarse tras exactamente 10 segundos');
+  assert.match(DOWNLOAD_TOAST_MOBILE_BOTTOM_STYLE, /var\(--mobile-nav-height/, 'Debe flotar por encima de la barra móvil');
+  assert.equal(DOWNLOAD_TOAST_DESKTOP_BOTTOM_STYLE, '24px');
+
+  // Textos oficiales exactos (Item 1.b)
+  assert.equal(COMMUNITY_TEXTS.download.title, '¡Listo, ya se está descargando!');
+  assert.equal(
+    COMMUNITY_TEXTS.download.body,
+    'Este material lo subió otro estudiante. Si tenés algo para compartir, subí aunque sea 1 archivo de lo que tengas a mano y ayudá a que la Biblioteca siga creciendo.'
+  );
+  assert.equal(COMMUNITY_TEXTS.download.primaryButton, 'Subir un archivo');
+
+  const toastPath = path.resolve(__dirname, '../src/components/library/LibraryDownloadToast.tsx');
+  assert.ok(fs.existsSync(toastPath), 'LibraryDownloadToast.tsx debe existir');
+  const toastContent = fs.readFileSync(toastPath, 'utf8');
+
+  assert.match(toastContent, /COMMUNITY_TEXTS\.download\.title/, 'Debe contener el título oficial');
+  assert.match(toastContent, /COMMUNITY_TEXTS\.download\.body/, 'Debe contener el mensaje motivacional');
+  assert.match(toastContent, /COMMUNITY_TEXTS\.download\.primaryButton/, 'Debe rotular el botón con "Subir un archivo"');
+  assert.match(toastContent, /aria-label=\{COMMUNITY_TEXTS\.download\.closeLabel\}/, 'Debe contar con botón accesible de cierre');
+  assert.match(toastContent, /aria-live="polite"/, 'Debe declarar aria-live="polite"');
+  assert.match(toastContent, /role="status"/, 'Debe declarar role="status"');
+  assert.match(toastContent, /onMouseEnter/, 'Debe pausar el temporizador al colocar el puntero');
+  assert.match(toastContent, /onFocusCapture/, 'Debe pausar el temporizador al recibir foco');
+
+  // Verificación en SubjectLibraryView de que no demora la descarga y solo aparece en éxito
+  const viewPath = path.resolve(__dirname, '../src/components/library/SubjectLibraryView.tsx');
+  const viewContent = fs.readFileSync(viewPath, 'utf8');
+  const downloadFnCode = viewContent.slice(
+    viewContent.indexOf('const handleDownload ='),
+    viewContent.indexOf('const handleToggleHelpful =')
+  );
+  assert.ok(
+    downloadFnCode.indexOf('a.click()') < downloadFnCode.indexOf('setShowDownloadToast(true)'),
+    'La descarga se inicia con a.click() ANTES de activar el toast de comunidad'
+  );
+  assert.ok(
+    !downloadFnCode.slice(downloadFnCode.indexOf('catch')).includes('setShowDownloadToast(true)'),
+    'Si ocurre un error en la descarga, el toast de comunidad NO debe mostrarse'
+  );
+});
+
+// ---------------------------------------------------------------------
+// 12. Rediseño Mobile de Cabecera y Filtros en Vista de Materia (B1)
+// ---------------------------------------------------------------------
+test('B1. SubjectLibraryView: buscador 100%, filtros en columna con touch targets >= 44px, select de 16px y chips con scroll snap', () => {
+  const viewPath = path.resolve(__dirname, '../src/components/library/SubjectLibraryView.tsx');
+  assert.ok(fs.existsSync(viewPath), 'SubjectLibraryView.tsx debe existir');
+  const viewContent = fs.readFileSync(viewPath, 'utf8');
+
+  // 1. Buscador ocupa 100% en mobile
+  assert.match(viewContent, /w-full\s+md:flex-1/, 'Buscador debe ocupar 100% en mobile y flex-1 en desktop');
+
+  // 2. Filtros en columna en mobile: checkbox fila 1 y select fila 2 con etiqueta arriba
+  assert.match(viewContent, /Solo con resolución/, 'Debe contener el filtro "Solo con resolución"');
+  assert.match(viewContent, /min-h-\[44px\]/, 'El checkbox debe disponer de área táctil >= 44px');
+  assert.match(viewContent, /Ordenar por:/, 'Debe rotular el selector con "Ordenar por:"');
+  assert.match(viewContent, /text-base\s+md:text-xs/, 'Select debe tener 16px en mobile para evitar auto-zoom en iOS');
+
+  // 3. Fila de chips con snap-x mandatory, pe-6 y gradiente fade
+  assert.match(viewContent, /snap-x\s+snap-mandatory/, 'Fila de chips debe tener snap-x snap-mandatory');
+  assert.match(viewContent, /pe-6/, 'Fila de chips debe tener padding al final (pe-6)');
+  assert.match(viewContent, /bg-gradient-to-l/, 'Fila de chips debe mostrar gradiente fade en el borde derecho');
+
+  // 4. Disparo de LibraryDownloadToast al descargar
+  assert.match(viewContent, /setShowDownloadToast\(true\)/, 'Debe activar el toast de comunidad al completar la descarga');
+});
+
 console.log('\n======================================================================');
 console.log(` 📊 RESULTADO TESTS FRONTEND BIBLIOTECA: ${passed} pasaron, 0 fallaron`);
 console.log('======================================================================\n');

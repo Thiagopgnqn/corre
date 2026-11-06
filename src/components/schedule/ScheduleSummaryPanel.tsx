@@ -155,7 +155,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
           `RRULE:FREQ=WEEKLY;BYDAY=${dayToIcsDay[slot.day]};COUNT=16`,
           `SUMMARY:${name} (${comm.code})`,
           `DESCRIPTION:Comisión ${comm.code}${comm.professors.length > 0 ? `\\nDocentes: ${comm.professors.join(', ')}` : ''}${slot.mode === 'virtual' ? '\\nModalidad: Virtual' : ''}`,
-          slot.room ? `LOCATION:Aula ${slot.room}` : 'LOCATION:UTN FRBA',
+          slot.room ? `LOCATION:Aula ${slot.room}` : 'LOCATION:Facultad',
           'END:VEVENT'
         );
       });

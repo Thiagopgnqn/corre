@@ -14,6 +14,7 @@ const files = [
   'mobileFrontend.test.ts',
   'apiContract.test.ts',
   'scheduleAvailability.test.ts',
+  'tutorialLayout.test.ts',
 ];
 
 for (const file of files) {

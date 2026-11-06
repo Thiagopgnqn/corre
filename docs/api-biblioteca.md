@@ -208,7 +208,7 @@ Respuesta:
     "hasUploader": true,
     "uploader": {
       "id": "44444444-4444-4444-8444-444444444444",
-      "email": "estudiante@ejemplo.frc.utn.edu.ar",
+      "email": "estudiante@ejemplo.utn.edu.ar",
       "status": "active",
       "role": "user",
       "createdAt": "2026-03-01T12:00:00.000Z"

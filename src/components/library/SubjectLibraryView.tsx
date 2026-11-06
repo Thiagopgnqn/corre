@@ -13,6 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import { libraryApi } from '../../api/library.api';
+import { LibraryDownloadToast } from './LibraryDownloadToast';
 import type {
   LibraryFilePublic,
   LibraryFileKind,
@@ -58,6 +59,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
 
   // Downloading feedback state
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [showDownloadToast, setShowDownloadToast] = useState<boolean>(false);
 
   const fetchFiles = async () => {
     setIsLoading(true);
@@ -104,6 +106,9 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+
+        // Disparar cartel posterior a la descarga de la comunidad
+        setShowDownloadToast(true);
       }
     } catch (err: any) {
       alert(err?.message || 'Error al descargar el archivo.');
@@ -206,81 +211,94 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
           <button
             type="button"
             onClick={onOpenUpload}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer self-start sm:self-auto"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer w-full sm:w-auto text-center shrink-0 min-h-[44px]"
           >
-            <UploadCloud className="w-4 h-4" />
-            Subir material de esta materia
+            <UploadCloud className="w-4 h-4 shrink-0" />
+            <span className="truncate">Subir material de esta materia</span>
           </button>
         </div>
       </div>
 
-      {/* Kind Filter Tabs */}
-      <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1 scrollbar-none snap-x flex items-center gap-1.5 px-0.5">
-        {[
-          { id: 'todos', label: 'Todos' },
-          { id: 'parcial', label: 'Parciales' },
-          { id: 'final', label: 'Finales' },
-          { id: 'resumen', label: 'Resúmenes' },
-          { id: 'apunte', label: 'Apuntes' },
-          { id: 'tp', label: 'TPs' },
-          { id: 'guia', label: 'Guías' },
-          { id: 'otro', label: 'Otros' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveKindTab(tab.id)}
-            className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
-              activeKindTab === tab.id
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
       {/* Filter and Sort Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800 text-xs">
-        {/* Search */}
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-slate-900/60 p-3 sm:p-3.5 rounded-2xl border border-slate-800 text-xs w-full min-w-0 max-w-full">
+        {/* Buscador de material ocupando el 100% del ancho en mobile */}
+        <div className="relative w-full md:flex-1 min-w-0">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar por título o palabras clave..."
-            className="w-full pl-9 pr-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base sm:text-xs"
+            className="w-full pl-9 pr-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base md:text-xs min-w-0"
           />
         </div>
 
-        <div className="flex items-center gap-3 justify-between sm:justify-end">
-          {/* Solution toggle */}
-          <label className="flex items-center gap-1.5 cursor-pointer text-slate-300 whitespace-nowrap">
+        {/* Filtros en columna en mobile (fila 1: switch "Solo con resolución", fila 2: selector de orden full-width con etiqueta arriba) */}
+        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 w-full md:w-auto min-w-0">
+          {/* Fila 1: switch/checkbox "Solo con resolución" con touch target >= 44px */}
+          <label className="flex items-center gap-2.5 cursor-pointer text-slate-300 min-h-[44px] px-1 select-none shrink-0">
             <input
               type="checkbox"
               checked={onlyWithSolution}
               onChange={(e) => setOnlyWithSolution(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-slate-700 text-emerald-500 bg-slate-950 focus:ring-emerald-500"
+              className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-950 focus:ring-emerald-500 cursor-pointer"
             />
-            <span className="text-[11px] font-medium">Solo con resolución</span>
+            <span className="text-xs font-medium">Solo con resolución</span>
           </label>
 
-          {/* Sort */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-500 text-[11px]">Orden:</span>
+          {/* Fila 2: selector de orden ocupando el 100% del ancho con etiqueta arriba en mobile */}
+          <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-2 w-full md:w-auto min-w-0">
+            <label htmlFor="sort-select" className="text-slate-400 text-xs font-medium shrink-0">
+              Ordenar por:
+            </label>
             <select
+              id="sort-select"
               value={sort}
               onChange={(e) => setSort(e.target.value as any)}
-              className="px-3 py-2 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white text-xs focus:outline-none"
+              className="w-full md:w-auto px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white text-base md:text-xs focus:outline-none focus:border-indigo-500 min-w-0 max-w-full cursor-pointer"
             >
               <option value="recent">Más recientes</option>
               <option value="downloads">Más descargados</option>
-              <option value="helpful">Más útiles</option>
+              <option value="helpful">Más votados / útiles</option>
             </select>
           </div>
         </div>
+      </div>
+
+      {/* Kind Filter Tabs con scroll horizontal suave, snap-x mandatory, pe-6 y gradiente fade en el borde derecho */}
+      <div className="relative w-full min-w-0 max-w-full">
+        <div
+          tabIndex={0}
+          role="region"
+          aria-label="Filtrar por tipo de material"
+          className="w-full min-w-0 max-w-full overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory scroll-smooth flex items-center gap-2 px-0.5 pe-6 focus:outline-none focus:ring-1 focus:ring-indigo-500/40 rounded-xl"
+        >
+          {[
+            { id: 'todos', label: 'Todos' },
+            { id: 'parcial', label: 'Parciales' },
+            { id: 'final', label: 'Finales' },
+            { id: 'resumen', label: 'Resúmenes' },
+            { id: 'apunte', label: 'Apuntes' },
+            { id: 'tp', label: 'TPs' },
+            { id: 'guia', label: 'Guías' },
+            { id: 'otro', label: 'Otros' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveKindTab(tab.id)}
+              className={`px-4 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
+                activeKindTab === tab.id
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                  : 'bg-slate-900 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800/80'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {/* Indicador sutil de gradiente (fade) en el borde derecho */}
+        <div className="pointer-events-none absolute right-0 top-0 bottom-1.5 w-8 bg-gradient-to-l from-slate-950 via-slate-950/70 to-transparent" />
       </div>
 
       {/* Files Grid */}
@@ -320,7 +338,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0 max-w-full">
           {files.map((file) => {
             const isPdf = file.mimeType === 'application/pdf';
             const sizeLabel = `${(file.sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
@@ -328,7 +346,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             return (
               <div
                 key={file.id}
-                className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4"
+                className="p-3.5 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 w-full min-w-0 max-w-full overflow-hidden"
               >
                 <div className="space-y-2.5">
                   {/* Top Badges */}
@@ -404,12 +422,12 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 w-full min-w-0">
                     {/* Helpful Vote Button */}
                     <button
                       type="button"
                       onClick={() => handleToggleHelpful(file)}
-                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] w-full sm:w-auto rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
                         file.hasVotedHelpful
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                           : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
@@ -425,7 +443,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
                       type="button"
                       onClick={() => handleDownload(file)}
                       disabled={downloadingId === file.id}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
+                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] w-full sm:w-auto rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
                     >
                       {downloadingId === file.id ? (
                         <>
@@ -535,6 +553,12 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
           </form>
         </div>
       )}
+      {/* Toast posterior a la descarga de material */}
+      <LibraryDownloadToast
+        isOpen={showDownloadToast}
+        onClose={() => setShowDownloadToast(false)}
+        onUpload={onOpenUpload}
+      />
     </div>
   );
 };

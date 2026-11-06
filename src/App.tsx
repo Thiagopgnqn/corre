@@ -79,6 +79,7 @@ const AppContent: React.FC = () => {
     closeGlobalReviewModal,
     refreshReviewableSummary,
     startTutorial,
+    closeTutorial,
   } = useCareer();
   const [hashState, setHashState] = useState(parseHashState);
   const currentView = hashState.view;
@@ -95,11 +96,13 @@ const AppContent: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
-    (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial = startTutorial;
+    (window as unknown as { __startTutorial?: (step?: number) => void; __closeTutorial?: () => void }).__startTutorial = startTutorial;
+    (window as unknown as { __startTutorial?: (step?: number) => void; __closeTutorial?: () => void }).__closeTutorial = closeTutorial;
     return () => {
       delete (window as unknown as { __startTutorial?: (step?: number) => void }).__startTutorial;
+      delete (window as unknown as { __closeTutorial?: () => void }).__closeTutorial;
     };
-  }, [startTutorial]);
+  }, [startTutorial, closeTutorial]);
 
   // Route guard: el panel de administración es exclusivo para usuarios con rol admin
   React.useEffect(() => {

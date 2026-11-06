@@ -59,7 +59,7 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) =>
           Biblioteca de Material de Estudio — {APP_NAME}
         </h1>
         <p className="text-sm text-slate-400 leading-relaxed max-w-2xl">
-          La Biblioteca de {APP_NAME} es un espacio colaborativo desarrollado para la comunidad estudiantil de Ingeniería en Sistemas de Información (UTN FRC), cuyo único propósito es facilitar el intercambio académico libre y sin costo de recursos de aprendizaje.
+          La Biblioteca de {APP_NAME} es un espacio colaborativo desarrollado para la comunidad estudiantil de Ingeniería en Sistemas de Información, cuyo único propósito es facilitar el intercambio académico libre y sin costo de recursos de aprendizaje.
         </p>
       </div>
 
@@ -153,11 +153,11 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) =>
               <Mail className="w-5 h-5 text-indigo-400 shrink-0" />
               <div>
                 <p className="text-xs text-slate-400">Canal oficial de reclamos y contacto DMCA:</p>
-                <p className="text-sm font-semibold text-white">soporte.stack.frba@gmail.com</p>
+                <p className="text-sm font-semibold text-white">soporte.stack@gmail.com</p>
               </div>
             </div>
             <a
-              href="mailto:soporte.stack.frba@gmail.com?subject=Reclamo%20de%20Material%20-%20Stack"
+              href="mailto:soporte.stack@gmail.com?subject=Reclamo%20de%20Material%20-%20Stack"
               className="px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
             >
               Enviar correo de reclamo
