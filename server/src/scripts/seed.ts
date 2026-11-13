@@ -8,11 +8,21 @@ import {
   faculties,
   careers,
   studyPlans,
+  sharedSubjects,
   subjects,
   subjectPrerequisites,
   planSpecialRules,
   acronyms,
 } from '../db/schema.js';
+
+function normalizeSharedSubjectName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,9 +103,15 @@ async function runSeed() {
           facultyId: fac.id,
           name: catalog.career.name,
           code: catalog.career.code,
+          status: 'published',
         })
         .returning();
       console.log(`  + Carrera creada con id: ${car.id}`);
+    } else if (car.status !== 'published') {
+      await db
+        .update(careers)
+        .set({ status: 'published', updatedAt: new Date() })
+        .where(eq(careers.id, car.id));
     }
 
     // 4. Plan de Estudios
@@ -119,15 +135,16 @@ async function runSeed() {
           name: catalog.studyPlan.name,
           year: catalog.studyPlan.year,
           isActive: catalog.studyPlan.isActive,
+          status: 'published',
           config: catalog.studyPlan.config,
         })
         .returning();
       console.log(`  + Plan de estudio creado con id: ${plan.id}`);
     } else {
-      // Actualizar config
+      // Actualizar config y estado publicado
       await db
         .update(studyPlans)
-        .set({ config: catalog.studyPlan.config, updatedAt: new Date() })
+        .set({ config: catalog.studyPlan.config, status: 'published', updatedAt: new Date() })
         .where(eq(studyPlans.id, plan.id));
     }
 
@@ -136,6 +153,27 @@ async function runSeed() {
     const codeToSubjectId = new Map<number, string>();
 
     for (const sub of catalog.subjects) {
+      const stableCode = `${String(catalog.career.code).toUpperCase()}-${catalog.studyPlan.year}-${sub.codeInPlan}`;
+      const normalizedName = normalizeSharedSubjectName(sub.name);
+
+      let [sharedSub] = await db
+        .select()
+        .from(sharedSubjects)
+        .where(and(eq(sharedSubjects.facultyId, fac.id), eq(sharedSubjects.stableCode, stableCode)))
+        .limit(1);
+
+      if (!sharedSub) {
+        [sharedSub] = await db
+          .insert(sharedSubjects)
+          .values({
+            facultyId: fac.id,
+            stableCode,
+            normalizedName,
+            displayName: sub.name,
+          })
+          .returning();
+      }
+
       let [existingSub] = await db
         .select()
         .from(subjects)
@@ -152,6 +190,7 @@ async function runSeed() {
           .insert(subjects)
           .values({
             planId: plan.id,
+            sharedSubjectId: sharedSub.id,
             codeInPlan: sub.codeInPlan,
             name: sub.name,
             shortName: sub.shortName,
@@ -169,6 +208,7 @@ async function runSeed() {
         await db
           .update(subjects)
           .set({
+            sharedSubjectId: existingSub.sharedSubjectId || sharedSub.id,
             name: sub.name,
             shortName: sub.shortName,
             level: sub.level,

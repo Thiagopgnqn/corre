@@ -44,40 +44,77 @@ export const faculties = pgTable('faculties', {
   ...timestamps,
 });
 
-export const careers = pgTable('careers', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  facultyId: uuid('faculty_id')
-    .notNull()
-    .references(() => faculties.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  code: text('code').notNull(),
-  ...timestamps,
-});
+export const careers = pgTable(
+  'careers',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    facultyId: uuid('faculty_id')
+      .notNull()
+      .references(() => faculties.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    code: text('code').notNull(),
+    status: text('status').default('draft').notNull(), // 'draft' | 'published' | 'archived'
+    ...timestamps,
+  },
+  (table) => [
+    check('chk_careers_status', sql`${table.status} IN ('draft', 'published', 'archived')`),
+  ]
+);
 
-export const studyPlans = pgTable('study_plans', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  careerId: uuid('career_id')
-    .notNull()
-    .references(() => careers.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  year: integer('year').notNull(),
-  isActive: boolean('is_active').default(true).notNull(),
-  config: jsonb('config')
-    .$type<{
-      requiredElectiveCredits: number;
-      defaultMinPassingGrade: number;
-      intermediateDegrees?: Array<{
-        key: string;
-        name: string;
-        requiredElectiveCredits?: number;
-        specialRuleSubjectCode?: number;
-      }>;
-      [key: string]: unknown;
-    }>()
-    .notNull()
-    .default({ requiredElectiveCredits: 20, defaultMinPassingGrade: 4 }),
-  ...timestamps,
-});
+export const studyPlans = pgTable(
+  'study_plans',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    careerId: uuid('career_id')
+      .notNull()
+      .references(() => careers.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    year: integer('year').notNull(),
+    isActive: boolean('is_active').default(true).notNull(),
+    status: text('status').default('draft').notNull(), // 'draft' | 'published' | 'archived'
+    config: jsonb('config')
+      .$type<{
+        requiredElectiveCredits: number;
+        defaultMinPassingGrade: number;
+        electiveSlotsEquivalent?: number;
+        totalLevels?: number;
+        levelLabel?: string;
+        ppsSubjectCode?: number;
+        shortTag?: string;
+        intermediateDegrees?: Array<{
+          key: string;
+          name: string;
+          requiredElectiveCredits?: number;
+          specialRuleSubjectCode?: number;
+        }>;
+        [key: string]: unknown;
+      }>()
+      .notNull()
+      .default({ requiredElectiveCredits: 20, defaultMinPassingGrade: 4 }),
+    ...timestamps,
+  },
+  (table) => [
+    check('chk_study_plans_status', sql`${table.status} IN ('draft', 'published', 'archived')`),
+  ]
+);
+
+export const sharedSubjects = pgTable(
+  'shared_subjects',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    facultyId: uuid('faculty_id')
+      .notNull()
+      .references(() => faculties.id, { onDelete: 'cascade' }),
+    stableCode: text('stable_code').notNull(),
+    normalizedName: text('normalized_name').notNull(),
+    displayName: text('display_name').notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique('uq_shared_subjects_faculty_code').on(table.facultyId, table.stableCode),
+    index('idx_shared_subjects_faculty_norm').on(table.facultyId, table.normalizedName),
+  ]
+);
 
 export const subjects = pgTable(
   'subjects',
@@ -86,6 +123,9 @@ export const subjects = pgTable(
     planId: uuid('plan_id')
       .notNull()
       .references(() => studyPlans.id, { onDelete: 'cascade' }),
+    sharedSubjectId: uuid('shared_subject_id').references(() => sharedSubjects.id, {
+      onDelete: 'set null',
+    }),
     codeInPlan: integer('code_in_plan').notNull(),
     name: text('name').notNull(),
     shortName: text('short_name').notNull(),
@@ -102,6 +142,7 @@ export const subjects = pgTable(
   (table) => [
     unique('uq_subject_plan_code').on(table.planId, table.codeInPlan),
     index('idx_subjects_plan_level').on(table.planId, table.level),
+    index('idx_subjects_shared_subject').on(table.sharedSubjectId),
   ]
 );
 
@@ -437,23 +478,30 @@ export const refreshTokens = pgTable(
   ]
 );
 
-export const userSettings = pgTable('user_settings', {
-  userId: uuid('user_id')
-    .primaryKey()
-    .references(() => users.id, { onDelete: 'cascade' }),
-  includePromotionsInGPA: boolean('include_promotions_in_gpa').default(true).notNull(),
-  minPassingGrade: integer('min_passing_grade').default(4).notNull(),
-  includeAnalistaTrack: boolean('include_analista_track').default(false).notNull(),
-  allowBlockedElectivesPlanning: boolean('allow_blocked_electives_planning')
-    .default(false)
-    .notNull(),
-  includeElectivesInProgress: boolean('include_electives_in_progress').default(true).notNull(),
-  soundEnabled: boolean('sound_enabled').default(true).notNull(),
-  tutorialCompleted: boolean('tutorial_completed').default(false).notNull(),
-  notifyLibraryEmail: boolean('notify_library_email').default(true).notNull(),
-  extraSettings: jsonb('extra_settings').$type<Record<string, unknown>>().default({}),
-  ...timestamps,
-});
+export const userSettings = pgTable(
+  'user_settings',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
+    includePromotionsInGPA: boolean('include_promotions_in_gpa').default(true).notNull(),
+    minPassingGrade: integer('min_passing_grade').default(4).notNull(),
+    includeAnalistaTrack: boolean('include_analista_track').default(false).notNull(),
+    allowBlockedElectivesPlanning: boolean('allow_blocked_electives_planning')
+      .default(false)
+      .notNull(),
+    includeElectivesInProgress: boolean('include_electives_in_progress').default(true).notNull(),
+    soundEnabled: boolean('sound_enabled').default(true).notNull(),
+    tutorialCompleted: boolean('tutorial_completed').default(false).notNull(),
+    notifyLibraryEmail: boolean('notify_library_email').default(true).notNull(),
+    extraSettings: jsonb('extra_settings').$type<Record<string, unknown>>().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex('uq_user_settings_user_plan').on(table.userId, table.planId),
+  ]
+);
 
 export const subjectProgress = pgTable(
   'subject_progress',
@@ -519,6 +567,7 @@ export const scheduleSelections = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
     scheduleTermId: uuid('schedule_term_id')
       .notNull()
       .references(() => scheduleTerms.id, { onDelete: 'cascade' }),
@@ -526,10 +575,19 @@ export const scheduleSelections = pgTable(
       .$type<Record<string, string>>() // { [subjectId]: commissionId }
       .notNull()
       .default({}),
+    selectionsByPlan: jsonb('selections_by_plan')
+      .$type<Record<string, Record<string, string>>>()
+      .notNull()
+      .default({}),
     ...timestamps,
   },
   (table) => [
     unique('uq_user_schedule_selection').on(table.userId, table.scheduleTermId),
+    uniqueIndex('uq_user_schedule_selection_user_plan_term').on(
+      table.userId,
+      table.planId,
+      table.scheduleTermId
+    ),
   ]
 );
 
@@ -540,6 +598,7 @@ export const scheduleProposals = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
     scheduleTermId: uuid('schedule_term_id')
       .notNull()
       .references(() => scheduleTerms.id, { onDelete: 'cascade' }),
@@ -552,6 +611,7 @@ export const scheduleProposals = pgTable(
   },
   (table) => [
     index('idx_schedule_proposals_user').on(table.userId),
+    index('idx_schedule_proposals_user_plan').on(table.userId, table.planId, table.scheduleTermId),
   ]
 );
 
@@ -830,6 +890,15 @@ export const facultiesRelations = relations(faculties, ({ one, many }) => ({
   }),
   careers: many(careers),
   scheduleTerms: many(scheduleTerms),
+  sharedSubjects: many(sharedSubjects),
+}));
+
+export const sharedSubjectsRelations = relations(sharedSubjects, ({ one, many }) => ({
+  faculty: one(faculties, {
+    fields: [sharedSubjects.facultyId],
+    references: [faculties.id],
+  }),
+  subjects: many(subjects),
 }));
 
 export const careersRelations = relations(careers, ({ one, many }) => ({
@@ -854,6 +923,10 @@ export const subjectsRelations = relations(subjects, ({ one, many }) => ({
   plan: one(studyPlans, {
     fields: [subjects.planId],
     references: [studyPlans.id],
+  }),
+  sharedSubject: one(sharedSubjects, {
+    fields: [subjects.sharedSubjectId],
+    references: [sharedSubjects.id],
   }),
   prerequisites: many(subjectPrerequisites, { relationName: 'subjectPrereqs' }),
   requiredBy: many(subjectPrerequisites, { relationName: 'requiredByPrereqs' }),
@@ -1027,6 +1100,15 @@ export const libraryFiles = pgTable(
     subjectId: uuid('subject_id')
       .notNull()
       .references(() => subjects.id, { onDelete: 'cascade' }),
+    sharedSubjectId: uuid('shared_subject_id').references(() => sharedSubjects.id, {
+      onDelete: 'set null',
+    }),
+    sourceSubjectId: uuid('source_subject_id').references(() => subjects.id, {
+      onDelete: 'set null',
+    }),
+    sourcePlanId: uuid('source_plan_id').references(() => studyPlans.id, {
+      onDelete: 'set null',
+    }),
     kind: text('kind').notNull(), // 'parcial' | 'final' | 'apunte' | 'resumen' | 'tp' | 'guia' | 'otro'
     academicYear: integer('academic_year'),
     term: text('term'), // '1C' | '2C' | 'A'
@@ -1051,6 +1133,8 @@ export const libraryFiles = pgTable(
   },
   (table) => [
     index('idx_lib_files_subject_status').on(table.subjectId, table.status),
+    index('idx_lib_files_shared_subject_status').on(table.sharedSubjectId, table.status),
+    index('idx_lib_files_source_plan').on(table.sourcePlanId),
     index('idx_lib_files_status_created').on(table.status, table.createdAt),
     index('idx_lib_files_uploader').on(table.uploaderUserId),
     uniqueIndex('uq_lib_files_sha256_active')
@@ -1169,6 +1253,8 @@ export const libraryOrphanDeletions = pgTable(
   ]
 );
 
+export type SharedSubject = typeof sharedSubjects.$inferSelect;
+export type InsertSharedSubject = typeof sharedSubjects.$inferInsert;
 export type LibraryFile = typeof libraryFiles.$inferSelect;
 export type InsertLibraryFile = typeof libraryFiles.$inferInsert;
 export type LibraryReport = typeof libraryReports.$inferSelect;
