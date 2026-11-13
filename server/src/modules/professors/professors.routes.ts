@@ -29,7 +29,7 @@ export function createProfessorsRouter(service: ReviewsService): Router {
 
       const data = await service.getRatingsBatch({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
         ids,
         names,
       });
@@ -56,7 +56,7 @@ export function createProfessorsRouter(service: ReviewsService): Router {
 
       const data = await service.listProfessors({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
         search,
         subjectId,
         minRating,
@@ -74,7 +74,7 @@ export function createProfessorsRouter(service: ReviewsService): Router {
     try {
       const data = await service.getProfessorDetail({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
         professorId: String(req.params.id),
       });
 
@@ -94,7 +94,7 @@ export function createProfessorsRouter(service: ReviewsService): Router {
 
       const data = await service.getProfessorReviews({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
         professorId: String(req.params.id),
         subjectId,
         page,

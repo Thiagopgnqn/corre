@@ -11,7 +11,8 @@ import { AuthService } from './modules/auth/auth.service.js';
 import catalogRouter from './modules/catalog/catalog.routes.js';
 import { updateSelectedPlan } from './modules/catalog/catalog.controller.js';
 import adminRouter from './modules/admin/admin.routes.js';
-import userStateRouter from './modules/user-state/userState.routes.js';
+import { createUserStateRouter } from './modules/user-state/userState.routes.js';
+import { defaultUserStateStore, UserStateStore } from './modules/user-state/userState.store.js';
 import { createProfessorsRouter } from './modules/professors/professors.routes.js';
 import {
   createAdminReviewsRouter,
@@ -32,9 +33,13 @@ import { csrfProtection } from './middlewares/csrf.middleware.js';
 import { validate } from './middlewares/validate.middleware.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 
-export function createApp(options?: { reviewsStore?: ReviewsStore }) {
+export function createApp(options?: {
+  reviewsStore?: ReviewsStore;
+  userStateStore?: UserStateStore;
+}) {
   const instance = express();
   const reviewsStore = options?.reviewsStore || defaultReviewsStore;
+  const userStateStore = options?.userStateStore || defaultUserStateStore;
   const reviewsService = new ReviewsService(reviewsStore);
   const enrollmentsService = new EnrollmentsService(reviewsStore);
 
@@ -107,7 +112,7 @@ export function createApp(options?: { reviewsStore?: ReviewsStore }) {
     try {
       const data = await reviewsService.getReviewableForUser({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
       });
       res.json({ success: true, data });
     } catch (err) {
@@ -161,7 +166,7 @@ export function createApp(options?: { reviewsStore?: ReviewsStore }) {
   instance.use('/api/admin', adminRouter);
   instance.use('/api/admin', createAdminReviewsRouter(reviewsService));
   instance.use('/api/library', libraryRouter);
-  instance.use('/api', userStateRouter);
+  instance.use('/api', createUserStateRouter(userStateStore, reviewsStore));
 
   // 7. Manejador de 404 para rutas no existentes
   instance.use('/api/*', (req, res) => {

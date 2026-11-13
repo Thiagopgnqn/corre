@@ -14,7 +14,7 @@ export function createEnrollmentsRouter(service: EnrollmentsService): Router {
     try {
       const data = await service.listEnrollments({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
       });
       res.json({ success: true, data });
     } catch (err) {
@@ -27,7 +27,7 @@ export function createEnrollmentsRouter(service: EnrollmentsService): Router {
     try {
       const data = await service.getSubjectOptions({
         userId: req.user!.id,
-        planId: typeof req.query.planId === 'string' ? req.query.planId : req.user?.selectedPlanId,
+        planId: req.user?.selectedPlanId,
         subjectIdOrCode: String(req.params.subjectId),
       });
       res.json({ success: true, data });
@@ -64,6 +64,7 @@ export function createEnrollmentsRouter(service: EnrollmentsService): Router {
       try {
         const data = await service.deleteEnrollment({
           userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
           enrollmentId: String(req.params.id),
         });
         res.json({ success: true, data });

@@ -139,11 +139,15 @@ export class EnrollmentsService {
       if (!comm) {
         throw appError(
           'La comisión seleccionada no existe.',
-          400,
+          404,
           'INVALID_COMMISSION'
         );
       }
       if (comm.subjectId !== subject.id) {
+        const commSubject = await this.store.getSubjectByIdOrCode(ctx.planId, comm.subjectId);
+        if (!commSubject) {
+          throw appError('La comisión seleccionada no existe.', 404, 'INVALID_COMMISSION');
+        }
         throw appError(
           'La comisión seleccionada no pertenece a la materia indicada.',
           400,
@@ -240,7 +244,18 @@ export class EnrollmentsService {
     return serializeEnrollment(saved);
   }
 
-  async deleteEnrollment(params: { userId: string; enrollmentId: string }) {
+  async deleteEnrollment(params: { userId: string; planId?: string | null; enrollmentId: string }) {
+    const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
+    if (ctx) {
+      const existing = await this.store.getEnrollmentById(params.enrollmentId);
+      if (!existing || existing.userId !== params.userId) {
+        throw appError('Cursada no encontrada', 404, 'ENROLLMENT_NOT_FOUND');
+      }
+      const sub = await this.store.getSubjectByIdOrCode(ctx.planId, existing.subjectId);
+      if (!sub) {
+        throw appError('Cursada no encontrada', 404, 'ENROLLMENT_NOT_FOUND');
+      }
+    }
     const result = await this.store.deleteUserEnrollment(params.userId, params.enrollmentId);
     if (!result.deleted) {
       throw appError('Cursada no encontrada', 404, 'ENROLLMENT_NOT_FOUND');

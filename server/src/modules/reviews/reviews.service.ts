@@ -361,12 +361,17 @@ export class ReviewsService {
     }
 
     const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
-    const [statsMap, subStatsMap, teachingPairs] = await Promise.all([
+    if (ctx && found.professor.facultyId !== ctx.facultyId) {
+      throw appError('Profesor no encontrado', 404);
+    }
+
+    const [statsMap, subStatsMap, teachingPairs, planSubs] = await Promise.all([
       this.store.getProfessorStatsMap([params.professorId]),
       this.store.getProfessorSubjectStatsMap(params.professorId),
       ctx
         ? this.store.getTeachingPairsForPlan(ctx.planId, found.professor.facultyId)
         : Promise.resolve([]),
+      ctx ? this.store.getPlanSubjects(ctx.planId) : Promise.resolve([]),
     ]);
 
     const overallAgg = formatPublicAggregate(
@@ -374,9 +379,11 @@ export class ReviewsService {
     );
 
     const profPairs = teachingPairs.filter((tp) => tp.professorId === params.professorId);
-    const allSubIds = Array.from(
+    const planSubIds = new Set(planSubs.map((s) => s.id));
+    const rawSubIds = Array.from(
       new Set([...profPairs.map((p) => p.subjectId), ...Array.from(subStatsMap.keys())])
     );
+    const allSubIds = ctx ? rawSubIds.filter((id) => planSubIds.has(id)) : rawSubIds;
     const subInfoMap = await this.store.getSubjectsByIds(allSubIds);
 
     const subjectBreakdown = allSubIds
@@ -436,13 +443,18 @@ export class ReviewsService {
       throw appError('Profesor no encontrado', 404);
     }
 
+    const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
+    if (!params.viewerIsAdmin && ctx && found.professor.facultyId !== ctx.facultyId) {
+      throw appError('Profesor no encontrado', 404);
+    }
+
     const page = Math.max(1, params.page || 1);
     const pageSize = Math.min(50, Math.max(1, params.pageSize || 10));
     const sort = params.sort === 'helpful' ? 'helpful' : 'recent';
 
     let subjectUuid: string | undefined;
+    let allowedSubjectIds: string[] | undefined;
     if (params.subjectId && params.subjectId.trim()) {
-      const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
       if (ctx) {
         const sub = await this.store.getSubjectByIdOrCode(ctx.planId, params.subjectId.trim());
         if (!sub) {
@@ -456,6 +468,9 @@ export class ReviewsService {
         }
         subjectUuid = sub.id;
       }
+    } else if (!params.viewerIsAdmin && ctx) {
+      const planSubs = await this.store.getPlanSubjects(ctx.planId);
+      allowedSubjectIds = planSubs.map((s) => s.id);
     }
 
     const [statsMap, result] = await Promise.all([
@@ -463,6 +478,7 @@ export class ReviewsService {
       this.store.listPublishedReviews({
         professorId: params.professorId,
         subjectUuid,
+        allowedSubjectIds,
         sort,
         page,
         pageSize,
@@ -600,13 +616,19 @@ export class ReviewsService {
       const prof = profById.get(pid);
       if (!prof) continue;
       const agg = formatPublicAggregate(statsMap.get(pid) || emptyAggregate());
-      const recents = (recentMap.get(pid) || []).map((r) =>
-        serializePublicReview({
-          review: r,
-          subject: subMap.get(r.subjectId),
-          professorPublishedReviewCount: agg.reviewCount,
+      const recents = (recentMap.get(pid) || [])
+        .filter((r) => {
+          if (!ctx) return true;
+          const sub = subMap.get(r.subjectId);
+          return !sub?.planId || sub.planId === ctx.planId;
         })
-      );
+        .map((r) =>
+          serializePublicReview({
+            review: r,
+            subject: subMap.get(r.subjectId),
+            professorPublishedReviewCount: agg.reviewCount,
+          })
+        );
       byId[pid] = {
         professorId: pid,
         displayName: prof.displayName,
@@ -660,8 +682,9 @@ export class ReviewsService {
     const [
       allProfs,
       teachingPairs,
+      planSubjects,
       progressMap,
-      ownReviews,
+      rawOwnReviews,
       usedLast24h,
       userEnrollments,
       dismissedSet,
@@ -669,6 +692,7 @@ export class ReviewsService {
     ] = await Promise.all([
       this.store.listFacultyProfessors(ctx.facultyId),
       this.store.getTeachingPairsForPlan(ctx.planId, ctx.facultyId),
+      this.store.getPlanSubjects(ctx.planId),
       this.store.getUserSubjectProgressMap(params.userId),
       this.store.listUserOwnReviews(params.userId),
       this.store.countUserNewReviewsSince(params.userId, since24h),
@@ -676,6 +700,9 @@ export class ReviewsService {
       this.store.listUserDismissedRecommendations(params.userId),
       this.store.getUserSeenRecommendationKeys(params.userId),
     ]);
+
+    const planSubIdSet = new Set(planSubjects.map((s) => s.id));
+    const ownReviews = rawOwnReviews.filter((r) => planSubIdSet.has(r.subjectId));
 
     const profMap = new Map(allProfs.map((p) => [p.id, p]));
     const ownByPair = new Map<string, StoredReview>();
@@ -952,7 +979,7 @@ export class ReviewsService {
     const currentStatus = userProg?.status || 'pendiente';
     const allowedSet = new Set<string>(ALLOWED_REVIEW_SUBJECT_STATUSES);
 
-    const userEnrollments = await this.store.listUserEnrollments(params.userId);
+    const userEnrollments = await this.store.listUserEnrollments(params.userId, ctx.planId);
     const hasEnrollmentWithProf = userEnrollments.some(
       (e) => e.subjectId === subject.id && e.professors.some((p) => p.professorId === profData.professor.id)
     );
@@ -1024,8 +1051,32 @@ export class ReviewsService {
     });
   }
 
+  private async requireReviewInUserPlan(
+    reviewId: string,
+    userId: string,
+    planId?: string | null
+  ) {
+    const [existing, ctx] = await Promise.all([
+      this.store.getReviewById(reviewId),
+      this.store.resolvePlanContext(userId, planId),
+    ]);
+    if (!existing) {
+      throw appError('Reseña no encontrada', 404);
+    }
+    if (ctx) {
+      const subject = await this.store.getSubjectByIdOrCode(ctx.planId, existing.subjectId);
+      if (!subject) {
+        throw appError('Reseña no encontrada', 404);
+      }
+    } else if (planId) {
+      throw appError('Reseña no encontrada', 404);
+    }
+    return existing;
+  }
+
   async updateReview(params: {
     userId: string;
+    planId?: string | null;
     reviewId: string;
     academicYear?: number | null;
     term?: '1C' | '2C' | 'A' | null;
@@ -1037,8 +1088,8 @@ export class ReviewsService {
     wouldRecommend?: boolean | null;
     comment?: string | null;
   }) {
-    const existing = await this.store.getReviewById(params.reviewId);
-    if (!existing || existing.status === 'removed') {
+    const existing = await this.requireReviewInUserPlan(params.reviewId, params.userId, params.planId);
+    if (existing.status === 'removed') {
       throw appError('Reseña no encontrada', 404);
     }
 
@@ -1075,11 +1126,8 @@ export class ReviewsService {
     });
   }
 
-  async deleteReview(params: { userId: string; reviewId: string }) {
-    const existing = await this.store.getReviewById(params.reviewId);
-    if (!existing) {
-      throw appError('Reseña no encontrada', 404);
-    }
+  async deleteReview(params: { userId: string; planId?: string | null; reviewId: string }) {
+    const existing = await this.requireReviewInUserPlan(params.reviewId, params.userId, params.planId);
 
     if (existing.userId !== params.userId) {
       throw appError('Solo el autor puede eliminar esta reseña', 403, 'FORBIDDEN_NOT_AUTHOR');
@@ -1089,9 +1137,9 @@ export class ReviewsService {
     return { deleted: true };
   }
 
-  async toggleHelpful(params: { userId: string; reviewId: string }) {
-    const existing = await this.store.getReviewById(params.reviewId);
-    if (!existing || existing.status !== 'published') {
+  async toggleHelpful(params: { userId: string; planId?: string | null; reviewId: string }) {
+    const existing = await this.requireReviewInUserPlan(params.reviewId, params.userId, params.planId);
+    if (existing.status !== 'published') {
       throw appError('Reseña no encontrada', 404);
     }
     return await this.store.toggleHelpfulVote(params.reviewId, params.userId);
@@ -1099,12 +1147,17 @@ export class ReviewsService {
 
   async reportReview(params: {
     reporterUserId: string;
+    planId?: string | null;
     reviewId: string;
     reason: ReportReason;
     note?: string | null;
   }) {
-    const existing = await this.store.getReviewById(params.reviewId);
-    if (!existing || existing.status === 'removed') {
+    const existing = await this.requireReviewInUserPlan(
+      params.reviewId,
+      params.reporterUserId,
+      params.planId
+    );
+    if (existing.status === 'removed') {
       throw appError('Reseña no encontrada', 404);
     }
 

@@ -45,6 +45,7 @@ export interface PlanContext {
 
 export interface PlanSubjectRef {
   id: string;
+  planId?: string;
   codeInPlan: number;
   name: string;
   shortName: string;
@@ -376,6 +377,7 @@ export interface ReviewsStore {
   listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
@@ -653,7 +655,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
     }
 
     let planRow;
-    if (planId) {
+    if (planId && this.isValidUuid(planId)) {
       [planRow] = await db.select().from(studyPlans).where(eq(studyPlans.id, planId)).limit(1);
     }
     if (!planRow) {
@@ -681,9 +683,11 @@ export class DrizzleReviewsStore implements ReviewsStore {
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
+    if (!this.isValidUuid(planId)) return [];
     const rows = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -699,11 +703,13 @@ export class DrizzleReviewsStore implements ReviewsStore {
     planId: string,
     idOrCode: string | number
   ): Promise<PlanSubjectRef | null> {
+    if (!this.isValidUuid(planId)) return null;
     if (typeof idOrCode === 'number' || /^\d+$/.test(String(idOrCode))) {
       const numCode = Number(idOrCode);
       const [row] = await db
         .select({
           id: subjects.id,
+          planId: subjects.planId,
           codeInPlan: subjects.codeInPlan,
           name: subjects.name,
           shortName: subjects.shortName,
@@ -716,9 +722,11 @@ export class DrizzleReviewsStore implements ReviewsStore {
       return row || null;
     }
 
+    if (!this.isValidUuid(String(idOrCode))) return null;
     const [row] = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -726,7 +734,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         kind: subjects.kind,
       })
       .from(subjects)
-      .where(eq(subjects.id, String(idOrCode)))
+      .where(and(eq(subjects.planId, planId), eq(subjects.id, String(idOrCode))))
       .limit(1);
     return row || null;
   }
@@ -734,9 +742,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async getSubjectsByIds(subjectIds: string[]): Promise<Map<string, PlanSubjectRef>> {
     const map = new Map<string, PlanSubjectRef>();
     if (subjectIds.length === 0) return map;
+    const validIds = subjectIds.filter((id) => this.isValidUuid(id));
+    if (validIds.length === 0) return map;
     const rows = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -744,7 +755,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         kind: subjects.kind,
       })
       .from(subjects)
-      .where(inArray(subjects.id, subjectIds));
+      .where(inArray(subjects.id, validIds));
     for (const r of rows) map.set(r.id, r);
     return map;
   }
@@ -1058,17 +1069,30 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
     viewerUserId?: string;
   }) {
+    if (params.allowedSubjectIds !== undefined && params.allowedSubjectIds.length === 0) {
+      return {
+        items: [],
+        total: 0,
+        viewerHelpfulIds: new Set<string>(),
+        viewerReportedIds: new Set<string>(),
+      };
+    }
+
     const conditions = [
       eq(professorReviews.professorId, params.professorId),
       eq(professorReviews.status, 'published'),
     ];
     if (params.subjectUuid) {
       conditions.push(eq(professorReviews.subjectId, params.subjectUuid));
+    }
+    if (params.allowedSubjectIds && params.allowedSubjectIds.length > 0) {
+      conditions.push(inArray(professorReviews.subjectId, params.allowedSubjectIds));
     }
     const whereClause = and(...conditions);
 
@@ -2526,10 +2550,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
       let hydrated = await this.hydrateEnrollmentRows(rows);
       if (planId) {
         const planSubs = await this.getPlanSubjects(planId);
-        if (planSubs.length > 0) {
-          const validIds = new Set(planSubs.map((s) => s.id));
-          hydrated = hydrated.filter((e) => validIds.has(e.subjectId));
-        }
+        const validIds = new Set(planSubs.map((s) => s.id));
+        hydrated = hydrated.filter((e) => validIds.has(e.subjectId));
       }
       return hydrated;
     } catch (err) {
@@ -2864,6 +2886,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
 export class InMemoryReviewsStore implements ReviewsStore {
   public defaultFacultyId: string = crypto.randomUUID();
   public defaultPlanId: string = crypto.randomUUID();
+  public planFaculties = new Map<string, string>();
+  public userPlans = new Map<string, string>();
   public subjectsMap = new Map<string, PlanSubjectRef & { planId: string }>();
   public professorsMap = new Map<string, ProfessorEntity>();
   public aliasesList: ProfessorAliasEntity[] = [];
@@ -2992,6 +3016,14 @@ export class InMemoryReviewsStore implements ReviewsStore {
     return comm;
   }
 
+  seedPlan(planId: string, facultyId: string) {
+    this.planFaculties.set(planId, facultyId);
+  }
+
+  seedUserPlan(userId: string, planId: string) {
+    this.userPlans.set(userId, planId);
+  }
+
   seedSubject(input: {
     codeInPlan: number;
     name: string;
@@ -2999,11 +3031,12 @@ export class InMemoryReviewsStore implements ReviewsStore {
     level?: number;
     kind?: string;
     id?: string;
+    planId?: string;
   }): PlanSubjectRef {
     const id = input.id || crypto.randomUUID();
     const sub = {
       id,
-      planId: this.defaultPlanId,
+      planId: input.planId || this.defaultPlanId,
       codeInPlan: input.codeInPlan,
       name: input.name,
       shortName: input.shortName || input.name,
@@ -3030,14 +3063,15 @@ export class InMemoryReviewsStore implements ReviewsStore {
   }
 
   async resolvePlanContext(
-    _userId: string,
+    userId: string,
     requestedPlanId?: string | null
   ): Promise<PlanContext | null> {
     const planId =
       requestedPlanId && requestedPlanId !== 'current' && requestedPlanId !== 'default'
         ? requestedPlanId
-        : this.defaultPlanId;
-    return { planId, facultyId: this.defaultFacultyId };
+        : this.userPlans.get(userId) || this.defaultPlanId;
+    const facultyId = this.planFaculties.get(planId) || this.defaultFacultyId;
+    return { planId, facultyId };
   }
 
   async getDefaultFacultyId(): Promise<string | null> {
@@ -3059,7 +3093,8 @@ export class InMemoryReviewsStore implements ReviewsStore {
       }
       return null;
     }
-    return this.subjectsMap.get(String(idOrCode)) || null;
+    const sub = this.subjectsMap.get(String(idOrCode));
+    return sub && sub.planId === planId ? sub : null;
   }
 
   async getSubjectsByIds(subjectIds: string[]): Promise<Map<string, PlanSubjectRef>> {
@@ -3197,16 +3232,20 @@ export class InMemoryReviewsStore implements ReviewsStore {
   async listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
     viewerUserId?: string;
   }) {
+    const allowedSet =
+      params.allowedSubjectIds !== undefined ? new Set(params.allowedSubjectIds) : null;
     let list = Array.from(this.reviewsMap.values()).filter(
       (r) =>
         r.professorId === params.professorId &&
         r.status === 'published' &&
-        (!params.subjectUuid || r.subjectId === params.subjectUuid)
+        (!params.subjectUuid || r.subjectId === params.subjectUuid) &&
+        (!allowedSet || allowedSet.has(r.subjectId))
     );
 
     list.sort((a, b) => {
@@ -4113,7 +4152,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         if (e.userId !== userId) return false;
         if (planId) {
           const sub = this.subjectsMap.get(e.subjectId);
-          if (sub && sub.planId !== planId) return false;
+          if (!sub || sub.planId !== planId) return false;
         }
         return true;
       })

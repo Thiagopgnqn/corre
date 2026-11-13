@@ -1,422 +1,242 @@
 import { Request, Response } from 'express';
-import { eq, and, inArray, asc } from 'drizzle-orm';
-import { db } from '../../db/index.js';
-import {
-  users,
-  userSettings,
-  subjectProgress,
-  electiveAssignments,
-  userBasket,
-  scheduleSelections,
-  scheduleProposals,
-  studyPlans,
-  subjects,
-  scheduleTerms,
-  finalExamAttempts,
-} from '../../db/schema.js';
-import { defaultReviewsStore } from '../reviews/reviews.store.js';
 import {
   EnrollmentsService,
   serializeEnrollment,
 } from '../enrollments/enrollments.service.js';
-import { LibraryService } from '../library/library.service.js';
+import { defaultReviewsStore, ReviewsStore } from '../reviews/reviews.store.js';
+import {
+  extractPlanScheduleSelections,
+  extractPlanSettings,
+  mergePlanScheduleSelections,
+  mergePlanSettings,
+} from './userState.helpers.js';
+import { defaultUserStateStore, UserStateStore } from './userState.store.js';
 
-const defaultEnrollmentsService = new EnrollmentsService(defaultReviewsStore);
+export function createUserStateHandlers(
+  store: UserStateStore = defaultUserStateStore,
+  reviewsStore: ReviewsStore = defaultReviewsStore
+) {
+  const enrollmentsService = new EnrollmentsService(reviewsStore);
 
-export async function getUserState(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  try {
-    // 1. Obtener usuario y su plan
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user) {
-      res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+  async function getUserState(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    let planId = user.selectedPlanId;
-    if (!planId) {
-      const [defaultPlan] = await db.select().from(studyPlans).where(eq(studyPlans.isActive, true)).limit(1);
-      if (defaultPlan) {
-        planId = defaultPlan.id;
-        await db.update(users).set({ selectedPlanId: planId }).where(eq(users.id, userId));
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active) {
+        res.status(404).json({ success: false, error: 'Usuario no encontrado' });
+        return;
       }
-    }
 
-    // 2. Mapeo de materias del plan
-    let planSubs: Array<{ id: string; codeInPlan: number; kind: string }> = [];
-    if (planId) {
-      planSubs = await db
-        .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
-        .from(subjects)
-        .where(eq(subjects.planId, planId));
-    }
+      const planId = active.planId;
+      const planSubs = planId ? await store.getPlanSubjects(planId) : [];
+      const planSubjectIds = planSubs.map((s) => s.id);
+      const uuidToCode = new Map<string, number>();
+      planSubs.forEach((s) => {
+        uuidToCode.set(s.id, s.codeInPlan);
+      });
 
-    const uuidToCode = new Map<string, number>();
-    const codeToUuid = new Map<number, string>();
-    planSubs.forEach((s) => {
-      uuidToCode.set(s.id, s.codeInPlan);
-      codeToUuid.set(s.codeInPlan, s.id);
-    });
+      const settingsRow = await store.getUserSettings(userId);
+      const settings = extractPlanSettings(settingsRow, planId);
 
-    // 3. Settings
-    const [settingsRow] = await db.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
-    const settings = settingsRow
-      ? {
-          includePromotionsInGPA: settingsRow.includePromotionsInGPA,
-          minPassingGrade: settingsRow.minPassingGrade,
-          includeAnalistaTrack: settingsRow.includeAnalistaTrack,
-          allowBlockedElectivesPlanning: settingsRow.allowBlockedElectivesPlanning,
-          includeElectivesInProgress: settingsRow.includeElectivesInProgress,
-          soundEnabled: settingsRow.soundEnabled,
-          tutorialCompleted: settingsRow.tutorialCompleted,
-          notifyLibraryEmail: settingsRow.notifyLibraryEmail ?? true,
-        }
-      : {
-          includePromotionsInGPA: true,
-          minPassingGrade: 4,
-          includeAnalistaTrack: false,
-          allowBlockedElectivesPlanning: false,
-          includeElectivesInProgress: true,
-          soundEnabled: true,
-          tutorialCompleted: false,
-          notifyLibraryEmail: true,
+      const progressRows = await store.listSubjectProgress(userId, planSubjectIds);
+      const progressByCode: Record<number, { status: string; grade?: number }> = {};
+      const progressByUuid: Record<string, { status: string; grade?: number }> = {};
+
+      progressRows.forEach((p) => {
+        const code = uuidToCode.get(p.subjectId);
+        if (code === undefined) return;
+        const entry = {
+          status: p.status,
+          grade: p.grade ? Number(p.grade) : undefined,
         };
-
-    // 4. Progreso
-    const progressRows = await db.select().from(subjectProgress).where(eq(subjectProgress.userId, userId));
-    const progressByCode: Record<number, { status: string; grade?: number }> = {};
-    const progressByUuid: Record<string, { status: string; grade?: number }> = {};
-
-    progressRows.forEach((p) => {
-      const code = uuidToCode.get(p.subjectId);
-      const entry = {
-        status: p.status,
-        grade: p.grade ? Number(p.grade) : undefined,
-      };
-      if (code !== undefined) {
         progressByCode[code] = entry;
+        progressByUuid[p.subjectId] = entry;
+      });
+
+      const electivesRows = await store.listElectiveAssignments(userId, planSubjectIds);
+      const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      electivesRows.forEach((e) => {
+        const code = uuidToCode.get(e.subjectId);
+        if (code !== undefined && e.year >= 1 && e.year <= 5) {
+          if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
+          assignedElectives[e.year].push(code);
+        }
+      });
+
+      const basketRows = await store.listUserBasket(userId, planSubjectIds);
+      const basketCodes: number[] = [];
+      basketRows.forEach((b) => {
+        const code = uuidToCode.get(b.subjectId);
+        if (code !== undefined) {
+          basketCodes.push(code);
+        }
+      });
+
+      const currentTerm = await store.getCurrentScheduleTerm(active.facultyId);
+      let scheduleSelectionMap: Record<string, string> = {};
+      if (currentTerm) {
+        const sel = await store.getScheduleSelection(userId, currentTerm.id);
+        scheduleSelectionMap = extractPlanScheduleSelections(sel, planId);
       }
-      progressByUuid[p.subjectId] = entry;
-    });
 
-    // 5. Electivas asignadas
-    const electivesRows = await db
-      .select()
-      .from(electiveAssignments)
-      .where(eq(electiveAssignments.userId, userId));
+      const proposals = await store.listScheduleProposals(userId, planId);
+      const formattedProposals = proposals.map((p) => ({
+        id: p.id,
+        name: p.name,
+        scheduleTermId: p.scheduleTermId,
+        selections: p.selections,
+        createdAt: p.createdAt.getTime(),
+        updatedAt: p.updatedAt.getTime(),
+      }));
 
-    const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
-    electivesRows.forEach((e) => {
-      const code = uuidToCode.get(e.subjectId);
-      if (code !== undefined && e.year >= 1 && e.year <= 5) {
-        if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
-        assignedElectives[e.year].push(code);
-      }
-    });
+      const storedEnrollments = await reviewsStore.listUserEnrollments(userId, planId);
+      const formattedEnrollments = storedEnrollments.map(serializeEnrollment);
 
-    // 6. Canasta
-    const basketRows = await db.select().from(userBasket).where(eq(userBasket.userId, userId));
-    const basketCodes: number[] = [];
-    basketRows.forEach((b) => {
-      const code = uuidToCode.get(b.subjectId);
-      if (code !== undefined) {
-        basketCodes.push(code);
-      }
-    });
+      const examAttemptsRows = await store.listExamAttempts(userId, planId);
+      const formattedExamAttempts = examAttemptsRows.map((r) => ({
+        id: r.id,
+        subjectId: r.subjectId,
+        subjectCode: r.subjectCode,
+        date: String(r.examDate),
+        grade: Number(r.grade),
+        isPassed: Number(r.grade) >= (settings.minPassingGrade || 4),
+        notes: r.notes || undefined,
+        createdAt: r.createdAt.toISOString(),
+      }));
 
-    // 7. Horarios y propuestas
-    const [currentTerm] = await db.select().from(scheduleTerms).where(eq(scheduleTerms.isCurrent, true)).limit(1);
+      const hasSavedData =
+        progressRows.length > 0 ||
+        electivesRows.length > 0 ||
+        basketRows.length > 0 ||
+        proposals.length > 0 ||
+        formattedEnrollments.length > 0 ||
+        formattedExamAttempts.length > 0 ||
+        settings.tutorialCompleted;
 
-    let scheduleSelectionMap: Record<number, string> = {};
-    if (currentTerm) {
-      const [sel] = await db
-        .select()
-        .from(scheduleSelections)
-        .where(
-          and(
-            eq(scheduleSelections.userId, userId),
-            eq(scheduleSelections.scheduleTermId, currentTerm.id)
-          )
-        )
-        .limit(1);
-
-      if (sel && sel.selections) {
-        // selections guardado como { [subjectCodeOrUuid]: commissionCode }
-        scheduleSelectionMap = sel.selections as any;
-      }
+      res.json({
+        success: true,
+        data: {
+          selectedPlanId: planId,
+          hasSavedData,
+          settings,
+          progress: progressByCode,
+          progressByUuid,
+          assignedElectives,
+          basket: basketCodes,
+          scheduleSelections: scheduleSelectionMap,
+          scheduleProposals: formattedProposals,
+          enrollments: formattedEnrollments,
+          examAttempts: formattedExamAttempts,
+        },
+      });
+    } catch (error) {
+      console.error('Error fetching user state:', error);
+      res.status(500).json({ success: false, error: 'Error al obtener estado del usuario' });
     }
-
-    const proposals = await db
-      .select()
-      .from(scheduleProposals)
-      .where(eq(scheduleProposals.userId, userId));
-
-    const formattedProposals = proposals.map((p) => ({
-      id: p.id,
-      name: p.name,
-      scheduleTermId: p.scheduleTermId,
-      selections: p.selections,
-      createdAt: p.createdAt.getTime(),
-      updatedAt: p.updatedAt.getTime(),
-    }));
-
-    const storedEnrollments = await defaultReviewsStore.listUserEnrollments(userId, planId);
-    const formattedEnrollments = storedEnrollments.map(serializeEnrollment);
-
-    const examAttemptsRows = await db
-      .select({
-        id: finalExamAttempts.id,
-        subjectId: finalExamAttempts.subjectId,
-        subjectCode: subjects.codeInPlan,
-        examDate: finalExamAttempts.examDate,
-        grade: finalExamAttempts.grade,
-        notes: finalExamAttempts.notes,
-        createdAt: finalExamAttempts.createdAt,
-      })
-      .from(finalExamAttempts)
-      .innerJoin(subjects, eq(finalExamAttempts.subjectId, subjects.id))
-      .where(eq(finalExamAttempts.userId, userId))
-      .orderBy(asc(finalExamAttempts.examDate));
-
-    const formattedExamAttempts = examAttemptsRows.map((r) => ({
-      id: r.id,
-      subjectId: r.subjectId,
-      subjectCode: r.subjectCode,
-      date: String(r.examDate),
-      grade: Number(r.grade),
-      isPassed: Number(r.grade) >= (settings?.minPassingGrade || 4),
-      notes: r.notes || undefined,
-      createdAt: r.createdAt.toISOString(),
-    }));
-
-    // Determinar si el usuario tiene datos guardados (para detectar si la cuenta está virgen)
-    const hasSavedData =
-      progressRows.length > 0 ||
-      electivesRows.length > 0 ||
-      basketRows.length > 0 ||
-      proposals.length > 0 ||
-      formattedEnrollments.length > 0 ||
-      formattedExamAttempts.length > 0 ||
-      (settingsRow !== undefined && settingsRow.tutorialCompleted);
-
-    res.json({
-      success: true,
-      data: {
-        selectedPlanId: planId,
-        hasSavedData,
-        settings,
-        progress: progressByCode,
-        progressByUuid,
-        assignedElectives,
-        basket: basketCodes,
-        scheduleSelections: scheduleSelectionMap,
-        scheduleProposals: formattedProposals,
-        enrollments: formattedEnrollments,
-        examAttempts: formattedExamAttempts,
-      },
-    });
-  } catch (error) {
-    console.error('Error fetching user state:', error);
-    res.status(500).json({ success: false, error: 'Error al obtener estado del usuario' });
-  }
-}
-
-export async function updateProgress(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const subjectId = String(req.params.subjectId);
-  const { status, grade } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
   }
 
-  const validStatuses = ['pendiente', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada', 'disponible', 'libre'];
-  if (!status || !validStatuses.includes(status)) {
-    res.status(400).json({ success: false, error: 'Estado de materia inválido' });
-    return;
-  }
+  async function updateProgress(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const subjectId = String(req.params.subjectId);
+    const { status, grade } = req.body;
 
-  try {
-    // 1. Obtener usuario para conocer su plan activo
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user || !user.selectedPlanId) {
-      res.status(400).json({ success: false, error: 'El usuario no tiene un plan seleccionado' });
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    // 2. Buscar materia por UUID o por codeInPlan dentro de su plan
-    let subjectRecord;
-    const isNum = !isNaN(Number(subjectId));
-
-    if (isNum) {
-      [subjectRecord] = await db
-        .select()
-        .from(subjects)
-        .where(
-          and(
-            eq(subjects.planId, user.selectedPlanId),
-            eq(subjects.codeInPlan, parseInt(subjectId, 10))
-          )
-        )
-        .limit(1);
-    } else {
-      [subjectRecord] = await db
-        .select()
-        .from(subjects)
-        .where(
-          and(
-            eq(subjects.planId, user.selectedPlanId),
-            eq(subjects.id, subjectId)
-          )
-        )
-        .limit(1);
-    }
-
-    if (!subjectRecord) {
-      res.status(404).json({ success: false, error: 'Materia no encontrada en el plan activo' });
+    const validStatuses = [
+      'pendiente',
+      'cursando',
+      'regularizada',
+      'aprobada',
+      'promocionada',
+      'bloqueada',
+      'disponible',
+      'libre',
+    ];
+    if (!status || !validStatuses.includes(status)) {
+      res.status(400).json({ success: false, error: 'Estado de materia inválido' });
       return;
     }
 
-    // Si status es 'pendiente', 'disponible' o 'bloqueada', se elimina el registro o se marca como 'pendiente'
-    const gradeVal = grade !== undefined && grade !== null && grade !== '' ? String(grade) : null;
-    const normalizedStatus = (status === 'disponible' || status === 'bloqueada') ? 'pendiente' : status;
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'El usuario no tiene un plan seleccionado' });
+        return;
+      }
 
-    if (normalizedStatus === 'pendiente' && gradeVal === null) {
-      await db
-        .delete(subjectProgress)
-        .where(
-          and(
-            eq(subjectProgress.userId, userId),
-            eq(subjectProgress.subjectId, subjectRecord.id)
-          )
-        );
+      const subjectRecord = await store.findPlanSubject(active.planId, subjectId);
+      if (!subjectRecord) {
+        res.status(404).json({ success: false, error: 'Materia no encontrada en el plan activo' });
+        return;
+      }
+
+      const gradeVal = grade !== undefined && grade !== null && grade !== '' ? String(grade) : null;
+      const normalizedStatus = status === 'disponible' || status === 'bloqueada' ? 'pendiente' : status;
+
+      await store.upsertSubjectProgress(userId, subjectRecord.id, normalizedStatus, gradeVal);
 
       res.json({
         success: true,
         data: {
           subjectId: subjectRecord.codeInPlan,
           uuid: subjectRecord.id,
-          status: 'pendiente',
-          grade: null,
+          status: normalizedStatus,
+          grade: gradeVal ? Number(gradeVal) : null,
         },
       });
+    } catch (error) {
+      console.error('Error updating progress:', error);
+      res.status(500).json({ success: false, error: 'Error al actualizar progreso de la materia' });
+    }
+  }
+
+  async function updateElectives(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const { assignedElectives: rawAssignments } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    // Upsert progreso
-    const [existing] = await db
-      .select()
-      .from(subjectProgress)
-      .where(
-        and(
-          eq(subjectProgress.userId, userId),
-          eq(subjectProgress.subjectId, subjectRecord.id)
-        )
-      )
-      .limit(1);
+    if (!rawAssignments || typeof rawAssignments !== 'object') {
+      res.status(400).json({ success: false, error: 'Formato de assignedElectives inválido' });
+      return;
+    }
 
-    if (existing) {
-      await db
-        .update(subjectProgress)
-        .set({
-          status: normalizedStatus,
-          grade: gradeVal,
-          updatedAt: new Date(),
-        })
-        .where(eq(subjectProgress.id, existing.id));
-    } else {
-      await db.insert(subjectProgress).values({
-        userId,
-        subjectId: subjectRecord.id,
-        status: normalizedStatus,
-        grade: gradeVal,
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
+      }
+
+      const planSubs = await store.getPlanSubjects(active.planId);
+      const validElectives = planSubs.filter((s) => s.kind === 'electiva');
+      const codeToUuid = new Map<number, string>();
+      const uuidSet = new Set<string>();
+      validElectives.forEach((e) => {
+        codeToUuid.set(e.codeInPlan, e.id);
+        uuidSet.add(e.id);
       });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        subjectId: subjectRecord.codeInPlan,
-        uuid: subjectRecord.id,
-        status: normalizedStatus,
-        grade: gradeVal ? Number(gradeVal) : null,
-      },
-    });
-  } catch (error) {
-    console.error('Error updating progress:', error);
-    res.status(500).json({ success: false, error: 'Error al actualizar progreso de la materia' });
-  }
-}
-
-export async function updateElectives(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const { assignedElectives: rawAssignments } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  if (!rawAssignments || typeof rawAssignments !== 'object') {
-    res.status(400).json({ success: false, error: 'Formato de assignedElectives inválido' });
-    return;
-  }
-
-  try {
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user || !user.selectedPlanId) {
-      res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
-      return;
-    }
-
-    // Obtener electivas válidas del plan
-    const validElectives = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
-      .from(subjects)
-      .where(
-        and(
-          eq(subjects.planId, user.selectedPlanId),
-          eq(subjects.kind, 'electiva')
-        )
-      );
-
-    const codeToUuid = new Map<number, string>();
-    const uuidSet = new Set<string>();
-    validElectives.forEach((e) => {
-      codeToUuid.set(e.codeInPlan, e.id);
-      uuidSet.add(e.id);
-    });
-
-    await db.transaction(async (tx) => {
-      // Eliminar asignaciones anteriores
-      await tx.delete(electiveAssignments).where(eq(electiveAssignments.userId, userId));
 
       const seenElectives = new Set<string>();
+      const nextAssignments: Array<{ subjectId: string; year: number }> = [];
 
       for (let year = 1; year <= 5; year++) {
         const list = Array.isArray(rawAssignments[year]) ? rawAssignments[year] : [];
         for (const item of list) {
           let subjectUuid: string | undefined;
 
-          if (typeof item === 'number' || !isNaN(Number(item))) {
+          if (typeof item === 'number' || (typeof item === 'string' && /^\d+$/.test(item.trim()))) {
             subjectUuid = codeToUuid.get(Number(item));
           } else if (typeof item === 'string' && uuidSet.has(item)) {
             subjectUuid = item;
@@ -424,70 +244,61 @@ export async function updateElectives(req: Request, res: Response): Promise<void
 
           if (subjectUuid && !seenElectives.has(subjectUuid)) {
             seenElectives.add(subjectUuid);
-            await tx.insert(electiveAssignments).values({
-              userId,
-              subjectId: subjectUuid,
-              year,
-            });
+            nextAssignments.push({ subjectId: subjectUuid, year });
           }
         }
       }
-    });
 
-    res.json({
-      success: true,
-      message: 'Electivas actualizadas correctamente',
-    });
-  } catch (error) {
-    console.error('Error updating electives:', error);
-    res.status(500).json({ success: false, error: 'Error al actualizar electivas asignadas' });
-  }
-}
+      await store.replacePlanElectiveAssignments(
+        userId,
+        planSubs.map((s) => s.id),
+        nextAssignments
+      );
 
-export async function updateBasket(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const { basket } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
+      res.json({
+        success: true,
+        message: 'Electivas actualizadas correctamente',
+      });
+    } catch (error) {
+      console.error('Error updating electives:', error);
+      res.status(500).json({ success: false, error: 'Error al actualizar electivas asignadas' });
+    }
   }
 
-  if (!Array.isArray(basket)) {
-    res.status(400).json({ success: false, error: 'basket debe ser un array de IDs' });
-    return;
-  }
+  async function updateBasket(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const { basket } = req.body;
 
-  try {
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user || !user.selectedPlanId) {
-      res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    const planSubs = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan })
-      .from(subjects)
-      .where(eq(subjects.planId, user.selectedPlanId));
+    if (!Array.isArray(basket)) {
+      res.status(400).json({ success: false, error: 'basket debe ser un array de IDs' });
+      return;
+    }
 
-    const codeToUuid = new Map<number, string>();
-    const uuidSet = new Set<string>();
-    planSubs.forEach((s) => {
-      codeToUuid.set(s.codeInPlan, s.id);
-      uuidSet.add(s.id);
-    });
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
+      }
 
-    await db.transaction(async (tx) => {
-      await tx.delete(userBasket).where(eq(userBasket.userId, userId));
+      const planSubs = await store.getPlanSubjects(active.planId);
+      const codeToUuid = new Map<number, string>();
+      const uuidSet = new Set<string>();
+      planSubs.forEach((s) => {
+        codeToUuid.set(s.codeInPlan, s.id);
+        uuidSet.add(s.id);
+      });
 
       const seen = new Set<string>();
+      const nextIds: string[] = [];
       for (const item of basket) {
         let subjectUuid: string | undefined;
-        if (typeof item === 'number' || !isNaN(Number(item))) {
+        if (typeof item === 'number' || (typeof item === 'string' && /^\d+$/.test(item.trim()))) {
           subjectUuid = codeToUuid.get(Number(item));
         } else if (typeof item === 'string' && uuidSet.has(item)) {
           subjectUuid = item;
@@ -495,700 +306,557 @@ export async function updateBasket(req: Request, res: Response): Promise<void> {
 
         if (subjectUuid && !seen.has(subjectUuid)) {
           seen.add(subjectUuid);
-          await tx.insert(userBasket).values({
-            userId,
-            subjectId: subjectUuid,
-          });
+          nextIds.push(subjectUuid);
         }
       }
-    });
 
-    res.json({
-      success: true,
-      message: 'Canasta actualizada correctamente',
-    });
-  } catch (error) {
-    console.error('Error updating basket:', error);
-    res.status(500).json({ success: false, error: 'Error al actualizar canasta' });
-  }
-}
-
-export async function updateSettings(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  const {
-    includePromotionsInGPA,
-    minPassingGrade,
-    includeAnalistaTrack,
-    allowBlockedElectivesPlanning,
-    includeElectivesInProgress,
-    soundEnabled,
-    tutorialCompleted,
-    notifyLibraryEmail,
-    extraSettings,
-  } = req.body;
-
-  try {
-    const [existing] = await db.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
-
-    const updatePayload = {
-      includePromotionsInGPA: includePromotionsInGPA !== undefined ? Boolean(includePromotionsInGPA) : (existing?.includePromotionsInGPA ?? true),
-      minPassingGrade: minPassingGrade !== undefined ? parseInt(minPassingGrade, 10) : (existing?.minPassingGrade ?? 4),
-      includeAnalistaTrack: includeAnalistaTrack !== undefined ? Boolean(includeAnalistaTrack) : (existing?.includeAnalistaTrack ?? false),
-      allowBlockedElectivesPlanning: allowBlockedElectivesPlanning !== undefined ? Boolean(allowBlockedElectivesPlanning) : (existing?.allowBlockedElectivesPlanning ?? false),
-      includeElectivesInProgress: includeElectivesInProgress !== undefined ? Boolean(includeElectivesInProgress) : (existing?.includeElectivesInProgress ?? true),
-      soundEnabled: soundEnabled !== undefined ? Boolean(soundEnabled) : (existing?.soundEnabled ?? true),
-      tutorialCompleted: tutorialCompleted !== undefined ? Boolean(tutorialCompleted) : (existing?.tutorialCompleted ?? false),
-      notifyLibraryEmail: notifyLibraryEmail !== undefined ? Boolean(notifyLibraryEmail) : (existing?.notifyLibraryEmail ?? true),
-      extraSettings: extraSettings ?? existing?.extraSettings ?? {},
-      updatedAt: new Date(),
-    };
-
-    if (existing) {
-      await db.update(userSettings).set(updatePayload).where(eq(userSettings.userId, userId));
-    } else {
-      await db.insert(userSettings).values({
+      await store.replacePlanBasket(
         userId,
-        ...updatePayload,
+        planSubs.map((s) => s.id),
+        nextIds
+      );
+
+      res.json({
+        success: true,
+        message: 'Canasta actualizada correctamente',
       });
+    } catch (error) {
+      console.error('Error updating basket:', error);
+      res.status(500).json({ success: false, error: 'Error al actualizar canasta' });
     }
-
-    res.json({
-      success: true,
-      data: updatePayload,
-    });
-  } catch (error) {
-    console.error('Error updating settings:', error);
-    res.status(500).json({ success: false, error: 'Error al actualizar configuraciones' });
-  }
-}
-
-export async function getScheduleProposals(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
   }
 
-  try {
-    const proposals = await db.select().from(scheduleProposals).where(eq(scheduleProposals.userId, userId));
-    res.json({
-      success: true,
-      data: proposals.map((p) => ({
-        id: p.id,
-        name: p.name,
-        scheduleTermId: p.scheduleTermId,
-        selections: p.selections,
-        createdAt: p.createdAt.getTime(),
-        updatedAt: p.updatedAt.getTime(),
-      })),
-    });
-  } catch (error) {
-    console.error('Error getting schedule proposals:', error);
-    res.status(500).json({ success: false, error: 'Error al obtener propuestas de horario' });
-  }
-}
-
-export async function saveScheduleProposal(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const { id, name, scheduleTermId, selections } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  if (!name || !selections) {
-    res.status(400).json({ success: false, error: 'name y selections son requeridos' });
-    return;
-  }
-
-  try {
-    let termId = scheduleTermId;
-    if (!termId) {
-      const [currTerm] = await db.select().from(scheduleTerms).where(eq(scheduleTerms.isCurrent, true)).limit(1);
-      if (currTerm) termId = currTerm.id;
-    }
-
-    if (!termId) {
-      res.status(400).json({ success: false, error: 'No se encontró un período lectivo válido' });
+  async function updateSettings(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    if (id) {
-      const [existing] = await db
-        .select()
-        .from(scheduleProposals)
-        .where(and(eq(scheduleProposals.id, id), eq(scheduleProposals.userId, userId)))
-        .limit(1);
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      const planId = active?.planId ?? null;
+      const existing = await store.getUserSettings(userId);
+      const merged = mergePlanSettings(existing, planId, req.body || {});
 
-      if (existing) {
-        const [updated] = await db
-          .update(scheduleProposals)
-          .set({
-            name: name.trim(),
-            selections,
-            updatedAt: new Date(),
-          })
-          .where(eq(scheduleProposals.id, id))
-          .returning();
+      await store.upsertUserSettings(userId, merged);
 
-        res.json({ success: true, data: updated });
+      res.json({
+        success: true,
+        data: {
+          includePromotionsInGPA: merged.includePromotionsInGPA,
+          minPassingGrade: merged.minPassingGrade,
+          includeAnalistaTrack: merged.includeAnalistaTrack,
+          allowBlockedElectivesPlanning: merged.allowBlockedElectivesPlanning,
+          includeElectivesInProgress: merged.includeElectivesInProgress,
+          soundEnabled: merged.soundEnabled,
+          tutorialCompleted: merged.tutorialCompleted,
+          notifyLibraryEmail: merged.notifyLibraryEmail,
+          extraSettings: merged.extraSettings,
+        },
+      });
+    } catch (error) {
+      console.error('Error updating settings:', error);
+      res.status(500).json({ success: false, error: 'Error al actualizar configuraciones' });
+    }
+  }
+
+  async function getScheduleProposals(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
+      return;
+    }
+
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      const proposals = await store.listScheduleProposals(userId, active?.planId ?? null);
+      res.json({
+        success: true,
+        data: proposals.map((p) => ({
+          id: p.id,
+          name: p.name,
+          scheduleTermId: p.scheduleTermId,
+          selections: p.selections,
+          createdAt: p.createdAt.getTime(),
+          updatedAt: p.updatedAt.getTime(),
+        })),
+      });
+    } catch (error) {
+      console.error('Error getting schedule proposals:', error);
+      res.status(500).json({ success: false, error: 'Error al obtener propuestas de horario' });
+    }
+  }
+
+  async function saveScheduleProposal(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const { id, name, scheduleTermId, selections } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
+      return;
+    }
+
+    if (!name || !selections) {
+      res.status(400).json({ success: false, error: 'name y selections son requeridos' });
+      return;
+    }
+
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
         return;
       }
-    }
 
-    const [created] = await db
-      .insert(scheduleProposals)
-      .values({
+      let termId: string | undefined;
+      if (scheduleTermId) {
+        const term = await store.getScheduleTermForFaculty(
+          String(scheduleTermId),
+          active.facultyId
+        );
+        if (!term) {
+          res.status(404).json({ success: false, error: 'Período lectivo no encontrado' });
+          return;
+        }
+        termId = term.id;
+      } else {
+        const currTerm = await store.getCurrentScheduleTerm(active.facultyId);
+        termId = currTerm?.id;
+      }
+
+      if (!termId) {
+        res.status(400).json({ success: false, error: 'No se encontró un período lectivo válido' });
+        return;
+      }
+
+      const result = await store.saveScheduleProposal({
+        id: id ? String(id) : undefined,
         userId,
+        planId: active.planId,
         scheduleTermId: termId,
-        name: name.trim(),
+        name: String(name),
         selections,
-      })
-      .returning();
-
-    res.status(201).json({ success: true, data: created });
-  } catch (error) {
-    console.error('Error saving schedule proposal:', error);
-    res.status(500).json({ success: false, error: 'Error al guardar propuesta' });
-  }
-}
-
-export async function deleteScheduleProposal(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const id = String(req.params.id);
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  try {
-    await db
-      .delete(scheduleProposals)
-      .where(and(eq(scheduleProposals.id, id), eq(scheduleProposals.userId, userId)));
-
-    res.json({ success: true, message: 'Propuesta eliminada' });
-  } catch (error) {
-    console.error('Error deleting schedule proposal:', error);
-    res.status(500).json({ success: false, error: 'Error al eliminar propuesta' });
-  }
-}
-
-export async function saveScheduleSelections(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  const { scheduleTermId, selections } = req.body;
-
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  try {
-    let termId = scheduleTermId;
-    if (!termId) {
-      const [currTerm] = await db.select().from(scheduleTerms).where(eq(scheduleTerms.isCurrent, true)).limit(1);
-      if (currTerm) termId = currTerm.id;
-    }
-
-    if (!termId) {
-      res.status(400).json({ success: false, error: 'No se encontró un período lectivo' });
-      return;
-    }
-
-    const [existing] = await db
-      .select()
-      .from(scheduleSelections)
-      .where(
-        and(
-          eq(scheduleSelections.userId, userId),
-          eq(scheduleSelections.scheduleTermId, termId)
-        )
-      )
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(scheduleSelections)
-        .set({
-          selections: selections || {},
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduleSelections.id, existing.id));
-    } else {
-      await db.insert(scheduleSelections).values({
-        userId,
-        scheduleTermId: termId,
-        selections: selections || {},
       });
+
+      if (result.notFound) {
+        res.status(404).json({ success: false, error: 'Propuesta no encontrada' });
+        return;
+      }
+
+      res.status(result.created ? 201 : 200).json({ success: true, data: result.proposal });
+    } catch (error) {
+      console.error('Error saving schedule proposal:', error);
+      res.status(500).json({ success: false, error: 'Error al guardar propuesta' });
     }
-
-    res.json({ success: true, message: 'Selecciones de horarios guardadas' });
-  } catch (error) {
-    console.error('Error saving schedule selections:', error);
-    res.status(500).json({ success: false, error: 'Error al guardar selecciones de horario' });
-  }
-}
-
-export async function importData(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
   }
 
-  const payload = req.body;
-  if (!payload || typeof payload !== 'object') {
-    res.status(400).json({ success: false, error: 'Payload de importación inválido' });
-    return;
-  }
+  async function deleteScheduleProposal(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const id = String(req.params.id);
 
-  try {
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user || !user.selectedPlanId) {
-      res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    // Mapa de materias del plan
-    const planSubs = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
-      .from(subjects)
-      .where(eq(subjects.planId, user.selectedPlanId));
-
-    const codeToUuid = new Map<number, string>();
-    planSubs.forEach((s) => codeToUuid.set(s.codeInPlan, s.id));
-
-    const [currentTerm] = await db.select().from(scheduleTerms).where(eq(scheduleTerms.isCurrent, true)).limit(1);
-
-    const counts = await db.transaction(async (tx) => {
-      let progressCount = 0;
-      let electivesCount = 0;
-      let basketCount = 0;
-      let proposalsCount = 0;
-
-      // 1. Settings
-      if (payload.settings && typeof payload.settings === 'object') {
-        const s = payload.settings;
-        const [existingSet] = await tx.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
-        const setValues = {
-          includePromotionsInGPA: s.includePromotionsInGPA ?? true,
-          minPassingGrade: s.minPassingGrade ?? 4,
-          includeAnalistaTrack: Boolean(s.includeAnalistaTrack),
-          allowBlockedElectivesPlanning: Boolean(s.allowBlockedElectivesPlanning),
-          includeElectivesInProgress: s.includeElectivesInProgress ?? true,
-          soundEnabled: s.soundEnabled ?? true,
-          tutorialCompleted: Boolean(s.tutorialCompleted),
-          notifyLibraryEmail: s.notifyLibraryEmail ?? existingSet?.notifyLibraryEmail ?? true,
-          updatedAt: new Date(),
-        };
-
-        if (existingSet) {
-          await tx.update(userSettings).set(setValues).where(eq(userSettings.userId, userId));
-        } else {
-          await tx.insert(userSettings).values({ userId, ...setValues });
-        }
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(404).json({ success: false, error: 'Propuesta no encontrada' });
+        return;
       }
 
-      // 2. Progreso
-      const userState = payload.userState || {};
-      for (const [codeStr, entry] of Object.entries(userState)) {
-        const codeNum = parseInt(codeStr, 10);
-        const subUuid = codeToUuid.get(codeNum);
-        if (!subUuid || !entry || typeof entry !== 'object') continue;
-
-        const rawStatus = (entry as any).status;
-        const normalizedStatus = (rawStatus === 'disponible' || rawStatus === 'bloqueada') ? 'pendiente' : rawStatus;
-        const gradeVal = (entry as any).grade !== undefined && (entry as any).grade !== null ? String((entry as any).grade) : null;
-
-        if (normalizedStatus === 'pendiente' && gradeVal === null) continue;
-
-        const [existing] = await tx
-          .select()
-          .from(subjectProgress)
-          .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subUuid)))
-          .limit(1);
-
-        if (existing) {
-          await tx
-            .update(subjectProgress)
-            .set({ status: normalizedStatus, grade: gradeVal, updatedAt: new Date() })
-            .where(eq(subjectProgress.id, existing.id));
-        } else {
-          await tx.insert(subjectProgress).values({
-            userId,
-            subjectId: subUuid,
-            status: normalizedStatus,
-            grade: gradeVal,
-          });
-        }
-        progressCount++;
+      const deleted = await store.deleteScheduleProposal(userId, active.planId, id);
+      if (!deleted) {
+        res.status(404).json({ success: false, error: 'Propuesta no encontrada' });
+        return;
       }
 
-      // 3. Electivas asignadas
-      if (payload.assignedElectives && typeof payload.assignedElectives === 'object') {
-        await tx.delete(electiveAssignments).where(eq(electiveAssignments.userId, userId));
-        const seen = new Set<string>();
-
-        for (let year = 1; year <= 5; year++) {
-          const list = Array.isArray(payload.assignedElectives[year]) ? payload.assignedElectives[year] : [];
-          for (const item of list) {
-            const subUuid = codeToUuid.get(Number(item));
-            if (subUuid && !seen.has(subUuid)) {
-              seen.add(subUuid);
-              await tx.insert(electiveAssignments).values({
-                userId,
-                subjectId: subUuid,
-                year,
-              });
-              electivesCount++;
-            }
-          }
-        }
-      }
-
-      // 4. Canasta
-      if (Array.isArray(payload.basket)) {
-        await tx.delete(userBasket).where(eq(userBasket.userId, userId));
-        const seen = new Set<string>();
-        for (const item of payload.basket) {
-          const subUuid = codeToUuid.get(Number(item));
-          if (subUuid && !seen.has(subUuid)) {
-            seen.add(subUuid);
-            await tx.insert(userBasket).values({
-              userId,
-              subjectId: subUuid,
-            });
-            basketCount++;
-          }
-        }
-      }
-
-      // 5. Horarios y propuestas
-      if (currentTerm && payload.scheduleSelections && typeof payload.scheduleSelections === 'object') {
-        const [existingSel] = await tx
-          .select()
-          .from(scheduleSelections)
-          .where(and(eq(scheduleSelections.userId, userId), eq(scheduleSelections.scheduleTermId, currentTerm.id)))
-          .limit(1);
-
-        if (existingSel) {
-          await tx
-            .update(scheduleSelections)
-            .set({ selections: payload.scheduleSelections, updatedAt: new Date() })
-            .where(eq(scheduleSelections.id, existingSel.id));
-        } else {
-          await tx.insert(scheduleSelections).values({
-            userId,
-            scheduleTermId: currentTerm.id,
-            selections: payload.scheduleSelections,
-          });
-        }
-      }
-
-      if (currentTerm && Array.isArray(payload.scheduleDrafts)) {
-        for (const d of payload.scheduleDrafts) {
-          if (d.name && d.selections) {
-            await tx.insert(scheduleProposals).values({
-              userId,
-              scheduleTermId: currentTerm.id,
-              name: d.name,
-              selections: d.selections,
-            });
-            proposalsCount++;
-          }
-        }
-      }
-
-      return { progressCount, electivesCount, basketCount, proposalsCount };
-    });
-
-    let enrollmentsCount = 0;
-    if (Array.isArray(payload.enrollments)) {
-      for (const item of payload.enrollments) {
-        if (!item || typeof item !== 'object') continue;
-        const subjectRef = item.subjectCode ?? item.subjectId;
-        if (subjectRef === undefined || subjectRef === null) continue;
-        try {
-          const profNames = Array.isArray(item.professors)
-            ? item.professors
-                .map((p: any) => (typeof p === 'string' ? p : p?.displayName))
-                .filter((x: any): x is string => typeof x === 'string' && x.trim().length > 0)
-            : Array.isArray(item.professorNames)
-            ? item.professorNames
-            : undefined;
-          const profIds = Array.isArray(item.professorIds) ? item.professorIds : undefined;
-          await defaultEnrollmentsService.upsertEnrollment({
-            userId,
-            planId: user.selectedPlanId,
-            subjectIdOrCode: subjectRef,
-            commissionCode: typeof item.commissionCode === 'string' ? item.commissionCode : null,
-            academicYear: typeof item.academicYear === 'number' ? item.academicYear : null,
-            term:
-              item.term === '1C' || item.term === '2C' || item.term === 'A' ? item.term : null,
-            source: item.source === 'schedule_builder' ? 'schedule_builder' : 'manual',
-            professorIds: profIds,
-            professorNames: profNames,
-          });
-          enrollmentsCount++;
-        } catch {
-          // Ignorar cursadas individuales que no coincidan con el catálogo actual
-        }
-      }
+      res.json({ success: true, message: 'Propuesta eliminada' });
+    } catch (error) {
+      console.error('Error deleting schedule proposal:', error);
+      res.status(500).json({ success: false, error: 'Error al eliminar propuesta' });
     }
-
-    res.json({
-      success: true,
-      data: { ...counts, enrollmentsCount },
-    });
-  } catch (error) {
-    console.error('Error importing data:', error);
-    res.status(500).json({ success: false, error: 'Error al importar los datos' });
-  }
-}
-
-export async function exportData(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
   }
 
-  try {
-    const [user] = await db
-      .select({ id: users.id, selectedPlanId: users.selectedPlanId })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user || !user.selectedPlanId) {
-      res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+  async function saveScheduleSelections(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    const { scheduleTermId, selections } = req.body;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    const [plan] = await db.select().from(studyPlans).where(eq(studyPlans.id, user.selectedPlanId)).limit(1);
-    const planSubs = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan })
-      .from(subjects)
-      .where(eq(subjects.planId, user.selectedPlanId));
-
-    const uuidToCode = new Map<string, number>();
-    planSubs.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
-
-    const [settingsRow] = await db.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
-    const progressRows = await db.select().from(subjectProgress).where(eq(subjectProgress.userId, userId));
-    const electivesRows = await db.select().from(electiveAssignments).where(eq(electiveAssignments.userId, userId));
-    const basketRows = await db.select().from(userBasket).where(eq(userBasket.userId, userId));
-    const proposals = await db.select().from(scheduleProposals).where(eq(scheduleProposals.userId, userId));
-
-    const [currentTerm] = await db.select().from(scheduleTerms).where(eq(scheduleTerms.isCurrent, true)).limit(1);
-    let selections: Record<string, string> = {};
-    if (currentTerm) {
-      const [sel] = await db
-        .select()
-        .from(scheduleSelections)
-        .where(and(eq(scheduleSelections.userId, userId), eq(scheduleSelections.scheduleTermId, currentTerm.id)))
-        .limit(1);
-      if (sel) selections = sel.selections as any;
-    }
-
-    const userState: Record<number, any> = {};
-    progressRows.forEach((p) => {
-      const code = uuidToCode.get(p.subjectId);
-      if (code !== undefined) {
-        userState[code] = {
-          status: p.status,
-          grade: p.grade ? Number(p.grade) : undefined,
-          updatedAt: p.updatedAt.toISOString(),
-        };
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
       }
-    });
 
-    const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
-    electivesRows.forEach((e) => {
-      const code = uuidToCode.get(e.subjectId);
-      if (code !== undefined && e.year >= 1 && e.year <= 5) {
-        if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
-        assignedElectives[e.year].push(code);
+      let termId: string | undefined;
+      if (scheduleTermId) {
+        const term = await store.getScheduleTermForFaculty(
+          String(scheduleTermId),
+          active.facultyId
+        );
+        if (!term) {
+          res.status(404).json({ success: false, error: 'Período lectivo no encontrado' });
+          return;
+        }
+        termId = term.id;
+      } else {
+        const currTerm = await store.getCurrentScheduleTerm(active.facultyId);
+        termId = currTerm?.id;
       }
-    });
 
-    const basket: number[] = [];
-    basketRows.forEach((b) => {
-      const code = uuidToCode.get(b.subjectId);
-      if (code !== undefined) basket.push(code);
-    });
+      if (!termId) {
+        res.status(400).json({ success: false, error: 'No se encontró un período lectivo' });
+        return;
+      }
 
-    const storedEnrollments = await defaultReviewsStore.listUserEnrollments(
-      userId,
-      user.selectedPlanId
-    );
+      const existing = await store.getScheduleSelection(userId, termId);
+      const merged = mergePlanScheduleSelections(existing, active.planId, selections || {});
+      await store.upsertScheduleSelection(userId, termId, merged);
 
-    const exportPayload = {
-      version: '2.2',
-      exportDate: new Date().toISOString(),
-      plan: plan?.name || 'Plan 2023 ISI UTN',
-      userState,
-      settings: settingsRow
-        ? {
-            includePromotionsInGPA: settingsRow.includePromotionsInGPA,
-            minPassingGrade: settingsRow.minPassingGrade,
-            includeAnalistaTrack: settingsRow.includeAnalistaTrack,
-            allowBlockedElectivesPlanning: settingsRow.allowBlockedElectivesPlanning,
-            includeElectivesInProgress: settingsRow.includeElectivesInProgress,
-            soundEnabled: settingsRow.soundEnabled,
-            tutorialCompleted: settingsRow.tutorialCompleted,
-          }
-        : {},
-      basket,
-      assignedElectives,
-      enrollments: storedEnrollments.map(serializeEnrollment),
-      scheduleDrafts: proposals.map((p) => ({
-        id: p.id,
-        name: p.name,
-        term: currentTerm?.term || '1C',
-        selections: p.selections,
-        createdAt: p.createdAt.getTime(),
-        updatedAt: p.updatedAt.getTime(),
-      })),
-      scheduleSelections: selections,
-      scheduleTerm: currentTerm?.term || '1C',
-    };
-
-    res.json({
-      success: true,
-      data: exportPayload,
-    });
-  } catch (error) {
-    console.error('Error exporting data:', error);
-    res.status(500).json({ success: false, error: 'Error al exportar los datos' });
-  }
-}
-
-export async function deleteAccount(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-
-  try {
-    // Ajuste 1: Casilla "Eliminar también mis archivos" (por defecto true)
-    const deleteFiles = req.body?.deleteFiles !== false;
-    const libraryService = new LibraryService();
-    await libraryService.handleAccountDeletion(userId, deleteFiles);
-
-    // Identificar profesores reseñados por este usuario antes del borrado en cascada
-    const affectedProfessorIds = await defaultReviewsStore.getAffectedProfessorIdsByUser(userId);
-
-    // ON DELETE CASCADE en PostgreSQL elimina todas las filas asociadas (incluyendo professor_reviews)
-    await db.delete(users).where(eq(users.id, userId));
-
-    // Recalcular agregados de los profesores cuyas reseñas fueron eliminadas
-    for (const profId of affectedProfessorIds) {
-      await defaultReviewsStore.recalculateProfessorStats(profId).catch(() => undefined);
+      res.json({ success: true, message: 'Selecciones de horarios guardadas' });
+    } catch (error) {
+      console.error('Error saving schedule selections:', error);
+      res.status(500).json({ success: false, error: 'Error al guardar selecciones de horario' });
     }
-
-    res.clearCookie('accessToken');
-    res.clearCookie('refreshToken');
-
-    res.json({
-      success: true,
-      message: 'Cuenta y datos asociados eliminados definitivamente',
-    });
-  } catch (error) {
-    console.error('Error deleting account:', error);
-    res.status(500).json({ success: false, error: 'Error al eliminar la cuenta' });
-  }
-}
-
-export async function saveExamAttempt(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
-  }
-  const { subjectIdOrCode, date: examDate, grade, notes } = req.body;
-  if (!subjectIdOrCode || !examDate || grade === undefined || grade === null) {
-    res.status(400).json({ success: false, error: 'Datos de examen incompletos (materia, fecha y nota requeridos)' });
-    return;
-  }
-  const numGrade = Number(grade);
-  if (isNaN(numGrade) || numGrade < 1 || numGrade > 10) {
-    res.status(400).json({ success: false, error: 'La calificación debe estar entre 1 y 10' });
-    return;
   }
 
-  try {
-    const [user] = await db.select({ selectedPlanId: users.selectedPlanId }).from(users).where(eq(users.id, userId));
-    const isCode = !isNaN(Number(subjectIdOrCode));
-    const subQuery = isCode
-      ? and(eq(subjects.planId, user.selectedPlanId || ''), eq(subjects.codeInPlan, Number(subjectIdOrCode)))
-      : eq(subjects.id, String(subjectIdOrCode));
-
-    const [sub] = await db.select({ id: subjects.id, codeInPlan: subjects.codeInPlan }).from(subjects).where(subQuery);
-    if (!sub) {
-      res.status(404).json({ success: false, error: 'Materia no encontrada' });
+  async function importData(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
 
-    const [inserted] = await db
-      .insert(finalExamAttempts)
-      .values({
+    const payload = req.body;
+    if (!payload || typeof payload !== 'object') {
+      res.status(400).json({ success: false, error: 'Payload de importación inválido' });
+      return;
+    }
+
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
+      }
+
+      const planSubs = await store.getPlanSubjects(active.planId);
+      const codeToUuid = new Map<number, string>();
+      planSubs.forEach((s) => codeToUuid.set(s.codeInPlan, s.id));
+
+      const counts = await store.importPlanBundle({
         userId,
-        subjectId: sub.id,
-        examDate,
-        grade: String(numGrade),
-        notes: typeof notes === 'string' ? notes.trim() : null,
-      })
-      .returning();
+        planId: active.planId,
+        facultyId: active.facultyId,
+        planSubjectIds: planSubs.map((s) => s.id),
+        codeToUuid,
+        settingsIncoming:
+          payload.settings && typeof payload.settings === 'object' ? payload.settings : undefined,
+        userState: payload.userState,
+        assignedElectives: payload.assignedElectives,
+        basket: payload.basket,
+        scheduleSelections: payload.scheduleSelections,
+        scheduleDrafts: payload.scheduleDrafts,
+      });
 
-    res.json({
-      success: true,
-      data: {
-        id: inserted.id,
+      let enrollmentsCount = 0;
+      if (Array.isArray(payload.enrollments)) {
+        for (const item of payload.enrollments) {
+          if (!item || typeof item !== 'object') continue;
+          const subjectRef = item.subjectCode ?? item.subjectId;
+          if (subjectRef === undefined || subjectRef === null) continue;
+          try {
+            const profNames = Array.isArray(item.professors)
+              ? item.professors
+                  .map((p: any) => (typeof p === 'string' ? p : p?.displayName))
+                  .filter((x: any): x is string => typeof x === 'string' && x.trim().length > 0)
+              : Array.isArray(item.professorNames)
+              ? item.professorNames
+              : undefined;
+            const profIds = Array.isArray(item.professorIds) ? item.professorIds : undefined;
+            await enrollmentsService.upsertEnrollment({
+              userId,
+              planId: active.planId,
+              subjectIdOrCode: subjectRef,
+              commissionCode: typeof item.commissionCode === 'string' ? item.commissionCode : null,
+              academicYear: typeof item.academicYear === 'number' ? item.academicYear : null,
+              term:
+                item.term === '1C' || item.term === '2C' || item.term === 'A' ? item.term : null,
+              source: item.source === 'schedule_builder' ? 'schedule_builder' : 'manual',
+              professorIds: profIds,
+              professorNames: profNames,
+            });
+            enrollmentsCount++;
+          } catch {
+            // Ignorar cursadas individuales que no coincidan con el catálogo del plan activo
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        data: { ...counts, enrollmentsCount },
+      });
+    } catch (error) {
+      console.error('Error importing data:', error);
+      res.status(500).json({ success: false, error: 'Error al importar los datos' });
+    }
+  }
+
+  async function exportData(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
+      return;
+    }
+
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
+      }
+
+      const planSubs = await store.getPlanSubjects(active.planId);
+      const planSubjectIds = planSubs.map((s) => s.id);
+      const uuidToCode = new Map<string, number>();
+      planSubs.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
+
+      const settingsRow = await store.getUserSettings(userId);
+      const activeSettings = extractPlanSettings(settingsRow, active.planId);
+      const progressRows = await store.listSubjectProgress(userId, planSubjectIds);
+      const electivesRows = await store.listElectiveAssignments(userId, planSubjectIds);
+      const basketRows = await store.listUserBasket(userId, planSubjectIds);
+      const proposals = await store.listScheduleProposals(userId, active.planId);
+
+      const currentTerm = await store.getCurrentScheduleTerm(active.facultyId);
+      let selections: Record<string, string> = {};
+      if (currentTerm) {
+        const sel = await store.getScheduleSelection(userId, currentTerm.id);
+        selections = extractPlanScheduleSelections(sel, active.planId);
+      }
+
+      const userState: Record<number, any> = {};
+      progressRows.forEach((p) => {
+        const code = uuidToCode.get(p.subjectId);
+        if (code !== undefined) {
+          userState[code] = {
+            status: p.status,
+            grade: p.grade ? Number(p.grade) : undefined,
+            updatedAt: p.updatedAt.toISOString(),
+          };
+        }
+      });
+
+      const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      electivesRows.forEach((e) => {
+        const code = uuidToCode.get(e.subjectId);
+        if (code !== undefined && e.year >= 1 && e.year <= 5) {
+          if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
+          assignedElectives[e.year].push(code);
+        }
+      });
+
+      const basket: number[] = [];
+      basketRows.forEach((b) => {
+        const code = uuidToCode.get(b.subjectId);
+        if (code !== undefined) basket.push(code);
+      });
+
+      const storedEnrollments = await reviewsStore.listUserEnrollments(userId, active.planId);
+
+      const exportPayload = {
+        version: '2.2',
+        exportDate: new Date().toISOString(),
+        plan: active.planName || 'Plan activo',
+        userState,
+        settings: settingsRow
+          ? {
+              includePromotionsInGPA: activeSettings.includePromotionsInGPA,
+              minPassingGrade: activeSettings.minPassingGrade,
+              includeAnalistaTrack: activeSettings.includeAnalistaTrack,
+              allowBlockedElectivesPlanning: activeSettings.allowBlockedElectivesPlanning,
+              includeElectivesInProgress: activeSettings.includeElectivesInProgress,
+              soundEnabled: activeSettings.soundEnabled,
+              tutorialCompleted: activeSettings.tutorialCompleted,
+            }
+          : {},
+        basket,
+        assignedElectives,
+        enrollments: storedEnrollments.map(serializeEnrollment),
+        scheduleDrafts: proposals.map((p) => ({
+          id: p.id,
+          name: p.name,
+          term: currentTerm?.term || '1C',
+          selections: p.selections,
+          createdAt: p.createdAt.getTime(),
+          updatedAt: p.updatedAt.getTime(),
+        })),
+        scheduleSelections: selections,
+        scheduleTerm: currentTerm?.term || '1C',
+      };
+
+      res.json({
+        success: true,
+        data: exportPayload,
+      });
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      res.status(500).json({ success: false, error: 'Error al exportar los datos' });
+    }
+  }
+
+  async function deleteAccount(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
+      return;
+    }
+
+    try {
+      const deleteFiles = req.body?.deleteFiles !== false;
+      await store.deleteAccount(userId, deleteFiles);
+
+      res.clearCookie('accessToken');
+      res.clearCookie('refreshToken');
+
+      res.json({
+        success: true,
+        message: 'Cuenta y datos asociados eliminados definitivamente',
+      });
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      res.status(500).json({ success: false, error: 'Error al eliminar la cuenta' });
+    }
+  }
+
+  async function saveExamAttempt(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
+      return;
+    }
+    const { subjectIdOrCode, date: examDate, grade, notes } = req.body;
+    if (!subjectIdOrCode || !examDate || grade === undefined || grade === null) {
+      res.status(400).json({
+        success: false,
+        error: 'Datos de examen incompletos (materia, fecha y nota requeridos)',
+      });
+      return;
+    }
+    const numGrade = Number(grade);
+    if (isNaN(numGrade) || numGrade < 1 || numGrade > 10) {
+      res.status(400).json({ success: false, error: 'La calificación debe estar entre 1 y 10' });
+      return;
+    }
+
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(400).json({ success: false, error: 'Usuario sin plan activo' });
+        return;
+      }
+
+      const sub = await store.findPlanSubject(active.planId, String(subjectIdOrCode));
+      if (!sub) {
+        res.status(404).json({ success: false, error: 'Materia no encontrada' });
+        return;
+      }
+
+      const inserted = await store.createExamAttempt({
+        userId,
         subjectId: sub.id,
         subjectCode: sub.codeInPlan,
-        date: String(inserted.examDate),
-        grade: numGrade,
-        notes: inserted.notes || undefined,
-        createdAt: inserted.createdAt.toISOString(),
-      },
-    });
-  } catch (error) {
-    console.error('Error saving exam attempt:', error);
-    res.status(500).json({ success: false, error: 'Error al registrar examen final' });
-  }
-}
+        examDate: String(examDate),
+        grade: String(numGrade),
+        notes: typeof notes === 'string' ? notes.trim() : null,
+      });
 
-export async function deleteExamAttempt(req: Request, res: Response): Promise<void> {
-  const userId = req.user?.id;
-  if (!userId) {
-    res.status(401).json({ success: false, error: 'No autenticado' });
-    return;
+      res.json({
+        success: true,
+        data: {
+          id: inserted.id,
+          subjectId: sub.id,
+          subjectCode: sub.codeInPlan,
+          date: inserted.examDate,
+          grade: numGrade,
+          notes: inserted.notes || undefined,
+          createdAt: inserted.createdAt.toISOString(),
+        },
+      });
+    } catch (error) {
+      console.error('Error saving exam attempt:', error);
+      res.status(500).json({ success: false, error: 'Error al registrar examen final' });
+    }
   }
-  const { id } = req.params;
-  try {
-    const [deleted] = await db
-      .delete(finalExamAttempts)
-      .where(and(eq(finalExamAttempts.id, String(id)), eq(finalExamAttempts.userId, userId)))
-      .returning({ id: finalExamAttempts.id });
 
-    if (!deleted) {
-      res.status(404).json({ success: false, error: 'Examen no encontrado' });
+  async function deleteExamAttempt(req: Request, res: Response): Promise<void> {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'No autenticado' });
       return;
     }
-    res.json({ success: true, data: { id: deleted.id } });
-  } catch (error) {
-    console.error('Error deleting exam attempt:', error);
-    res.status(500).json({ success: false, error: 'Error al eliminar examen final' });
+    const id = String(req.params.id);
+    try {
+      const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
+      if (!active || !active.planId) {
+        res.status(404).json({ success: false, error: 'Examen no encontrado' });
+        return;
+      }
+
+      const deleted = await store.deleteExamAttempt(userId, active.planId, id);
+      if (!deleted) {
+        res.status(404).json({ success: false, error: 'Examen no encontrado' });
+        return;
+      }
+      res.json({ success: true, data: { id } });
+    } catch (error) {
+      console.error('Error deleting exam attempt:', error);
+      res.status(500).json({ success: false, error: 'Error al eliminar examen final' });
+    }
   }
+
+  return {
+    getUserState,
+    updateProgress,
+    updateElectives,
+    updateBasket,
+    updateSettings,
+    getScheduleProposals,
+    saveScheduleProposal,
+    deleteScheduleProposal,
+    saveScheduleSelections,
+    importData,
+    exportData,
+    deleteAccount,
+    saveExamAttempt,
+    deleteExamAttempt,
+  };
 }
+
+const defaultHandlers = createUserStateHandlers();
+
+export const {
+  getUserState,
+  updateProgress,
+  updateElectives,
+  updateBasket,
+  updateSettings,
+  getScheduleProposals,
+  saveScheduleProposal,
+  deleteScheduleProposal,
+  saveScheduleSelections,
+  importData,
+  exportData,
+  deleteAccount,
+  saveExamAttempt,
+  deleteExamAttempt,
+} = defaultHandlers;
