@@ -1,0 +1,396 @@
+# Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría Etapa 0)
+
+> **Estado:** Etapa 0 + Paso Previo completados (sin cambios de funcionalidad aún; pendiente aprobación para iniciar Etapa 1A).  
+> **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
+> **Última migración SQL existente:** `server/drizzle/0007_enrollment_status_and_exam_attempts.sql` (siguiente migración aditiva: `0008_*`)
+
+Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
+
+---
+
+## 1. Inventario de lugares fijos para Sistemas (Plan 2023 / UTN FRC)
+
+### 1.1 Frontend: datos estáticos, lógica pura y estado
+
+| Archivo | Elemento / comportamiento hardcoded |
+|---|---|
+| `src/data/plan2023.ts` | Catálogo estático `CORE_SUBJECTS`, `REQUIRED_ELECTIVE_CREDITS_TOTAL = 20`, `REQUIRED_ANALISTA_ELECTIVE_CREDITS = 4`, `ELECTIVE_SLOTS_EQUIVALENT = 7`. |
+| `src/data/electives.ts` | Listado estático `ELECTIVES` exclusivo de Sistemas Plan 2023. |
+| `src/data/acronyms.ts` | Mapa estático `ACRONYM_TO_ID` con siglas de materias de Sistemas. |
+| `src/data/schedule.ts` y `src/data/schedule.json` | `SAMPLE_SCHEDULES` y `DEFAULT_SCHEDULES` embebidos para Sistemas (337 comisiones, 29 slots reservados de electivas). |
+| `src/data/subjectAliases.ts` | Alias estáticos de materias de Sistemas para importación/parseo de horarios. |
+| `src/data/tutorialSteps.ts` | Copys fijos del Plan 2023: `"las 5 columnas representan los años de la carrera (1° a 5° año)"`, `"Total 20 cr"`, `"título de Ingeniero/a"`, `"Título Intermedio de Analista"`, `"Seminario Integrador (99)"`, `"4 créditos de electivas"`. |
+| `src/types/career.ts` | `CareerProgress` expone campos fijos `isAnalistaEligible`, `missingForAnalista`, `isPPSEligible`; `Subject.level` asume niveles `1–5`. |
+| `src/utils/correlativas.ts` | Importa `CORE_SUBJECTS` y `ELECTIVES` estáticos; `canRenderSeminario` fija rango `[1..23]`; `canRenderProyectoFinal` fija IDs `36` y `99`; `isPPSEligible` fija ID `36`; `checkAnalistaTitle` fija `1..23`, `99` y `>= 4` créditos; `calculateProgressBreakdown` toma por defecto `electiveSlotsEquivalent = 7` y `requiredElectiveCredits = 20`. |
+| `src/utils/criticalPath.ts` | L8–9 importa `CORE_SUBJECTS` estático y excluye/incluye `s.id !== 99` mediante `includeAnalistaTrack`. |
+| `src/utils/storage.ts` | Claves en `localStorage` no segmentadas por `planId`; `INITIAL_ASSIGNED_ELECTIVES` y `sanitizeAssignedElectives` fijan años `1..5`; `exportCareerToJson` escribe `plan: 'Plan 2023 ISI UTN'`. |
+| `src/context/CareerContext.tsx` | Consume `/api/catalog/plans/current` solo para leer `plan.name`, ignorando materias/correlativas/reglas/siglas/configuración del backend y calculando con `CORE_SUBJECTS` y `ELECTIVES` estáticos; `addElectiveToYear` limita años a `1..5`. |
+
+### 1.2 Frontend: componentes de UI
+
+| Archivo | Elemento / comportamiento hardcoded |
+|---|---|
+| `src/components/common/Navbar.tsx` | L288, L402, L732 textos fijos `"Analista (99)"` / `"Título Analista (99)"`; interruptor `includeAnalistaTrack` siempre renderizado sin verificar si el plan tiene título intermedio. |
+| `src/components/common/PlanSelectorModal.tsx` | L97 compara por nombre (`const isCurrent = p.name === currentPlanName;`), lo que colisiona si dos carreras tienen un plan llamado `"Plan 2023"`; no advierte que el progreso es independiente por plan ni pide confirmación antes de cambiar. |
+| `src/components/common/SearchModal.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/onboarding/OnboardingModal.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/kanban/KanbanBoard.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/planner/SemesterPlanner.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/electives/ElectivesPicker.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos y distribuye en años fijos. |
+| `src/components/graph/CorrelativeGraph.tsx` | Usa `CORE_SUBJECTS` / `ELECTIVES`, filtra `s.id !== 99`, fija `levelCounts: {1..5}` e itera `for (let y=1; y<=5; y++)`. |
+| `src/components/graph/SubjectDrawer.tsx` | L514–534 fija `selectedSubject.id === 36`, `"Materias previas del plan (1 a 35 + Electivas)"` y `"Proyecto Final"`. |
+| `src/components/stats/StatsDashboard.tsx` | Usa `CORE_SUBJECTS` / `ELECTIVES`, filtra `s.id !== 99` y muestra tarjetas/textos fijos: `"Título Intermedio: Analista Universitario de Sistemas"`, `"Materias 1 a 23:"`, `"Seminario Integrador (99):"`, `"Requisito de 20 créditos alcanzado"`, `"Logros desbloqueados automáticamente al avanzar en el plan 2023."` y `"Habilitación PPS"` (`isPPSEligible`). |
+| `src/components/schedule/ScheduleBuilder.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/schedule/ScheduleWeeklyGrid.tsx` | L49–120 define `SUBJECT_SHORT_NAMES` hardcoded para IDs `1..36`, `99`, `401..514`; L129 referencia `// Recreos estándar UTN`. |
+| `src/components/schedule/ScheduleSummaryPanel.tsx` | L65 exporta texto fijo `'📅 MI HORARIO DE CURSADA — UTN ISI (Plan 2023)\n'`. |
+| `src/components/professors/ProfessorsDirectory.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/library/LibraryHome.tsx` | L178, L287, L352–360 texto fijo `"Ingeniería en Sistemas de Información"`, filtro `level > 5` y botones fijos de años `1..5`. |
+| `src/components/library/LibraryTermsPage.tsx` | L62 texto fijo `"para la comunidad estudiantil de Ingeniería en Sistemas de Información"`. |
+| `src/components/admin/tabs/AdminScheduleTab.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+| `src/components/admin/tabs/AdminReviewsTab.tsx` | Importa `CORE_SUBJECTS` / `ELECTIVES` estáticos. |
+
+> **Nota positiva en marca:** `index.html`, `src/config/brand.ts` y `server/src/modules/mailer/templates/verificationEmail.ts` ya usan marca genérica **Stack** sin referencias hardcoded a Sistemas.
+
+### 1.3 Backend, scripts y correos
+
+| Archivo | Elemento / comportamiento hardcoded o sin filtro de plan |
+|---|---|
+| `server/src/modules/admin/admin.service.ts` | L457 `getStats()` fija `adminsCount: 1`; L468 fija `totalSubjects: 45`; L724 `getUserDetail()` usa fallback `let planName = 'Plan 2023'`. |
+| `server/src/modules/admin/admin.controller.ts` | L801–911 `createCareer` / `createPlan` legacy asignan config fija `{ requiredElectiveCredits: 20, defaultMinPassingGrade: 4 }` y `isActive: true` sin cargar materias/reglas/siglas; `createSchedule` solo incrementa versión de catálogo y audita sin cargar horarios reales. |
+| `server/src/modules/catalog/catalog.controller.ts` | L253–264 `getSchedule` usa año por defecto `2026` y su fallback `isCurrent` no filtra por `eq(scheduleTerms.facultyId, career.facultyId)`; L518–527 `updateSelectedPlan` permite elegir planes sin validar si están publicados. |
+| `server/src/app.ts` | L110 `/api/me/reviewable` acepta `req.query.planId` en lugar de imponer el plan activo del usuario. |
+| `server/src/modules/enrollments/enrollments.routes.ts` | L17 y L30 aceptan `req.query.planId` arbitrario. |
+| `server/src/modules/library/library.controller.ts` | L29 toma `(req.query.planId as string) || req.user?.selectedPlanId` sin impedir consulta cross-plan no autorizada. |
+| `server/src/modules/professors/professors.routes.ts` | L32, L59, L77, L97 aceptan `req.query.planId` sin validar que coincida con el plan activo del usuario. |
+| `server/src/modules/reviews/reviews.store.ts` | L714 vs L729 `getSubjectByIdOrCode` filtra por `planId` cuando recibe `codeInPlan` numérico, pero omite `eq(subjects.planId, planId)` cuando recibe un UUID de materia; `InMemoryReviewsStore` siembra por defecto una sola facultad/plan. |
+| `server/src/modules/user-state/userState.controller.ts` | L410, L414, L485, L839, L861 (`updateElectives`, `updateBasket`, `importData`) eliminan registros por `userId` sin filtrar por `planId`; L1131–1137 `saveExamAttempt` omite `planId` al buscar por UUID. |
+| `server/src/modules/library/library.mailer.ts` | L201, L269, L334, L414, L450 incluyen textos fijos `"Ingeniería en Sistemas"` / `"UTN FRC"`. |
+| `server/src/scripts/importScheduleDb.ts` | L109–113 acepta `--faculty` y `--plan` pero ignora `--plan` y toma `studyPlans.isActive = true LIMIT 1`. |
+| `server/src/scripts/seed.ts`, `server/seed-data/plan2023-catalog.json`, `server/tools/generateSeedData.ts` | Upsert de plan único basado en `plan2023-catalog.json` con `intermediateDegrees` (`analista`, `specialRuleSubjectCode: 99`) y `specialRules` (`approved_range` `1..23` para `99`, `all_previous_core_approved` para `36` excluyendo `analista`), sin poblar `status` ni `sharedSubjectId`. |
+
+---
+
+## 2. Auditoría del esquema de base de datos y brechas multi-carrera
+
+El esquema en `server/src/db/schema.ts` ya posee la columna vertebral jerárquica correcta:
+`institutions -> faculties -> careers -> study_plans -> subjects / subject_prerequisites / plan_special_rules / acronyms`, además de `professors` por facultad y `schedule_terms -> commissions -> commission_slots / commission_professors`.
+
+Sin embargo, faltan piezas clave para soportar múltiples carreras y carga desde admin sin tocar código:
+
+1. **Ciclo de vida (Borrador / Publicado / Archivado) en `careers` y `study_plans`:**
+   - Hoy solo existe `isActive` booleano. Falta una columna `status` (`'draft' | 'published' | 'archived'`, default `'draft'` para cargas nuevas y backfill a `'published'` para Sistemas Plan 2023 existente) manteniendo `isActive` sincronizado por compatibilidad aditiva.
+   - Los endpoints públicos de catálogo y selección de plan deben listar/permitir exclusivamente planes con `status = 'published'`.
+2. **Configuración estructurada por plan (`study_plans.config`):**
+   - Formalizar contrato JSONB + valores por defecto claros para todo plan:
+     - `requiredElectiveCredits`: créditos de electivas requeridos para el título principal (ej. `20`, o `0` si el plan no tiene electivas).
+     - `electiveSlotsEquivalent`: peso/equivalencia de electivas en estadísticas generales (ej. `7` en Sistemas, `0` si no aplica bloque equivalente).
+     - `totalLevels` / `levelLabel` (ej. `5` y `"año"`, soportando carreras de 3, 4, 5 o 6 años/niveles).
+     - `defaultMinPassingGrade`: nota mínima aprobatoria (ej. `4` o `6`).
+     - `intermediateDegree` (opcional, `null` si la carrera no tiene título intermedio): `{ trackKey, label, shortLabel, toggleLabel, capstoneSubjectCode, minApprovedCore, requiredElectiveCredits, countsSubjectsRange }`. El interruptor en Navbar y tarjeta de título intermedio en Estadísticas **solo** se renderizan si el plan define título intermedio.
+     - `ppsRequirement` (opcional): regla/etiqueta configurable para habilitación de prácticas supervisadas si existe en el plan (no asumir ID `36`).
+     - `shortTag` / etiqueta para exportaciones (reemplazando `"UTN ISI (Plan 2023)"`).
+3. **Reglas especiales genéricas (`plan_special_rules`):**
+   - Deben parametrizar completamente reglas por códigos del plan (`codeInPlan` / `subjectId`), por ejemplo:
+     - `approved_range`: requiere entre `N` y `M` materias aprobadas de un rango/lista del plan (ej. `"Seminario: 1 a 23 aprobadas"`).
+     - `all_previous_core_approved`: requiere todas las obligatorias previas aprobadas hasta cierto nivel o excluyendo tracks/códigos opcionales (ej. `"Proyecto Final"` excluyendo track intermedio).
+     - `min_credits`: requiere mínimo de créditos acumulados.
+4. **Identificación estable de materias y siglas en `subjects`:**
+   - Asegurar código estable de plantilla (`codeInPlan` / `externalCode`) único por `plan_id` para que re-importar el mismo plan actualice en forma idempotente en lugar de duplicar materias.
+   - Permitir sigla corta (`shortName`) y alias por materia en catálogo para nutrir `ScheduleWeeklyGrid`, buscador y chips sin mapas hardcoded.
+5. **Pertenencia de usuario al plan (`users.selected_plan_id`):**
+   - La columna ya existe, pero:
+     - Debe garantizarse que todos los usuarios actuales queden vinculados a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)**.
+     - Registro y login Google deben requerir o resolver válidamente un `selectedPlanId` publicado (manteniendo retrocompatibilidad en clientes que no lo envíen todavía si hay un único plan publicado o fallback explícito).
+6. **Períodos horarios por facultad / plan (`schedule_terms` y `commissions`):**
+   - Un período horario (`faculty_id`, `academic_year`, `term`) pertenece a una facultad, mientras cada `commission` apunta a un `subject_id` (y por tanto pertenece unívocamente a un `study_plan`).
+   - El resolver `getSchedule` debe filtrar `schedule_terms` siempre por la `faculty_id` de la carrera del plan activo del usuario y devolver únicamente las comisiones cuyas materias pertenecen a ese `plan_id`.
+
+---
+
+## 3. Auditoría de estado del usuario y aislamiento entre planes
+
+### 3.1 Cómo se persiste hoy el estado del usuario
+- **Estados de materias (`user_subject_states`), notas/intentos (`exam_attempts`), electivas asignadas y canasta:** ya referencian `subject_id` (UUID de fila en `subjects`, la cual pertenece a un único `plan_id`) + `user_id`. Esto es favorable porque distintas carreras tendrán `subject_id` distintos.
+- **Cursadas (`enrollments`) y reseñas (`reviews`):** vinculadas a `subject_id` (y `professors.id` por facultad en reseñas).
+- **Puntos rotos / con riesgo de colisión entre planes:**
+  1. `user_settings`: su clave primaria actual es solo `user_id` (y tiene columna fija `include_analista_track`). Si un usuario cambia de carrera/plan y ajusta sus preferencias (ej. ocultar un track intermedio o configurar preferencias del grafo), sobrescribiría la configuración de su primer plan. **Estrategia de migración segura (sin cambiar la PK de golpe):**
+     - **Paso 1 (Etapa 1A):** agregar columna `plan_id` **nullable** en `user_settings` (FK -> `study_plans.id`).
+     - **Paso 2 (Etapa 1A):** hacer backfill de todas las filas existentes al `id` de Sistemas Plan 2023 (o `users.selected_plan_id` si ya existe), manteniendo integridad sin romper escrituras previas.
+     - **Paso 3 (Etapa 1A):** crear índice único compuesto `(user_id, plan_id)` y adaptar la aplicación/consultas para leer/escribir por `(user_id, plan_id)`.
+     - **Paso 4 (paso posterior explícito tras validar en rama Neon):** una vez verificado en producción/staging que no hay filas con `plan_id IS NULL` ni clientes viejos dependientes de la PK simple, retirar en migración posterior explícita la PK vieja solo-`user_id` y promover `(user_id, plan_id)` (eventualmente retirando `include_analista_track` legacy si ya no se usa).
+  2. `schedule_selections` (`uq_user_schedule_selection`) y `schedule_proposals`: están indexados solo por `(user_id, schedule_term_id)` sin `plan_id`. En una misma facultad y cuatrimestre (`schedule_term_id` compartido), cambiar de carrera mezclaría o borraría la propuesta horaria del otro plan.
+  3. **Borrados sin filtro de `planId` en `userState.controller.ts`:** `updateElectives`, `updateBasket` e `importData` eliminan registros filtrando únicamente por `userId`. Si un usuario tiene progreso en Plan A y guarda cambios en Plan B, **perdería el progreso de electivas/canasta/materias del Plan A**.
+  4. **Consultas cross-plan sin autorización:** `app.ts` (`/api/me/reviewable`), `enrollments.routes.ts`, `library.controller.ts`, `professors.routes.ts` aceptan `?planId=` desde query string; y `reviews.store.ts` (`getSubjectByIdOrCode`) + `userState.controller.ts` (`saveExamAttempt`) aceptan un UUID de `subjectId` sin exigir `subjects.planId === req.user.selectedPlanId`.
+  5. **Otros bugs detectados en backend:** `admin.service.ts` fija `adminsCount: 1`, `totalSubjects: 45` y `planName = 'Plan 2023'`; `catalog.controller.ts` no filtra `scheduleTerms` por `facultyId` en `getSchedule`, usa año `2026` por defecto, y `updateSelectedPlan` no valida que el plan exista **y** esté en estado publicado.
+  6. **`localStorage` en frontend (`src/utils/storage.ts`):** las claves no incluyen `planId`, por lo que en modo invitado o migración inicial mezclarían estados de carreras distintas.
+
+### 3.2 Regla de aislamiento obligatorio (Etapa 1A)
+- Toda lectura y escritura de estado académico, horarios, reseñas, cursadas y biblioteca del usuario autenticado se acota en el **backend** exclusivamente a `req.user.selectedPlanId` (salvo endpoints explícitos de `/api/admin/*`).
+- Todos los endpoints que reciben `planId`, `subjectId` o cualquier UUID de entidad del plan deben verificar que pertenezcan al plan activo del usuario (`req.user.selectedPlanId`), rechazando con `403`/`404` cualquier acceso a otro plan.
+- Al cambiar de plan (`PATCH /api/catalog/me/plan` o equivalente, validando existencia y estado `published`), el progreso anterior **no se borra**: cada tabla de configuración/selección/propuesta queda particionada por `(user_id, plan_id)`.
+- Requisito de prueba obligatorio en Etapa 1A: suite con **DOS planes** (Plan A y Plan B) que demuestre que guardar cambios en `updateElectives`, `updateBasket`, `importData` o borrar registros en Plan B deja intacto el 100% de los datos en Plan A.
+
+---
+
+## 4. Diseño de Biblioteca y "Materia compartida dentro de la facultad" (Ajuste al Plan)
+
+### 4.1 Situación actual e invariante de Cloudflare R2
+- En `server/src/modules/library/library.service.ts` (L356, L2270), la clave en R2 se construye como:
+  ```text
+  storageKey = `library/${fileId}${ext}`
+  ```
+- **Resultado crítico:** las claves de objetos en Cloudflare R2 **no contienen** `subjectId`, `planId`, `careerId` ni `facultyId`. No hace falta mover, copiar ni renombrar ningún objeto ya almacenado en R2.
+
+### 4.2 Modelo de materia compartida dentro de la misma facultad
+Para que materias equivalentes entre carreras o planes de una **misma facultad** (por ejemplo, *Análisis Matemático I*, *Álgebra y Geometría Analítica* o *Física I* en UTN FRC) compartan apuntes, parciales y finales sin duplicar archivos ni colapsar por homonimias automáticas:
+
+1. **Nueva entidad `shared_subjects`:**
+   - Campos: `id` (UUID), `faculty_id` (FK a `faculties`), `stable_code` (código estable alfanumérico/slug), `normalized_name` (nombre normalizado sin tildes ni puntuación), `display_name`, `created_at`, `updated_at`.
+   - **Restricción única:** `UNIQUE (faculty_id, stable_code)` (NO única por `normalized_name`).
+   - **Índice de sugerencia:** índice **NO único** sobre `(faculty_id, normalized_name)`, utilizado únicamente como heurística de sugerencia al administrador.
+2. **Vínculo en `subjects` (nunca automático por nombre):**
+   - Nueva columna nullable `shared_subject_id` (FK -> `shared_subjects.id`) en `subjects`.
+   - **Regla estricta de vinculación:** **nunca** se vinculan materias por nombre de forma automática. Durante el dry-run de la carga de planes (Etapa 2), el backend solo **sugiere** coincidencias posibles dentro de la misma facultad; cada vínculo a un `shared_subject_id` existente (o la creación de uno nuevo) debe ser **confirmado explícitamente por el admin**.
+   - **Excepción única:** el backfill idempotente de la migración `0008` crea una `shared_subject` **1 a 1** por cada materia existente de Sistemas Plan 2023 (generando su `stable_code` a partir del código estable de la materia en el plan).
+3. **Vínculo e historial de origen en `library_files` y cuotas estrictamente POR USUARIO:**
+   - Agregar `shared_subject_id` (FK -> `shared_subjects.id`) y metadatos de origen `source_subject_id` / `source_plan_id` (backfilled desde `library_files.subject_id` actual).
+   - **Lo que SÍ se agrupa por `shared_subject_id`:** listado público de archivos de la materia, contadores de material disponible por materia, filtros de Biblioteca de esa materia y detección de duplicados por hash `SHA-256`.
+   - **Cuotas y límites estrictamente POR USUARIO (NUNCA por materia compartida):** todos los límites vigentes —`25 MB` por PDF, `10 MB` por imagen, `300 MB` de espacio total por usuario, `5` subidas por día, `10` archivos pendientes y `60` descargas por hora— se evalúan exclusivamente por `user_id`. Un usuario de la carrera B jamás queda limitado o bloqueado por el volumen, cantidad diaria o descargas de usuarios de la carrera A aunque compartan `shared_subject_id` (verificado con tests dedicados).
+   - **Etiqueta informativa sin romper privacidad:** la ficha pública del archivo muestra el origen académico (ej. *"Aportado en Ing. en Sistemas (Plan 2023)"* cuando proviene de otra carrera/plan de la facultad) conservando siempre el anonimato del autor (`"Subido por un estudiante"`, jamás exponiendo nombre, legajo ni email en rutas no-admin).
+   - **Validación de pertenencia:** el usuario solo puede listar, descargar o subir material para materias pertenecientes a su **plan activo** (`subjects.plan_id === req.user.selectedPlanId`), pero al hacerlo ve y aporta al repositorio de su `shared_subject_id` dentro de su facultad.
+4. **Límites y alcance futuro (fuera de esta iteración):**
+   - El compartimiento entre **distintas facultades** (ej. dos regionales distintas) queda **fuera de alcance** por ahora para evitar diferencias de programa/cátedra; se documenta explícitamente como mejora futura.
+
+### 4.3 Pregunta abierta de diseño: ¿unificar también reseñas en materias compartidas?
+- **Estado actual planificado (Etapas 1–4):** `professors` ya es único por facultad, mientras que `reviews` sigue exigiendo que el usuario haya regularizado/aprobado/promocionado la `subjects.id` específica de **su plan** (y asociándose a esa `subject_id`).
+- **Pros de unificar reseñas por `shared_subject_id` en el futuro:** concentra opiniones cuando un mismo docente dicta la misma materia de ciclo básico para varias ingenierías, evitando perfiles fragmentados.
+- **Contras:** diferentes carreras pueden tener distintos programas analíticos, profundidad o régimen de aprobación aunque el nombre coincida, y un admin podría requerir gestión granular de equivalencias antes de fusionar reseñas.
+- **Decisión propuesta:** mantener `reviews` ligadas a `subjects.id` (validado contra `planId` activo) en Etapas 1–4 y conservar `professors` por facultad; evaluar unificación opcional en un filtro posterior en UI/backend una vez operen varias carreras.
+
+---
+
+## 5. Riesgos para usuarios actuales (Sistemas Plan 2023) y estado de línea base
+
+### 5.1 Riesgos y mitigaciones
+
+| Riesgo | Impacto en usuarios actuales | Mitigación |
+|---|---|---|
+| **Migración parcial de `users.selected_plan_id` o `user_settings`** | Usuarios antiguos ven pantalla de elegir plan o pierden su flag `include_analista_track`. | Migración SQL idempotente asigna `selected_plan_id` de Sistemas Plan 2023 (marcado `status = 'published'`) a todo usuario con `NULL` y migra `user_settings` existentes a `(user_id, plan_id)`. |
+| **Pérdida silenciosa de progreso al cambiar de plan** | Al usar `updateElectives` / `updateBasket` / `importData` o `schedule_selections` sin `plan_id`, se borran datos de Sistemas al probar otra carrera. | Acotar todo `DELETE` y clave de `schedule_selections` / `schedule_proposals` / `user_settings` por `(user_id, plan_id)`, con tests dedicados de aislamiento cross-plan. |
+| **Diferencias numéricas en estadísticas o elegibilidad de Sistemas** | Cambio involuntario en cálculo de promedio, créditos de electivas (`20`), bloque equivalente (`7`), regla `99` (`1..23`) o `36` (`PPS` / `Proyecto Final`). | Suite de regresión en Etapa 1 que compara salida byte-a-byte / estructura exacta para Sistemas Plan 2023 contra la línea base actual. |
+| **Ruptura de URLs / claves R2 en Biblioteca** | Archivos históricos dejan de encontrarse o descargarse. | Cero cambios en `storageKey` de R2 (`library/${fileId}${ext}`); backfill aditivo de `shared_subjects` y `library_files.shared_subject_id`. |
+| **Inyección o DoS en subida de Excel desde admin** | Fórmulas maliciosas, archivos enormes o ciclos en correlativas cuelgan el servidor. | Validación de `.xlsx` por extensión + firma ZIP, límite `5 MB`, lectura exclusiva de valores sin evaluar fórmulas ni macros, detección DFS de ciclos, límite de filas, `requireAdmin` + `requireRecentReauth` + `adminRateLimiter` + `adminAuditLog`. |
+| **Despublicación o borrado accidental de plan con alumnos** | Estudiantes quedan huérfanos sin plan activo. | Prohibir borrado/despublicación con usuarios activos sin confirmación explícita informando la cantidad exacta de usuarios afectados en `/#admin`. |
+
+### 5.2 Línea base real verificada y auditoría de seguridad (Paso Previo)
+
+#### A. Origen de rama y verificación de entorno de tests
+- **Historial Git (`git log --oneline --graph --decorate -n 15`):** `multicarrera` nació de `master` en el commit `bbbf257` (*"suba masiva de archivos"*). La Biblioteca (migración `0005_library_material.sql`, `0006_library_notifications.sql`, `library.service.ts`) ya estaba integrada en `master` desde `0dbc5c1` (*"Merge pull request #1 from Thiagopgnqn/biblioteca"*), y `0007_enrollment_status_and_exam_attempts.sql` desde `c126d81`. Última migración existente confirmada: `0007`.
+- **Aislamiento de credenciales (`.env` / Neon / R2):**
+  - Verificado en el repositorio y entorno de ejecución: no existen archivos `.env`, `server/.env`, `server/.env.test` ni `.env.local` (solo `.env.example` y `server/.env.example`), ni variables `DATABASE_URL`, `DIRECT_URL` o `R2_*` definidas en el shell.
+  - Los 12 archivos de test en `test/*.test.ts` operan sobre código cliente/estático o mocks sin base de datos ni R2 real.
+  - En `npm --prefix server test` (`reviews.test.ts`, `authVerification.test.ts`, `admin.test.ts`, `library.test.ts`), los suites fijan `NODE_ENV = 'test'` y `DATABASE_URL = 'postgresql://offline:offline@localhost:5432/offline_test'`, utilizando stores en memoria (`InMemoryReviewsStore`, `InMemoryLibraryService`, `MemoryMockR2Service`). Solo `server/test/integration.test.ts` (exclusivo de `npm --prefix server run test:neon`, no incluido en `test`) usa PostgreSQL real.
+  - **Riesgo técnico detectado a endurecer en Etapa 1A:** `server/src/config/env.ts` (L4) invoca `dotenv.config()` al cargarse el módulo; si existiera un `.env` local y un test usara `import` estáticos (como `library.test.ts`), ESM evalúa `env.ts` antes de las líneas top-level `process.env.*`. Se corregirá en Etapa 1A omitiendo `dotenv.config()` cuando `NODE_ENV === 'test'` o pasando imports a dinámicos.
+
+#### B. Builds de línea base (`server` y raíz)
+Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packages`, `server/node_modules` ignorado por `.gitignore`):
+- **`npm --prefix server run build` (`tsc`):** ✅ **COMPILÓ OK** (código de salida `0`).
+- **`npm run build` (`tsc -b && vite build`):** ✅ **COMPILÓ OK** (código de salida `0`, `2606` módulos transformados).
+
+#### C. Línea base real de tests (antes y después de corregir rutas fijas)
+
+**Backend (`npm --prefix server test`):** ejecuta 4 archivos en cadena (`reviews.test.ts`, `authVerification.test.ts`, `admin.test.ts`, `library.test.ts`):
+- `server/test/reviews.test.ts`: **85 pasaron, 0 fallaron** (warning inicial en stderr por `REFRESH_SECRET` no seteado).
+- `server/test/authVerification.test.ts`: **51 pasaron, 0 fallaron** (warning inicial en stderr por `REFRESH_SECRET` no seteado).
+- `server/test/admin.test.ts`: **37 pasaron, 0 fallaron** (0 warnings).
+- `server/test/library.test.ts`: **13 pasaron, 9 fallaron + error fatal en línea 355** (`TypeError: Cannot read properties of undefined (reading 'uploadUrl')`, dejando el resto de los `149` asserts sin ejecutar).
+  - **Causa raíz preexistente (sin tocar en Paso Previo):** `library.test.ts` usa `import` estáticos (L11–35), por lo que en ESM `env.ts` se evalúa *antes* de L2–6 (`process.env.JWT_SECRET = ...`, `DATABASE_URL = ...`) y sin `REFRESH_SECRET`; `env.ts` termina usando el secreto fallback `'dev_jwt_secret_change_in_production_min_16_chars'` mientras `library.test.ts` firma los JWT con `process.env.JWT_SECRET`, provocando `401` en las rutas autenticadas. Se reparará en Etapa 1A.
+- **Total backend observado:** `186` aserciones pasadas, `9` falladas + `1` aborto fatal en `library.test.ts` (`server/test/integration.test.ts` no se ejecuta en `test`, corresponde a `test:neon`).
+
+**Frontend (`npm test`):** ejecuta 12 archivos en cadena:
+- **Antes de corregir rutas (`c:/Users/msgar/OneDrive/Escritorio/codigos/corre`):**
+  - `scheduleLayout.test.ts`: **0 pasaron, 6 fallaron** (`ENOENT`).
+  - `mobileFrontend.test.ts`: **4 pasaron, 33 fallaron** (`ENOENT` por ruta de otra máquina).
+- **Después de corregir únicamente `rootDir` relativo al archivo con `fileURLToPath(import.meta.url)` en [scheduleLayout.test.ts](file:///c:/Users/PC/Desktop/correlativas/test/scheduleLayout.test.ts) y [mobileFrontend.test.ts](file:///c:/Users/PC/Desktop/correlativas/test/mobileFrontend.test.ts) (sin tocar aserciones):** **`npm test` completo PASÓ con código de salida `0`:**
+  1. `test/correlativas.test.ts`: ✅ **pasó** (runner propio; `106` llamadas `assert` en código).
+  2. `test/scheduleImport.test.ts`: ✅ **pasó** (runner propio; `84` llamadas `assert` en código; `337` comisiones, `29` slots reservados).
+  3. `test/reviewsFrontend.test.ts`: ✅ **pasó** (runner propio; `75` llamadas `assert` en código).
+  4. `test/authFrontend.test.ts`: ✅ **pasó** (runner propio; `19` llamadas `assert` en código; `4` bloques verificados).
+  5. `test/brand.test.ts`: ✅ **`33` pasaron, `0` fallaron**.
+  6. `test/scheduleLayout.test.ts`: ✅ **`6` pasaron, `0` fallaron**.
+  7. `test/adminFrontend.test.ts`: ✅ **pasó** (`6` secciones en verde; `24` llamadas `assert` en código).
+  8. `test/libraryFrontend.test.ts`: ✅ **`31` pasaron, `0` fallaron**.
+  9. `test/mobileFrontend.test.ts`: ✅ **`37` pasaron, `0` fallaron**.
+  10. `test/apiContract.test.ts`: ✅ **`2` pasaron, `0` fallaron**.
+  11. `test/scheduleAvailability.test.ts`: ✅ **`13` pasaron, `0` fallaron**.
+  12. `test/tutorialLayout.test.ts`: ✅ **`12` pasaron, `0` fallaron**.
+- **Resumen frontend actual:** **12 / 12 archivos en verde** (`134` casos contabilizados explícitamente en runners estructurados + `6` secciones admin + `284` aserciones en los 4 runners simples, **0 fallos**).
+
+#### D. Auditoría de seguridad de SheetJS (`xlsx`) antes de Etapa 2
+- **Versión instalada (raíz y `server/`):** `xlsx@0.18.5`.
+- **Resultados de `npm audit --json` (raíz y `server/`):**
+  - En raíz (`1` vulnerabilidad total, **high**): `xlsx` tiene **2 avisos HIGH** sin parche en npmjs.com (`fixAvailable: false`):
+    1. `GHSA-4r6h-8v6p-xvw6` (**Prototype Pollution in sheetJS**, `<0.19.3`, CVSS `7.8`, CWE-1321).
+    2. `GHSA-5pgg-2g8v-p4x9` (**SheetJS Regular Expression Denial of Service (ReDoS)**, `<0.20.2`, CVSS `7.5`, CWE-1333).
+  - En `server/` (`7` vulnerabilidades totales: `4` moderate, `3` high): incluye los mismos 2 avisos HIGH de `xlsx@0.18.5` (`fixAvailable: false`), además de `drizzle-orm` `<0.45.2` (high), `zod` `<4.6.6` (high) y `drizzle-kit` / `esbuild` / `@esbuild-kit/*` (moderate).
+- **Mitigación propuesta (requiere aprobación explícita antes de codear Etapa 2):**
+  1. **Reemplazar el parser `.xlsx` en backend** para subidas del admin en lugar de exponer `xlsx@0.18.5` de npm al parsing de archivos subidos (alternativas: `exceljs` auditado sin esos CVEs / parser ZIP+XML dedicado OOXML de solo lectura para hojas y celdas planas, o instalación verificada de SheetJS `0.20.2+` desde tarball oficial con integridad `sha256` si se desea conservar la API).
+  2. **Endurecimiento en capas:** límite de archivo `5 MB`, verificación de firma ZIP (`PK`), tope estricto de hojas (<= `10`), filas por hoja (<= `2000`), columnas y longitud de celda, lectura exclusiva de valores escalares sin fórmulas ni macros, objetos sin prototipo (`Object.create(null)`) y whitelist de columnas.
+  3. **Aislamiento de proceso + timeout:** ejecutar el parseo del `.xlsx` subido en un **proceso/worker aislado (`worker_threads` / subproceso dedicado sin acceso a `env`, BD ni red)** con timeout máximo (ej. `5000 ms`) y tope de memoria para neutralizar cualquier ReDoS o bloqueo del event loop principal.
+
+---
+
+## 6. Plan de implementación por etapas (1A, 1B, 2, 3, 4 y 5)
+
+> Cada etapa termina con un **commit dedicado en `multicarrera`** (sin `git push`), reporte de archivos modificados y resultados reales de tests/builds, y **freno esperando aprobación**.
+
+### ETAPA 1A – Base de datos, aislamiento cross-plan y generalización de backend
+**Objetivos:**
+- Migración SQL aditiva e idempotente `server/drizzle/0008_multicarrera_and_shared_subjects.sql` (+ actualización de `server/src/db/schema.ts` y `server/drizzle/meta/_journal.json`):
+  - Agregar `status` (`'draft' | 'published' | 'archived'`) a `careers` y `study_plans`, backfilling los registros actuales de Sistemas Plan 2023 a `'published'`.
+  - Estandarizar `study_plans.config` (créditos de electivas requeridos, `electiveSlotsEquivalent`, `totalLevels`, `levelLabel`, `intermediateDegree` opcional, `ppsRequirement` opcional, `shortTag`) y columnas en `subjects` (`short_name`, `shared_subject_id`).
+  - Crear `shared_subjects` con unicidad `UNIQUE (faculty_id, stable_code)` e índice **NO único** `(faculty_id, normalized_name)`; agregar `shared_subject_id`, `source_subject_id`, `source_plan_id` a `library_files`. Backfill **1 a 1** idempotente de las materias existentes de Sistemas Plan 2023 y sus archivos en Biblioteca (sin tocar claves `library/${fileId}${ext}` de R2).
+  - Backfill de `users.selected_plan_id` a Ing. en Sistemas Plan 2023 para todo usuario existente sin plan asignado.
+  - **`user_settings` sin cambiar PK de golpe:** agregar `plan_id` **nullable**, backfillear al plan de Sistemas Plan 2023 / `users.selected_plan_id`, y crear índice único `(user_id, plan_id)`. Documentar explícitamente el paso posterior futuro para retirar la PK legacy una vez validado en rama de Neon.
+  - Agregar `plan_id` nullable + backfill + índices por `(user_id, plan_id, schedule_term_id)` en `schedule_selections` y `schedule_proposals`.
+- **Blindaje cross-plan obligatorio en backend:**
+  - `updateElectives`, `updateBasket`, `importData` y cualquier borrado actúan **solo** sobre `req.user.selectedPlanId`.
+  - Todos los endpoints que reciban `planId`, `subjectId` o UUIDs de cursadas/intentos/reseñas/materias verifican pertenencia al plan activo del usuario (`req.user.selectedPlanId`).
+  - Corregir bugs detectados: `adminsCount` y `totalSubjects` reales en `admin.service.ts` (y fallback de `planName` desde BD), filtro obligatorio por `facultyId` y año dinámico en `getSchedule` (`catalog.controller.ts`), y validación de existencia + estado `'published'` en `updateSelectedPlan`.
+- **Biblioteca por materia compartida + cuotas por usuario:**
+  - Agrupar listado, contadores y detección de duplicados `SHA-256` por `shared_subject_id`, manteniendo **todas las cuotas y límites por usuario** (`user_id`), nunca compartidos entre usuarios de distintas carreras.
+- **Saneamiento de tests de backend preexistentes:**
+  - Evitar que `server/src/config/env.ts` lea `.env` cuando `NODE_ENV === 'test'` y corregir `server/test/library.test.ts` (`REFRESH_SECRET` + imports dinámicos tras configurar env mock) para dejar el suite backend 100% en verde.
+- **Tests obligatorios de Etapa 1A:**
+  - Test de migración de usuarios existentes hacia Sistemas Plan 2023 conservando datos y configuración.
+  - Test con **DOS planes (Plan A y Plan B)** demostrando que `updateElectives`, `updateBasket`, `importData` y borrados en Plan B no alteran ni pierden datos en Plan A, y que endpoints rechazan UUIDs/`planId` ajenos al plan activo.
+  - Test de Biblioteca compartida intra-facultad: usuario de carrera B no queda limitado por cuotas/subidas de usuario de carrera A, ni ve identidad del autor.
+
+**Archivos principales a tocar / crear:**
+- `server/drizzle/0008_multicarrera_and_shared_subjects.sql` (nuevo)
+- `server/drizzle/meta/_journal.json`
+- `server/src/db/schema.ts`
+- `server/src/config/env.ts`
+- `server/src/app.ts`
+- `server/src/modules/auth/auth.service.ts`, `auth.schemas.ts`
+- `server/src/modules/catalog/catalog.controller.ts`, `catalog.routes.ts`
+- `server/src/modules/user-state/userState.controller.ts`
+- `server/src/modules/enrollments/enrollments.routes.ts`, `enrollments.service.ts`
+- `server/src/modules/professors/professors.routes.ts`
+- `server/src/modules/reviews/reviews.store.ts`, `reviews.service.ts`
+- `server/src/modules/library/library.controller.ts`, `library.service.ts`, `library.mailer.ts`
+- `server/src/modules/admin/admin.service.ts`, `admin.controller.ts`
+- `server/src/scripts/seed.ts`, `server/seed-data/plan2023-catalog.json`
+- `server/test/library.test.ts` y nuevos tests de migración/aislamiento dos-planes (`server/test/multicarreraIsolation.test.ts`).
+
+---
+
+### ETAPA 1B – Generalización del motor y estado frontend
+**Objetivos:**
+- Generalizar el motor puro y reglas de negocio en frontend para consumir dinámicamente el catálogo y reglas del plan activo (`study_plans.config`, `plan_special_rules`, `subjects`, `acronyms`), eliminando IDs fijos (`99`, `36`, `1..23`, `7`, `20`) y supuestos de 5 años en la lógica:
+  - `src/types/career.ts`, `src/types/library.ts`
+  - `src/utils/correlativas.ts` (evaluador genérico de `approved_range`, `all_previous_core_approved`, `min_credits`, títulos intermedios opcionales)
+  - `src/utils/criticalPath.ts`
+  - `src/utils/storage.ts` (claves de `localStorage` segmentadas por `planId` + migración automática no destructiva del `localStorage` legado hacia el plan actual de Sistemas Plan 2023)
+  - `src/context/CareerContext.tsx`, `src/api/catalog.api.ts`, `src/api/userState.api.ts` (lectura completa de materias, correlativas, siglas y config del plan activo).
+- Agregar suite de **regresión para Sistemas Plan 2023** que garantice resultados idénticos al comportamiento original (mismas materias, correlativas, elegibilidades, camino crítico, estadísticas y exportaciones).
+
+**Archivos principales a tocar / crear:**
+- `src/types/career.ts`, `src/types/library.ts`
+- `src/utils/correlativas.ts`, `src/utils/criticalPath.ts`, `src/utils/storage.ts`
+- `src/context/CareerContext.tsx`
+- `src/api/catalog.api.ts`, `src/api/userState.api.ts`
+- `test/correlativas.test.ts` (ampliación con regresión Plan 2023 + segundo plan dinámico) y tests de migración de `storage.ts`.
+
+---
+
+### ETAPA 2 – Carga de plan de estudios desde el admin *(requiere aprobación previa de mitigación Excel)*
+**Prerrequisito bloqueante:** aprobación explícita del enfoque de seguridad para reemplazo/aislamiento de `xlsx@0.18.5` (ver Sección 5.2 D).
+
+**Objetivos:**
+- Diseñar e implementar plantilla `.xlsx` descargable desde `/#admin` (hojas: `"Carrera"`, `"Materias"`, `"Correlativas"`, `"Reglas"`, con fila de ejemplo y notas de ayuda).
+- Backend admin:
+  - `GET /api/admin/careers/template` (descarga `.xlsx` generado).
+  - `POST /api/admin/careers/import/preview` (dry-run sin escrituras: conteo de materias/correlativas/reglas, **solo sugerencias** de equivalencia contra `shared_subjects` existentes de la facultad por `normalized_name` sin vincular jamás de forma automática, errores bloqueantes con hoja y fila —duplicados, ciclos DFS en correlativas, destino inexistente, campos obligatorios vacíos, niveles inválidos— y avisos no bloqueantes).
+  - `POST /api/admin/careers/import/confirm` (una única transacción todo-o-nada, deja el plan en estado `draft`, actualización idempotente por código estable de materia en el plan, y aplica únicamente los vínculos a `shared_subjects` **confirmados manualmente por el admin** o crea nuevos `shared_subjects` por `stable_code`).
+  - Acciones de ciclo de vida en admin: listar carreras/planes con conteo de usuarios activos, detalle de plan con mapa visual de correlativas, `publish` / `unpublish` / `delete` exigiendo confirmación explícita si existen usuarios activos en ese plan.
+  - Seguridad estricta: `requireAdmin`, `requireRecentReauth`, `adminRateLimiter`, límite `5 MB`, parser OOXML endurecido + worker/proceso aislado con timeout, validación estricta de cada celda, sin evaluar fórmulas ni macros, y registro en `admin_audit_log`.
+- Documentar los nuevos endpoints en `docs/api-multicarrera.md`.
+- Frontend: nueva pestaña `"Carreras"` en `AdminDashboard.tsx` (descarga plantilla, subida, vista previa con errores/avisos y selector explícito para confirmar cada sugerencia de `shared_subjects`, confirmación, publicación/despublicación y vista de detalle con `CorrelativeGraph`).
+- Tests de backend del parser, detección de ciclos, dry-run (incluyendo no-autovinculación), idempotencia transaccional y guardias de seguridad.
+
+**Archivos principales a tocar / crear:**
+- `docs/api-multicarrera.md` (nuevo)
+- `server/src/modules/admin/planImport.parser.ts`, `planImport.service.ts` (nuevos)
+- `server/src/modules/admin/admin.controller.ts`, `admin.routes.ts`, `admin.service.ts`
+- `src/api/admin.api.ts`
+- `src/components/admin/AdminDashboard.tsx`
+- `src/components/admin/tabs/AdminCareersTab.tsx` (nuevo)
+- `src/components/graph/CorrelativeGraph.tsx` (modo lectura preview en detalle admin)
+- `server/test/planImport.test.ts` (nuevo) y ampliación de `test/adminFrontend.test.ts`.
+
+---
+
+### ETAPA 3 – Carga de horarios, comisiones y profesores desde el admin
+**Objetivos:**
+- Definir plantilla `.xlsx` canónica de horarios independiente de Sistemas (manteniendo intacto el importador legacy actual para Sistemas Plan 2023):
+  - Hojas `"Período"`, `"Comisiones"`, `"Slots"` (`LUN`..`SAB`, `HH:MM`, aula opcional, `anual`/`1C`/`2C`), `"Docentes"` (con rol opcional).
+- Unificación y desambiguación de profesores **por facultad**:
+  - Reutilizar `professorNormalizer.ts` / `professorResolver.ts` y lógica de `mergeProfessors.ts`.
+  - En vista previa: separar coincidencias exactas (vinculación automática), coincidencias dudosas (el admin elige manualmente vincular a docente existente o crear nuevo; nunca autounificar ante duda) y docentes nuevos; preservar intactas las reseñas históricas.
+- Dry-run (validando materia inexistente en el plan, solapamientos de slots dentro de la misma comisión, horas inválidas / fin menor a inicio, períodos) + confirmación en una única transacción con reautenticación, auditoría, límites de tamaño/formato y rate limit (usando el mismo parser endurecido y aislado).
+- Corregir `importScheduleDb.ts` para respetar `--plan` cuando se invoque por CLI.
+- Frontend en pestaña `"Carreras"` -> sección `"Horarios"` por plan/período: descarga de plantilla canónica, preview, selector interactivo para resolver docentes dudosos, listado de períodos cargados y confirmación.
+- Tests con fixture completo de una **segunda carrera ficticia**, validando además que `scheduleLogic` (armador de horarios, detector de choques y sugeridor de combinaciones) funciona correctamente con un plan distinto a Sistemas.
+
+**Archivos principales a tocar / crear:**
+- `docs/api-multicarrera.md` (actualización con endpoints de importación de horarios)
+- `server/src/modules/admin/scheduleImport.parser.ts`, `scheduleImport.service.ts` (nuevos)
+- `server/src/modules/admin/admin.controller.ts`, `admin.routes.ts`
+- `server/src/scripts/importScheduleDb.ts`
+- `src/api/admin.api.ts`
+- `src/components/admin/tabs/AdminCareersTab.tsx` y subcomponentes de preview/resolución de docentes
+- `src/components/admin/tabs/AdminScheduleTab.tsx` (mantener herramientas existentes sin romperlas)
+- `server/test/scheduleCanonImport.test.ts` (nuevo) y tests frontend de armador con fixture multi-carrera.
+
+---
+
+### ETAPA 4 – Experiencia del usuario multi-carrera
+**Objetivos:**
+- Registro / primer ingreso (email y Google): selección de carrera/plan entre los planes `published`. Usuarios actuales permanecen en Sistemas Plan 2023 y disponen de cambio de plan en `UserMenu` / perfil.
+- Flujo seguro de cambio de plan en `PlanSelectorModal.tsx`: **comparar por `plan.id` (no por `plan.name`)**, explicar claramente que el progreso es por plan y no se mezcla ni se pierde, exigir confirmación explícita y recargar estado aislado del nuevo plan (incluyendo namespace por `planId` en `localStorage`).
+- Generalizar todas las pantallas y textos visibles de usuario: Mapa (`CorrelativeGraph`), `SubjectDrawer`, `SubjectListView`, `KanbanBoard`, `SemesterPlanner`, `ElectivesPicker`, `StatsDashboard`, `ScheduleBuilder` / `ScheduleWeeklyGrid` / `ScheduleSummaryPanel`, `ProfessorsDirectory`, `LibraryHome` / `SubjectLibraryView` / `LibraryTermsPage`, `Navbar`, `SearchModal`, `OnboardingModal` y `tutorialSteps.ts`. Eliminar textos fijos de `"Sistemas"` / `"Plan 2023"`.
+- Biblioteca compartida intra-facultad en UI y backend: mostrar materiales de la materia compartida en la facultad con etiqueta informativa de origen académico cuando aplique, manteniendo anonimato absoluto de autores y cuotas por usuario; corregir textos de `library.mailer.ts` para usar datos reales de carrera/facultad.
+- Reseñas: mantener profesores únicos por facultad y validar en backend que el usuario tenga la materia regularizada/aprobada/promocionada dentro de su plan activo.
+- Verificar diseño mobile intacto (barra inferior de 5 destinos: Mapa, Biblioteca, Profesores, Estadísticas, Más; Armador solo PC/tablet; panel Admin orientado a escritorio).
+
+**Archivos principales a tocar / crear:**
+- `src/components/auth/AuthScreen.tsx`
+- `src/components/common/Navbar.tsx`, `UserMenu.tsx`, `PlanSelectorModal.tsx`, `SearchModal.tsx`
+- `src/components/graph/CorrelativeGraph.tsx`, `SubjectDrawer.tsx`, `SubjectListView.tsx`
+- `src/components/kanban/KanbanBoard.tsx`
+- `src/components/planner/SemesterPlanner.tsx`
+- `src/components/electives/ElectivesPicker.tsx`
+- `src/components/stats/StatsDashboard.tsx`
+- `src/components/schedule/ScheduleBuilder.tsx`, `ScheduleWeeklyGrid.tsx`, `ScheduleSummaryPanel.tsx`
+- `src/components/professors/ProfessorsDirectory.tsx`, `ReviewFormModal.tsx`
+- `src/components/library/LibraryHome.tsx`, `SubjectLibraryView.tsx`, `UploadMaterialModal.tsx`, `MyUploadsView.tsx`, `LibraryTermsPage.tsx`
+- `src/components/onboarding/OnboardingModal.tsx`
+- `src/data/tutorialSteps.ts`
+- `src/components/admin/tabs/AdminReviewsTab.tsx`
+- `server/src/modules/library/library.service.ts`, `library.mailer.ts`.
+
+---
+
+### ETAPA 5 – Cierre, contratos y verificación integral
+**Objetivos:**
+- Actualizar/ampliar `test/apiContract.test.ts` para que falle automáticamente si el frontend invoca cualquier ruta `/api/*` inexistente en Express (incluyendo las nuevas rutas multi-carrera y admin de etapas 1–4).
+- Ejecutar suite completa de frontend y backend (`npm test`, `npm run build`, `npm --prefix server test`, `npm --prefix server run build`), contando e informando la cantidad real de tests vs la línea base inicial.
+- Completar y revisar `README.md`, `docs/api-multicarrera.md` y actualizar el estado final en `docs/plan-multicarrera.md`.
+- Entregar al usuario el listado exacto de pasos manuales para producción/staging (migraciones en rama de Neon en orden explícito incluido retiro posterior de PK legacy de `user_settings`, verificación de seed/backfill, variables de entorno si hubiera nuevas, validaciones post-deploy sin tocar nunca credenciales).
+
+**Archivos principales a tocar / crear:**
+- `test/apiContract.test.ts`
+- `README.md`
+- `docs/api-multicarrera.md`
+- `docs/plan-multicarrera.md`.
