@@ -1,8 +1,8 @@
-# Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría Etapa 0)
+# Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría y Etapa 1A)
 
-> **Estado:** Etapa 0 + Paso Previo completados (sin cambios de funcionalidad aún; pendiente aprobación para iniciar Etapa 1A).  
+> **Estado:** Etapa 1A completada en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales; **FRENADO** esperando aprobación para probar `0008` en Neon / commit de deps / pasar a Etapa 1B).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Última migración SQL existente:** `server/drizzle/0007_enrollment_status_and_exam_attempts.sql` (siguiente migración aditiva: `0008_*`)
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> nueva migración aditiva idempotente `0008_multicarrera_and_shared_subjects.sql` (pendiente de prueba del usuario en rama de Neon).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -197,15 +197,12 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
 - **`npm --prefix server run build` (`tsc`):** ✅ **COMPILÓ OK** (código de salida `0`).
 - **`npm run build` (`tsc -b && vite build`):** ✅ **COMPILÓ OK** (código de salida `0`, `2606` módulos transformados).
 
-#### C. Línea base real de tests (antes y después de corregir rutas fijas)
+#### C. Línea base real de tests (antes y después de sanear rutas y entorno de test)
 
-**Backend (`npm --prefix server test`):** ejecuta 4 archivos en cadena (`reviews.test.ts`, `authVerification.test.ts`, `admin.test.ts`, `library.test.ts`):
-- `server/test/reviews.test.ts`: **85 pasaron, 0 fallaron** (warning inicial en stderr por `REFRESH_SECRET` no seteado).
-- `server/test/authVerification.test.ts`: **51 pasaron, 0 fallaron** (warning inicial en stderr por `REFRESH_SECRET` no seteado).
-- `server/test/admin.test.ts`: **37 pasaron, 0 fallaron** (0 warnings).
-- `server/test/library.test.ts`: **13 pasaron, 9 fallaron + error fatal en línea 355** (`TypeError: Cannot read properties of undefined (reading 'uploadUrl')`, dejando el resto de los `149` asserts sin ejecutar).
-  - **Causa raíz preexistente (sin tocar en Paso Previo):** `library.test.ts` usa `import` estáticos (L11–35), por lo que en ESM `env.ts` se evalúa *antes* de L2–6 (`process.env.JWT_SECRET = ...`, `DATABASE_URL = ...`) y sin `REFRESH_SECRET`; `env.ts` termina usando el secreto fallback `'dev_jwt_secret_change_in_production_min_16_chars'` mientras `library.test.ts` firma los JWT con `process.env.JWT_SECRET`, provocando `401` en las rutas autenticadas. Se reparará en Etapa 1A.
-- **Total backend observado:** `186` aserciones pasadas, `9` falladas + `1` aborto fatal en `library.test.ts` (`server/test/integration.test.ts` no se ejecuta en `test`, corresponde a `test:neon`).
+**Backend (`npm --prefix server test`):** ejecuta la suite de backend sobre stores en memoria (sin Postgres ni R2):
+- *Línea base inicial pre-reparación:* `186` pasaron, `9` fallaron + aborto fatal en `library.test.ts` (por `env.ts` evaluando `dotenv.config()` / defaults antes del setup en ESM).
+- **Línea base saneada (pre-1A, tras aislar setup en `server/test/setupTestEnv.ts` y saltear `dotenv.config()` cuando `NODE_ENV === 'test'`):** **`320` aserciones originales pasaron, `0` fallaron** (`reviews.test.ts`: `85/0`, `authVerification.test.ts`: `51/0` + `1` test nuevo de falla obligatoria en producción sin variables requeridas -> `52/0`, `admin.test.ts`: `37/0`, `library.test.ts`: `147/0` llegando hasta su resumen final sin warnings espurios de `REFRESH_SECRET`).
+- **Con la nueva suite de Etapa 1A (`server/test/multicarreraIsolation.test.ts`, `24` aserciones):** **`345` pasaron, `0` fallaron** (`server/test/integration.test.ts` sigue reservado para `npm --prefix server run test:neon`).
 
 **Frontend (`npm test`):** ejecuta 12 archivos en cadena:
 - **Antes de corregir rutas (`c:/Users/msgar/OneDrive/Escritorio/codigos/corre`):**
@@ -226,17 +223,15 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
   12. `test/tutorialLayout.test.ts`: ✅ **`12` pasaron, `0` fallaron**.
 - **Resumen frontend actual:** **12 / 12 archivos en verde** (`134` casos contabilizados explícitamente en runners estructurados + `6` secciones admin + `284` aserciones en los 4 runners simples, **0 fallos**).
 
-#### D. Auditoría de seguridad de SheetJS (`xlsx`) antes de Etapa 2
-- **Versión instalada (raíz y `server/`):** `xlsx@0.18.5`.
-- **Resultados de `npm audit --json` (raíz y `server/`):**
-  - En raíz (`1` vulnerabilidad total, **high**): `xlsx` tiene **2 avisos HIGH** sin parche en npmjs.com (`fixAvailable: false`):
-    1. `GHSA-4r6h-8v6p-xvw6` (**Prototype Pollution in sheetJS**, `<0.19.3`, CVSS `7.8`, CWE-1321).
-    2. `GHSA-5pgg-2g8v-p4x9` (**SheetJS Regular Expression Denial of Service (ReDoS)**, `<0.20.2`, CVSS `7.5`, CWE-1333).
-  - En `server/` (`7` vulnerabilidades totales: `4` moderate, `3` high): incluye los mismos 2 avisos HIGH de `xlsx@0.18.5` (`fixAvailable: false`), además de `drizzle-orm` `<0.45.2` (high), `zod` `<4.6.6` (high) y `drizzle-kit` / `esbuild` / `@esbuild-kit/*` (moderate).
-- **Mitigación propuesta (requiere aprobación explícita antes de codear Etapa 2):**
-  1. **Reemplazar el parser `.xlsx` en backend** para subidas del admin en lugar de exponer `xlsx@0.18.5` de npm al parsing de archivos subidos (alternativas: `exceljs` auditado sin esos CVEs / parser ZIP+XML dedicado OOXML de solo lectura para hojas y celdas planas, o instalación verificada de SheetJS `0.20.2+` desde tarball oficial con integridad `sha256` si se desea conservar la API).
-  2. **Endurecimiento en capas:** límite de archivo `5 MB`, verificación de firma ZIP (`PK`), tope estricto de hojas (<= `10`), filas por hoja (<= `2000`), columnas y longitud de celda, lectura exclusiva de valores escalares sin fórmulas ni macros, objetos sin prototipo (`Object.create(null)`) y whitelist de columnas.
-  3. **Aislamiento de proceso + timeout:** ejecutar el parseo del `.xlsx` subido en un **proceso/worker aislado (`worker_threads` / subproceso dedicado sin acceso a `env`, BD ni red)** con timeout máximo (ej. `5000 ms`) y tope de memoria para neutralizar cualquier ReDoS o bloqueo del event loop principal.
+#### D. Auditoría de dependencias (`xlsx`, `drizzle-orm`, `zod`) y decisión aprobada para Etapa 2
+- **Versión instalada en Etapa 1A (sin modificar `package.json` de dependencias):** `xlsx@0.18.5`, `drizzle-orm@0.40.1` (`^0.40.0`), `drizzle-kit@0.30.6` (`^0.30.4`), `zod@3.25.76` (`^3.24.2`).
+- **`xlsx@0.18.5` (aplica en Etapa 2 — decisión cerrada):**
+  - `GHSA-4r6h-8v6p-xvw6` (**Prototype Pollution in sheetJS**, `<0.19.3`, high) y `GHSA-5pgg-2g8v-p4x9` (**SheetJS ReDoS**, `<0.20.2`, high), ambos sin parche en npmjs.com.
+  - **Decisión aprobada para Etapa 2:** migrar a SheetJS parcheado (`>=0.20.2`, última versión estable según `docs.sheetjs.com`) instalado desde tarball oficial de `cdn.sheetjs.com` y **guardado dentro del repositorio** (ej. `vendor/xlsx-<version>.tgz` referenciado vía `"file:"` con integridad fija en `package-lock.json` para no depender de la CDN en builds de Render/Vercel), combinando: límite `5 MB`, verificación de firma ZIP (`PK`), tope `10` hojas y `2000` filas, lectura exclusiva de valores sin fórmulas ni macros, objetos sin prototipo / whitelist de columnas y parseo aislado con timeout.
+- **Análisis de `npm audit` en `server/` para `drizzle-orm` y `zod` (NO actualizados en 1A; quedan para commit dedicado posterior a 1A y previo al deploy):**
+  - **`drizzle-orm <0.45.2` (`GHSA-gpj5-g38j-94v9`, high — SQL injection via improperly escaped SQL identifiers):** inspeccionado todo `server/src/`, existen **0 llamadas** a `sql.identifier` ni `sql.raw`; todas las expresiones `sql\`...\`` referencian columnas tipadas de Drizzle o valores parametrizados (y un literal estático `FOR UPDATE`). **No se dispara con el uso actual del código**, aunque conviene actualizar junto a `drizzle-kit` en el commit de dependencias previo al deploy validando previamente la migración en una rama de Neon (por posibles cambios de formato en el journal de `drizzle-kit`).
+  - **`zod <4.6.6` (`GHSA-mrhx-c7xc-m3w5`, high — memory exhaustion validating oversized constrained collections):** en endpoints HTTP de `server/src/modules/`, los únicos `z.array(...)` se encuentran en `enrollments.schemas.ts` con topes explícitos (`professorIds` `.max(15)`, `professorNames` `.max(15)`, `keys` `.max(500)`), todos autenticados (`requireAuth`), con rate limiter y tope global `express.json({ limit: '10mb' })` en `server/src/app.ts` (los demás `z.array` pertenecen al script CLI offline `mergeProfessors.ts`). Aunque el riesgo queda acotado a usuarios autenticados y payloads `<= 10 MB`, la actualización a Zod `4.6.6+` (cambio mayor) se realizará en el commit dedicado de dependencias con regresión completa de validaciones.
+  - **`esbuild <=0.24.2` / `drizzle-kit` (moderate):** dependencia de desarrollo transitiva vía `@esbuild-kit/esm-loader` usada por `drizzle-kit`, no expuesta en tiempo de ejecución en producción (`npm start`).
 
 ---
 
@@ -394,3 +389,74 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
 - `README.md`
 - `docs/api-multicarrera.md`
 - `docs/plan-multicarrera.md`.
+
+---
+
+## 7. Estado completado de Etapa 1A y guía de prueba / limpieza en rama de Neon
+
+### 7.1 Resumen de implementación en Etapa 1A
+- **Aislamiento de entorno de test (`237fdcf`):** `server/test/setupTestEnv.ts` inicializa `NODE_ENV='test'` y variables en memoria antes de evaluar `env.ts`; `env.ts` solo saltea `dotenv.config()` cuando `NODE_ENV === 'test'` y conserva falla obligatoria en producción (validado en `authVerification.test.ts`). `server/tsconfig.json` / `server/dist/` excluyen `server/test/` de la compilación de despliegue.
+- **Migración `0008` y esquema (`f48312f`):** `server/drizzle/0008_multicarrera_and_shared_subjects.sql`, `meta/_journal.json`, `schema.ts` y `seed.ts`. Todas las columnas/tablas son aditivas e idempotentes (`careers.status`, `study_plans.status`, `shared_subjects` con `UNIQUE(faculty_id, stable_code)`, índice no único `idx_shared_subjects_faculty_norm`, backfill 1-a-1 de `subjects.shared_subject_id`, backfill de `library_files.(shared_subject_id, source_subject_id, source_plan_id)` sin tocar `storage_key`, backfill de `users.selected_plan_id` y columnas/índices por plan en `user_settings`, `schedule_selections` y `schedule_proposals`).
+- **Catálogo, Auth y Admin (`3c9170e`):** filtro `status = 'published'` en catálogo público y `PUT /api/me/plan` (con fallback seguro en `auth.service.ts`), resolución de `schedule_terms` por `facultyId` + año dinámico en `catalog.controller.ts`, y conteos reales (`adminsCount`, `totalSubjects`, fallback `planName`) en `admin.service.ts`.
+- **Blindaje cross-plan y Biblioteca compartida (`61b214b`):**
+  - `auth.middleware.ts` incluye `selectedPlanId` vivo del usuario.
+  - Endpoints de usuario (`app.ts`, `userState.*`, `enrollments.*`, `professors.routes.ts`, `reviews.*`, `library.*`) ignoran cualquier `?planId=` externo y usan `req.user.selectedPlanId`, devolviendo `404` ante materias/comisiones/cursadas/reseñas/propuestas/períodos/exámenes/archivos ajenos al plan activo.
+  - `userState.helpers.ts` + `userState.store.ts` aíslan `user_settings` (`extraSettings.perPlan[planId]`), `schedule_selections` (`selectionsByPlan[planId]`), `electives`, `basket`, `progress`, `scheduleProposals`, `examAttempts` e `importPlanBundle` por `(userId, planId)`.
+  - `library.service.ts` agrupa catálogo, conteos y detección `SHA-256` por `shared_subject_id` dentro del plan activo manteniendo anonimato de autor y cuotas estrictamente por `user_id`.
+- **Tests (`db6f882`):** `server/test/multicarreraIsolation.test.ts` (`24` aserciones sobre SQL `0008`, helpers, aislamiento HTTP dos-planes UserState/Reviews/Enrollments/Professors y Biblioteca compartida + cuotas por usuario).
+
+### 7.2 Qué se verificó en memoria vs qué NO se pudo verificar aquí
+- **Verificado en este entorno:** compilación TypeScript frontend (`tsc -b && vite build`) y backend (`tsc`), `12/12` archivos frontend (`npm test`) y `345/0` aserciones backend sobre `InMemory*` stores y `MemoryMockR2Service`.
+- **NO verificado aquí (requiere prueba del usuario):** ejecución real de `0008_multicarrera_and_shared_subjects.sql` contra PostgreSQL / Neon, lectura/escritura real contra Cloudflare R2, envío SMTP real y verificación visual/end-to-end contra base real.
+
+### 7.3 Orden paso a paso para probar `0008` en una rama de Neon
+> No ejecutar contra `master` / producción ni guardar credenciales en `.env` dentro del repo.
+
+1. **Crear rama aislada en Neon** desde el snapshot actual de producción/staging (por consola de Neon o `neon branches create --name test-0008`). Copiar `DATABASE_URL` y `DIRECT_URL` **de esa rama temporal** solo en variables de sesión de terminal.
+2. **Registrar conteos previos en la rama de Neon (`psql`):**
+   ```sql
+   SELECT COUNT(*) AS users_total, COUNT(*) FILTER (WHERE selected_plan_id IS NULL) AS users_no_plan FROM users;
+   SELECT COUNT(*) AS subjects_total FROM subjects;
+   SELECT COUNT(*) AS library_files_total FROM library_files;
+   SELECT COUNT(*) AS settings_total FROM user_settings;
+   SELECT COUNT(*) AS sched_sel_total FROM schedule_selections;
+   SELECT COUNT(*) AS sched_prop_total FROM schedule_proposals;
+   ```
+3. **Ejecutar la migración `0008`** (con `DIRECT_URL` apuntando a la rama de prueba):
+   - Vía app/Drizzle: `npm --prefix server run build` y luego `npm --prefix server run db:migrate`.
+   - O vía `psql`: `psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f server/drizzle/0008_multicarrera_and_shared_subjects.sql`.
+4. **Probar idempotencia (segunda ejecución sin errores ni duplicados):**
+   - Correr `psql "$DIRECT_URL" -v ON_ERROR_STOP=1 -f server/drizzle/0008_multicarrera_and_shared_subjects.sql` una **segunda vez** y confirmar salida sin error.
+5. **Verificar integridad post-`0008` en Neon (`psql`):**
+   ```sql
+   -- 1. Planes publicados y config de ISI 2023
+   SELECT c.code, sp.year, sp.status, sp.config FROM study_plans sp JOIN careers c ON c.id = sp.career_id;
+   -- 2. Backfill 1-a-1 de shared_subjects (debe dar orphaned = 0 y mismo conteo que subjects)
+   SELECT COUNT(*) FILTER (WHERE shared_subject_id IS NULL) AS subjects_sin_shared, COUNT(*) AS subjects_total FROM subjects;
+   SELECT COUNT(*) AS shared_subjects_total FROM shared_subjects;
+   -- 3. Biblioteca backfill sin tocar storage_key
+   SELECT COUNT(*) AS lib_total,
+          COUNT(*) FILTER (WHERE shared_subject_id IS NULL) AS lib_sin_shared,
+          COUNT(*) FILTER (WHERE source_plan_id IS NULL) AS lib_sin_source_plan
+   FROM library_files WHERE subject_id IS NOT NULL;
+   -- 4. Usuarios y estado por plan sin nulls
+   SELECT COUNT(*) FILTER (WHERE selected_plan_id IS NULL) AS users_sin_plan FROM users;
+   SELECT COUNT(*) FILTER (WHERE plan_id IS NULL) AS settings_sin_plan FROM user_settings;
+   SELECT COUNT(*) FILTER (WHERE plan_id IS NULL) AS sched_sel_sin_plan FROM schedule_selections;
+   SELECT COUNT(*) FILTER (WHERE plan_id IS NULL) AS sched_prop_sin_plan FROM schedule_proposals;
+   ```
+6. **Eliminar la rama temporal de Neon** al finalizar la validación.
+
+### 7.4 Paso posterior explícito (fuera de Etapa 1A) para retirar PK/índices legacy
+Una vez que el backend 1A esté desplegado y validado en Neon que `0` clientes antiguos escriben filas con `plan_id IS NULL`:
+1. **Prerrequisito en código (`DrizzleUserStateStore` en `userState.store.ts`):** antes de quitar la unicidad anterior por usuario solo, actualizar `getUserSettings`/`upsertUserSettings` y `getScheduleSelection`/`upsertScheduleSelection` para consultar e insertar/hacer `onConflictDoUpdate` por `(user_id, plan_id)` y `(user_id, plan_id, schedule_term_id)` en filas separadas (hoy 1A conserva `extraSettings.perPlan[planId]` y `selectionsByPlan[planId]` justamente para convivir sin errores con la PK actual `user_settings_pkey(user_id)` y el índice `uq_user_schedule_selection`).
+2. **En una migración posterior explícita (`0009_*` o posterior):**
+   ```sql
+   -- Solo cuando ya existan 0 filas con plan_id IS NULL y DrizzleUserStateStore haya pasado a múltiples filas por plan:
+   ALTER TABLE "user_settings" ALTER COLUMN "plan_id" SET NOT NULL;
+   ALTER TABLE "user_settings" DROP CONSTRAINT "user_settings_pkey";
+   ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_pkey" PRIMARY KEY ("user_id", "plan_id");
+
+   ALTER TABLE "schedule_selections" ALTER COLUMN "plan_id" SET NOT NULL;
+   DROP INDEX IF EXISTS "uq_user_schedule_selection";
+   ```
