@@ -94,13 +94,60 @@ async function main() {
     'user_settings, schedule_selections y schedule_proposals agregan scoping por plan sin DROP de PK anterior'
   );
 
-  // Simular doble corrida idempotente del backfill 1-a-1 de shared_subjects por (faculty_id, stable_code)
+  // Verificar que todos los bloques DO $$ ... ADD CONSTRAINT atrapen duplicate_object OR duplicate_table
+  const addConstraintCount = (sql.match(/ADD\s+CONSTRAINT\s+/gi) || []).length;
+  const whenClauses = Array.from(
+    sql.matchAll(/EXCEPTION\s+WHEN\s+([^\n;]+?)\s+THEN\s+null;/gi),
+    (m) => m[1].trim()
+  );
+  const allHandleBoth =
+    whenClauses.length === addConstraintCount &&
+    whenClauses.length === 11 &&
+    whenClauses.every(
+      (clause) => /\bduplicate_object\b/i.test(clause) && /\bduplicate_table\b/i.test(clause)
+    );
+  assert(
+    allHandleBoth,
+    `Todos los bloques ADD CONSTRAINT (${whenClauses.length}/${addConstraintCount}) atrapan duplicate_object OR duplicate_table`
+  );
+
+  // Simular doble corrida idempotente de 0008 (DDL UNIQUE/CHECK/FK con duplicate_object/duplicate_table + backfill 1-a-1)
+  const simConstraints = new Map<string, 'unique' | 'check' | 'fk'>();
   const simSharedRows = new Map<string, { id: string; facultyId: string; stableCode: string; normalizedName: string }>();
   const simSubjects = [
     { id: 'aaaa1111-1111-4111-8111-111111111111', facultyId: 'fac-1', careerCode: 'ISI', planYear: 2023, codeInPlan: 1, name: 'Análisis Matemático I', sharedSubjectId: null as string | null },
     { id: 'bbbb2222-2222-4222-8222-222222222222', facultyId: 'fac-1', careerCode: 'IND', planYear: 2023, codeInPlan: 1, name: 'Análisis Matemático I', sharedSubjectId: null as string | null },
   ];
-  function runBackfillSim() {
+  const ddlBlocks = Array.from(
+    sql.matchAll(
+      /DO \$\$\s+BEGIN\s+ALTER TABLE "[^"]+" ADD CONSTRAINT "([^"]+)" (UNIQUE|CHECK|FOREIGN KEY)[\s\S]*?EXCEPTION\s+WHEN\s+([^\n;]+?)\s+THEN\s+null;\s+END \$\$;/gi
+    )
+  ).map((m) => ({
+    name: m[1],
+    kind: (m[2].toUpperCase() === 'UNIQUE' ? 'unique' : m[2].toUpperCase() === 'CHECK' ? 'check' : 'fk') as
+      | 'unique'
+      | 'check'
+      | 'fk',
+    catchesDuplicateObject: /\bduplicate_object\b/i.test(m[3]),
+    catchesDuplicateTable: /\bduplicate_table\b/i.test(m[3]),
+  }));
+
+  function runMigration0008Sim() {
+    for (const block of ddlBlocks) {
+      if (simConstraints.has(block.name)) {
+        // En Postgres, ADD CONSTRAINT ... UNIQUE puede lanzar duplicate_table (42P07) por el índice/relación subyacente
+        const pgErrCode = block.kind === 'unique' ? 'duplicate_table' : 'duplicate_object';
+        const handled =
+          (pgErrCode === 'duplicate_object' && block.catchesDuplicateObject) ||
+          (pgErrCode === 'duplicate_table' && block.catchesDuplicateTable);
+        if (!handled) {
+          throw new Error(`Constraint "${block.name}" no capturó ${pgErrCode} al re-ejecutar`);
+        }
+      } else {
+        simConstraints.set(block.name, block.kind);
+      }
+    }
+
     for (const sub of simSubjects) {
       if (sub.sharedSubjectId !== null) continue;
       const stableCode = `${sub.careerCode}-${sub.planYear}-${sub.codeInPlan}`;
@@ -113,15 +160,23 @@ async function main() {
       sub.sharedSubjectId = shared.id;
     }
   }
-  runBackfillSim();
+  runMigration0008Sim();
   const firstRunSharedIds = simSubjects.map((s) => s.sharedSubjectId);
-  runBackfillSim(); // Segunda ejecución idempotente
+  let secondRunThrew = false;
+  try {
+    runMigration0008Sim(); // Segunda ejecución idempotente
+  } catch {
+    secondRunThrew = true;
+  }
   assert(
-    simSharedRows.size === 2 &&
+    !secondRunThrew &&
+      ddlBlocks.length === 11 &&
+      simConstraints.has('uq_shared_subjects_faculty_code') &&
+      simSharedRows.size === 2 &&
       simSubjects[0].sharedSubjectId !== simSubjects[1].sharedSubjectId &&
       simSubjects[0].sharedSubjectId === firstRunSharedIds[0] &&
       simSubjects[1].sharedSubjectId === firstRunSharedIds[1],
-    'Simulación backfill 1-a-1: segunda ejecución no duplica filas ni une materias homónimas automáticamente'
+    'Simulación doble corrida 0008: maneja duplicate_table/duplicate_object, no duplica filas ni une materias homónimas'
   );
 
   // ---------------------------------------------------------------------------
