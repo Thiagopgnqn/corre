@@ -1,0 +1,937 @@
+// Configurar entorno aislado en memoria ANTES de importar módulos del servidor (CERO conexión a Neon)
+import './setupTestEnv.js';
+
+import crypto from 'crypto';
+import fs from 'fs';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import jwt from 'jsonwebtoken';
+import { env } from '../src/config/env.js';
+import { LIBRARY_CONFIG } from '../src/config/library.config.js';
+import { createApp } from '../src/app.js';
+import {
+  setLiveUserResolverForTesting,
+  type LiveUserStatusRecord,
+} from '../src/middlewares/auth.middleware.js';
+import {
+  InMemoryLibraryService,
+  resetInitUploadRateLimits,
+  setLibraryServiceForTesting,
+} from '../src/modules/library/library.service.js';
+import { InMemoryReviewsStore } from '../src/modules/reviews/reviews.store.js';
+import {
+  extractPlanScheduleSelections,
+  extractPlanSettings,
+  mergePlanScheduleSelections,
+  mergePlanSettings,
+} from '../src/modules/user-state/userState.helpers.js';
+import { InMemoryUserStateStore } from '../src/modules/user-state/userState.store.js';
+import { MemoryMockR2Service } from '../src/services/r2.service.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+async function main() {
+  console.log('======================================================================');
+  console.log(' 🧪 TESTS ETAPA 1A: MULTI-CARRERA, MIGRACIÓN 0008 Y AISLAMIENTO');
+  console.log('======================================================================\n');
+
+  let passed = 0;
+  let failed = 0;
+
+  function assert(condition: boolean, name: string, detail?: string) {
+    if (condition) {
+      console.log(`  ✅ ${name}`);
+      passed++;
+    } else {
+      console.error(`  ❌ ${name}${detail ? ` -> ${detail}` : ''}`);
+      failed++;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 1. VERIFICACIÓN DE MIGRACIÓN 0008 (ADITIVA, IDEMPOTENTE, SIN RIESGO A R2/DATOS)
+  // ---------------------------------------------------------------------------
+  console.log('📌 1. Migración 0008: Reglas aditivas, idempotencia y backfills');
+
+  const migrationPath = path.resolve(
+    __dirname,
+    '../drizzle/0008_multicarrera_and_shared_subjects.sql'
+  );
+  const sql = fs.readFileSync(migrationPath, 'utf8');
+
+  assert(!/^\s*DROP\s+/im.test(sql) && !/;\s*DROP\s+/im.test(sql), '0008 es 100% aditiva (sin sentencias DROP)');
+  assert(
+    sql.includes('ADD COLUMN IF NOT EXISTS "status"') &&
+      sql.includes("CHECK (\"status\" IN ('draft', 'published', 'archived'))"),
+    'Agrega careers.status y study_plans.status con constraint de estado'
+  );
+  assert(
+    sql.includes('CREATE TABLE IF NOT EXISTS "shared_subjects"') &&
+      sql.includes('CONSTRAINT "uq_shared_subjects_faculty_code" UNIQUE ("faculty_id", "stable_code")') &&
+      sql.includes('CREATE INDEX IF NOT EXISTS "idx_shared_subjects_faculty_norm"'),
+    'shared_subjects usa índice único (faculty_id, stable_code) y normalized_name NO único'
+  );
+  assert(
+    sql.includes('WHERE s."shared_subject_id" IS NULL') &&
+      sql.includes('ON CONFLICT ("faculty_id", "stable_code") DO NOTHING'),
+    'Backfill 1-a-1 de subjects -> shared_subjects es idempotente y nunca fusiona por nombre'
+  );
+  assert(
+    sql.includes('ALTER TABLE "library_files" ADD COLUMN IF NOT EXISTS "shared_subject_id"') &&
+      sql.includes('ALTER TABLE "library_files" ADD COLUMN IF NOT EXISTS "source_subject_id"') &&
+      sql.includes('ALTER TABLE "library_files" ADD COLUMN IF NOT EXISTS "source_plan_id"') &&
+      !/SET\s+"storage_key"/i.test(sql),
+    'Backfill de library_files agrega columnas nuevas sin alterar storage_key'
+  );
+  assert(
+    sql.includes('ALTER TABLE "user_settings" ADD COLUMN IF NOT EXISTS "plan_id"') &&
+      sql.includes('CREATE UNIQUE INDEX IF NOT EXISTS "uq_user_settings_user_plan"') &&
+      sql.includes('ALTER TABLE "schedule_selections" ADD COLUMN IF NOT EXISTS "selections_by_plan"') &&
+      sql.includes('CREATE UNIQUE INDEX IF NOT EXISTS "uq_user_schedule_selection_user_plan_term"') &&
+      sql.includes('ALTER TABLE "schedule_proposals" ADD COLUMN IF NOT EXISTS "plan_id"'),
+    'user_settings, schedule_selections y schedule_proposals agregan scoping por plan sin DROP de PK anterior'
+  );
+
+  // Simular doble corrida idempotente del backfill 1-a-1 de shared_subjects por (faculty_id, stable_code)
+  const simSharedRows = new Map<string, { id: string; facultyId: string; stableCode: string; normalizedName: string }>();
+  const simSubjects = [
+    { id: 'aaaa1111-1111-4111-8111-111111111111', facultyId: 'fac-1', careerCode: 'ISI', planYear: 2023, codeInPlan: 1, name: 'Análisis Matemático I', sharedSubjectId: null as string | null },
+    { id: 'bbbb2222-2222-4222-8222-222222222222', facultyId: 'fac-1', careerCode: 'IND', planYear: 2023, codeInPlan: 1, name: 'Análisis Matemático I', sharedSubjectId: null as string | null },
+  ];
+  function runBackfillSim() {
+    for (const sub of simSubjects) {
+      if (sub.sharedSubjectId !== null) continue;
+      const stableCode = `${sub.careerCode}-${sub.planYear}-${sub.codeInPlan}`;
+      const key = `${sub.facultyId}::${stableCode}`;
+      let shared = simSharedRows.get(key);
+      if (!shared) {
+        shared = { id: crypto.randomUUID(), facultyId: sub.facultyId, stableCode, normalizedName: 'analisis matematico i' };
+        simSharedRows.set(key, shared);
+      }
+      sub.sharedSubjectId = shared.id;
+    }
+  }
+  runBackfillSim();
+  const firstRunSharedIds = simSubjects.map((s) => s.sharedSubjectId);
+  runBackfillSim(); // Segunda ejecución idempotente
+  assert(
+    simSharedRows.size === 2 &&
+      simSubjects[0].sharedSubjectId !== simSubjects[1].sharedSubjectId &&
+      simSubjects[0].sharedSubjectId === firstRunSharedIds[0] &&
+      simSubjects[1].sharedSubjectId === firstRunSharedIds[1],
+    'Simulación backfill 1-a-1: segunda ejecución no duplica filas ni une materias homónimas automáticamente'
+  );
+
+  // ---------------------------------------------------------------------------
+  // 2. HELPERS PUROS DE AISLAMIENTO POR PLAN (USER_SETTINGS Y SCHEDULE_SELECTIONS)
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 2. Helpers de estado por plan: user_settings y schedule_selections');
+
+  const hPlanA = crypto.randomUUID();
+  const hPlanB = crypto.randomUUID();
+  const legacySettings = {
+    planId: null,
+    includePromotionsInGPA: false,
+    minPassingGrade: 6,
+    includeAnalistaTrack: false,
+    allowBlockedElectivesPlanning: false,
+    includeElectivesInProgress: true,
+    soundEnabled: false,
+    tutorialCompleted: true,
+    notifyLibraryEmail: true,
+    extraSettings: {},
+  };
+
+  // Migrar configuración legada al editar Plan A, luego editar Plan B, y releer Plan A
+  const mergedA = mergePlanSettings(legacySettings, hPlanA, { includeAnalistaTrack: true, minPassingGrade: 6 });
+  const mergedAB = mergePlanSettings(mergedA, hPlanB, { includeAnalistaTrack: false, minPassingGrade: 4 });
+  const readBackA = extractPlanSettings(mergedAB, hPlanA);
+  const readBackB = extractPlanSettings(mergedAB, hPlanB);
+  assert(
+    readBackA.includeAnalistaTrack === true &&
+      readBackA.minPassingGrade === 6 &&
+      readBackB.includeAnalistaTrack === false &&
+      readBackB.minPassingGrade === 4,
+    'userState.helpers preserva settings independientes al alternar Plan A -> Plan B -> Plan A'
+  );
+
+  const legacySelection = {
+    planId: null,
+    selections: { '1': '1K1' },
+    selectionsByPlan: {},
+  };
+  const selA = mergePlanScheduleSelections(legacySelection, hPlanA, { '1': '1K1', '2': '1K2' });
+  const selAB = mergePlanScheduleSelections(selA, hPlanB, { '1': '2B1' });
+  const readSelA = extractPlanScheduleSelections(selAB, hPlanA);
+  const readSelB = extractPlanScheduleSelections(selAB, hPlanB);
+  assert(
+    readSelA['1'] === '1K1' && readSelA['2'] === '1K2' && readSelB['1'] === '2B1' && !readSelB['2'],
+    'userState.helpers preserva selecciones de horarios por plan sin sobrescribir el otro plan'
+  );
+
+  // ---------------------------------------------------------------------------
+  // 3. ENTORNO HTTP MULTI-PLAN EN MEMORIA (PLAN A, PLAN B, BIBLIOTECA COMPARTIDA)
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 3. Configurando app Express con dos facultades y tres carreras/planes');
+
+  resetInitUploadRateLimits();
+  const mockR2 = new MemoryMockR2Service();
+  const libraryStore = new InMemoryLibraryService(mockR2);
+  setLibraryServiceForTesting(libraryStore);
+
+  const reviewsStore = new InMemoryReviewsStore();
+  const userStateStore = new InMemoryUserStateStore();
+
+  const facA = crypto.randomUUID();
+  const facB = crypto.randomUUID();
+  const planA = crypto.randomUUID();
+  const planB = crypto.randomUUID();
+  const planA2 = crypto.randomUUID(); // Segunda carrera en Facultad A (comparte materia con Plan A)
+
+  // Sembrar planes en stores
+  reviewsStore.seedPlan(planA, facA);
+  reviewsStore.seedPlan(planB, facB);
+  reviewsStore.seedPlan(planA2, facA);
+  userStateStore.seedPlan({ id: planA, name: 'Sistemas Plan 2023', facultyId: facA });
+  userStateStore.seedPlan({ id: planB, name: 'Industrial Plan 2024', facultyId: facB });
+  userStateStore.seedPlan({ id: planA2, name: 'Electrónica Plan 2023', facultyId: facA });
+
+  // Sembrar períodos lectivos por facultad
+  const termA = userStateStore.seedTerm({
+    id: crypto.randomUUID(),
+    facultyId: facA,
+    academicYear: 2026,
+    term: '1C',
+    isCurrent: true,
+  });
+  const termB = userStateStore.seedTerm({
+    id: crypto.randomUUID(),
+    facultyId: facB,
+    academicYear: 2026,
+    term: '1C',
+    isCurrent: true,
+  });
+
+  // Sembrar materias con códigos numéricos superpuestos (101 en ambos planes) + shared_subject entre Plan A y Plan B
+  const sharedAlgebraId = crypto.randomUUID();
+  const subA_core = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planA,
+    codeInPlan: 101,
+    name: 'Álgebra y Geometría Analítica (ISI)',
+    level: 1,
+    kind: 'obligatoria',
+  });
+  const subA_elec1 = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planA,
+    codeInPlan: 102,
+    name: 'Electiva Cloud Computing',
+    level: 4,
+    kind: 'electiva',
+  });
+  const subA_elec2 = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planA,
+    codeInPlan: 103,
+    name: 'Electiva Visión Artificial',
+    level: 5,
+    kind: 'electiva',
+  });
+  const subB_core = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planB,
+    codeInPlan: 101,
+    name: 'Álgebra Lineal (IND)',
+    level: 1,
+    kind: 'obligatoria',
+  });
+  const subB_elec1 = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planB,
+    codeInPlan: 201,
+    name: 'Electiva Logística Industrial',
+    level: 4,
+    kind: 'electiva',
+  });
+  const subB_only = reviewsStore.seedSubject({
+    id: crypto.randomUUID(),
+    planId: planB,
+    codeInPlan: 202,
+    name: 'Investigación Operativa Exclusiva B',
+    level: 4,
+    kind: 'obligatoria',
+  });
+
+  // Espejar materias en UserStateStore
+  userStateStore.seedSubject({ id: subA_core.id, planId: planA, codeInPlan: 101, kind: 'obligatoria' });
+  userStateStore.seedSubject({ id: subA_elec1.id, planId: planA, codeInPlan: 102, kind: 'electiva' });
+  userStateStore.seedSubject({ id: subA_elec2.id, planId: planA, codeInPlan: 103, kind: 'electiva' });
+  userStateStore.seedSubject({ id: subB_core.id, planId: planB, codeInPlan: 101, kind: 'obligatoria' });
+  userStateStore.seedSubject({ id: subB_elec1.id, planId: planB, codeInPlan: 201, kind: 'electiva' });
+  userStateStore.seedSubject({ id: subB_only.id, planId: planB, codeInPlan: 202, kind: 'obligatoria' });
+
+  // Espejar materias en LibraryStore (subA_core y subB_core comparten sharedAlgebraId; subB_only es exclusivo de Plan B)
+  libraryStore.seedSubject({
+    id: subA_core.id,
+    name: subA_core.name,
+    codeInPlan: 101,
+    level: 1,
+    kind: 'obligatoria',
+    planId: planA,
+    sharedSubjectId: sharedAlgebraId,
+  });
+  libraryStore.seedSubject({
+    id: subB_core.id,
+    name: subB_core.name,
+    codeInPlan: 101,
+    level: 1,
+    kind: 'obligatoria',
+    planId: planB,
+    sharedSubjectId: sharedAlgebraId,
+  });
+  libraryStore.seedSubject({
+    id: subB_only.id,
+    name: subB_only.name,
+    codeInPlan: 202,
+    level: 4,
+    kind: 'obligatoria',
+    planId: planB,
+    sharedSubjectId: crypto.randomUUID(),
+  });
+
+  // Sembrar docentes y comisiones en Plan A (Facultad A) y Plan B (Facultad B)
+  const profA = await reviewsStore.createOrResolveProfessor({
+    facultyId: facA,
+    displayName: 'Docente Sistemas, Ana',
+  });
+  const profB = await reviewsStore.createOrResolveProfessor({
+    facultyId: facB,
+    displayName: 'Docente Industrial, Bruno',
+  });
+  const commA = reviewsStore.seedCommission({
+    subjectId: subA_core.id,
+    commissionCode: '1K1',
+    academicYear: 2026,
+    term: '1C',
+  });
+  const commB = reviewsStore.seedCommission({
+    subjectId: subB_core.id,
+    commissionCode: '1D1',
+    academicYear: 2026,
+    term: '1C',
+  });
+  reviewsStore.seedCommissionTeaching({
+    professorId: profA.id,
+    subjectId: subA_core.id,
+    commissionCode: '1K1',
+    termLabel: '2026 1C',
+    isCurrent: true,
+  });
+  reviewsStore.seedCommissionTeaching({
+    professorId: profB.id,
+    subjectId: subB_core.id,
+    commissionCode: '1D1',
+    termLabel: '2026 1C',
+    isCurrent: true,
+  });
+
+  // Sembrar usuarios
+  const multiUserId = crypto.randomUUID();
+  const studentBOnlyId = crypto.randomUUID();
+  const authorBId = crypto.randomUUID();
+  const quotaUserId = crypto.randomUUID();
+  const pendingQuotaUserId = crypto.randomUUID();
+  const adminId = crypto.randomUUID();
+
+  const liveUsers = new Map<string, LiveUserStatusRecord>();
+  function setUserPlanInAllStores(userId: string, selectedPlanId: string | null) {
+    const curr = liveUsers.get(userId);
+    if (curr) {
+      liveUsers.set(userId, { ...curr, selectedPlanId });
+    }
+    userStateStore.seedUser(userId, selectedPlanId);
+    reviewsStore.seedUserPlan(userId, selectedPlanId);
+  }
+
+  function registerUser(params: {
+    id: string;
+    email: string;
+    role: 'user' | 'admin';
+    selectedPlanId: string | null;
+  }) {
+    liveUsers.set(params.id, {
+      id: params.id,
+      email: params.email,
+      role: params.role,
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: params.selectedPlanId,
+    });
+    libraryStore.seedUser({
+      id: params.id,
+      email: params.email,
+      role: params.role,
+      emailVerified: true,
+      termsAccepted: true,
+    });
+    userStateStore.seedUser(params.id, params.selectedPlanId);
+    reviewsStore.seedUserPlan(params.id, params.selectedPlanId);
+  }
+
+  registerUser({ id: multiUserId, email: 'multi@frc.utn.edu.ar', role: 'user', selectedPlanId: planA });
+  registerUser({ id: studentBOnlyId, email: 'alumnob@frc.utn.edu.ar', role: 'user', selectedPlanId: planB });
+  registerUser({ id: authorBId, email: 'autorb@frc.utn.edu.ar', role: 'user', selectedPlanId: planB });
+  registerUser({ id: quotaUserId, email: 'cuota.cross@frc.utn.edu.ar', role: 'user', selectedPlanId: planA });
+  registerUser({ id: pendingQuotaUserId, email: 'pendiente.cross@frc.utn.edu.ar', role: 'user', selectedPlanId: planA });
+  registerUser({ id: adminId, email: 'admin.multi@stack.com', role: 'admin', selectedPlanId: planA });
+
+  setLiveUserResolverForTesting(async (userId: string) => liveUsers.get(userId) || null);
+
+  function signUserToken(userId: string) {
+    const u = liveUsers.get(userId)!;
+    return jwt.sign(
+      {
+        id: u.id,
+        email: u.email,
+        role: u.role,
+        emailVerified: true,
+        selectedPlanId: u.selectedPlanId,
+      },
+      env.JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+  }
+
+  const app = createApp({ reviewsStore, userStateStore });
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const port = (server.address() as any).port;
+
+  async function api(method: string, reqPath: string, token?: string, body?: any) {
+    return new Promise<{ status: number; data: any }>((resolve, reject) => {
+      const payload = body !== undefined ? JSON.stringify(body) : undefined;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (payload) headers['Content-Length'] = Buffer.byteLength(payload).toString();
+
+      const req = http.request(
+        { hostname: '127.0.0.1', port, path: reqPath, method, headers },
+        (res) => {
+          let raw = '';
+          res.on('data', (chunk) => (raw += chunk));
+          res.on('end', () => {
+            let parsed: any = raw;
+            try {
+              parsed = JSON.parse(raw);
+            } catch {
+              // raw text fallback
+            }
+            resolve({ status: res.statusCode || 500, data: parsed });
+          });
+        }
+      );
+      req.on('error', reject);
+      if (payload) req.write(payload);
+      req.end();
+    });
+  }
+
+  const multiToken = signUserToken(multiUserId);
+  const studentBToken = signUserToken(studentBOnlyId);
+  const quotaToken = signUserToken(quotaUserId);
+  const pendingToken = signUserToken(pendingQuotaUserId);
+  const adminToken = signUserToken(adminId);
+
+  try {
+    // -------------------------------------------------------------------------
+    // 4. AISLAMIENTO USER-STATE ENTRE PLAN A Y PLAN B
+    // -------------------------------------------------------------------------
+    console.log('\n📌 4. Aislamiento de UserState (progreso, electivas, canasta, horarios, import)');
+
+    // 4.1 Guardar estado completo en Plan A
+    const putProgA = await api('PUT', `/api/progress/${subA_core.id}`, multiToken, {
+      status: 'aprobada',
+      grade: 9,
+    });
+    const putElecA = await api('PUT', '/api/electives', multiToken, {
+      assignedElectives: { 3: [102] },
+    });
+    const putBasketA = await api('PUT', '/api/basket', multiToken, {
+      basket: [103],
+    });
+    const putSettingsA = await api('PUT', '/api/settings', multiToken, {
+      includeAnalistaTrack: true,
+      minPassingGrade: 6,
+      tutorialCompleted: true,
+    });
+    const putSelA = await api('PUT', '/api/schedule/selections', multiToken, {
+      selections: { '101': '1K1' },
+    });
+    const postPropA = await api('POST', '/api/schedule/proposals', multiToken, {
+      name: 'Propuesta Plan A',
+      selections: { '101': '1K1' },
+    });
+    const postExamA = await api('POST', '/api/exam-attempts', multiToken, {
+      subjectIdOrCode: subA_core.id,
+      date: '2026-07-10',
+      grade: 9,
+      notes: 'Final A',
+    });
+
+    assert(
+      putProgA.status === 200 &&
+        putElecA.status === 200 &&
+        putBasketA.status === 200 &&
+        putSettingsA.status === 200 &&
+        putSelA.status === 200 &&
+        postPropA.status === 201 &&
+        postExamA.status === 200,
+      'Guardar estado completo en Plan A responde con éxito'
+    );
+
+    const proposalAId = postPropA.data?.data?.id as string;
+    const examAId = postExamA.data?.data?.id as string;
+
+    // Sembrar progreso en Plan A en reviewsStore para pruebas de reviewable
+    reviewsStore.seedUserProgress(multiUserId, subA_core.id, 'aprobada', 9);
+    // Sembrar también una cursada y una reseña en Plan B (authorBId y multiUserId)
+    reviewsStore.seedUserProgress(authorBId, subB_core.id, 'aprobada', 8);
+    const revB = await reviewsStore.createReview({
+      userId: authorBId,
+      professorId: profB.id,
+      subjectId: subB_core.id,
+      academicYear: 2025,
+      term: '1C',
+      overall: 5,
+      clarity: null,
+      treatment: null,
+      availability: null,
+      difficulty: null,
+      wouldRecommend: true,
+      comment: 'Excelente en Industrial.',
+    });
+    const revBId = revB.id;
+    const enrB = await reviewsStore.saveUserEnrollment({
+      userId: multiUserId,
+      subjectId: subB_core.id,
+      commissionId: commB.id,
+      academicYear: 2025,
+      term: '1C',
+      source: 'manual',
+      professorIds: [profB.id],
+    });
+
+    // 4.2 Cambiar al usuario activo a Plan B y validar ?planId= ignorado + 404 cruzados
+    setUserPlanInAllStores(multiUserId, planB);
+
+    const stateWhileBIgnoringQuery = await api('GET', `/api/state?planId=${planA}`, multiToken);
+    const propsWhileBIgnoringQuery = await api('GET', `/api/schedule/proposals?planId=${planA}`, multiToken);
+    assert(
+      stateWhileBIgnoringQuery.status === 200 &&
+        stateWhileBIgnoringQuery.data.data.selectedPlanId === planB &&
+        Object.keys(stateWhileBIgnoringQuery.data.data.progress).length === 0 &&
+        stateWhileBIgnoringQuery.data.data.assignedElectives['3'].length === 0 &&
+        stateWhileBIgnoringQuery.data.data.basket.length === 0 &&
+        Object.keys(stateWhileBIgnoringQuery.data.data.scheduleSelections).length === 0 &&
+        stateWhileBIgnoringQuery.data.data.scheduleProposals.length === 0 &&
+        stateWhileBIgnoringQuery.data.data.examAttempts.length === 0 &&
+        propsWhileBIgnoringQuery.data.data.length === 0,
+      'Al estar en Plan B, ?planId=PlanA es ignorado y no filtra ningún dato de Plan A'
+    );
+
+    const crossProg404 = await api('PUT', `/api/progress/${subA_core.id}`, multiToken, { status: 'aprobada', grade: 7 });
+    const crossExamCreate404 = await api('POST', '/api/exam-attempts', multiToken, {
+      subjectIdOrCode: subA_core.id,
+      date: '2026-07-11',
+      grade: 8,
+    });
+    const crossExamDel404 = await api('DELETE', `/api/exam-attempts/${examAId}`, multiToken);
+    const crossTermProp404 = await api('POST', '/api/schedule/proposals', multiToken, {
+      name: 'Intento cruzado',
+      scheduleTermId: termA.id,
+      selections: { '101': '1K1' },
+    });
+    const crossTermSel404 = await api('PUT', '/api/schedule/selections', multiToken, {
+      scheduleTermId: termA.id,
+      selections: { '101': '1K1' },
+    });
+    const crossUpdateProp404 = await api('POST', '/api/schedule/proposals', multiToken, {
+      id: proposalAId,
+      name: 'Sobrescritura ilegal',
+      selections: { '101': '1D1' },
+    });
+    const crossDelProp404 = await api('DELETE', `/api/schedule/proposals/${proposalAId}`, multiToken);
+
+    assert(
+      crossProg404.status === 404 &&
+        crossExamCreate404.status === 404 &&
+        crossExamDel404.status === 404 &&
+        crossTermProp404.status === 404 &&
+        crossTermSel404.status === 404 &&
+        crossUpdateProp404.status === 404 &&
+        crossDelProp404.status === 404,
+      'IDs ajenos de materia, período lectivo, propuesta y examen devuelven 404 en otro plan'
+    );
+
+    // 4.3 Mutar electivas, canasta, settings, horarios e importData en Plan B
+    const putElecB = await api('PUT', '/api/electives', multiToken, { assignedElectives: { 4: [201] } });
+    const putBasketB = await api('PUT', '/api/basket', multiToken, { basket: [201] });
+    const putSettingsB = await api('PUT', '/api/settings', multiToken, {
+      includeAnalistaTrack: false,
+      minPassingGrade: 4,
+    });
+    const importB = await api('POST', '/api/import', multiToken, {
+      settings: { includeAnalistaTrack: false, minPassingGrade: 4, tutorialCompleted: false },
+      userState: { '101': { status: 'regularizada' } },
+      assignedElectives: { 5: [201] },
+      basket: [101],
+      scheduleSelections: { '101': '1D2' },
+      scheduleDrafts: [{ name: 'Borrador Plan B', selections: { '101': '1D2' } }],
+    });
+
+    assert(
+      putElecB.status === 200 && putBasketB.status === 200 && putSettingsB.status === 200 && importB.status === 200,
+      'Guardar electivas, canasta, settings e importData en Plan B responde 200'
+    );
+
+    // 4.4 Volver a Plan A y verificar que NADA de Plan A fue borrado o pisado por Plan B
+    setUserPlanInAllStores(multiUserId, planA);
+
+    const stateBackInA = await api('GET', '/api/state', multiToken);
+    const dataA = stateBackInA.data?.data;
+    assert(
+      stateBackInA.status === 200 &&
+        dataA.selectedPlanId === planA &&
+        dataA.progress['101']?.status === 'aprobada' &&
+        dataA.progress['101']?.grade === 9 &&
+        Array.isArray(dataA.assignedElectives['3']) &&
+        dataA.assignedElectives['3'].includes(102) &&
+        !dataA.assignedElectives['5'].includes(201) &&
+        Array.isArray(dataA.basket) &&
+        dataA.basket.length === 1 &&
+        dataA.basket[0] === 103 &&
+        dataA.settings.includeAnalistaTrack === true &&
+        dataA.settings.minPassingGrade === 6 &&
+        dataA.scheduleSelections['101'] === '1K1' &&
+        dataA.scheduleProposals.length === 1 &&
+        dataA.scheduleProposals[0].name === 'Propuesta Plan A' &&
+        dataA.examAttempts.length === 1 &&
+        dataA.examAttempts[0].id === examAId,
+      'Al volver a Plan A, electivas, canasta, importData, propuestas y ajustes de Plan A permanecen intactos'
+    );
+
+    const exportA = await api('GET', `/api/export?planId=${planB}`, multiToken);
+    assert(
+      exportA.status === 200 &&
+        exportA.data.data.basket.length === 1 &&
+        exportA.data.data.basket[0] === 103 &&
+        exportA.data.data.scheduleDrafts.length === 1 &&
+        exportA.data.data.scheduleDrafts[0].name === 'Propuesta Plan A',
+      'GET /api/export ignora ?planId= extranjero y exporta solo datos del plan activo'
+    );
+
+    // -------------------------------------------------------------------------
+    // 5. AISLAMIENTO REVIEWS, PROFESSORS Y ENROLLMENTS ENTRE FACULTADES/PLANES
+    // -------------------------------------------------------------------------
+    console.log('\n📌 5. Aislamiento cross-plan de profesores, cursadas y reseñas');
+
+    const profsInA = await api('GET', `/api/professors?planId=${planB}`, multiToken);
+    const profItems = profsInA.data?.data?.professors || [];
+    const crossProfDetail404 = await api('GET', `/api/professors/${profB.id}`, multiToken);
+    const crossProfRevs404 = await api('GET', `/api/professors/${profB.id}/reviews`, multiToken);
+    assert(
+      profsInA.status === 200 &&
+        profItems.some((p: any) => p.id === profA.id) &&
+        !profItems.some((p: any) => p.id === profB.id) &&
+        crossProfDetail404.status === 404 &&
+        crossProfRevs404.status === 404,
+      'Listado y detalle de profesores filtran por facultad activa e ignoran ?planId= ajeno (404 cross-facultad)'
+    );
+
+    const reviewableA = await api('GET', `/api/me/reviewable?planId=${planB}`, multiToken);
+    const reviewableEligible = reviewableA.data?.data?.eligible || [];
+    const enrollmentsA = await api('GET', `/api/enrollments?planId=${planB}`, multiToken);
+    const enrollmentsList = enrollmentsA.data?.data?.enrollments || [];
+    const crossOptions404 = await api('GET', `/api/enrollments/options/${subB_core.id}`, multiToken);
+    const crossUpsertSub404 = await api('PUT', `/api/enrollments/${subB_core.id}`, multiToken, {
+      commissionId: commB.id,
+      academicYear: 2026,
+      term: '1C',
+    });
+    const crossUpsertComm404 = await api('PUT', `/api/enrollments/${subA_core.id}`, multiToken, {
+      commissionId: commB.id,
+      academicYear: 2026,
+      term: '1C',
+    });
+    const crossDeleteEnr404 = await api('DELETE', `/api/enrollments/${enrB.id}`, multiToken);
+
+    assert(
+      reviewableA.status === 200 &&
+        reviewableEligible.some((x: any) => x.subjectId === subA_core.id) &&
+        !reviewableEligible.some((x: any) => x.subjectId === subB_core.id) &&
+        enrollmentsA.status === 200 &&
+        !enrollmentsList.some((e: any) => e.id === enrB.id) &&
+        crossOptions404.status === 404 &&
+        crossUpsertSub404.status === 404 &&
+        crossUpsertComm404.status === 404 &&
+        crossDeleteEnr404.status === 404 &&
+        reviewsStore.enrollmentsMap.has(enrB.id),
+      'Enrollments y reviewable devuelven 404 ante materia/comisión/cursada de otro plan sin borrar cursadas de Plan B'
+    );
+
+    const crossRevCreate404 = await api('POST', '/api/reviews', multiToken, {
+      professorId: profB.id,
+      subjectId: subB_core.id,
+      overall: 5,
+    });
+    const crossRevPut404 = await api('PUT', `/api/reviews/${revBId}`, multiToken, { overall: 3 });
+    const crossRevDel404 = await api('DELETE', `/api/reviews/${revBId}`, multiToken);
+    const crossRevVote404 = await api('POST', `/api/reviews/${revBId}/helpful`, multiToken);
+    const crossRevRep404 = await api('POST', `/api/reviews/${revBId}/report`, multiToken, {
+      reason: 'falsa o spam',
+    });
+    assert(
+      crossRevCreate404.status === 404 &&
+        crossRevPut404.status === 404 &&
+        crossRevDel404.status === 404 &&
+        crossRevVote404.status === 404 &&
+        crossRevRep404.status === 404,
+      'Crear/editar/borrar/votar/reportar reseñas de materias de otro plan responde 404',
+      `statuses: create=${crossRevCreate404.status}, put=${crossRevPut404.status}, del=${crossRevDel404.status}, vote=${crossRevVote404.status}, rep=${crossRevRep404.status}`
+    );
+
+    // -------------------------------------------------------------------------
+    // 6. BIBLIOTECA COMPARTIDA POR SHARED_SUBJECT_ID, 404 CROSS-PLAN Y CUOTAS
+    // -------------------------------------------------------------------------
+    console.log('\n📌 6. Biblioteca: shared_subjects entre carreras, 404 en no compartidas y cuotas por usuario');
+
+    // 6.1 Alumno A en Plan A sube material en subA_core (compartida con subB_core via sharedAlgebraId)
+    const pdfSharedBuf = Buffer.from('%PDF-1.4 Apunte compartido de Álgebra %%EOF');
+    const initShared = await api('POST', '/api/library/uploads/init', multiToken, {
+      subjectId: subA_core.id,
+      kind: 'apunte',
+      title: 'Resumen Álgebra Compartido',
+      originalFilename: 'resumen-algebra.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: pdfSharedBuf.length,
+    });
+    assert(initShared.status === 201, 'Alumno en Plan A inicia subida en materia compartida (201)');
+    const sharedFileId = initShared.data.data.fileId as string;
+    await mockR2.putObjectDirect(initShared.data.data.storageKey, pdfSharedBuf, 'application/pdf');
+    const completeShared = await api('POST', `/api/library/uploads/${sharedFileId}/complete`, multiToken);
+    const approveShared = await api('PATCH', `/api/admin/library/files/${sharedFileId}/approve`, adminToken);
+    assert(
+      completeShared.status === 200 && approveShared.status === 200,
+      'Subida compartida se completa y se aprueba correctamente'
+    );
+
+    // 6.2 Alumno B en Plan B ve el material aprobado en su materia subB_core, con nombre del Plan B y anonimato
+    const subsB = await api('GET', '/api/library/subjects', studentBToken);
+    const bSharedRow = (subsB.data?.data?.subjects || subsB.data?.data || []).find(
+      (s: any) => s.id === subB_core.id
+    );
+    const listSharedInB = await api('GET', `/api/library/subjects/${subB_core.id}/files`, studentBToken);
+    const listBIgnoringQuery = await api('GET', `/api/library/files?planId=${planA}`, studentBToken);
+    const detailInB = await api('GET', `/api/library/files/${sharedFileId}`, studentBToken);
+    const downloadInB = await api('GET', `/api/library/files/${sharedFileId}/download`, studentBToken);
+    const helpfulInB = await api('POST', `/api/library/files/${sharedFileId}/helpful`, studentBToken);
+
+    const itemInB = listSharedInB.data?.data?.items?.[0];
+    assert(
+      subsB.status === 200 &&
+        bSharedRow?.approvedFilesCount === 1 &&
+        listSharedInB.status === 200 &&
+        listSharedInB.data?.data?.items?.length === 1 &&
+        itemInB?.id === sharedFileId &&
+        itemInB?.subjectName === subB_core.name &&
+        itemInB?.uploaderDisplay === 'Subido por un estudiante' &&
+        !('uploaderUserId' in itemInB) &&
+        !('uploaderEmail' in itemInB) &&
+        listBIgnoringQuery.status === 200 &&
+        detailInB.status === 200 &&
+        downloadInB.status === 200 &&
+        helpfulInB.status === 200,
+      'Alumno en Plan B ve y descarga material compartido por shared_subject_id con nombre de Plan B y sin filtrar autor'
+    );
+
+    // 6.3 Material en materia exclusiva de Plan B (NO compartida) devuelve 404 para alumno en Plan A
+    const pdfBOnlyBuf = Buffer.from('%PDF-1.4 Parcial exclusivo de Industrial Plan B %%EOF');
+    const initBOnly = await api('POST', '/api/library/uploads/init', studentBToken, {
+      subjectId: subB_only.id,
+      kind: 'parcial',
+      title: 'Parcial IO Plan B',
+      academicYear: 2025,
+      term: '2C',
+      originalFilename: 'parcial-io.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: pdfBOnlyBuf.length,
+    });
+    const bOnlyFileId = initBOnly.data.data.fileId as string;
+    await mockR2.putObjectDirect(initBOnly.data.data.storageKey, pdfBOnlyBuf, 'application/pdf');
+    await api('POST', `/api/library/uploads/${bOnlyFileId}/complete`, studentBToken);
+    await api('PATCH', `/api/admin/library/files/${bOnlyFileId}/approve`, adminToken);
+
+    const crossLibSubFiles404 = await api('GET', `/api/library/subjects/${subB_only.id}/files`, multiToken);
+    const crossLibQuery404 = await api('GET', `/api/library/subjects/${subB_only.id}/files?planId=${planB}`, multiToken);
+    const crossLibInit404 = await api('POST', '/api/library/uploads/init', multiToken, {
+      subjectId: subB_only.id,
+      kind: 'apunte',
+      title: 'Intento subida cruzada',
+      originalFilename: 'x.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 512,
+    });
+    const crossLibDetail404 = await api('GET', `/api/library/files/${bOnlyFileId}`, multiToken);
+    const crossLibDownload404 = await api('GET', `/api/library/files/${bOnlyFileId}/download`, multiToken);
+    const crossLibHelpful404 = await api('POST', `/api/library/files/${bOnlyFileId}/helpful`, multiToken);
+    const crossLibReport404 = await api('POST', `/api/library/files/${bOnlyFileId}/report`, multiToken, {
+      reason: 'wrong_subject',
+    });
+    const crossLibDeleteOther404 = await api('DELETE', `/api/library/my-uploads/${bOnlyFileId}`, multiToken);
+
+    assert(
+      crossLibSubFiles404.status === 404 &&
+        crossLibQuery404.status === 404 &&
+        crossLibInit404.status === 404 &&
+        crossLibDetail404.status === 404 &&
+        crossLibDownload404.status === 404 &&
+        crossLibHelpful404.status === 404 &&
+        crossLibReport404.status === 404 &&
+        crossLibDeleteOther404.status === 404,
+      'Biblioteca devuelve 404 ante materias/archivos no compartidos de otro plan incluso con ?planId='
+    );
+
+    // 6.4 Cuotas estrictamente por usuario (globales al userId, nunca compartidas con otros usuarios en shared_subjects)
+    libraryStore.files.set('seed-quota-full', {
+      id: 'seed-quota-full',
+      uploaderUserId: quotaUserId,
+      subjectId: subA_core.id,
+      sharedSubjectId: sharedAlgebraId,
+      sourceSubjectId: subA_core.id,
+      sourcePlanId: planA,
+      professorId: null,
+      kind: 'apunte',
+      title: 'Archivo pesado en Plan A',
+      description: null,
+      academicYear: null,
+      term: null,
+      examInstance: null,
+      professorText: null,
+      hasSolution: null,
+      originalFilename: 'pesado.pdf',
+      storageKey: 'library/pesado.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES - 1024,
+      sha256: 'sha256-pesado-cross-plan',
+      status: 'approved',
+      rejectionReason: null,
+      rejectedAt: null,
+      helpfulCount: 0,
+      downloadCount: 0,
+      reportsCount: 0,
+      moderatorUserId: null,
+      moderatedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+
+    // Cambiar quotaUserId a Plan B: su cuota de usuario NO se resetea al cambiar de plan
+    setUserPlanInAllStores(quotaUserId, planB);
+    const quotaTokenInB = signUserToken(quotaUserId);
+    const quotaBlockedInB = await api('POST', '/api/library/uploads/init', quotaTokenInB, {
+      subjectId: subB_core.id,
+      kind: 'apunte',
+      title: 'Intento exceder cuota en Plan B',
+      originalFilename: 'excede.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 4096,
+    });
+
+    // Otro estudiante (studentBOnlyId) en Plan B sobre la MISMA materia compartida NO hereda el bloqueo de cuota
+    const freshPdfForShared = Buffer.from('%PDF-1.4 Segundo aporte independiente en shared subject %%EOF');
+    const studentBNotBlocked = await api('POST', '/api/library/uploads/init', studentBToken, {
+      subjectId: subB_core.id,
+      kind: 'apunte',
+      title: 'Aporte independiente en shared subject',
+      originalFilename: 'indep.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: freshPdfForShared.length,
+    });
+
+    assert(
+      quotaBlockedInB.status === 429 &&
+        (quotaBlockedInB.data?.code === 'LIMIT_STORAGE_QUOTA' || quotaBlockedInB.data?.code === 'LIMIT_USER_QUOTA') &&
+        studentBNotBlocked.status === 201,
+      'Cuota de almacenamiento es global por userId entre planes (429) y no bloquea a otro estudiante en el mismo shared_subject (201)'
+    );
+
+    // Limite de pendientes por usuario (MAX_PENDING_UPLOADS) también por userId
+    for (let i = 0; i < LIBRARY_CONFIG.MAX_PENDING_UPLOADS; i++) {
+      libraryStore.files.set(`seed-pend-${i}`, {
+        id: `seed-pend-${i}`,
+        uploaderUserId: pendingQuotaUserId,
+        subjectId: subA_core.id,
+        sharedSubjectId: sharedAlgebraId,
+        sourceSubjectId: subA_core.id,
+        sourcePlanId: planA,
+        professorId: null,
+        kind: 'apunte',
+        title: `Pendiente ${i}`,
+        description: null,
+        academicYear: null,
+        term: null,
+        examInstance: null,
+        professorText: null,
+        hasSolution: null,
+        originalFilename: `p${i}.pdf`,
+        storageKey: `library/p${i}.pdf`,
+        mimeType: 'application/pdf',
+        sizeBytes: 512,
+        sha256: `sha256-pend-${i}`,
+        status: 'pending',
+        rejectionReason: null,
+        rejectedAt: null,
+        helpfulCount: 0,
+        downloadCount: 0,
+        reportsCount: 0,
+        moderatorUserId: null,
+        moderatedAt: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as any);
+    }
+    const pendingBlockedRes = await api('POST', '/api/library/uploads/init', pendingToken, {
+      subjectId: subA_core.id,
+      kind: 'apunte',
+      title: 'Pendiente extra 31',
+      originalFilename: 'p31.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 512,
+    });
+    assert(
+      pendingBlockedRes.status === 429 && pendingBlockedRes.data?.code === 'LIMIT_PENDING_UPLOADS',
+      'Límite de archivos pendientes se aplica por usuario (429 LIMIT_PENDING_UPLOADS)'
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+
+  console.log('\n======================================================================');
+  console.log(` 📊 RESULTADO TESTS MULTI-CARRERA (1A): ${passed} pasaron, ${failed} fallaron`);
+  console.log('======================================================================');
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error('❌ Error fatal ejecutando tests multi-carrera:', err);
+  process.exit(1);
+});
