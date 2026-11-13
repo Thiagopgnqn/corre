@@ -1,11 +1,5 @@
 // Configurar entorno aislado en memoria ANTES de importar módulos del servidor
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET =
-  process.env.JWT_SECRET || 'test_jwt_secret_super_seguro_de_al_menos_32_caracteres_2026';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
-process.env.VERIFICATION_CODE_PEPPER =
-  process.env.VERIFICATION_CODE_PEPPER || 'test_pepper_secret_super_seguro_min_16_caracteres';
+import './setupTestEnv.js';
 
 import http from 'http';
 import crypto from 'crypto';
@@ -851,6 +845,39 @@ async function main() {
   assert(
     registerConflictMsg.includes('Continuar con Google'),
     'Registro con contraseña de email que usa Google sugiere iniciar con Google sin revelar más datos'
+  );
+
+  // Verificar que en producción env.ts sigue negándose a arrancar si falta una variable obligatoria
+  const { spawnSync } = await import('child_process');
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const serverRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const prodBootCheck = spawnSync(
+    process.execPath,
+    [
+      ...process.execArgv,
+      '--input-type=module',
+      '-e',
+      "import('./src/config/env.js').catch((err) => { console.error(err); process.exit(2); });",
+    ],
+    {
+      cwd: serverRootDir,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH || '',
+        SystemRoot: process.env.SystemRoot || '',
+        NODE_ENV: 'production',
+        DATABASE_URL: '',
+        JWT_SECRET: '',
+        REFRESH_SECRET: '',
+      },
+    }
+  );
+  assert(
+    prodBootCheck.status === 1 &&
+      (prodBootCheck.stderr || '').includes('Error de validación en variables de entorno'),
+    'En NODE_ENV=production el servidor se niega a arrancar (exit 1) si falta una variable obligatoria',
+    `status=${prodBootCheck.status}, stderr=${(prodBootCheck.stderr || '').slice(0, 300)}`
   );
 
   // Restaurar verificador mock

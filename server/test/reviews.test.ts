@@ -1,9 +1,5 @@
 // Configurar entorno aislado en memoria ANTES de importar módulos del servidor (CERO conexión a Neon)
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET =
-  process.env.JWT_SECRET || 'test_jwt_secret_super_seguro_de_al_menos_32_caracteres_2026';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
+import './setupTestEnv.js';
 
 import http from 'http';
 import crypto from 'crypto';
