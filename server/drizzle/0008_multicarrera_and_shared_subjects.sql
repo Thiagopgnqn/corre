@@ -2,13 +2,13 @@ ALTER TABLE "careers" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'draft' NOT
 DO $$ BEGIN
  ALTER TABLE "careers" ADD CONSTRAINT "chk_careers_status" CHECK ("status" IN ('draft', 'published', 'archived'));
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 ALTER TABLE "study_plans" ADD COLUMN IF NOT EXISTS "status" text DEFAULT 'draft' NOT NULL;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "study_plans" ADD CONSTRAINT "chk_study_plans_status" CHECK ("status" IN ('draft', 'published', 'archived'));
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 UPDATE "study_plans" sp
 SET "status" = 'published'
@@ -50,19 +50,19 @@ CREATE TABLE IF NOT EXISTS "shared_subjects" (
 DO $$ BEGIN
  ALTER TABLE "shared_subjects" ADD CONSTRAINT "shared_subjects_faculty_id_faculties_id_fk" FOREIGN KEY ("faculty_id") REFERENCES "public"."faculties"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "shared_subjects" ADD CONSTRAINT "uq_shared_subjects_faculty_code" UNIQUE ("faculty_id", "stable_code");
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_shared_subjects_faculty_norm" ON "shared_subjects" USING btree ("faculty_id","normalized_name");--> statement-breakpoint
 ALTER TABLE "subjects" ADD COLUMN IF NOT EXISTS "shared_subject_id" uuid;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "subjects" ADD CONSTRAINT "subjects_shared_subject_id_shared_subjects_id_fk" FOREIGN KEY ("shared_subject_id") REFERENCES "public"."shared_subjects"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_subjects_shared_subject" ON "subjects" USING btree ("shared_subject_id");--> statement-breakpoint
 DO $$
@@ -132,17 +132,17 @@ ALTER TABLE "library_files" ADD COLUMN IF NOT EXISTS "source_plan_id" uuid;--> s
 DO $$ BEGIN
  ALTER TABLE "library_files" ADD CONSTRAINT "library_files_shared_subject_id_shared_subjects_id_fk" FOREIGN KEY ("shared_subject_id") REFERENCES "public"."shared_subjects"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "library_files" ADD CONSTRAINT "library_files_source_subject_id_subjects_id_fk" FOREIGN KEY ("source_subject_id") REFERENCES "public"."subjects"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "library_files" ADD CONSTRAINT "library_files_source_plan_id_study_plans_id_fk" FOREIGN KEY ("source_plan_id") REFERENCES "public"."study_plans"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_lib_files_shared_subject_status" ON "library_files" USING btree ("shared_subject_id","status");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_lib_files_source_plan" ON "library_files" USING btree ("source_plan_id");--> statement-breakpoint
@@ -175,7 +175,7 @@ ALTER TABLE "user_settings" ADD COLUMN IF NOT EXISTS "plan_id" uuid;--> statemen
 DO $$ BEGIN
  ALTER TABLE "user_settings" ADD CONSTRAINT "user_settings_plan_id_study_plans_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."study_plans"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 UPDATE "user_settings" us
 SET "plan_id" = COALESCE(
@@ -196,7 +196,7 @@ ALTER TABLE "schedule_selections" ADD COLUMN IF NOT EXISTS "selections_by_plan" 
 DO $$ BEGIN
  ALTER TABLE "schedule_selections" ADD CONSTRAINT "schedule_selections_plan_id_study_plans_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."study_plans"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 UPDATE "schedule_selections" ss
 SET
@@ -252,7 +252,7 @@ ALTER TABLE "schedule_proposals" ADD COLUMN IF NOT EXISTS "plan_id" uuid;--> sta
 DO $$ BEGIN
  ALTER TABLE "schedule_proposals" ADD CONSTRAINT "schedule_proposals_plan_id_study_plans_id_fk" FOREIGN KEY ("plan_id") REFERENCES "public"."study_plans"("id") ON DELETE cascade ON UPDATE no action;
 EXCEPTION
- WHEN duplicate_object THEN null;
+ WHEN duplicate_object OR duplicate_table THEN null;
 END $$;--> statement-breakpoint
 UPDATE "schedule_proposals" sp_prop
 SET "plan_id" = COALESCE(
