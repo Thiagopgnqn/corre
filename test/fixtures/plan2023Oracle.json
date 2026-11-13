@@ -1,0 +1,4317 @@
+{
+  "planId": "isi-plan-2023-oracle-v1",
+  "description": "Frozen regression oracle computed from unmodified static Plan 2023 code before Etapa 1B-1 engine generalization.",
+  "scenarios": [
+    {
+      "id": "01-empty-default",
+      "description": "Estado vacío con configuración por defecto (sin track Analista, electivas en progreso ON, sin bochazos en promedio)",
+      "input": {
+        "userState": {},
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 0,
+          "promotedCount": 0,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 27,
+          "availableCount": 9,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 0,
+          "careerPercentageBySubjects": 0,
+          "careerPercentageByHours": 0,
+          "percentageApproved": 0,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 100,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 0,
+          "averageGrade": 0,
+          "averageGradeWithPromotions": 0,
+          "averageGradeWithoutFails": 0,
+          "averageGradeWithFails": 0,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 0,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 20,
+          "missingCoreForDegree": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 0
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          11
+        ],
+        "availableElectiveIds": [],
+        "coreStatuses": {
+          "1": "disponible",
+          "2": "disponible",
+          "3": "disponible",
+          "4": "disponible",
+          "5": "disponible",
+          "6": "disponible",
+          "7": "disponible",
+          "8": "disponible",
+          "9": "bloqueada",
+          "10": "bloqueada",
+          "11": "disponible",
+          "12": "bloqueada",
+          "13": "bloqueada",
+          "14": "bloqueada",
+          "15": "bloqueada",
+          "16": "bloqueada",
+          "17": "bloqueada",
+          "18": "bloqueada",
+          "19": "bloqueada",
+          "20": "bloqueada",
+          "21": "bloqueada",
+          "22": "bloqueada",
+          "23": "bloqueada",
+          "24": "bloqueada",
+          "25": "bloqueada",
+          "26": "bloqueada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "bloqueada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada"
+        },
+        "electiveStatuses": {
+          "301": "bloqueada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "bloqueada",
+          "405": "bloqueada",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 0
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": [
+            12,
+            20,
+            23
+          ]
+        },
+        "criticalPath": {
+          "chainIds": [
+            6,
+            16,
+            23,
+            30,
+            36
+          ],
+          "length": 5,
+          "estimatedTerms": 7
+        }
+      }
+    },
+    {
+      "id": "02-empty-with-analista",
+      "description": "Estado vacío con track Analista habilitado (incluye materia 99 Seminario Integrador)",
+      "input": {
+        "userState": {},
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 0,
+          "promotedCount": 0,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 28,
+          "availableCount": 9,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 0,
+          "careerPercentageBySubjects": 0,
+          "careerPercentageByHours": 0,
+          "percentageApproved": 0,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 100,
+          "totalEquivalentSlots": 44,
+          "approvedEquivalentSlots": 0,
+          "averageGrade": 0,
+          "averageGradeWithPromotions": 0,
+          "averageGradeWithoutFails": 0,
+          "averageGradeWithFails": 0,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 0,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 20,
+          "missingCoreForDegree": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            99,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 0
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          11
+        ],
+        "availableElectiveIds": [],
+        "coreStatuses": {
+          "1": "disponible",
+          "2": "disponible",
+          "3": "disponible",
+          "4": "disponible",
+          "5": "disponible",
+          "6": "disponible",
+          "7": "disponible",
+          "8": "disponible",
+          "9": "bloqueada",
+          "10": "bloqueada",
+          "11": "disponible",
+          "12": "bloqueada",
+          "13": "bloqueada",
+          "14": "bloqueada",
+          "15": "bloqueada",
+          "16": "bloqueada",
+          "17": "bloqueada",
+          "18": "bloqueada",
+          "19": "bloqueada",
+          "20": "bloqueada",
+          "21": "bloqueada",
+          "22": "bloqueada",
+          "23": "bloqueada",
+          "24": "bloqueada",
+          "25": "bloqueada",
+          "26": "bloqueada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "bloqueada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada",
+          "99": "bloqueada"
+        },
+        "electiveStatuses": {
+          "301": "bloqueada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "bloqueada",
+          "405": "bloqueada",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            99,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 0
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": [
+            12,
+            20,
+            23
+          ]
+        },
+        "criticalPath": {
+          "chainIds": [
+            6,
+            16,
+            23,
+            30,
+            36
+          ],
+          "length": 5,
+          "estimatedTerms": 7
+        }
+      }
+    },
+    {
+      "id": "03-sample-3rd-year-no-fails-in-gpa",
+      "description": "Estudiante muestra 3° año con intentos de examen (2 bochazos y 1 aprobado) excluyendo bochazos del promedio activo",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "5": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "9": {
+            "status": "regularizada"
+          },
+          "10": {
+            "status": "regularizada"
+          },
+          "11": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "15": {
+            "status": "cursando"
+          },
+          "16": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "19": {
+            "status": "cursando"
+          },
+          "20": {
+            "status": "cursando"
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "404": {
+            "status": "cursando"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": [
+          {
+            "id": "att-1",
+            "subjectCode": 9,
+            "date": "2025-07-10",
+            "grade": 2,
+            "isPassed": false
+          },
+          {
+            "id": "att-2",
+            "subjectCode": 10,
+            "date": "2025-12-12",
+            "grade": 3,
+            "isPassed": false
+          },
+          {
+            "id": "att-3",
+            "subjectCode": 13,
+            "date": "2025-07-20",
+            "grade": 8,
+            "isPassed": true
+          }
+        ]
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 6,
+          "promotedCount": 8,
+          "regularizedCount": 2,
+          "takingCount": 3,
+          "blockedCount": 12,
+          "availableCount": 5,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 53,
+          "careerPercentageBySubjects": 36,
+          "careerPercentageByHours": 38,
+          "percentageApproved": 36,
+          "percentageTaking": 9,
+          "percentageRegularized": 5,
+          "percentagePending": 50,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 15.4,
+          "averageGrade": 8.53,
+          "averageGradeWithPromotions": 8.53,
+          "averageGradeWithoutFails": 8.53,
+          "averageGradeWithFails": 7.82,
+          "totalFailsCount": 2,
+          "libreCount": 0,
+          "pendingFinalsCount": 2,
+          "totalElectiveCreditsApproved": 4,
+          "totalElectiveCreditsTaking": 3,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 16,
+          "missingCoreForDegree": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              9,
+              10,
+              15,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 4
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          18,
+          21,
+          22,
+          23,
+          24
+        ],
+        "availableElectiveIds": [
+          405
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "promocionada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "regularizada",
+          "10": "regularizada",
+          "11": "promocionada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "cursando",
+          "16": "aprobada",
+          "17": "aprobada",
+          "18": "disponible",
+          "19": "cursando",
+          "20": "cursando",
+          "21": "disponible",
+          "22": "disponible",
+          "23": "disponible",
+          "24": "disponible",
+          "25": "bloqueada",
+          "26": "bloqueada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "bloqueada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "cursando",
+          "405": "disponible",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 4
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": [
+            20,
+            23
+          ]
+        },
+        "criticalPath": {
+          "chainIds": [
+            9,
+            22,
+            27,
+            33
+          ],
+          "length": 4,
+          "estimatedTerms": 5
+        }
+      }
+    },
+    {
+      "id": "04-sample-with-fails-libre-analista-electives-off",
+      "description": "Estudiante muestra con materia libre (10), bochazos incluidos en GPA, Analista ON y electivas excluidas del avance",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "5": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "9": {
+            "status": "regularizada"
+          },
+          "10": {
+            "status": "libre"
+          },
+          "11": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "15": {
+            "status": "cursando"
+          },
+          "16": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "18": {
+            "status": "cursando"
+          },
+          "19": {
+            "status": "cursando"
+          },
+          "20": {
+            "status": "cursando"
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "401": {
+            "status": "regularizada"
+          },
+          "404": {
+            "status": "cursando"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": false,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": true
+        },
+        "examAttempts": [
+          {
+            "id": "att-1",
+            "subjectCode": 9,
+            "date": "2025-07-10",
+            "grade": 2,
+            "isPassed": false
+          },
+          {
+            "id": "att-2",
+            "subjectCode": 10,
+            "date": "2025-12-12",
+            "grade": 3,
+            "isPassed": false
+          },
+          {
+            "id": "att-3",
+            "subjectCode": 13,
+            "date": "2025-07-20",
+            "grade": 8,
+            "isPassed": true
+          }
+        ]
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 6,
+          "promotedCount": 8,
+          "regularizedCount": 1,
+          "takingCount": 4,
+          "blockedCount": 13,
+          "availableCount": 5,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 53,
+          "careerPercentageBySubjects": 38,
+          "careerPercentageByHours": 37,
+          "percentageApproved": 38,
+          "percentageTaking": 11,
+          "percentageRegularized": 3,
+          "percentagePending": 48,
+          "totalEquivalentSlots": 37,
+          "approvedEquivalentSlots": 14,
+          "averageGrade": 7.82,
+          "averageGradeWithPromotions": 7.82,
+          "averageGradeWithoutFails": 8.53,
+          "averageGradeWithFails": 7.82,
+          "totalFailsCount": 2,
+          "libreCount": 1,
+          "pendingFinalsCount": 1,
+          "totalElectiveCreditsApproved": 4,
+          "totalElectiveCreditsTaking": 3,
+          "totalElectiveCreditsRegularized": 3,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 16,
+          "missingCoreForDegree": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            99,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              9,
+              10,
+              15,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 4
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          21,
+          22,
+          23,
+          99,
+          24
+        ],
+        "availableElectiveIds": [
+          405
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "promocionada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "regularizada",
+          "10": "libre",
+          "11": "promocionada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "cursando",
+          "16": "aprobada",
+          "17": "aprobada",
+          "18": "cursando",
+          "19": "cursando",
+          "20": "cursando",
+          "21": "disponible",
+          "22": "disponible",
+          "23": "disponible",
+          "24": "disponible",
+          "25": "bloqueada",
+          "26": "bloqueada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "bloqueada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada",
+          "99": "disponible"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "regularizada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "cursando",
+          "405": "disponible",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            99,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            9,
+            10,
+            15,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 4
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": [
+            20,
+            23
+          ]
+        },
+        "criticalPath": {
+          "chainIds": [
+            9,
+            22,
+            27,
+            33
+          ],
+          "length": 4,
+          "estimatedTerms": 5
+        }
+      }
+    },
+    {
+      "id": "05-pps-blocked-approved-prereqs-only-regular",
+      "description": "PPS bloqueada: correlativas 25,26,30 regularizadas pero 12,20,23 solo regularizadas (se requieren aprobadas)",
+      "input": {
+        "userState": {
+          "12": {
+            "status": "regularizada"
+          },
+          "20": {
+            "status": "regularizada"
+          },
+          "23": {
+            "status": "regularizada"
+          },
+          "25": {
+            "status": "regularizada"
+          },
+          "26": {
+            "status": "regularizada"
+          },
+          "30": {
+            "status": "regularizada"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 0,
+          "promotedCount": 0,
+          "regularizedCount": 6,
+          "takingCount": 0,
+          "blockedCount": 21,
+          "availableCount": 9,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 0,
+          "careerPercentageBySubjects": 0,
+          "careerPercentageByHours": 0,
+          "percentageApproved": 0,
+          "percentageTaking": 0,
+          "percentageRegularized": 14,
+          "percentagePending": 86,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 0,
+          "averageGrade": 0,
+          "averageGradeWithPromotions": 0,
+          "averageGradeWithoutFails": 0,
+          "averageGradeWithFails": 0,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 6,
+          "totalElectiveCreditsApproved": 0,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 20,
+          "missingCoreForDegree": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 0
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          11
+        ],
+        "availableElectiveIds": [],
+        "coreStatuses": {
+          "1": "disponible",
+          "2": "disponible",
+          "3": "disponible",
+          "4": "disponible",
+          "5": "disponible",
+          "6": "disponible",
+          "7": "disponible",
+          "8": "disponible",
+          "9": "bloqueada",
+          "10": "bloqueada",
+          "11": "disponible",
+          "12": "regularizada",
+          "13": "bloqueada",
+          "14": "bloqueada",
+          "15": "bloqueada",
+          "16": "bloqueada",
+          "17": "bloqueada",
+          "18": "bloqueada",
+          "19": "bloqueada",
+          "20": "regularizada",
+          "21": "bloqueada",
+          "22": "bloqueada",
+          "23": "regularizada",
+          "24": "bloqueada",
+          "25": "regularizada",
+          "26": "regularizada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "regularizada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada"
+        },
+        "electiveStatuses": {
+          "301": "bloqueada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "bloqueada",
+          "405": "bloqueada",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 0
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [],
+          "missingApproved": [
+            12,
+            20,
+            23
+          ]
+        },
+        "criticalPath": {
+          "chainIds": [
+            6,
+            16,
+            23,
+            30,
+            36
+          ],
+          "length": 5,
+          "estimatedTerms": 7
+        }
+      }
+    },
+    {
+      "id": "06-pps-blocked-missing-one-regular-with-514-approved",
+      "description": "PPS bloqueada pese a electiva 514 aprobada: falta regularizar 30 (25,26 reg y 12,20,23 apr)",
+      "input": {
+        "userState": {
+          "12": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "25": {
+            "status": "regularizada"
+          },
+          "26": {
+            "status": "regularizada"
+          },
+          "30": {
+            "status": "cursando"
+          },
+          "514": {
+            "status": "aprobada",
+            "grade": 9
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 2,
+          "promotedCount": 1,
+          "regularizedCount": 2,
+          "takingCount": 1,
+          "blockedCount": 21,
+          "availableCount": 9,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 12,
+          "careerPercentageBySubjects": 10,
+          "careerPercentageByHours": 9,
+          "percentageApproved": 10,
+          "percentageTaking": 2,
+          "percentageRegularized": 5,
+          "percentagePending": 83,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 4.4,
+          "averageGrade": 8.25,
+          "averageGradeWithPromotions": 8.25,
+          "averageGradeWithoutFails": 8.25,
+          "averageGradeWithFails": 8.25,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 2,
+          "totalElectiveCreditsApproved": 4,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 16,
+          "missingCoreForDegree": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              21,
+              22
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 4
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          11
+        ],
+        "availableElectiveIds": [],
+        "coreStatuses": {
+          "1": "disponible",
+          "2": "disponible",
+          "3": "disponible",
+          "4": "disponible",
+          "5": "disponible",
+          "6": "disponible",
+          "7": "disponible",
+          "8": "disponible",
+          "9": "bloqueada",
+          "10": "bloqueada",
+          "11": "disponible",
+          "12": "aprobada",
+          "13": "bloqueada",
+          "14": "bloqueada",
+          "15": "bloqueada",
+          "16": "bloqueada",
+          "17": "bloqueada",
+          "18": "bloqueada",
+          "19": "bloqueada",
+          "20": "promocionada",
+          "21": "bloqueada",
+          "22": "bloqueada",
+          "23": "aprobada",
+          "24": "bloqueada",
+          "25": "regularizada",
+          "26": "regularizada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "cursando",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada"
+        },
+        "electiveStatuses": {
+          "301": "bloqueada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "bloqueada",
+          "405": "bloqueada",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "aprobada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 4
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            30
+          ],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            1,
+            9,
+            22,
+            27,
+            33
+          ],
+          "length": 5,
+          "estimatedTerms": 6
+        }
+      }
+    },
+    {
+      "id": "07-pps-enabled-minimal",
+      "description": "PPS habilitada mínimo exacto: 25,26,30 regularizadas y 12,20 aprobadas + 23 promocionada (sin aprobar 1..35 ni 99)",
+      "input": {
+        "userState": {
+          "12": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "20": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "23": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "25": {
+            "status": "regularizada"
+          },
+          "26": {
+            "status": "regularizada"
+          },
+          "30": {
+            "status": "regularizada"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 2,
+          "promotedCount": 1,
+          "regularizedCount": 3,
+          "takingCount": 0,
+          "blockedCount": 20,
+          "availableCount": 10,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 12,
+          "careerPercentageBySubjects": 7,
+          "careerPercentageByHours": 9,
+          "percentageApproved": 7,
+          "percentageTaking": 0,
+          "percentageRegularized": 7,
+          "percentagePending": 86,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 3,
+          "averageGrade": 8,
+          "averageGradeWithPromotions": 8,
+          "averageGradeWithoutFails": 8,
+          "averageGradeWithFails": 8,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 3,
+          "totalElectiveCreditsApproved": 0,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 20,
+          "missingCoreForDegree": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              21,
+              22
+            ],
+            "seminarioApproved": false,
+            "electiveCredits": 0
+          },
+          "isPPSEligible": true,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          11,
+          36
+        ],
+        "availableElectiveIds": [
+          502,
+          503,
+          504,
+          505,
+          512,
+          513
+        ],
+        "coreStatuses": {
+          "1": "disponible",
+          "2": "disponible",
+          "3": "disponible",
+          "4": "disponible",
+          "5": "disponible",
+          "6": "disponible",
+          "7": "disponible",
+          "8": "disponible",
+          "9": "bloqueada",
+          "10": "bloqueada",
+          "11": "disponible",
+          "12": "aprobada",
+          "13": "bloqueada",
+          "14": "bloqueada",
+          "15": "bloqueada",
+          "16": "bloqueada",
+          "17": "bloqueada",
+          "18": "bloqueada",
+          "19": "bloqueada",
+          "20": "aprobada",
+          "21": "bloqueada",
+          "22": "bloqueada",
+          "23": "promocionada",
+          "24": "bloqueada",
+          "25": "regularizada",
+          "26": "regularizada",
+          "27": "bloqueada",
+          "28": "bloqueada",
+          "29": "bloqueada",
+          "30": "regularizada",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "disponible"
+        },
+        "electiveStatuses": {
+          "301": "bloqueada",
+          "401": "bloqueada",
+          "402": "bloqueada",
+          "403": "bloqueada",
+          "404": "bloqueada",
+          "405": "bloqueada",
+          "406": "bloqueada",
+          "407": "bloqueada",
+          "408": "bloqueada",
+          "501": "bloqueada",
+          "502": "disponible",
+          "503": "disponible",
+          "504": "disponible",
+          "505": "disponible",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "disponible",
+          "513": "disponible",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22
+          ]
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            11,
+            9,
+            10,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            21,
+            22
+          ],
+          "seminarioApproved": false,
+          "electiveCredits": 0
+        },
+        "pps": {
+          "eligible": true,
+          "missingRegular": [],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            1,
+            9,
+            22,
+            27,
+            33
+          ],
+          "length": 5,
+          "estimatedTerms": 6
+        }
+      }
+    },
+    {
+      "id": "08-analista-partial-3-credits",
+      "description": "Analista bloqueado por créditos: 1..23 y Seminario 99 aprobados, solo 3 créditos electivos (401)",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "99": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "401": {
+            "status": "aprobada",
+            "grade": 8
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 13,
+          "promotedCount": 11,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 6,
+          "availableCount": 7,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 95,
+          "careerPercentageBySubjects": 57,
+          "careerPercentageByHours": 67,
+          "percentageApproved": 57,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 43,
+          "totalEquivalentSlots": 44,
+          "approvedEquivalentSlots": 25.05,
+          "averageGrade": 8.44,
+          "averageGradeWithPromotions": 8.44,
+          "averageGradeWithoutFails": 8.44,
+          "averageGradeWithFails": 8.44,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 3,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 17,
+          "missingCoreForDegree": [
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": true,
+            "electiveCredits": 3
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "availableElectiveIds": [
+          301,
+          402,
+          403,
+          404,
+          405,
+          406,
+          407,
+          408
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "disponible",
+          "25": "disponible",
+          "26": "disponible",
+          "27": "disponible",
+          "28": "disponible",
+          "29": "disponible",
+          "30": "disponible",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada",
+          "99": "aprobada"
+        },
+        "electiveStatuses": {
+          "301": "disponible",
+          "401": "aprobada",
+          "402": "disponible",
+          "403": "disponible",
+          "404": "disponible",
+          "405": "disponible",
+          "406": "disponible",
+          "407": "disponible",
+          "408": "disponible",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [],
+          "seminarioApproved": true,
+          "electiveCredits": 3
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            26,
+            36
+          ],
+          "length": 2,
+          "estimatedTerms": 3
+        }
+      }
+    },
+    {
+      "id": "09-analista-complete-4-credits",
+      "description": "Analista habilitado: 1..23 y Seminario 99 aprobados + 4 créditos electivos (301)",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "99": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 13,
+          "promotedCount": 11,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 6,
+          "availableCount": 7,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 95,
+          "careerPercentageBySubjects": 58,
+          "careerPercentageByHours": 67,
+          "percentageApproved": 58,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 42,
+          "totalEquivalentSlots": 44,
+          "approvedEquivalentSlots": 25.4,
+          "averageGrade": 8.48,
+          "averageGradeWithPromotions": 8.48,
+          "averageGradeWithoutFails": 8.48,
+          "averageGradeWithFails": 8.48,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 4,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 16,
+          "missingCoreForDegree": [
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "isAnalistaEligible": true,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": true,
+            "electiveCredits": 4
+          },
+          "isPPSEligible": false,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "availableElectiveIds": [
+          401,
+          402,
+          403,
+          404,
+          405,
+          406,
+          407,
+          408
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "disponible",
+          "25": "disponible",
+          "26": "disponible",
+          "27": "disponible",
+          "28": "disponible",
+          "29": "disponible",
+          "30": "disponible",
+          "31": "bloqueada",
+          "32": "bloqueada",
+          "33": "bloqueada",
+          "34": "bloqueada",
+          "35": "bloqueada",
+          "36": "bloqueada",
+          "99": "aprobada"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "disponible",
+          "402": "disponible",
+          "403": "disponible",
+          "404": "disponible",
+          "405": "disponible",
+          "406": "disponible",
+          "407": "disponible",
+          "408": "disponible",
+          "501": "bloqueada",
+          "502": "bloqueada",
+          "503": "bloqueada",
+          "504": "bloqueada",
+          "505": "bloqueada",
+          "506": "bloqueada",
+          "507": "bloqueada",
+          "508": "bloqueada",
+          "509": "bloqueada",
+          "510": "bloqueada",
+          "511": "bloqueada",
+          "512": "bloqueada",
+          "513": "bloqueada",
+          "514": "bloqueada"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
+          ]
+        },
+        "analista": {
+          "eligible": true,
+          "missingCoreIds": [],
+          "seminarioApproved": true,
+          "electiveCredits": 4
+        },
+        "pps": {
+          "eligible": false,
+          "missingRegular": [
+            25,
+            26,
+            30
+          ],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            26,
+            36
+          ],
+          "length": 2,
+          "estimatedTerms": 3
+        }
+      }
+    },
+    {
+      "id": "10-near-graduate-without-analista-electives-overflow",
+      "description": "1..35 aprobadas, Proyecto Final 36 cursando, Seminario 99 pendiente pero track Analista OFF, 22 cr electivos aprobados + 3 reg + 3 cursando",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "24": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "25": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "26": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "27": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "28": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "29": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "30": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "31": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "32": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "33": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "34": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "35": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "36": {
+            "status": "cursando"
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "401": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "402": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "403": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "404": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "405": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "406": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "407": {
+            "status": "regularizada"
+          },
+          "408": {
+            "status": "cursando"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 18,
+          "promotedCount": 17,
+          "regularizedCount": 0,
+          "takingCount": 1,
+          "blockedCount": 0,
+          "availableCount": 0,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 132,
+          "careerPercentageBySubjects": 98,
+          "careerPercentageByHours": 96,
+          "percentageApproved": 98,
+          "percentageTaking": 2,
+          "percentageRegularized": 0,
+          "percentagePending": 0,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 42,
+          "averageGrade": 8.52,
+          "averageGradeWithPromotions": 8.52,
+          "averageGradeWithoutFails": 8.52,
+          "averageGradeWithFails": 8.52,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 22,
+          "totalElectiveCreditsTaking": 3,
+          "totalElectiveCreditsRegularized": 3,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 0,
+          "missingCoreForDegree": [
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": false,
+            "electiveCredits": 22
+          },
+          "isPPSEligible": true,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [],
+        "availableElectiveIds": [
+          501,
+          502,
+          503,
+          504,
+          505,
+          506,
+          507,
+          508,
+          509,
+          510,
+          511,
+          512,
+          513,
+          514
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "promocionada",
+          "25": "aprobada",
+          "26": "promocionada",
+          "27": "aprobada",
+          "28": "promocionada",
+          "29": "aprobada",
+          "30": "promocionada",
+          "31": "aprobada",
+          "32": "promocionada",
+          "33": "aprobada",
+          "34": "promocionada",
+          "35": "aprobada",
+          "36": "cursando"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "promocionada",
+          "402": "aprobada",
+          "403": "promocionada",
+          "404": "aprobada",
+          "405": "aprobada",
+          "406": "aprobada",
+          "407": "regularizada",
+          "408": "cursando",
+          "501": "disponible",
+          "502": "disponible",
+          "503": "disponible",
+          "504": "disponible",
+          "505": "disponible",
+          "506": "disponible",
+          "507": "disponible",
+          "508": "disponible",
+          "509": "disponible",
+          "510": "disponible",
+          "511": "disponible",
+          "512": "disponible",
+          "513": "disponible",
+          "514": "disponible"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [],
+          "seminarioApproved": false,
+          "electiveCredits": 22
+        },
+        "pps": {
+          "eligible": true,
+          "missingRegular": [],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            36
+          ],
+          "length": 1,
+          "estimatedTerms": 2
+        }
+      }
+    },
+    {
+      "id": "11-near-graduate-with-analista-missing-99",
+      "description": "1..36 aprobadas y 22 cr electivos aprobados con track Analista ON pero falta Seminario 99",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "24": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "25": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "26": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "27": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "28": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "29": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "30": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "31": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "32": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "33": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "34": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "35": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "36": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "401": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "402": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "403": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "404": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "405": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "406": {
+            "status": "aprobada",
+            "grade": 8
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 18,
+          "promotedCount": 18,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 0,
+          "availableCount": 1,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 138,
+          "careerPercentageBySubjects": 98,
+          "careerPercentageByHours": 97,
+          "percentageApproved": 98,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 2,
+          "totalEquivalentSlots": 44,
+          "approvedEquivalentSlots": 43,
+          "averageGrade": 8.49,
+          "averageGradeWithPromotions": 8.49,
+          "averageGradeWithoutFails": 8.49,
+          "averageGradeWithFails": 8.49,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 22,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 0,
+          "missingCoreForDegree": [
+            99
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": false,
+            "electiveCredits": 22
+          },
+          "isPPSEligible": true,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          99
+        ],
+        "availableElectiveIds": [
+          407,
+          501,
+          502,
+          503,
+          504,
+          505,
+          506,
+          507,
+          508,
+          509,
+          510,
+          511,
+          408,
+          512,
+          513,
+          514
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "promocionada",
+          "25": "aprobada",
+          "26": "promocionada",
+          "27": "aprobada",
+          "28": "promocionada",
+          "29": "aprobada",
+          "30": "promocionada",
+          "31": "aprobada",
+          "32": "promocionada",
+          "33": "aprobada",
+          "34": "promocionada",
+          "35": "aprobada",
+          "36": "promocionada",
+          "99": "disponible"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "promocionada",
+          "402": "aprobada",
+          "403": "promocionada",
+          "404": "aprobada",
+          "405": "aprobada",
+          "406": "aprobada",
+          "407": "disponible",
+          "408": "disponible",
+          "501": "disponible",
+          "502": "disponible",
+          "503": "disponible",
+          "504": "disponible",
+          "505": "disponible",
+          "506": "disponible",
+          "507": "disponible",
+          "508": "disponible",
+          "509": "disponible",
+          "510": "disponible",
+          "511": "disponible",
+          "512": "disponible",
+          "513": "disponible",
+          "514": "disponible"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": false,
+          "missingIds": [
+            99
+          ]
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [],
+          "seminarioApproved": false,
+          "electiveCredits": 22
+        },
+        "pps": {
+          "eligible": true,
+          "missingRegular": [],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            99
+          ],
+          "length": 1,
+          "estimatedTerms": 1
+        }
+      }
+    },
+    {
+      "id": "12-full-graduate-with-analista",
+      "description": "Carrera completa (1..36 + 99 + 22 cr electivos aprobados) con Analista ON",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "24": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "25": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "26": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "27": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "28": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "29": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "30": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "31": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "32": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "33": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "34": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "35": {
+            "status": "aprobada",
+            "grade": 10
+          },
+          "36": {
+            "status": "promocionada",
+            "grade": 7
+          },
+          "99": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "301": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "401": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "402": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "403": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "404": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "405": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "406": {
+            "status": "aprobada",
+            "grade": 8
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 4,
+          "includeAnalistaTrack": true,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": false
+        },
+        "examAttempts": []
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 37,
+          "approvedCount": 18,
+          "promotedCount": 19,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 0,
+          "availableCount": 0,
+          "totalWeeklyHours": 142,
+          "approvedWeeklyHours": 142,
+          "careerPercentageBySubjects": 100,
+          "careerPercentageByHours": 100,
+          "percentageApproved": 100,
+          "percentageTaking": 0,
+          "percentageRegularized": 0,
+          "percentagePending": 0,
+          "totalEquivalentSlots": 44,
+          "approvedEquivalentSlots": 44,
+          "averageGrade": 8.52,
+          "averageGradeWithPromotions": 8.52,
+          "averageGradeWithoutFails": 8.52,
+          "averageGradeWithFails": 8.52,
+          "totalFailsCount": 0,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 22,
+          "totalElectiveCreditsTaking": 0,
+          "totalElectiveCreditsRegularized": 0,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 0,
+          "missingCoreForDegree": [],
+          "isAnalistaEligible": true,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": true,
+            "electiveCredits": 22
+          },
+          "isPPSEligible": true,
+          "isDegreeEligible": true
+        },
+        "availableCoreIds": [],
+        "availableElectiveIds": [
+          407,
+          501,
+          502,
+          503,
+          504,
+          505,
+          506,
+          507,
+          508,
+          509,
+          510,
+          511,
+          408,
+          512,
+          513,
+          514
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "promocionada",
+          "25": "aprobada",
+          "26": "promocionada",
+          "27": "aprobada",
+          "28": "promocionada",
+          "29": "aprobada",
+          "30": "promocionada",
+          "31": "aprobada",
+          "32": "promocionada",
+          "33": "aprobada",
+          "34": "promocionada",
+          "35": "aprobada",
+          "36": "promocionada",
+          "99": "promocionada"
+        },
+        "electiveStatuses": {
+          "301": "aprobada",
+          "401": "promocionada",
+          "402": "aprobada",
+          "403": "promocionada",
+          "404": "aprobada",
+          "405": "aprobada",
+          "406": "aprobada",
+          "407": "disponible",
+          "408": "disponible",
+          "501": "disponible",
+          "502": "disponible",
+          "503": "disponible",
+          "504": "disponible",
+          "505": "disponible",
+          "506": "disponible",
+          "507": "disponible",
+          "508": "disponible",
+          "509": "disponible",
+          "510": "disponible",
+          "511": "disponible",
+          "512": "disponible",
+          "513": "disponible",
+          "514": "disponible"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "analista": {
+          "eligible": true,
+          "missingCoreIds": [],
+          "seminarioApproved": true,
+          "electiveCredits": 22
+        },
+        "pps": {
+          "eligible": true,
+          "missingRegular": [],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [],
+          "length": 0,
+          "estimatedTerms": 0
+        }
+      }
+    },
+    {
+      "id": "13-elective-cap-cascade-and-min-grade",
+      "description": "Cascada de créditos electivos (18 apr + 3 reg + 3 cursando, tope 20) y minPassingGrade = 6",
+      "input": {
+        "userState": {
+          "1": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "2": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "3": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "4": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "5": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "6": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "7": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "8": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "9": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "10": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "11": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "12": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "13": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "14": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "15": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "16": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "17": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "18": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "19": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "20": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "21": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "22": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "23": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "24": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "25": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "26": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "27": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "28": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "29": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "30": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "31": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "32": {
+            "status": "promocionada",
+            "grade": 10
+          },
+          "33": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "34": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "35": {
+            "status": "aprobada",
+            "grade": 5
+          },
+          "401": {
+            "status": "aprobada",
+            "grade": 8
+          },
+          "402": {
+            "status": "promocionada",
+            "grade": 9
+          },
+          "403": {
+            "status": "aprobada",
+            "grade": 7
+          },
+          "404": {
+            "status": "promocionada",
+            "grade": 8
+          },
+          "405": {
+            "status": "aprobada",
+            "grade": 6
+          },
+          "406": {
+            "status": "aprobada",
+            "grade": 9
+          },
+          "407": {
+            "status": "regularizada"
+          },
+          "408": {
+            "status": "cursando"
+          }
+        },
+        "settings": {
+          "includePromotionsInGPA": true,
+          "minPassingGrade": 6,
+          "includeAnalistaTrack": false,
+          "allowBlockedElectivesPlanning": false,
+          "includeElectivesInProgress": true,
+          "tutorialCompleted": false,
+          "notifyLibraryEmail": true,
+          "includeFailsInGPA": true
+        },
+        "examAttempts": [
+          {
+            "id": "att-4",
+            "subjectCode": 35,
+            "date": "2026-02-15",
+            "grade": 5,
+            "isPassed": true
+          }
+        ]
+      },
+      "expected": {
+        "progress": {
+          "totalSubjects": 36,
+          "approvedCount": 18,
+          "promotedCount": 17,
+          "regularizedCount": 0,
+          "takingCount": 0,
+          "blockedCount": 0,
+          "availableCount": 1,
+          "totalWeeklyHours": 138,
+          "approvedWeeklyHours": 132,
+          "careerPercentageBySubjects": 96,
+          "careerPercentageByHours": 96,
+          "percentageApproved": 96,
+          "percentageTaking": 0,
+          "percentageRegularized": 2,
+          "percentagePending": 2,
+          "totalEquivalentSlots": 43,
+          "approvedEquivalentSlots": 41.3,
+          "averageGrade": 8.27,
+          "averageGradeWithPromotions": 8.27,
+          "averageGradeWithoutFails": 8.35,
+          "averageGradeWithFails": 8.27,
+          "totalFailsCount": 1,
+          "libreCount": 0,
+          "pendingFinalsCount": 0,
+          "totalElectiveCreditsApproved": 18,
+          "totalElectiveCreditsTaking": 3,
+          "totalElectiveCreditsRegularized": 3,
+          "totalElectiveCreditsRequired": 20,
+          "missingElectiveCreditsForDegree": 2,
+          "missingCoreForDegree": [
+            36
+          ],
+          "isAnalistaEligible": false,
+          "missingForAnalista": {
+            "missingCoreIds": [],
+            "seminarioApproved": false,
+            "electiveCredits": 18
+          },
+          "isPPSEligible": true,
+          "isDegreeEligible": false
+        },
+        "availableCoreIds": [
+          36
+        ],
+        "availableElectiveIds": [
+          301,
+          501,
+          502,
+          503,
+          504,
+          505,
+          506,
+          507,
+          508,
+          509,
+          510,
+          511,
+          512,
+          513,
+          514
+        ],
+        "coreStatuses": {
+          "1": "aprobada",
+          "2": "promocionada",
+          "3": "aprobada",
+          "4": "promocionada",
+          "5": "aprobada",
+          "6": "promocionada",
+          "7": "aprobada",
+          "8": "promocionada",
+          "9": "aprobada",
+          "10": "promocionada",
+          "11": "aprobada",
+          "12": "promocionada",
+          "13": "aprobada",
+          "14": "promocionada",
+          "15": "aprobada",
+          "16": "promocionada",
+          "17": "aprobada",
+          "18": "promocionada",
+          "19": "aprobada",
+          "20": "promocionada",
+          "21": "aprobada",
+          "22": "promocionada",
+          "23": "aprobada",
+          "24": "promocionada",
+          "25": "aprobada",
+          "26": "promocionada",
+          "27": "aprobada",
+          "28": "promocionada",
+          "29": "aprobada",
+          "30": "promocionada",
+          "31": "aprobada",
+          "32": "promocionada",
+          "33": "aprobada",
+          "34": "promocionada",
+          "35": "aprobada",
+          "36": "disponible"
+        },
+        "electiveStatuses": {
+          "301": "disponible",
+          "401": "aprobada",
+          "402": "promocionada",
+          "403": "aprobada",
+          "404": "promocionada",
+          "405": "aprobada",
+          "406": "aprobada",
+          "407": "regularizada",
+          "408": "cursando",
+          "501": "disponible",
+          "502": "disponible",
+          "503": "disponible",
+          "504": "disponible",
+          "505": "disponible",
+          "506": "disponible",
+          "507": "disponible",
+          "508": "disponible",
+          "509": "disponible",
+          "510": "disponible",
+          "511": "disponible",
+          "512": "disponible",
+          "513": "disponible",
+          "514": "disponible"
+        },
+        "seminario": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "proyectoFinal": {
+          "canRender": true,
+          "missingIds": []
+        },
+        "analista": {
+          "eligible": false,
+          "missingCoreIds": [],
+          "seminarioApproved": false,
+          "electiveCredits": 18
+        },
+        "pps": {
+          "eligible": true,
+          "missingRegular": [],
+          "missingApproved": []
+        },
+        "criticalPath": {
+          "chainIds": [
+            36
+          ],
+          "length": 1,
+          "estimatedTerms": 2
+        }
+      }
+    }
+  ]
+}
