@@ -2,11 +2,14 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { registerLayer, unregisterLayer, getActiveLayersCount, isTopLayer } from '../src/components/common/BottomSheet';
 import { checkEligibility, ALL_SUBJECTS_MAP } from '../src/utils/correlativas';
 import { PLURAL_DAYS_MAP } from '../src/components/schedule/ScheduleWeeklyGrid';
 
-const rootDir = 'c:/Users/msgar/OneDrive/Escritorio/codigos/corre';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
 
 describe('Fase 1: Infraestructura Mobile, BottomSheet, Navegación y Prevención de Zoom iOS', () => {
   it('1. Hook useIsMobile y useDeviceCapabilities respetan Tailwind md y media queries oficiales', () => {
