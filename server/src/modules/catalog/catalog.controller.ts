@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   institutions,
@@ -22,6 +22,11 @@ import {
   users,
 } from '../../db/schema.js';
 import { getCatalogVersion } from '../admin/admin.service.js';
+import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
+import {
+  findDefaultPublishedPlan,
+  findPublishedPlanById,
+} from './catalog.helpers.js';
 
 const DAY_REVERSE: Record<number, 'LUN' | 'MAR' | 'MIE' | 'JUE' | 'VIE' | 'SAB'> = {
   1: 'LUN',
@@ -42,36 +47,46 @@ export async function getCareers(req: Request, res: Response): Promise<void> {
   try {
     const allInstitutions = await db.select().from(institutions);
     const allFaculties = await db.select().from(faculties);
-    const allCareers = await db.select().from(careers);
-    const activePlans = await db.select().from(studyPlans).where(eq(studyPlans.isActive, true));
+    const publishedCareers = await db
+      .select()
+      .from(careers)
+      .where(eq(careers.status, 'published'));
+    const activePlans = await db
+      .select()
+      .from(studyPlans)
+      .where(and(eq(studyPlans.isActive, true), eq(studyPlans.status, 'published')));
 
-    const tree = allInstitutions.map((inst) => ({
-      id: inst.id,
-      name: inst.name,
-      code: inst.code,
-      faculties: allFaculties
-        .filter((f) => f.institutionId === inst.id)
-        .map((fac) => ({
-          id: fac.id,
-          name: fac.name,
-          code: fac.code,
-          careers: allCareers
-            .filter((c) => c.facultyId === fac.id)
-            .map((car) => ({
-              id: car.id,
-              name: car.name,
-              code: car.code,
-              plans: activePlans
-                .filter((p) => p.careerId === car.id)
-                .map((p) => ({
-                  id: p.id,
-                  name: p.name,
-                  year: p.year,
-                  config: p.config,
-                })),
-            })),
-        })),
-    }));
+    const tree = allInstitutions
+      .map((inst) => ({
+        id: inst.id,
+        name: inst.name,
+        code: inst.code,
+        faculties: allFaculties
+          .filter((f) => f.institutionId === inst.id)
+          .map((fac) => ({
+            id: fac.id,
+            name: fac.name,
+            code: fac.code,
+            careers: publishedCareers
+              .filter((c) => c.facultyId === fac.id)
+              .map((car) => ({
+                id: car.id,
+                name: car.name,
+                code: car.code,
+                plans: activePlans
+                  .filter((p) => p.careerId === car.id)
+                  .map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    year: p.year,
+                    config: p.config,
+                  })),
+              }))
+              .filter((car) => car.plans.length > 0),
+          }))
+          .filter((fac) => fac.careers.length > 0),
+      }))
+      .filter((inst) => inst.faculties.length > 0);
 
     res.json({
       success: true,
@@ -87,13 +102,12 @@ export async function getPlan(req: Request, res: Response): Promise<void> {
   const planId = String(req.params.planId);
 
   try {
-    let plan;
-    if (planId === 'current' || planId === 'default') {
-      [plan] = await db.select().from(studyPlans).where(eq(studyPlans.isActive, true)).limit(1);
-    } else {
-      [plan] = await db.select().from(studyPlans).where(eq(studyPlans.id, planId)).limit(1);
-    }
+    const resolved =
+      planId === 'current' || planId === 'default'
+        ? await findDefaultPublishedPlan()
+        : await findPublishedPlanById(planId);
 
+    const plan = resolved?.plan;
     if (!plan) {
       res.status(404).json({ success: false, error: 'Plan de estudio no encontrado' });
       return;
@@ -109,11 +123,18 @@ export async function getPlan(req: Request, res: Response): Promise<void> {
     const uuidToCode = new Map<string, number>();
     planSubjects.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
 
-    // Obtener todas las correlativas del plan
+    // Obtener solo correlativas del plan activo
     const subIds = planSubjects.map((s) => s.id);
     let allPrereqs: Array<{ subjectId: string; requiresSubjectId: string; type: string }> = [];
     if (subIds.length > 0) {
-      allPrereqs = await db.select().from(subjectPrerequisites);
+      allPrereqs = await db
+        .select({
+          subjectId: subjectPrerequisites.subjectId,
+          requiresSubjectId: subjectPrerequisites.requiresSubjectId,
+          type: subjectPrerequisites.type,
+        })
+        .from(subjectPrerequisites)
+        .where(inArray(subjectPrerequisites.subjectId, subIds));
     }
 
     // Agrupar correlativas por subject
@@ -212,72 +233,105 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
   const { planId, year, term } = req.query;
 
   try {
-    // 1. Obtener el plan de estudio
-    let plan;
-    if (!planId || planId === 'current' || planId === 'default') {
-      [plan] = await db.select().from(studyPlans).where(eq(studyPlans.isActive, true)).limit(1);
-    } else {
-      [plan] = await db.select().from(studyPlans).where(eq(studyPlans.id, String(planId))).limit(1);
-    }
+    // 1. Obtener el plan de estudio publicado (y su carrera/facultad)
+    const rawPlanId = planId ? String(planId) : 'current';
+    const resolved =
+      rawPlanId === 'current' || rawPlanId === 'default'
+        ? await findDefaultPublishedPlan()
+        : await findPublishedPlanById(rawPlanId);
 
-    if (!plan) {
+    if (!resolved) {
       res.status(404).json({ success: false, error: 'Plan de estudio no encontrado' });
       return;
     }
 
-    // 2. Obtener la carrera y facultad correspondiente
-    const [career] = await db.select().from(careers).where(eq(careers.id, plan.careerId)).limit(1);
-    if (!career) {
-      res.status(404).json({ success: false, error: 'Carrera no encontrada' });
-      return;
+    const { plan, career } = resolved;
+
+    // 2. Obtener el término de horarios (siempre filtrado por facultyId y no borrador)
+    const parsedYear = year ? parseInt(String(year), 10) : NaN;
+    const hasExplicitYear = !Number.isNaN(parsedYear) && parsedYear > 0;
+    const requestedTermStr =
+      term && String(term).toUpperCase() === '2C'
+        ? '2C'
+        : term && String(term).toUpperCase() === '1C'
+        ? '1C'
+        : null;
+
+    let termRecord;
+    if (hasExplicitYear && requestedTermStr) {
+      [termRecord] = await db
+        .select()
+        .from(scheduleTerms)
+        .where(
+          and(
+            eq(scheduleTerms.facultyId, career.facultyId),
+            eq(scheduleTerms.academicYear, parsedYear),
+            eq(scheduleTerms.term, requestedTermStr),
+            eq(scheduleTerms.isDraft, false)
+          )
+        )
+        .limit(1);
+    } else if (hasExplicitYear) {
+      [termRecord] = await db
+        .select()
+        .from(scheduleTerms)
+        .where(
+          and(
+            eq(scheduleTerms.facultyId, career.facultyId),
+            eq(scheduleTerms.academicYear, parsedYear),
+            eq(scheduleTerms.isDraft, false)
+          )
+        )
+        .orderBy(desc(scheduleTerms.isCurrent))
+        .limit(1);
+    } else if (requestedTermStr) {
+      [termRecord] = await db
+        .select()
+        .from(scheduleTerms)
+        .where(
+          and(
+            eq(scheduleTerms.facultyId, career.facultyId),
+            eq(scheduleTerms.term, requestedTermStr),
+            eq(scheduleTerms.isDraft, false)
+          )
+        )
+        .orderBy(desc(scheduleTerms.isCurrent), desc(scheduleTerms.academicYear))
+        .limit(1);
     }
 
-    // 3. Obtener el término de horarios
-    const academicYear = year ? parseInt(String(year), 10) : 2026;
-    const termStr = term && String(term).toUpperCase() === '2C' ? '2C' : '1C';
-
-    let [termRecord] = await db
-      .select()
-      .from(scheduleTerms)
-      .where(
-        and(
-          eq(scheduleTerms.facultyId, career.facultyId),
-          eq(scheduleTerms.academicYear, academicYear),
-          eq(scheduleTerms.term, termStr),
-          eq(scheduleTerms.isDraft, false)
-        )
-      )
-      .limit(1);
-
-    // Si no encuentra exacto, tomar el término actual activo (que no sea borrador)
+    // Fallback seguro: período lectivo activo DE LA MISMA FACULTAD (nunca otra facultad ni borrador)
     if (!termRecord) {
       [termRecord] = await db
         .select()
         .from(scheduleTerms)
         .where(
           and(
+            eq(scheduleTerms.facultyId, career.facultyId),
             eq(scheduleTerms.isCurrent, true),
             eq(scheduleTerms.isDraft, false)
           )
         )
+        .orderBy(desc(scheduleTerms.academicYear))
         .limit(1);
     }
 
+    const fallbackYear = hasExplicitYear ? parsedYear : new Date().getFullYear();
+    const termStr = termRecord?.term || requestedTermStr || '1C';
+
     if (!termRecord) {
-      // Devolver estructura vacía pero válida
       res.json({
         success: true,
         data: {
           schedule: [],
           reservedElectiveSlots: [],
           electiveOfferings: [],
-          term: { academicYear, term: termStr },
+          term: { academicYear: fallbackYear, term: termStr },
         },
       });
       return;
     }
 
-    // 4. Mapeo de materias del plan
+    // 3. Mapeo de materias del plan
     const planSubs = await db
       .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, name: subjects.name })
       .from(subjects)
@@ -290,23 +344,49 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
       uuidToName.set(s.id, s.name);
     });
 
-    // 5. Cargar course groups
+    // 4. Cargar course groups
     const cGroups = await db
       .select()
       .from(courseGroups)
       .where(eq(courseGroups.scheduleTermId, termRecord.id));
     const courseGroupMap = new Map<string, string>(); // id -> code
-    cGroups.forEach((cg) => courseGroupMap.set(cg.id, cg.code));
+    const courseGroupTurnoMap = new Map<string, string>(); // id -> turno
+    cGroups.forEach((cg) => {
+      courseGroupMap.set(cg.id, cg.code);
+      courseGroupTurnoMap.set(cg.id, cg.turno);
+    });
 
-    // 6. Cargar comisiones del término
-    const commList = await db
+    // 5. Cargar comisiones y ofertas del término separando las del plan activo de otros planes
+    const allTermComms = await db
       .select()
       .from(commissions)
       .where(eq(commissions.scheduleTermId, termRecord.id));
 
+    const commList = allTermComms.filter((c) => uuidToCode.has(c.subjectId));
     const commIds = commList.map((c) => c.id);
 
-    // 7. Cargar profesores y slots (con fallback seguro si aún no corrió la migración 0001 en Neon)
+    const allTermOfferings = await db
+      .select()
+      .from(electiveOfferings)
+      .where(eq(electiveOfferings.scheduleTermId, termRecord.id));
+
+    const offList = allTermOfferings.filter((o) => uuidToCode.has(o.subjectId));
+    const offIds = offList.map((o) => o.id);
+
+    const planCourseGroupIds = new Set<string>();
+    const foreignCourseGroupIds = new Set<string>();
+    for (const c of allTermComms) {
+      if (!c.courseGroupId) continue;
+      if (uuidToCode.has(c.subjectId)) planCourseGroupIds.add(c.courseGroupId);
+      else foreignCourseGroupIds.add(c.courseGroupId);
+    }
+    for (const o of allTermOfferings) {
+      if (!o.courseGroupId) continue;
+      if (uuidToCode.has(o.subjectId)) planCourseGroupIds.add(o.courseGroupId);
+      else foreignCourseGroupIds.add(o.courseGroupId);
+    }
+
+    // 6. Cargar profesores y slots estrictamente acotados a commIds del plan
     let allProfs: Array<{
       commissionId: string;
       professorId: string | null;
@@ -315,14 +395,14 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
 
     if (commIds.length > 0) {
       try {
-        const rows = await db
+        allProfs = await db
           .select({
             commissionId: commissionProfessors.commissionId,
             professorId: commissionProfessors.professorId,
             professorName: commissionProfessors.professorName,
           })
-          .from(commissionProfessors);
-        allProfs = rows;
+          .from(commissionProfessors)
+          .where(inArray(commissionProfessors.commissionId, commIds));
       } catch (err: any) {
         if (err?.code === '42703' || err?.code === '42P01') {
           const legacyRows = await db
@@ -330,7 +410,8 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
               commissionId: commissionProfessors.commissionId,
               professorName: commissionProfessors.professorName,
             })
-            .from(commissionProfessors);
+            .from(commissionProfessors)
+            .where(inArray(commissionProfessors.commissionId, commIds));
           allProfs = legacyRows.map((r) => ({ ...r, professorId: null }));
         } else {
           throw err;
@@ -338,7 +419,13 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
       }
     }
 
-    const allSlots = commIds.length > 0 ? await db.select().from(commissionSlots) : [];
+    const allSlots =
+      commIds.length > 0
+        ? await db
+            .select()
+            .from(commissionSlots)
+            .where(inArray(commissionSlots.commissionId, commIds))
+        : [];
 
     const profMap = new Map<string, string[]>();
     const profRefMap = new Map<string, Array<{ id: string | null; name: string }>>();
@@ -394,21 +481,28 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
       commissions: comms,
     }));
 
-    // 9. Cargar franjas reservadas de electivas
-    const resSlots = await db
+    // 9. Cargar franjas reservadas de electivas acotadas a cursos del plan activo
+    const resSlotsRaw = await db
       .select()
       .from(reservedElectiveSlots)
       .where(eq(reservedElectiveSlots.scheduleTermId, termRecord.id));
 
+    const resSlots = resSlotsRaw.filter(
+      (rs) =>
+        planCourseGroupIds.has(rs.courseGroupId) ||
+        !foreignCourseGroupIds.has(rs.courseGroupId)
+    );
+
     // Agrupar franjas reservadas por courseGroup + label
     const groupedReservedMap = new Map<string, any>();
     resSlots.forEach((rs) => {
-      const cCode = courseGroupMap.get(rs.courseGroupId) || '3K1';
+      const cCode = courseGroupMap.get(rs.courseGroupId) || '';
+      const turnoRaw = courseGroupTurnoMap.get(rs.courseGroupId) || 'M';
       const key = `${cCode}-${rs.label}`;
       const existing = groupedReservedMap.get(key) || {
         courseCode: cCode,
         term: termStr,
-        turno: 'mañana',
+        turno: TURNO_REVERSE[turnoRaw] || 'mañana',
         label: rs.label,
         slots: [],
       };
@@ -420,14 +514,9 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
       groupedReservedMap.set(key, existing);
     });
 
-    // 10. Cargar electivas con docentes
-    const offList = await db
-      .select()
-      .from(electiveOfferings)
-      .where(eq(electiveOfferings.scheduleTermId, termRecord.id));
-
+    // 10. Cargar electivas con docentes del plan activo
     const offProfRefMap = new Map<string, Array<{ id: string | null; name: string }>>();
-    if (offList.length > 0) {
+    if (offIds.length > 0) {
       try {
         const offProfRows = await db
           .select({
@@ -435,7 +524,8 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
             professorId: electiveOfferingProfessors.professorId,
             professorName: electiveOfferingProfessors.professorName,
           })
-          .from(electiveOfferingProfessors);
+          .from(electiveOfferingProfessors)
+          .where(inArray(electiveOfferingProfessors.electiveOfferingId, offIds));
         offProfRows.forEach((op) => {
           const list = offProfRefMap.get(op.electiveOfferingId) || [];
           list.push({ id: op.professorId || null, name: op.professorName });
@@ -509,22 +599,26 @@ export async function updateSelectedPlan(req: Request, res: Response): Promise<v
     return;
   }
 
-  if (!planId) {
+  if (!planId || typeof planId !== 'string') {
     res.status(400).json({ success: false, error: 'planId es requerido' });
     return;
   }
 
   try {
-    const [plan] = await db.select().from(studyPlans).where(eq(studyPlans.id, planId)).limit(1);
-    if (!plan) {
-      res.status(404).json({ success: false, error: 'Plan de estudio no encontrado' });
+    const resolved = await findPublishedPlanById(planId);
+    if (!resolved) {
+      res.status(404).json({ success: false, error: 'Plan de estudio no encontrado o no publicado' });
       return;
     }
+
+    const { plan } = resolved;
 
     await db
       .update(users)
       .set({ selectedPlanId: plan.id, updatedAt: new Date() })
       .where(eq(users.id, userId));
+
+    invalidateUserStatusCache(userId);
 
     res.json({
       success: true,

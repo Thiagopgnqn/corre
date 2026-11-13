@@ -24,6 +24,10 @@ import { defaultMailer } from '../mailer/mailer.service.js';
 import { verifyGoogleCredential } from './googleAuth.service.js';
 import { logAdminAction } from '../admin/admin.audit.js';
 import { getUserLiveStatus } from '../../middlewares/auth.middleware.js';
+import {
+  findDefaultPublishedPlan,
+  findPublishedPlanById,
+} from '../catalog/catalog.helpers.js';
 import type {
   RegisterInput,
   LoginInput,
@@ -41,6 +45,22 @@ const ARGON2_OPTIONS = {
   timeCost: 3,
   outputLen: 32,
 };
+
+async function resolvePublishedOrDefaultPlanId(
+  requestedPlanId?: string | null
+): Promise<string | null> {
+  if (requestedPlanId) {
+    const found = await findPublishedPlanById(requestedPlanId);
+    if (!found) {
+      const err = new Error('El plan de estudio seleccionado no existe o no está publicado');
+      (err as any).status = 404;
+      throw err;
+    }
+    return found.plan.id;
+  }
+  const defaultFound = await findDefaultPublishedPlan();
+  return defaultFound?.plan.id || null;
+}
 
 function hashToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
@@ -243,18 +263,8 @@ export class AuthService {
     // Hashear contraseña con Argon2id
     const passwordHash = await hash(input.password, ARGON2_OPTIONS);
 
-    // Asignar plan por defecto si no vino provisto
-    let planId = input.selectedPlanId || null;
-    if (!planId) {
-      const defaultPlan = await db
-        .select({ id: studyPlans.id })
-        .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
-        .limit(1);
-      if (defaultPlan.length > 0) {
-        planId = defaultPlan[0].id;
-      }
-    }
+    // Asignar plan publicado seleccionado o plan por defecto
+    const planId = await resolvePublishedOrDefaultPlanId(input.selectedPlanId);
 
     // Generar código de verificación criptográfico de 6 dígitos
     const rawCode = crypto.randomInt(100000, 1000000).toString();
@@ -284,6 +294,7 @@ export class AuthService {
       // Crear settings iniciales
       await tx.insert(userSettings).values({
         userId: newUser.id,
+        planId,
         includePromotionsInGPA: true,
         minPassingGrade: 4,
         includeAnalistaTrack: false,
@@ -394,13 +405,8 @@ export class AuthService {
 
         let planId = user.selectedPlanId;
         if (!planId) {
-          const defaultPlan = await db
-            .select({ id: studyPlans.id })
-            .from(studyPlans)
-            .where(eq(studyPlans.isActive, true))
-            .limit(1);
-          if (defaultPlan.length > 0) {
-            planId = defaultPlan[0].id;
+          planId = await resolvePublishedOrDefaultPlanId(null);
+          if (planId) {
             await db
               .update(users)
               .set({ selectedPlanId: planId, updatedAt: new Date() })
@@ -466,18 +472,8 @@ export class AuthService {
       throw err;
     }
 
-    // Plan por defecto
-    let planId = input.selectedPlanId || null;
-    if (!planId) {
-      const defaultPlan = await db
-        .select({ id: studyPlans.id })
-        .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
-        .limit(1);
-      if (defaultPlan.length > 0) {
-        planId = defaultPlan[0].id;
-      }
-    }
+    // Plan publicado seleccionado o plan por defecto
+    const planId = await resolvePublishedOrDefaultPlanId(input.selectedPlanId);
 
     // Caso A: No existe ninguna cuenta con ese email -> crear cuenta verificada
     if (!existingUser) {
@@ -502,6 +498,7 @@ export class AuthService {
 
         await tx.insert(userSettings).values({
           userId: newUser.id,
+          planId,
           includePromotionsInGPA: true,
           minPassingGrade: 4,
           includeAnalistaTrack: false,
@@ -737,6 +734,7 @@ export class AuthService {
 
       await tx.insert(userSettings).values({
         userId: newUser.id,
+        planId,
         includePromotionsInGPA: true,
         minPassingGrade: 4,
         includeAnalistaTrack: false,
@@ -820,14 +818,7 @@ export class AuthService {
 
     let planId = user.selectedPlanId;
     if (!planId) {
-      const defaultPlan = await db
-        .select({ id: studyPlans.id })
-        .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
-        .limit(1);
-      if (defaultPlan.length > 0) {
-        planId = defaultPlan[0].id;
-      }
+      planId = await resolvePublishedOrDefaultPlanId(null);
     }
 
     const isVerified = Boolean(user.emailVerifiedAt);
@@ -1453,13 +1444,8 @@ export class AuthService {
 
     let selectedPlanId = user.selectedPlanId;
     if (!selectedPlanId) {
-      const defaultPlan = await db
-        .select({ id: studyPlans.id })
-        .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
-        .limit(1);
-      if (defaultPlan.length > 0) {
-        selectedPlanId = defaultPlan[0].id;
+      selectedPlanId = await resolvePublishedOrDefaultPlanId(null);
+      if (selectedPlanId) {
         await db
           .update(users)
           .set({ selectedPlanId, updatedAt: new Date() })

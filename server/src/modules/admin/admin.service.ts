@@ -37,6 +37,7 @@ import { defaultMailer } from '../mailer/mailer.service.js';
 import { hashVerificationCode, computeCanonicalEmail } from '../auth/auth.service.js';
 import { invalidateUserStatusCache, getUserLiveStatus } from '../../middlewares/auth.middleware.js';
 import { LibraryService } from '../library/library.service.js';
+import { findDefaultPublishedPlan } from '../catalog/catalog.helpers.js';
 
 // Cache de estadísticas en memoria (TTL 60 segundos) (Ajuste 2)
 let statsCache: { data: any; expiresAt: number; range: string } | null = null;
@@ -312,6 +313,14 @@ export class AdminService {
 
     // A. Usuarios
     const [totalUsersRes] = await db.select({ value: count() }).from(users);
+    const [adminsCountRes] = await db
+      .select({ value: count() })
+      .from(users)
+      .where(eq(users.role, 'admin'));
+    const [suspendedUsersRes] = await db
+      .select({ value: count() })
+      .from(users)
+      .where(eq(users.status, 'suspended'));
     const [verifiedUsersRes] = await db
       .select({ value: count() })
       .from(users)
@@ -416,6 +425,7 @@ export class AdminService {
       .groupBy(professorReviews.overall);
 
     // D. Calidad del Catálogo y Alertas
+    const [subjectsTotalRes] = await db.select({ value: count() }).from(subjects);
     const [commissionsTotalRes] = await db.select({ value: count() }).from(commissions);
     const [professorsTotalRes] = await db.select({ value: count() }).from(professors);
     const [plansTotalRes] = await db.select({ value: count() }).from(studyPlans);
@@ -453,8 +463,8 @@ export class AdminService {
       overview: {
         totalUsers: totalUsersRes?.value || 0,
         activeUsersCount: activeTodayRes?.value || 0,
-        suspendedUsersCount: 0,
-        adminsCount: 1,
+        suspendedUsersCount: suspendedUsersRes?.value || 0,
+        adminsCount: adminsCountRes?.value || 0,
         newUsersInRange: range === '7d' ? (newUsers7dRes?.value || 0) : (newUsers30dRes?.value || 0),
         totalEnrollments: enrollmentsCountRes?.value || 0,
         totalReviews: reviewsTotalRes?.value || 0,
@@ -465,7 +475,7 @@ export class AdminService {
         activeUsersByDay: activesByDayRows.map((r) => ({ date: r.day, count: r.count })),
       },
       catalog: {
-        totalSubjects: 45,
+        totalSubjects: subjectsTotalRes?.value || 0,
         totalCommissions: commissionsTotalRes?.value || 0,
         totalProfessors: professorsTotalRes?.value || 0,
         plansCount: plansTotalRes?.value || 0,
@@ -721,7 +731,7 @@ export class AdminService {
         db.select({ value: count() }).from(reviewReports).where(eq(reviewReports.reporterUserId, userId)),
       ]);
 
-    let planName = 'Plan 2023';
+    let planName = 'Sin plan asignado';
     if (user.selectedPlanId) {
       const [p] = await db
         .select({ name: studyPlans.name })
@@ -729,6 +739,9 @@ export class AdminService {
         .where(eq(studyPlans.id, user.selectedPlanId))
         .limit(1);
       if (p) planName = p.name;
+    } else {
+      const defaultPlan = await findDefaultPublishedPlan();
+      if (defaultPlan) planName = defaultPlan.plan.name;
     }
 
     return {
