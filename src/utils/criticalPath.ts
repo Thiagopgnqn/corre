@@ -1,12 +1,15 @@
-import type { CriticalPathResult, Subject, UserCareerState } from '../types/career';
-import { CORE_SUBJECTS } from '../data/plan2023';
-import { isApprovedOrHigher } from './correlativas';
+import type { ActivePlanCatalog, CriticalPathResult, Subject, UserCareerState } from '../types/career';
+import { getActiveCoreSubjects, isApprovedOrHigher, type OptionalTrackSelection } from './correlativas';
 
 /**
  * Computes the Critical Path (longest remaining prerequisite chain to graduation)
  */
-export function calculateCriticalPath(userState: UserCareerState, includeAnalistaTrack = false): CriticalPathResult {
-  const subjectsPool = includeAnalistaTrack ? CORE_SUBJECTS : CORE_SUBJECTS.filter((s) => s.id !== 99);
+export function calculateCriticalPath(
+  userState: UserCareerState,
+  planOrCoreSubjects: ActivePlanCatalog | Subject[],
+  includeAnalistaTrack: OptionalTrackSelection = false
+): CriticalPathResult {
+  const subjectsPool = getActiveCoreSubjects(planOrCoreSubjects, includeAnalistaTrack);
 
   // Filter core subjects that are not yet approved
   const remainingSubjects = subjectsPool.filter((s) => !isApprovedOrHigher(userState[s.id]));
