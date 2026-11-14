@@ -22,8 +22,10 @@ import {
   exportCareerToJson,
 } from '../src/utils/storage';
 import {
+  CATALOG_CACHE_SCHEMA,
   getCatalogCacheKey,
   readCachedCatalog,
+  writeCachedCatalog,
   loadPlanCatalogSmart,
 } from '../src/api/catalog.api';
 import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
@@ -376,6 +378,7 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
       mockStorage.getItem(getCatalogCacheKey('plan-a'))!
     );
     assert.equal(cachedAfterUpdate.version, 'v2');
+    assert.equal(cachedAfterUpdate.schema, CATALOG_CACHE_SCHEMA);
 
     // 4) Transient 503 triggers onWakingChange(true) -> retries -> succeeds -> onWakingChange(false)
     let attemptsB = 0;
@@ -420,6 +423,73 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
         }),
       /Backend down/
     );
+  });
+
+  it('ignores outdated or schema-less catalog caches when CATALOG_CACHE_SCHEMA does not match', async () => {
+    const planLegacy = buildFictitious3LevelPlan({ planId: 'plan-schema-test' });
+    const freshCatalog: ActivePlanCatalog = {
+      ...planLegacy,
+      plan: { ...planLegacy.plan, name: 'Plan Fresh Schema' },
+    };
+    const mockStorage = createMockStorage();
+
+    // Case A: old cache without schema property
+    mockStorage.setItem(
+      getCatalogCacheKey('plan-schema-test'),
+      JSON.stringify({
+        planId: 'plan-schema-test',
+        version: 'v1',
+        cachedAt: '2026-01-01T00:00:00.000Z',
+        catalog: planLegacy,
+      })
+    );
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
+
+    // Case B: cache with outdated schema number
+    mockStorage.setItem(
+      getCatalogCacheKey('plan-schema-test'),
+      JSON.stringify({
+        schema: CATALOG_CACHE_SCHEMA - 1,
+        planId: 'plan-schema-test',
+        version: 'v1',
+        cachedAt: '2026-01-01T00:00:00.000Z',
+        catalog: planLegacy,
+      })
+    );
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
+
+    let remotePlanCalls = 0;
+    const loaded = await loadPlanCatalogSmart({
+      planId: 'plan-schema-test',
+      storage: mockStorage,
+      getVersion: async () => ({ success: true, version: 'v1' }),
+      getPlan: async () => {
+        remotePlanCalls++;
+        return { success: true, data: freshCatalog };
+      },
+      onImmediateCache: () => {
+        throw new Error('onImmediateCache must not be called for outdated cache schema');
+      },
+    });
+
+    assert.equal(remotePlanCalls, 1);
+    assert.equal(loaded.fromCache, false);
+    assert.equal(loaded.catalog.plan.name, 'Plan Fresh Schema');
+
+    // Re-stored entry now includes current CATALOG_CACHE_SCHEMA and passes readCachedCatalog
+    const reStoredRaw = JSON.parse(
+      mockStorage.getItem(getCatalogCacheKey('plan-schema-test'))!
+    );
+    assert.equal(reStoredRaw.schema, CATALOG_CACHE_SCHEMA);
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage)?.schema, CATALOG_CACHE_SCHEMA);
+
+    // Explicitly verify writeCachedCatalog stamps schema
+    const directStorage = createMockStorage();
+    writeCachedCatalog('current', 'v9', freshCatalog, directStorage);
+    const written = readCachedCatalog('current', directStorage);
+    assert.ok(written);
+    assert.equal(written.schema, CATALOG_CACHE_SCHEMA);
+    assert.equal(written.catalog.plan.id, 'plan-schema-test');
   });
 
   it('contains zero imports from static Sistemas data modules or test/fixtures inside src/', () => {

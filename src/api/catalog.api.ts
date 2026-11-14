@@ -73,8 +73,10 @@ export interface ScheduleResponse {
 
 export const CATALOG_CACHE_KEY_PREFIX = 'mi_carrera_catalog_cache_v1:';
 export const CATALOG_CURRENT_POINTER_KEY = 'mi_carrera_catalog_current_plan_id_v1';
+export const CATALOG_CACHE_SCHEMA = 2;
 
 export interface CachedPlanCatalog {
+  schema: number;
   planId: string;
   version: string;
   cachedAt: string;
@@ -101,7 +103,12 @@ export function readCachedCatalog(
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as CachedPlanCatalog;
-    if (!parsed || typeof parsed !== 'object' || !parsed.catalog?.plan?.id) {
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      parsed.schema !== CATALOG_CACHE_SCHEMA ||
+      !parsed.catalog?.plan?.id
+    ) {
       return null;
     }
 
@@ -126,6 +133,7 @@ export function writeCachedCatalog(
   if (!storage || !catalog?.plan?.id) return;
   try {
     const entry: CachedPlanCatalog = {
+      schema: CATALOG_CACHE_SCHEMA,
       planId: catalog.plan.id,
       version,
       cachedAt: new Date().toISOString(),
