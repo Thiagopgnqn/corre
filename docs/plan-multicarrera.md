@@ -2,7 +2,7 @@
 
 > **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. Actualmente en **Etapa 1B – Parte 1B-1** en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos de `ppsRequirement` para ISI 2023).
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos idempotentes de `finalDegreeTitle` + `ppsRequirement` con `label` y bump de `catalog_versions` via CTE para ISI 2023; aún pendiente de despliegue).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -636,3 +636,30 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
 
 #### D4. `vite.config.ts` (`server.proxy`)
 - Confirmado que `vite.config.ts` (`L1-8`) solo configura `plugins: [react(), tailwindcss()]`. El bloque `server.proxy` (`/api -> http://localhost:4000`) que se agregará en 1B-2 aplica únicamente al servidor de desarrollo de Vite (`npm run dev`); `vite build` y el despliegue productivo en Vercel (que usa `vercel.json`) no se ven afectados.
+
+### 9.5 Ajustes previos a PARTE 1B-2 (Puntos 1–6)
+
+1. **Configuración para textos en migración `0009`, esquema y normalizador (Puntos 1 y 6):**
+   - `server/drizzle/0009_isi_plan_pps_config.sql` ampliada con `finalDegreeTitle: "Ingeniero/a"` y `ppsRequirement: { "referenceSubjectCode": 36, "label": "Habilitación PPS" }` para `ISI Plan 2023` (alineado también en `server/seed-data/plan2023-catalog.json`).
+   - Idempotencia mediante merge a izquierda tanto a nivel raíz como dentro de `ppsRequirement` (claves existentes ganan en ambos niveles), actualizando únicamente cuando falta `finalDegreeTitle`, `ppsRequirement` objeto válido, `ppsRequirement.referenceSubjectCode` o `ppsRequirement.label`. La CTE de `catalog_versions` solo inserta/actualiza `'default'` si `upd` modificó filas, usando el mismo formato de `bumpCatalogVersion()` (`v-<ms>-<6hex>`; default inicial `'v1.0.0'` en `getCatalogVersion()`).
+   - `normalizePlanConfig` / `normalizePpsRequirement` (`server/src/modules/catalog/planConfig.helpers.ts`) preservan `finalDegreeTitle` y `ppsRequirement.label` solo si existen como strings no vacíos en la base; de lo contrario quedan `undefined` (sin inventar textos de Sistemas ni agregar otros campos a `ppsRequirement`).
+
+2. **Metadatos aditivos de facultad/institución y `CATALOG_CACHE_SCHEMA = 3` (Punto 2):**
+   - `catalog.helpers.ts`, `catalog.store.ts`, `catalog.controller.ts` y `planConfig.helpers.ts` enriquecen `GET /api/catalog/plans/:planId` (y `/current`) de forma aditiva con `career.facultyName`, `career.facultyCode`, `career.institutionName` y `career.institutionCode`, manteniendo intactos `id`, `name`, `code` y `facultyId`.
+   - `src/api/catalog.api.ts` eleva `CATALOG_CACHE_SCHEMA` de `2` a `3` (descartando entradas cacheadas con esquema anterior) y extiende `isValidPlanCatalogShape` para validar que `facultyName`, `institutionName`, `facultyCode`, `institutionCode`, `finalDegreeTitle` y `ppsRequirement.label`, cuando están presentes (no null), sean strings no vacíos (sin requerir su presencia obligatoria).
+
+3. **Protección de claves legadas en `localStorage` y `LocalStorageMigrationModal` (Punto 3):**
+   - `src/utils/storage.ts` incorpora `STORAGE_KEY_LEGACY_PLAN_ID = 'mi_carrera_legacy_plan_id_v1'` y `hasUnmigratedLegacyLocalStorage()`.
+   - `migrateLegacyLocalStorageToPlan` **no** auto-migra claves sin sufijo al primer plan que cargue: la migración automática solo ocurre cuando `STORAGE_KEY_LEGACY_PLAN_ID === planId`. Si falta `STORAGE_KEY_LEGACY_PLAN_ID` (datos pre-multicarrera) o corresponde a otro plan, no copia nada y devuelve `migrated: false`.
+   - `CareerContext.tsx` y `LocalStorageMigrationModal.tsx`: cuando el servidor no tiene progreso guardado (`!d.hasSavedData`) y existen datos con alcance del plan activo **o** claves legadas sin migrar (`hasUnmigratedLegacyLocalStorage()`), el modal muestra el destino exacto (`activeCareer.name — currentPlanName`), advierte verificar antes de importar datos pre-multicarrera y recién aplica `migrateLegacyLocalStorageToPlan(planId, undefined, { force: true })` cuando el usuario confirma explícitamente.
+
+4. **Auditoría de `SUBJECT_SHORT_NAMES`, `shortName` y campo `code` del payload (Punto 4, solo lectura):**
+   - Se detectan **43 diferencias** entre `SUBJECT_SHORT_NAMES` (`src/components/schedule/ScheduleWeeklyGrid.tsx`) y `plan2023-catalog.json`: `21` abreviaturas de troncales/seminario + `7` abreviaturas de electivas de la misma materia, `1` electiva ausente (`301`) y **`14` electivas desfasadas donde el ID en la grilla apunta a otra materia distinta del catálogo y del seed** (`401, 402, 403, 404, 406, 407, 501, 502, 503, 504, 505, 506, 508, 510`, ninguna presente en `server/seed-data/schedule.json`, que solo contiene `405, 408, 507, 509, 511`).
+   - Hoy `formatPlanCatalogPayload` (`server/src/modules/catalog/planConfig.helpers.ts:232-233`) emite `code: s.shortName` y `shortName: s.shortName`: en el frontend `subject.shortName` solo se valida en `catalog.api.ts:140` (`ScheduleWeeklyGrid` aún no lo lee), mientras que `subject.code` se muestra como `#{subject.code}` en 14 componentes y se envía como `subjectId` en `ProfessorsDirectory.tsx:607,814` (donde `reviews.store.ts:707` espera `codeInPlan` numérico o `uuid`). Pendiente de definición al iniciar 1B-2.
+
+5. **Protección de `server/seed-data/schedule.json` en `scripts/importSchedule.ts` (Punto 5):**
+   - `npm run import:schedule` (`scripts/importSchedule.ts`) sigue operativo tras la eliminación de `src/data/schedule.json`, pero por defecto escribe en `artifacts/schedule.generated.json` (y reporte en `artifacts/import-report.generated.md`, dentro de `artifacts/` ignorado por git). Solo sobrescribe `server/seed-data/schedule.json` cuando se pasa explícitamente `--write-seed` (o `writeSeed: true`). `test/scheduleImport.test.ts` valida ahora `importAllSchedules({ writeOutput: false })` de punta a punta y la protección del seed.
+
+6. **Línea base verificada tras Puntos 1–6 (sin empezar 1B-2):**
+   - **Backend (`npm --prefix server test`):** `370/0` (`reviews 85`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 24`) + `tsc` OK.
+   - **Frontend (`npm test`):** `14/14` archivos en verde (`plan2023Oracle 23`, `multicarreraEngine 9`, `scheduleImport` end-to-end) + `tsc -b && vite build` (`2601` módulos) OK.
