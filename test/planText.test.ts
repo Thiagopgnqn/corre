@@ -6,23 +6,30 @@ import { fileURLToPath } from 'node:url';
 
 import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
 import { TUTORIAL_STEPS, getAvailableTutorialSteps } from '../src/data/tutorialSteps';
-import { SUBJECT_SHORT_NAMES } from '../src/components/schedule/ScheduleWeeklyGrid';
 import { APP_NAME } from '../src/config/brand';
 import { evaluatePlanProgress } from '../src/utils/correlativas';
 import { getSampleStudentForPlan } from '../src/utils/storage';
 import {
+  buildAdminPlanSubjectOptions,
   buildElectivesPickerStructure,
   buildGraphViewStructure,
   buildKanbanBoardStructure,
+  buildLibraryHomeStructure,
   buildOnboardingModalStructure,
+  buildProfessorsDirectoryStructure,
+  buildScheduleBuilderStructure,
+  buildScheduleSummaryExportMetadata,
+  buildScheduleWeeklyGridSubjectLabel,
   buildSearchModalStructure,
   buildSemesterPlannerStructure,
   buildSubjectListViewStructure,
   buildSubjectNodeViewModel,
+  isPlanSelected,
 } from '../src/utils/planViewSelectors';
 import { CORE_SUBJECTS } from './fixtures/plan2023';
 import { ELECTIVES } from './fixtures/electives';
 import { ACRONYM_TO_ID } from './fixtures/acronyms';
+import { SAMPLE_SCHEDULES } from './fixtures/schedule';
 import type { ActivePlanCatalog, AssignedElectivesByYear, UserCareerState } from '../src/types/career';
 import {
   buildPlanTutorialSteps,
@@ -423,6 +430,60 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     }
   });
 
+const EXPECTED_ISI_SCHEDULE_SHORT_NAMES: Record<number, string> = {
+  // Nivel 1
+  1: 'Análisis Mat. 1',
+  2: 'Álgebra y Geom.',
+  3: 'Física 1',
+  4: 'Inglés 1',
+  5: 'Lógica y Estruct.',
+  6: 'Algoritmos (AED)',
+  7: 'Arquitectura (ACO)',
+  8: 'Sist. y Procesos (SPN)',
+  11: 'Ing. y Sociedad',
+  // Nivel 2
+  9: 'Análisis Mat. 2',
+  10: 'Física 2',
+  12: 'Inglés 2',
+  13: 'Sintaxis (SSL)',
+  14: 'Paradigmas (PPR)',
+  15: 'Sistemas Operativos',
+  16: 'Análisis de Sistemas',
+  17: 'Probabilidad y Est.',
+  // Nivel 3
+  18: 'Economía',
+  19: 'Bases de Datos',
+  20: 'Desarrollo Software (DDS)',
+  21: 'Com. de Datos',
+  22: 'Análisis Numérico',
+  23: 'Diseño de Sist. (DSI)',
+  99: 'Seminario Integrador',
+  // Nivel 4
+  24: 'Legislación',
+  25: 'Calidad de Software',
+  26: 'Redes de Datos (RDA)',
+  27: 'Investigación Operativa',
+  28: 'Simulación',
+  29: 'Automatización (TPA)',
+  30: 'Admin. de Sistemas',
+  // Nivel 5
+  31: 'Inteligencia Artificial',
+  32: 'Ciencia de Datos',
+  33: 'Sistemas de Gestión',
+  34: 'Gestión Gerencial',
+  35: 'Seguridad en Sistemas',
+  36: 'Proyecto Final',
+  // Electivas alineadas con shortName en catálogo
+  405: 'Aplic. con Objetos (DAO)',
+  408: 'Interfaces y UIX',
+  507: 'Decisiones (DEC)',
+  509: 'Seguridad SW (SDS)',
+  511: 'Software Libre (ISFA)',
+  512: 'Habilidades Blandas',
+  513: 'Entornos Virtuales',
+  514: 'PPS',
+};
+
   it('resolves ScheduleWeeklyGrid short names solely from catalog shortName or <= 22 char name truncation without any ID map', () => {
     // 1. All 37 core subjects + 9 aligned electives + 301 read exact shortName from catalog
     const alignedAndCoreIds = [
@@ -437,12 +498,18 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       513,
       514,
     ];
+    const subjectsById = new Map(ISI_PLAN.subjects.map((s) => [s.id, s]));
     for (const id of alignedAndCoreIds) {
       const subj = ISI_PLAN.subjects.find((s) => s.id === id)!;
       const resolved = getScheduleShortSubjectName(subj.id, subj.name, subj);
       assert.equal(resolved, subj.shortName);
-      if (SUBJECT_SHORT_NAMES[id]) {
-        assert.equal(resolved, SUBJECT_SHORT_NAMES[id], `Mismatch on aligned subject #${id}`);
+      assert.equal(buildScheduleWeeklyGridSubjectLabel(subj.id, subj.name, subjectsById), resolved);
+      if (EXPECTED_ISI_SCHEDULE_SHORT_NAMES[id]) {
+        assert.equal(
+          resolved,
+          EXPECTED_ISI_SCHEDULE_SHORT_NAMES[id],
+          `Mismatch on aligned subject #${id}`
+        );
       }
     }
 
@@ -617,7 +684,7 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(formatSpanishOrdinal(4), '4to');
   });
 
-  it('contains zero fixed Sistemas strings or standalone 99/36 academic references in Tanda 2a and Tanda 2b components, selectors and tutorialSteps.ts', () => {
+  it('contains zero fixed Sistemas strings or standalone 99/36 academic references in Tanda 2a, 2b and 2c components, selectors and tutorialSteps.ts', () => {
     const repoRoot = path.resolve(currentDir, '..');
     const auditedFiles = [
       // Tanda 2a
@@ -638,6 +705,17 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       'src/components/onboarding/OnboardingModal.tsx',
       'src/components/common/SearchModal.tsx',
       'src/utils/planViewSelectors.ts',
+      // Tanda 2c
+      'src/components/schedule/ScheduleWeeklyGrid.tsx',
+      'src/components/schedule/ScheduleSummaryPanel.tsx',
+      'src/components/schedule/ScheduleBuilder.tsx',
+      'src/components/library/LibraryHome.tsx',
+      'src/components/library/LibraryTermsPage.tsx',
+      'src/components/common/PlanSelectorModal.tsx',
+      'src/components/professors/ProfessorsDirectory.tsx',
+      'src/components/admin/tabs/AdminScheduleTab.tsx',
+      'src/components/admin/tabs/AdminReviewsTab.tsx',
+      'src/utils/libraryUploadLogic.ts',
     ];
     const forbiddenStrings = [
       'UTN',
@@ -651,6 +729,8 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       'Práctica Profesional',
       '3er año',
       'Algoritmos, 14, DDS',
+      'SUBJECT_SHORT_NAMES',
+      '[1, 2, 3, 4, 5]',
     ];
     // Documented non-academic literals containing 99 or 36 (Tailwind heights/widths, SVG math, hex/rgba colors, layout comments/sentinels, opacity)
     const allowedTechnicalLiterals = [
@@ -667,6 +747,16 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       'rgba(251,191,36,0.4)',
       'rgba(251,191,36,0.3)',
     ];
+
+    const scheduleGridSource = fs.readFileSync(
+      path.join(repoRoot, 'src/components/schedule/ScheduleWeeklyGrid.tsx'),
+      'utf8'
+    );
+    assert.equal(
+      scheduleGridSource.includes('Record<number, string>'),
+      false,
+      'ScheduleWeeklyGrid.tsx no debe definir ni importar mapas Record<number, string> por ID'
+    );
 
     for (const relPath of auditedFiles) {
       const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
@@ -1326,6 +1416,262 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
         serialized.includes(forbidden),
         false,
         `Estructura 3-niveles no debe contener "${forbidden}"`
+      );
+    }
+  });
+
+  it('reproduces Tanda 2c structures on normalized ISI Plan 2023 payload matching fixtures and legacy export/tab metadata', () => {
+    const coreFromPayload = ISI_PLAN.subjects.filter((s) => !s.isElective);
+    const electivesFromPayload = ISI_PLAN.subjects.filter((s) => s.isElective);
+    const subjectsByIdFromPayload = new Map(ISI_PLAN.subjects.map((s) => [s.id, s]));
+
+    // 1. ScheduleWeeklyGrid: exact parity with all 45 legacy aligned short names
+    for (const [idStr, expectedShort] of Object.entries(EXPECTED_ISI_SCHEDULE_SHORT_NAMES)) {
+      const id = Number(idStr);
+      const subj = subjectsByIdFromPayload.get(id)!;
+      assert.ok(subj, `Subject #${id} must exist in normalized ISI payload`);
+      assert.equal(
+        buildScheduleWeeklyGridSubjectLabel(id, subj.name, subjectsByIdFromPayload),
+        expectedShort
+      );
+    }
+
+    // 2. ScheduleSummaryPanel: exact clipboard header + ICS export metadata
+    const exportMeta = buildScheduleSummaryExportMetadata(ISI_PLAN, '2026-11-14');
+    assert.deepEqual(exportMeta, {
+      clipboardHeader: '📅 MI HORARIO DE CURSADA — UTN ISI (Plan 2023)\n',
+      icsProdId: 'PRODID:-//Stack//Armador de Horarios//ES',
+      icsUidDomain: '@micarrera.utn',
+      icsFilename: 'horarios-utn-2026-11-14.ics',
+    });
+
+    // 3. ScheduleBuilder: exact active core/electives counts, availability & selected hours vs fixtures
+    const builderClean = buildScheduleBuilderStructure({
+      coreSubjects: coreFromPayload,
+      electives: electivesFromPayload,
+      includeAnalistaTrack: false,
+      scheduleData: SAMPLE_SCHEDULES,
+      selectedCommissions: { 1: '1-1K1' },
+      activeState: {},
+      assignedElectives: {},
+    });
+    assert.equal(builderClean.activeCoreSubjects.length, CORE_SUBJECTS.filter((s) => s.id !== 99).length);
+    assert.equal(builderClean.allPlanSubjects.length, CORE_SUBJECTS.length + ELECTIVES.length);
+    assert.equal(builderClean.knownSubjectIds.size, CORE_SUBJECTS.length + ELECTIVES.length);
+    assert.equal(builderClean.subjectNamesMap.get(6), CORE_SUBJECTS.find((s) => s.id === 6)!.name);
+    assert.deepEqual(
+      builderClean.availableSubjects.map((s) => s.id),
+      [1, 2, 3, 4, 5, 6, 7, 8, 11]
+    );
+    assert.equal(builderClean.selectedCount, 1);
+    assert.equal(builderClean.totalHours, 4.5);
+
+    const builderWithTrack = buildScheduleBuilderStructure({
+      coreSubjects: coreFromPayload,
+      electives: electivesFromPayload,
+      includeAnalistaTrack: true,
+      scheduleData: SAMPLE_SCHEDULES,
+      selectedCommissions: {},
+      activeState: {},
+      assignedElectives: {},
+    });
+    assert.equal(builderWithTrack.activeCoreSubjects.some((s) => s.id === 99), true);
+    assert.equal(builderWithTrack.allSubjects.length, CORE_SUBJECTS.length + ELECTIVES.length);
+
+    // 4. LibraryHome & LibraryTermsPage: exact 5 years + Electives tab + career descriptions
+    const libraryIsi = buildLibraryHomeStructure({
+      subjects: coreFromPayload,
+      electives: electivesFromPayload,
+      planConfig: ISI_PLAN.plan.config,
+      career: ISI_PLAN.career,
+    });
+    assert.equal(libraryIsi.totalLevels, 5);
+    assert.equal(libraryIsi.hasElectives, true);
+    assert.equal(
+      libraryIsi.heroDescription,
+      'Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Ingeniería en Sistemas de Información.'
+    );
+    assert.deepEqual(libraryIsi.levelFilterTabs, [
+      { id: 'all', label: 'Todas las materias' },
+      { id: 1, label: '1° Año' },
+      { id: 2, label: '2° Año' },
+      { id: 3, label: '3° Año' },
+      { id: 4, label: '4° Año' },
+      { id: 5, label: '5° Año' },
+      { id: 'electives', label: 'Electivas' },
+    ]);
+    assert.equal(
+      getLibraryTermsIntroParagraph(ISI_PLAN.career, APP_NAME),
+      `La Biblioteca de ${APP_NAME} es un espacio colaborativo desarrollado para la comunidad estudiantil de Ingeniería en Sistemas de Información, cuyo único propósito es facilitar el intercambio académico libre y sin costo de recursos de aprendizaje.`
+    );
+
+    // 5. PlanSelectorModal: identity strictly by plan.id
+    assert.equal(isPlanSelected('plan-isi-2023', ISI_PLAN.plan.id), true);
+    assert.equal(isPlanSelected('plan-other-2023', ISI_PLAN.plan.id), false);
+    assert.equal(isPlanSelected('plan-isi-2023', undefined), false);
+
+    // 6. ProfessorsDirectory & Admin selects: subject options keep codeInPlan & level/name sorting
+    const dirIsi = buildProfessorsDirectoryStructure(ISI_PLAN.subjects);
+    assert.equal(dirIsi.allPlanSubjects.length, CORE_SUBJECTS.length + ELECTIVES.length);
+    assert.equal(dirIsi.subjectFilterOptions[0].label.startsWith('1° · '), true);
+    const dirLevels = dirIsi.allPlanSubjects.map((s) => s.level);
+    assert.deepEqual(
+      dirLevels,
+      [...dirLevels].sort((a, b) => a - b)
+    );
+
+    const adminOptions = buildAdminPlanSubjectOptions(coreFromPayload);
+    assert.equal(adminOptions.length, CORE_SUBJECTS.length);
+    assert.deepEqual(adminOptions[0], {
+      id: 1,
+      value: '1',
+      code: '1',
+      name: CORE_SUBJECTS.find((s) => s.id === 1)!.name,
+      label: `#1 ${CORE_SUBJECTS.find((s) => s.id === 1)!.name}`,
+    });
+    assert.equal(adminOptions.some((o) => o.id === 99 && o.label.startsWith('#99 ')), true);
+  });
+
+  it('builds strictly neutral Tanda 2c structures on a 3-level plan without intermediate degrees or electives', () => {
+    const threeLevelCareer = {
+      id: 'career-tq',
+      name: 'Tecnicatura en Química',
+      code: 'TQ',
+      facultyId: 'fac-fcq',
+      facultyCode: 'FCQ',
+      facultyName: 'Facultad de Ciencias Químicas',
+      institutionCode: 'UNLP',
+      institutionName: 'Universidad Nacional de La Plata',
+    };
+    const threeLevelConfig = {
+      ...ISI_PLAN.plan.config,
+      totalLevels: 3,
+      levelLabel: 'Cuatrimestre',
+      shortTag: 'TQ · Plan 2026',
+      requiredElectiveCredits: 0,
+      electiveSlotsEquivalent: 0,
+      intermediateDegrees: [],
+      ppsRequirement: null,
+      finalDegreeTitle: 'Técnico/a en Química',
+    };
+    const coreThreeLevels = [
+      {
+        id: 6,
+        code: '6',
+        shortName: 'Química General',
+        name: 'Introducción a la Química General Experimental',
+        level: 1,
+        modality: '1C' as const,
+        weeklyHours: 4,
+        regularPrereqs: [],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 99,
+        code: '99',
+        shortName: '',
+        name: 'Fisiología Humana Celular Avanzada',
+        level: 2,
+        modality: '2C' as const,
+        weeklyHours: 5,
+        regularPrereqs: [6],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 103,
+        code: '103',
+        shortName: 'Bioquímica Aplicada',
+        name: 'Bioquímica Aplicada',
+        level: 3,
+        modality: 'A' as const,
+        weeklyHours: 6,
+        regularPrereqs: [],
+        approvedPrereqs: [6],
+        isElective: false,
+      },
+    ];
+    const threeLevelPlan: ActivePlanCatalog = {
+      career: threeLevelCareer,
+      plan: {
+        id: 'plan-tq-2026',
+        name: 'Plan 2026',
+        year: 2026,
+        config: threeLevelConfig,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      subjects: coreThreeLevels,
+      rules: [],
+      acronyms: {},
+    };
+    const subjectsById = new Map(coreThreeLevels.map((s) => [s.id, s]));
+
+    // 1. Weekly grid uses catalog shortName or fullName truncation even for colliding IDs (6, 99)
+    assert.equal(buildScheduleWeeklyGridSubjectLabel(6, coreThreeLevels[0].name, subjectsById), 'Química General');
+    assert.equal(buildScheduleWeeklyGridSubjectLabel(99, coreThreeLevels[1].name, subjectsById), 'Fisiología Humana C...');
+
+    // 2. ICS & clipboard metadata reflect the non-UTN career
+    const exportMeta = buildScheduleSummaryExportMetadata(threeLevelPlan, '2026-11-14');
+    assert.deepEqual(exportMeta, {
+      clipboardHeader: '📅 MI HORARIO DE CURSADA — UNLP TQ (Plan 2026)\n',
+      icsProdId: 'PRODID:-//Stack//Armador de Horarios//ES',
+      icsUidDomain: '@micarrera.unlp',
+      icsFilename: 'horarios-unlp-2026-11-14.ics',
+    });
+
+    // 3. ScheduleBuilder handles 3-level plan cleanly
+    const builder = buildScheduleBuilderStructure({
+      coreSubjects: coreThreeLevels,
+      electives: [],
+      includeAnalistaTrack: false,
+      scheduleData: [],
+      selectedCommissions: {},
+    });
+    assert.deepEqual(builder.availableSubjects.map((s) => s.id), [6]);
+
+    // 4. LibraryHome emits 4 tabs (all + 1..3 cuatrimestres), NO electives tab, and neutral descriptions
+    const lib = buildLibraryHomeStructure({
+      subjects: coreThreeLevels,
+      electives: [],
+      planConfig: threeLevelConfig,
+      career: threeLevelCareer,
+    });
+    assert.equal(lib.totalLevels, 3);
+    assert.equal(lib.hasElectives, false);
+    assert.deepEqual(lib.levelFilterTabs, [
+      { id: 'all', label: 'Todas las materias' },
+      { id: 1, label: '1° Cuatrimestre' },
+      { id: 2, label: '2° Cuatrimestre' },
+      { id: 3, label: '3° Cuatrimestre' },
+    ]);
+    assert.equal(
+      lib.heroDescription,
+      'Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Tecnicatura en Química.'
+    );
+    assert.equal(
+      getLibraryTermsIntroParagraph(threeLevelCareer, APP_NAME),
+      `La Biblioteca de ${APP_NAME} es un espacio colaborativo desarrollado para la comunidad estudiantil de Tecnicatura en Química, cuyo único propósito es facilitar el intercambio académico libre y sin costo de recursos de aprendizaje.`
+    );
+
+    // 5. PlanSelectorModal, ProfessorsDirectory & Admin options remain plan-agnostic
+    assert.equal(isPlanSelected('plan-tq-2026', threeLevelPlan.plan.id), true);
+    assert.equal(isPlanSelected('plan-isi-2023', threeLevelPlan.plan.id), false);
+    const dir = buildProfessorsDirectoryStructure(coreThreeLevels);
+    const adminOpts = buildAdminPlanSubjectOptions(coreThreeLevels);
+
+    const serialized = JSON.stringify({
+      exportMeta,
+      builder,
+      lib,
+      dir,
+      adminOpts,
+    });
+    for (const forbidden of ['Analista', 'UTN', 'Sistemas', 'Ingeniero', '4°', '5°', 'Año', 'Electivas']) {
+      assert.equal(
+        serialized.includes(forbidden),
+        false,
+        `Estructura 2c de 3-niveles no debe contener "${forbidden}"`
       );
     }
   });

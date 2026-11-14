@@ -98,7 +98,7 @@ export function parseFilenameSuggestions(filename: string): ParsedFilenameSugges
   } else if (/(?:^|\D)(?:parcial|1p|2p|3p|recu|recuperatorio)(?:\D|$)/i.test(norm)) {
     kind = 'parcial';
   } else {
-    // Si no coincide con palabras clave específicas, por omisión en biblioteca UTN
+    // Si no coincide con palabras clave específicas, por omisión en la biblioteca comunitaria
     // se sugiere 'parcial' si hay año o 'otro' si es genérico.
     kind = academicYear ? 'parcial' : 'otro';
   }

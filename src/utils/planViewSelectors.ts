@@ -1,4 +1,5 @@
 import type {
+  ActivePlanCatalog,
   AssignedElectivesByYear,
   CareerProgress,
   PlanCareerMeta,
@@ -7,6 +8,7 @@ import type {
   SubjectStatus,
   UserCareerState,
 } from '../types/career';
+import type { Commission, SubjectSchedule } from '../types/schedule';
 import {
   checkEligibility,
   getActiveCoreSubjects,
@@ -28,6 +30,12 @@ import {
   getKanbanLevelsRangeTag,
   getLevelNumbers,
   getLevelOrdinalTabLabel,
+  getLibraryHeroDescription,
+  getScheduleClipboardHeader,
+  getScheduleIcsFilename,
+  getScheduleIcsProdId,
+  getScheduleIcsUidDomain,
+  getScheduleShortSubjectName,
   getSearchModalDesktopPlaceholder,
   getSubjectNodeLevelBadge,
 } from './planText';
@@ -977,4 +985,212 @@ export function buildSearchModalStructure(params: {
     countLabelMobile: `${filtered.length} ${filtered.length === 1 ? 'materia encontrada' : 'materias encontradas'}`,
     countLabelDesktop: `${filtered.length} materias encontradas`,
   };
+}
+
+// ── 9. Tanda 2c Selectors (Schedule, Library, PlanSelector, Directory, Admin) ──
+
+export function buildScheduleWeeklyGridSubjectLabel(
+  subjectId: number,
+  fullName: string,
+  subjectsById?: ReadonlyMap<number, Pick<Subject, 'name' | 'shortName'>> | null
+): string {
+  return getScheduleShortSubjectName(subjectId, fullName, subjectsById?.get(subjectId) ?? null);
+}
+
+export interface ScheduleSummaryExportMetadata {
+  clipboardHeader: string;
+  icsProdId: string;
+  icsUidDomain: string;
+  icsFilename: string;
+}
+
+export function buildScheduleSummaryExportMetadata(
+  plan?: ActivePlanCatalog | null,
+  dateIso?: string
+): ScheduleSummaryExportMetadata {
+  return {
+    clipboardHeader: getScheduleClipboardHeader(plan),
+    icsProdId: getScheduleIcsProdId(),
+    icsUidDomain: getScheduleIcsUidDomain(plan?.career),
+    icsFilename: getScheduleIcsFilename(plan?.career, dateIso),
+  };
+}
+
+export interface ScheduleBuilderStructure {
+  activeCoreSubjects: Subject[];
+  allPlanSubjects: Subject[];
+  subjectNamesMap: Map<number, string>;
+  knownSubjectIds: Set<number | string>;
+  schedulesMap: Map<number, SubjectSchedule>;
+  availableSubjects: Subject[];
+  allSubjects: Subject[];
+  selectedCommissionsMap: Record<number, Commission>;
+  totalHours: number;
+  selectedCount: number;
+}
+
+export function buildScheduleBuilderStructure(params: {
+  coreSubjects: Subject[];
+  electives: Subject[];
+  includeAnalistaTrack: boolean;
+  scheduleData: SubjectSchedule[];
+  selectedCommissions: Record<number, string>;
+  activeState?: UserCareerState;
+  assignedElectives?: AssignedElectivesByYear;
+}): ScheduleBuilderStructure {
+  const {
+    coreSubjects,
+    electives,
+    includeAnalistaTrack,
+    scheduleData,
+    selectedCommissions,
+    activeState = {},
+    assignedElectives = {},
+  } = params;
+
+  const allPlanSubjects = [...coreSubjects, ...electives];
+
+  const subjectNamesMap = new Map<number, string>();
+  const knownSubjectIds = new Set<number | string>();
+  allPlanSubjects.forEach((s) => {
+    subjectNamesMap.set(s.id, s.name);
+    knownSubjectIds.add(s.id);
+  });
+
+  const schedulesMap = new Map<number, SubjectSchedule>();
+  scheduleData.forEach((s) => schedulesMap.set(Number(s.subjectId), s));
+
+  const activeCoreSubjects = getActiveCoreSubjects(coreSubjects, includeAnalistaTrack);
+  const allSubjects = [...activeCoreSubjects, ...electives];
+
+  const assignedElectiveIds = new Set(Object.values(assignedElectives).flat());
+  const relevantElectives = electives.filter((e) => assignedElectiveIds.has(e.id));
+  const availableSubjects = [...activeCoreSubjects, ...relevantElectives].filter((s) => {
+    const st = getSubjectStatus(s, activeState);
+    return st === 'disponible' || st === 'cursando';
+  });
+
+  const selectedCommissionsMap: Record<number, Commission> = {};
+  Object.entries(selectedCommissions).forEach(([sIdStr, commId]) => {
+    const sId = Number(sIdStr);
+    const sched = schedulesMap.get(sId);
+    const found = sched?.commissions.find((c) => c.id === commId);
+    if (found) {
+      selectedCommissionsMap[sId] = found;
+    }
+  });
+
+  let minutes = 0;
+  Object.values(selectedCommissionsMap).forEach((comm) => {
+    comm.slots.forEach((s) => {
+      const [sh, sm] = s.start.split(':').map(Number);
+      const [eh, em] = s.end.split(':').map(Number);
+      minutes += eh * 60 + em - (sh * 60 + sm);
+    });
+  });
+
+  return {
+    activeCoreSubjects,
+    allPlanSubjects,
+    subjectNamesMap,
+    knownSubjectIds,
+    schedulesMap,
+    availableSubjects,
+    allSubjects,
+    selectedCommissionsMap,
+    totalHours: Math.round((minutes / 60) * 10) / 10,
+    selectedCount: Object.keys(selectedCommissionsMap).length,
+  };
+}
+
+export interface LibraryLevelFilterTab {
+  id: 'all' | 'electives' | number;
+  label: string;
+}
+
+export interface LibraryHomeStructure {
+  totalLevels: number;
+  hasElectives: boolean;
+  heroDescription: string;
+  levelFilterTabs: LibraryLevelFilterTab[];
+}
+
+export function buildLibraryHomeStructure(params: {
+  subjects: Array<Pick<Subject, 'level'> & { kind?: string; isElective?: boolean }>;
+  electives?: Array<Pick<Subject, 'level'>>;
+  planConfig?: Partial<PlanConfig> | null;
+  career?: Partial<PlanCareerMeta> | null;
+}): LibraryHomeStructure {
+  const { subjects, electives = [], planConfig, career } = params;
+  const levels = getLevelNumbers(planConfig);
+  const totalLevels = levels.length;
+  const hasElectives =
+    electives.length > 0 ||
+    (planConfig?.requiredElectiveCredits ?? 0) > 0 ||
+    subjects.some((s) => s.kind === 'electiva' || s.isElective === true || s.level > totalLevels);
+
+  const levelFilterTabs: LibraryLevelFilterTab[] = [
+    { id: 'all', label: 'Todas las materias' },
+    ...levels.map((lvl) => ({
+      id: lvl,
+      label: getLevelOrdinalTabLabel(lvl, planConfig),
+    })),
+    ...(hasElectives ? [{ id: 'electives' as const, label: 'Electivas' }] : []),
+  ];
+
+  return {
+    totalLevels,
+    hasElectives,
+    heroDescription: getLibraryHeroDescription(career),
+    levelFilterTabs,
+  };
+}
+
+export function isPlanSelected(planId: string, currentPlanId?: string | null): boolean {
+  return Boolean(planId && currentPlanId && planId === currentPlanId);
+}
+
+export interface ProfessorsDirectorySubjectOption {
+  id: number;
+  value: string;
+  label: string;
+}
+
+export interface ProfessorsDirectoryStructure {
+  allPlanSubjects: Subject[];
+  subjectFilterOptions: ProfessorsDirectorySubjectOption[];
+}
+
+export function buildProfessorsDirectoryStructure(
+  allSubjects: Subject[]
+): ProfessorsDirectoryStructure {
+  const allPlanSubjects = [...allSubjects].sort(
+    (a, b) => a.level - b.level || a.name.localeCompare(b.name, 'es')
+  );
+  return {
+    allPlanSubjects,
+    subjectFilterOptions: allPlanSubjects.map((sub) => ({
+      id: sub.id,
+      value: String(sub.id),
+      label: `${sub.level}° · ${sub.name}`,
+    })),
+  };
+}
+
+export interface AdminPlanSubjectOption {
+  id: number;
+  value: string;
+  code: string;
+  name: string;
+  label: string;
+}
+
+export function buildAdminPlanSubjectOptions(subjects: Subject[]): AdminPlanSubjectOption[] {
+  return subjects.map((s) => ({
+    id: s.id,
+    value: String(s.id),
+    code: s.code,
+    name: s.name,
+    label: `#${s.code} ${s.name}`,
+  }));
 }

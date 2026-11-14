@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Calendar,
   Plus,
@@ -22,11 +22,13 @@ import {
 } from '../../../api/admin.api';
 import { AdminReauthModal } from '../AdminReauthModal';
 import { useCareer } from '../../../context/CareerContext';
+import { buildAdminPlanSubjectOptions } from '../../../utils/planViewSelectors';
 
 const DAYS_NAMES = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export const AdminScheduleTab: React.FC = () => {
   const { coreSubjects: subjects } = useCareer();
+  const subjectOptions = useMemo(() => buildAdminPlanSubjectOptions(subjects), [subjects]);
 
   // State: Terms
   const [terms, setTerms] = useState<AdminTerm[]>([]);
@@ -211,7 +213,7 @@ export const AdminScheduleTab: React.FC = () => {
   // ── Commission Actions ──
   const handleOpenNewCommission = () => {
     setEditingCommission(null);
-    setFormSubjectId(subjects[0]?.id ? String(subjects[0].id) : '');
+    setFormSubjectId(subjectOptions[0]?.value ?? '');
     setFormCode('');
     setFormShift('M');
     setFormClassroom('');
@@ -507,9 +509,9 @@ export const AdminScheduleTab: React.FC = () => {
             className="bg-slate-950 border border-slate-800 text-slate-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 max-w-xs"
           >
             <option value="">Todas las materias</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={String(s.id)}>
-                #{s.code} {s.name}
+            {subjectOptions.map((s) => (
+              <option key={s.id} value={s.value}>
+                {s.label}
               </option>
             ))}
           </select>
@@ -767,9 +769,9 @@ export const AdminScheduleTab: React.FC = () => {
                   onChange={(e) => setFormSubjectId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
                 >
-                  {subjects.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      #{s.code} {s.name}
+                  {subjectOptions.map((s) => (
+                    <option key={s.id} value={s.value}>
+                      {s.label}
                     </option>
                   ))}
                 </select>

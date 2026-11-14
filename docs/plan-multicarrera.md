@@ -795,3 +795,37 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
    - Se conservan sin cambios `shortLabel` (`"Analista"`) y `shortTitle` (`"Analista Universitario"`).
    - **Única diferencia visible intencional respecto de producción:** en `StatsDashboard`, la tarjeta de requisitos del título intermedio pasa a mostrar `"Título Intermedio: Analista Universitario de Sistemas de Información"` (en producción mostraba `"Título Intermedio: Analista Universitario de Sistemas"`). Documentado también en `docs/prueba-manual-multicarrera.md`.
    - Además se incorpora `getScheduleIcsProdId()` en `src/utils/planText.ts` junto con la cobertura de `getScheduleIcsUidDomain`, `getScheduleIcsProdId` y `getScheduleIcsFilename`.
+
+---
+
+### 9.12 PARTE 1B-2 — Grupo 2 (Tanda 2c, Commit 2)
+
+1. **Selectores puros agregados en `src/utils/planViewSelectors.ts` (7 funciones puras):**
+   - `buildScheduleWeeklyGridSubjectLabel`: resuelve etiquetas cortas de materia exclusivamente mediante `getScheduleShortSubjectName` + `subjectsById` del catálogo (sin diccionarios por ID).
+   - `buildScheduleSummaryExportMetadata`: centraliza `clipboardHeader`, `icsProdId`, `icsUidDomain` e `icsFilename` desde `activePlan`.
+   - `buildScheduleBuilderStructure`: encapsula el armado de materias habilitadas/disponibles, electivas asignadas, mapa de horarios/nombres y carga horaria seleccionada.
+   - `buildLibraryHomeStructure`: deriva cantidad de niveles, `hasElectives`, descripción del hero y pestañas de filtro (`Todas las materias`, niveles `1°..N° <levelLabel>`, `Electivas` condicional).
+   - `isPlanSelected`: compara identidad del plan activo estrictamente por `plan.id` (no por nombre visible).
+   - `buildProfessorsDirectoryStructure`: genera lista ordenada y opciones `<level>° · <name>` por materia del plan activo.
+   - `buildAdminPlanSubjectOptions`: construye opciones `#<code> <name>` a partir de `coreSubjects` del plan activo.
+
+2. **Componentes y utilidades refactorizados (10 archivos de Tanda 2c):**
+   - `src/components/schedule/ScheduleWeeklyGrid.tsx`: eliminado `SUBJECT_SHORT_NAMES` (`Record<number, string>`); re-exporta `getScheduleShortSubjectName as getSubjectShortName`; recibe `subjectsById` por prop desde `ScheduleBuilder.tsx` (sin importar `CareerContext` ni disparar `audio.ts` en entorno Node) y delega en `buildScheduleWeeklyGridSubjectLabel`. Se preserva `PLURAL_DAYS_MAP` y el comentario de `RECREOS` queda anotado para Etapa 3.
+   - `src/components/schedule/ScheduleSummaryPanel.tsx`: conecta `useCareer().activePlan` y `buildScheduleSummaryExportMetadata(activePlan)` para portapapeles y `.ics` (preservando `@micarrera.utn`, `PRODID:-//Stack//Armador de Horarios//ES` y `horarios-utn-YYYY-MM-DD.ics` en ISI 2023).
+   - `src/components/schedule/ScheduleBuilder.tsx`: adopta `buildScheduleBuilderStructure` y pasa `subjectsById` a las dos instancias de `<ScheduleWeeklyGrid />`.
+   - `src/components/library/LibraryHome.tsx`: adopta `buildLibraryHomeStructure`, sustituye niveles `[1, 2, 3, 4, 5]` fijos y pasa `career={activeCareer}` a `<LibraryTermsPage />`.
+   - `src/components/library/LibraryTermsPage.tsx`: reemplaza únicamente el párrafo introductorio mediante `getLibraryTermsIntroParagraph(career, APP_NAME)` (sin importar `CareerContext` en SSR/Node), manteniendo intactos las cláusulas legales y `CONTACT_EMAIL`.
+   - `src/components/common/PlanSelectorModal.tsx`: determina el plan seleccionado mediante `isPlanSelected(p.id, activePlan?.plan.id)` sin sumar diálogos ni flujos de Etapa 4.
+   - `src/components/professors/ProfessorsDirectory.tsx`: adopta `buildProfessorsDirectoryStructure(allSubjects)` conservando los `<option>` claveados por `sub.id`.
+   - `src/components/admin/tabs/AdminScheduleTab.tsx` y `src/components/admin/tabs/AdminReviewsTab.tsx`: usan `buildAdminPlanSubjectOptions(subjects)` en selectores de materias sin reescribir endpoints administrativos.
+   - `src/utils/libraryUploadLogic.ts`: reemplazo de comentario residual `"biblioteca UTN"` por `"la biblioteca comunitaria"`.
+
+3. **Relevamiento del alcance actual del Panel de Administración (solo informe, sin cambios en backend):**
+   - **Acciones globales (todas las facultades/planes, sin filtro por `planId`/`facultyId`):** `AdminOverviewTab` (`GET /api/admin/stats`), `AdminUsersTab` (`/api/admin/users/*`), `AdminAuditTab` (`/api/admin/audit-logs`), `AdminLibraryTab` (`/api/admin/library/*`: pendientes, catálogo, reportes, aprobación/rechazo/baja/suspensión de autor), cola de moderación (`GET /api/admin/reviews/reports`), listado de reseñas (`GET /api/admin/reviews` y `/reviews/all`), ocultar/restaurar reseña, resolver reporte y suspender autor de reseña. En listados de reseñas y biblioteca se muestra `subjectName`/`subjectCode` sin etiqueta de carrera/plan.
+   - **Horarios (`AdminScheduleTab` y `/api/admin/terms|commissions|schedules`):** `schedule_terms` opera a nivel **`facultyId`** (`setCurrentScheduleTerm` desmarca el resto de la misma facultad afectando a todas las carreras/planes de esa facultad; `duplicateScheduleTerm` clona un término origen; `listTerms` lista todos los términos globales). `commissions` y `createCommission`/`editCommission`/`retireCommission`/`deleteCommission` operan por `termId`/`commissionId`/`subjectId` (UUID) sin validar coincidencia contra el plan activo del admin. Se observa además un desacople preexistente entre los selects del frontend (`codeInPlan` vía `String(s.id)` y `{ name, year }`) y los controladores (`UUID` en `subjects.id` y `{ facultyId, academicYear, term }`).
+   - **Docentes (`AdminReviewsTab` y `ReviewsService`):** `adminListProfessors` / `duplicates` operan sobre la **`facultyId` del plan activo del admin** (`resolvePlanContext(adminUserId, req.user?.selectedPlanId)`); `adminMergeProfessors` exige igual `facultyId` pero consolida comisiones/reseñas/ofertas de todos los planes de esa facultad; `adminCreateHistoricalProfessor` resuelve `resolvePlanContext(adminUserId)` en DB (`users.selected_plan_id`) para buscar `codeInPlan` al vincular materia (riesgo si el estado cliente difiere tras cambiar de plan).
+
+4. **Tests y línea base tras Tanda 2c:**
+   - `test/planText.test.ts` ampliado a **10/0**: auditoría estática extendida a los **26** archivos (`Tanda 2a + 2b + 2c + planViewSelectors.ts + tutorialSteps.ts`), paridad de selectores Tanda 2c sobre payload normalizado ISI 2023 y estructura neutra en plan de 3 cuatrimestres sin título intermedio ni electivas.
+   - **Backend (`npm --prefix server test`):** **`394` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 46`) + `npm --prefix server run build` OK (`tsc`).
+   - **Frontend (`14 / 15` archivos en verde + `npm run build` OK con `2604` módulos):** todos los demás suites de frontend pasan en verde; `test/scheduleImport.test.ts` permanece **sin editar por regla (f)** y falla en `npm test` al importar `SUBJECT_SHORT_NAMES` en `L26` (también referenciado en `L292–304`), a la espera de autorización del usuario para actualizarlo.

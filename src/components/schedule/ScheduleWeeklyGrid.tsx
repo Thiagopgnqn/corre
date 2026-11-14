@@ -19,6 +19,10 @@ import {
 } from '../../utils/scheduleLogic';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
+import type { Subject } from '../../types/career';
+import { buildScheduleWeeklyGridSubjectLabel } from '../../utils/planViewSelectors';
+
+export { getScheduleShortSubjectName as getSubjectShortName } from '../../utils/planText';
 
 export const PLURAL_DAYS_MAP: Record<DayOfWeek, string> = {
   LUN: 'los lunes',
@@ -46,87 +50,7 @@ export function getSubjectColor(subjectId: number) {
   return SUBJECT_PALETTES[idx];
 }
 
-export const SUBJECT_SHORT_NAMES: Record<number, string> = {
-  // Nivel 1
-  1: 'Análisis Mat. 1',
-  2: 'Álgebra y Geom.',
-  3: 'Física 1',
-  4: 'Inglés 1',
-  5: 'Lógica y Estruct.',
-  6: 'Algoritmos (AED)',
-  7: 'Arquitectura (ACO)',
-  8: 'Sist. y Procesos (SPN)',
-  11: 'Ing. y Sociedad',
-
-  // Nivel 2
-  9: 'Análisis Mat. 2',
-  10: 'Física 2',
-  12: 'Inglés 2',
-  13: 'Sintaxis (SSL)',
-  14: 'Paradigmas (PPR)',
-  15: 'Sistemas Operativos',
-  16: 'Análisis de Sistemas',
-  17: 'Probabilidad y Est.',
-
-  // Nivel 3
-  18: 'Economía',
-  19: 'Bases de Datos',
-  20: 'Desarrollo Software (DDS)',
-  21: 'Com. de Datos',
-  22: 'Análisis Numérico',
-  23: 'Diseño de Sist. (DSI)',
-  99: 'Seminario Integrador',
-
-  // Nivel 4
-  24: 'Legislación',
-  25: 'Calidad de Software',
-  26: 'Redes de Datos (RDA)',
-  27: 'Investigación Operativa',
-  28: 'Simulación',
-  29: 'Automatización (TPA)',
-  30: 'Admin. de Sistemas',
-
-  // Nivel 5
-  31: 'Inteligencia Artificial',
-  32: 'Ciencia de Datos',
-  33: 'Sistemas de Gestión',
-  34: 'Gestión Gerencial',
-  35: 'Seguridad en Sistemas',
-  36: 'Proyecto Final',
-
-  // Electivas
-  401: 'Gerenciamiento Proyectos',
-  402: 'Arquitectura Software',
-  403: 'Testing de Software',
-  404: 'Seguridad en Redes',
-  405: 'Aplic. con Objetos (DAO)',
-  406: 'Gobierno de TI',
-  407: 'Bioinformática',
-  408: 'Interfaces y UIX',
-  501: 'Criptografía Aplicada',
-  502: 'Auditoría de Sistemas',
-  503: 'Cloud Computing',
-  504: 'DevOps & CI/CD',
-  505: 'Arquitecturas Cloud Nativas',
-  506: 'Deep Learning',
-  507: 'Decisiones (DEC)',
-  508: 'Procesamiento Lenguaje Natural',
-  509: 'Seguridad SW (SDS)',
-  510: 'Big Data',
-  511: 'Software Libre (ISFA)',
-  512: 'Habilidades Blandas',
-  513: 'Entornos Virtuales',
-  514: 'PPS',
-};
-
-export function getSubjectShortName(id: number, fullName: string): string {
-  if (SUBJECT_SHORT_NAMES[id]) return SUBJECT_SHORT_NAMES[id];
-  if (!fullName) return `Materia #${id}`;
-  if (fullName.length <= 22) return fullName;
-  return fullName.slice(0, 20) + '...';
-}
-
-// Recreos estándar UTN
+// Recreos estándar de la grilla horaria (Etapa 3: plantilla por facultad)
 export const RECREOS = [
   { start: '09:30', end: '09:40', label: 'Recreo' },
   { start: '11:10', end: '11:20', label: 'Recreo' },
@@ -154,6 +78,7 @@ interface ScheduleWeeklyGridProps {
   hoveredCommission: { commission: Commission; subjectId: number; subjectName: string; hasConflict: boolean } | null;
   conflicts: ScheduleConflict[];
   subjectNamesMap: Map<number, string>;
+  subjectsById?: ReadonlyMap<number, Pick<Subject, 'name' | 'shortName'>> | null;
   focusedConflictId?: string | null;
   focusedSubjectId?: number | null;
   onFocusSubject?: (subjectId: number) => void;
@@ -166,6 +91,7 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
   hoveredCommission,
   conflicts,
   subjectNamesMap,
+  subjectsById,
   focusedConflictId,
   focusedSubjectId,
   onFocusSubject,
@@ -331,10 +257,10 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
       const sId = Number(sIdStr);
       const name = subjectNamesMap.get(sId) || `Materia #${sId}`;
       const color = getSubjectColor(sId);
-      const short = getSubjectShortName(sId, name);
+      const short = buildScheduleWeeklyGridSubjectLabel(sId, name, subjectsById);
       return { subjectId: sId, name, short, commission: comm, color };
     });
-  }, [selections, subjectNamesMap]);
+  }, [selections, subjectNamesMap, subjectsById]);
 
   // Swipe gesture for mobile view
 
@@ -675,7 +601,11 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                     const durationMinutes = endMin - startMin;
                     const isShortBlock = durationMinutes <= 50;
 
-                    const shortName = getSubjectShortName(item.subjectId, item.subjectName);
+                    const shortName = buildScheduleWeeklyGridSubjectLabel(
+                      item.subjectId,
+                      item.subjectName,
+                      subjectsById
+                    );
 
                     const isFocused =
                       (focusedSubjectId && focusedSubjectId === item.subjectId) ||
@@ -797,9 +727,10 @@ export const ScheduleWeeklyGrid: React.FC<ScheduleWeeklyGridProps> = ({
                           const endMin = timeToMinutes(slot.end);
                           const topPct = ((startMin - minMinute) / totalMinutes) * 100;
                           const heightPct = ((endMin - startMin) / totalMinutes) * 100;
-                          const shortName = getSubjectShortName(
+                          const shortName = buildScheduleWeeklyGridSubjectLabel(
                             hoveredCommission.subjectId,
-                            hoveredCommission.subjectName
+                            hoveredCommission.subjectName,
+                            subjectsById
                           );
 
                           return (

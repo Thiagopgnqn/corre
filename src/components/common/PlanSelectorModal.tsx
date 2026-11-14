@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { catalogApi, type Institution } from '../../api/catalog.api';
 import { useCareer } from '../../context/CareerContext';
+import { isPlanSelected } from '../../utils/planViewSelectors';
 import { GraduationCap, Check, Building2, BookOpen, Loader2, X } from 'lucide-react';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from './BottomSheet';
@@ -11,7 +12,7 @@ interface PlanSelectorModalProps {
 }
 
 export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, onClose }) => {
-  const { currentPlanName, reloadServerState } = useCareer();
+  const { activePlan, reloadServerState } = useCareer();
   const isMobile = useIsMobile();
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [loading, setLoading] = useState(false);
@@ -94,7 +95,7 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
 
                     <div className="space-y-2 pt-1">
                       {career.plans.map((p) => {
-                        const isCurrent = p.name === currentPlanName;
+                        const isCurrent = isPlanSelected(p.id, activePlan?.plan.id);
                         return (
                           <div
                             key={p.id}

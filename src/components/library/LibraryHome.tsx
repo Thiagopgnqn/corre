@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   BookOpen,
   Search,
@@ -19,6 +19,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { LibraryWelcomeModal } from './LibraryWelcomeModal';
 import { shouldShowLibraryWelcome, markLibraryWelcomeSeen } from '../../utils/libraryCommunityLogic';
+import { buildLibraryHomeStructure } from '../../utils/planViewSelectors';
 
 interface SubjectItem {
   id: string; // UUID
@@ -67,7 +68,17 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
 
   // Cartel de bienvenida comunitario (C1)
   const { user } = useAuth();
-  const { isTutorialOpen } = useCareer();
+  const { isTutorialOpen, activeCareer, planConfig, electives } = useCareer();
+  const libraryStructure = useMemo(
+    () =>
+      buildLibraryHomeStructure({
+        subjects,
+        electives,
+        planConfig,
+        career: activeCareer,
+      }),
+    [subjects, electives, planConfig, activeCareer]
+  );
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(() =>
     shouldShowLibraryWelcome({ isTutorialOpen, userId: user?.id })
   );
@@ -175,7 +186,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   // Filtered subjects
   const filteredSubjects = subjects.filter((s) => {
     if (levelFilter === 'electives') {
-      if (s.kind !== 'electiva' && s.level > 5) return true;
+      if (s.kind !== 'electiva' && s.level > libraryStructure.totalLevels) return true;
       if (s.kind !== 'electiva') return false;
     } else if (levelFilter !== 'all') {
       if (s.level !== levelFilter) return false;
@@ -198,7 +209,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   if (subView === 'terms') {
     return (
       <>
-        <LibraryTermsPage onBack={handleBackToCatalog} />
+        <LibraryTermsPage onBack={handleBackToCatalog} career={activeCareer} />
         <LibraryWelcomeModal
           isOpen={showWelcomeModal}
           onClose={handleCloseWelcome}
@@ -284,7 +295,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
               Material de Estudio para tu carrera
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 leading-relaxed break-words">
-              Exámenes parciales y finales, resoluciones, apuntes y resúmenes compartidos por y para estudiantes de Ingeniería en Sistemas de Información.
+              {libraryStructure.heroDescription}
             </p>
           </div>
 
@@ -349,15 +360,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
           {/* Level Filter Tabs con scroll horizontal suave, snap-x mandatory, pe-6 y fade lateral */}
           <div className="relative flex-1 min-w-0 max-w-full">
             <div className="w-full min-w-0 max-w-full overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory scroll-smooth flex items-center gap-1.5 px-0.5 pe-6">
-              {[
-                { id: 'all', label: 'Todas las materias' },
-                { id: 1, label: '1° Año' },
-                { id: 2, label: '2° Año' },
-                { id: 3, label: '3° Año' },
-                { id: 4, label: '4° Año' },
-                { id: 5, label: '5° Año' },
-                { id: 'electives', label: 'Electivas' },
-              ].map((lvl) => (
+              {libraryStructure.levelFilterTabs.map((lvl) => (
                 <button
                   key={String(lvl.id)}
                   type="button"

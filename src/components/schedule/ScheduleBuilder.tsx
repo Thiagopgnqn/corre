@@ -20,9 +20,9 @@ import {
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
-import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 import { detectAllConflicts } from '../../utils/scheduleLogic';
-import type { Commission, SubjectSchedule } from '../../types/schedule';
+import { buildScheduleBuilderStructure } from '../../utils/planViewSelectors';
+import type { Commission } from '../../types/schedule';
 import { ScheduleWeeklyGrid } from './ScheduleWeeklyGrid';
 import { ScheduleLeftPanel } from './ScheduleLeftPanel';
 import { ScheduleSummaryPanel } from './ScheduleSummaryPanel';
@@ -67,7 +67,7 @@ export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMa
     applyScheduleToEnrolled,
     coreSubjects,
     electives,
-    allSubjects: planAllSubjects,
+    subjectsById,
   } = useCareer();
 
   const { getRatingForProfessor, reloadRatings } = useProfessorRatings(true);
@@ -135,63 +135,36 @@ export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMa
     hasConflict: boolean;
   } | null>(null);
 
-  // Subject names map
-  const subjectNamesMap = useMemo(() => {
-    const map = new Map<number, string>();
-    planAllSubjects.forEach((s) => map.set(s.id, s.name));
-    return map;
-  }, [planAllSubjects]);
-
-  const knownSubjectIds = useMemo(() => {
-    const set = new Set<number | string>();
-    planAllSubjects.forEach((s) => set.add(s.id));
-    return set;
-  }, [planAllSubjects]);
-
-  // Schedules by subject map
-  const schedulesMap = useMemo(() => {
-    const map = new Map<number, SubjectSchedule>();
-    activeSchedules.forEach((s) => map.set(Number(s.subjectId), s));
-    return map;
-  }, [activeSchedules]);
-
-  // Available subjects pool based on career status
-  const availableSubjects = useMemo(() => {
-    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
-
-    // Collect electives that user has planned/assigned
-    const assignedElectiveIds = new Set(
-      Object.values(assignedElectives).flat()
-    );
-    const relevantElectives = electives.filter((e) => assignedElectiveIds.has(e.id));
-
-    const pool = [...core, ...relevantElectives];
-
-    return pool.filter((s) => {
-      const st = getSubjectStatus(s, activeState);
-      return st === 'disponible' || st === 'cursando';
-    });
-  }, [coreSubjects, electives, activeState, settings.includeAnalistaTrack, assignedElectives]);
-
-  // Full pool of all subjects
-  const allSubjects = useMemo(() => {
-    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
-    return [...core, ...electives];
-  }, [coreSubjects, electives, settings.includeAnalistaTrack]);
-
-  // Selected commission objects map: subjectId -> Commission
-  const selectedCommissionsMap = useMemo(() => {
-    const map: Record<number, Commission> = {};
-    Object.entries(scheduleSelections).forEach(([sIdStr, commId]) => {
-      const sId = Number(sIdStr);
-      const sched = schedulesMap.get(sId);
-      const found = sched?.commissions.find((c) => c.id === commId);
-      if (found) {
-        map[sId] = found;
-      }
-    });
-    return map;
-  }, [scheduleSelections, schedulesMap]);
+  const {
+    subjectNamesMap,
+    knownSubjectIds,
+    schedulesMap,
+    availableSubjects,
+    allSubjects,
+    selectedCommissionsMap,
+    totalHours,
+    selectedCount,
+  } = useMemo(
+    () =>
+      buildScheduleBuilderStructure({
+        coreSubjects,
+        electives,
+        includeAnalistaTrack: settings.includeAnalistaTrack,
+        scheduleData: activeSchedules,
+        selectedCommissions: scheduleSelections,
+        activeState,
+        assignedElectives,
+      }),
+    [
+      coreSubjects,
+      electives,
+      settings.includeAnalistaTrack,
+      activeSchedules,
+      scheduleSelections,
+      activeState,
+      assignedElectives,
+    ]
+  );
 
   // Calculate conflicts across current selection
   const { conflicts } = useMemo(() => {
@@ -232,21 +205,6 @@ export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMa
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Total weekly hours
-  const totalHours = useMemo(() => {
-    let minutes = 0;
-    Object.values(selectedCommissionsMap).forEach((comm) => {
-      comm.slots.forEach((s) => {
-        const [sh, sm] = s.start.split(':').map(Number);
-        const [eh, em] = s.end.split(':').map(Number);
-        minutes += eh * 60 + em - (sh * 60 + sm);
-      });
-    });
-    return Math.round((minutes / 60) * 10) / 10;
-  }, [selectedCommissionsMap]);
-
-  const selectedCount = Object.keys(selectedCommissionsMap).length;
 
   const handleNavigateToMap = () => {
     if (onNavigateToMap) {
@@ -723,6 +681,7 @@ export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMa
               hoveredCommission={hoveredCommission}
               conflicts={conflicts}
               subjectNamesMap={subjectNamesMap}
+              subjectsById={subjectsById}
               focusedConflictId={focusedConflictId}
               focusedSubjectId={focusedSubjectId}
               onFocusSubject={(sId) => setFocusedSubjectId(sId)}
@@ -777,6 +736,7 @@ export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMa
                 hoveredCommission={hoveredCommission}
                 conflicts={conflicts}
                 subjectNamesMap={subjectNamesMap}
+                subjectsById={subjectsById}
                 focusedConflictId={focusedConflictId}
                 focusedSubjectId={focusedSubjectId}
                 onFocusSubject={(sId) => setFocusedSubjectId(sId)}

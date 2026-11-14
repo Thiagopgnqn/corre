@@ -30,6 +30,7 @@ import {
   getSubjectsMissingDeclaredProfessors,
   formatEnrollmentPeriodLabel,
 } from '../../utils/enrollmentLogic';
+import { buildProfessorsDirectoryStructure } from '../../utils/planViewSelectors';
 import { ProfessorCard } from './ProfessorCard';
 import { ProfessorDetailModal } from './ProfessorDetailModal';
 import { ReviewFormModal } from './ReviewFormModal';
@@ -103,11 +104,10 @@ export const ProfessorsDirectory: React.FC = () => {
     });
   };
 
-  const allPlanSubjects = useMemo(() => {
-    return [...allSubjects].sort(
-      (a, b) => a.level - b.level || a.name.localeCompare(b.name, 'es')
-    );
-  }, [allSubjects]);
+  const { allPlanSubjects } = useMemo(
+    () => buildProfessorsDirectoryStructure(allSubjects),
+    [allSubjects]
+  );
 
   // Recomendaciones y materias sin comisiones registradas
   const recommendedPairs = useMemo(() => {
