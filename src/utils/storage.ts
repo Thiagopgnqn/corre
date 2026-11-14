@@ -1,13 +1,19 @@
-import type { UserCareerState, AssignedElectivesByYear, ExamAttempt } from '../types/career';
+import type {
+  ActivePlanCatalog,
+  AssignedElectivesByYear,
+  ExamAttempt,
+  Subject,
+  UserCareerState,
+  UserSubjectState,
+} from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
 import type { SubjectEnrollment } from '../types/enrollment';
-import { ELECTIVES } from '../data/electives';
 
-const STORAGE_KEY_STATE = 'mi_carrera_user_state_v1';
-const STORAGE_KEY_ASSIGNED_ELECTIVES = 'mi_carrera_assigned_electives_v2';
-const STORAGE_KEY_OLD_SLOTS = 'mi_carrera_electives_slots_v1';
-const STORAGE_KEY_BASKET = 'mi_carrera_semester_basket_v1';
-const STORAGE_KEY_SETTINGS = 'mi_carrera_settings_v1';
+export const STORAGE_KEY_STATE = 'mi_carrera_user_state_v1';
+export const STORAGE_KEY_ASSIGNED_ELECTIVES = 'mi_carrera_assigned_electives_v2';
+export const STORAGE_KEY_OLD_SLOTS = 'mi_carrera_electives_slots_v1';
+export const STORAGE_KEY_BASKET = 'mi_carrera_semester_basket_v1';
+export const STORAGE_KEY_SETTINGS = 'mi_carrera_settings_v1';
 export const STORAGE_KEY_TUTORIAL = 'mi_carrera_tutorial_completed_v1';
 export const STORAGE_KEY_SCHEDULE_SELECTIONS = 'mi_carrera_schedule_selections_v1';
 export const STORAGE_KEY_SCHEDULE_DRAFTS = 'mi_carrera_schedule_drafts_v1';
@@ -15,6 +21,22 @@ export const STORAGE_KEY_CUSTOM_SCHEDULES = 'mi_carrera_custom_schedules_v1';
 export const STORAGE_KEY_SCHEDULE_TERM = 'mi_carrera_schedule_term_v1';
 export const STORAGE_KEY_ENROLLMENTS = 'mi_carrera_enrollments_v1';
 export const STORAGE_KEY_EXAM_ATTEMPTS = 'mi_carrera_exam_attempts_v1';
+export const STORAGE_KEY_LEGACY_MIGRATED_PREFIX = 'mi_carrera_legacy_migrated_v1';
+export const STORAGE_KEY_LEGACY_PLAN_ID = 'mi_carrera_legacy_plan_id_v1';
+
+const PLAN_SCOPED_LEGACY_KEYS = [
+  STORAGE_KEY_STATE,
+  STORAGE_KEY_ASSIGNED_ELECTIVES,
+  STORAGE_KEY_BASKET,
+  STORAGE_KEY_SETTINGS,
+  STORAGE_KEY_TUTORIAL,
+  STORAGE_KEY_SCHEDULE_SELECTIONS,
+  STORAGE_KEY_SCHEDULE_DRAFTS,
+  STORAGE_KEY_CUSTOM_SCHEDULES,
+  STORAGE_KEY_SCHEDULE_TERM,
+  STORAGE_KEY_ENROLLMENTS,
+  STORAGE_KEY_EXAM_ATTEMPTS,
+];
 
 export interface AppSettings {
   includePromotionsInGPA: boolean;
@@ -38,42 +60,155 @@ export const DEFAULT_SETTINGS: AppSettings = {
   includeFailsInGPA: false,
 };
 
-export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = {
-  1: [],
-  2: [],
-  3: [],
-  4: [],
-  5: [],
-};
+export function getPlanStorageKey(baseKey: string, planId?: string | null): string {
+  if (!planId || planId === 'current') return baseKey;
+  return `${baseKey}::plan:${planId}`;
+}
+
+export function buildEmptyAssignedElectives(totalLevels: number = 5): AssignedElectivesByYear {
+  const safeLevels = Math.max(1, Math.floor(totalLevels));
+  const res: AssignedElectivesByYear = {};
+  for (let lvl = 1; lvl <= safeLevels; lvl++) {
+    res[lvl] = [];
+  }
+  return res;
+}
+
+export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = buildEmptyAssignedElectives(5);
+
+function hasNonEmptyParsedValue(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.length > 0;
+    if (parsed && typeof parsed === 'object') {
+      return Object.values(parsed as Record<string, unknown>).some((v) =>
+        Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined
+      );
+    }
+    return Boolean(parsed);
+  } catch {
+    return raw.trim().length > 0;
+  }
+}
 
 /**
- * Sanitizes and deduplicates assigned electives across all years
- * Ensures no elective ID exists in more than one year
+ * Returns true if unscoped legacy localStorage keys contain saved data that has not been
+ * migrated into a plan-scoped namespace yet.
  */
-export function sanitizeAssignedElectives(raw: Record<number, number[]>): AssignedElectivesByYear {
-  const result: AssignedElectivesByYear = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+export function hasUnmigratedLegacyLocalStorage(
+  storage: Pick<Storage, 'getItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined
+): boolean {
+  if (!storage) return false;
+  if (storage.getItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX) !== null) {
+    return false;
+  }
+
+  return [
+    STORAGE_KEY_STATE,
+    STORAGE_KEY_ASSIGNED_ELECTIVES,
+    STORAGE_KEY_BASKET,
+    STORAGE_KEY_SCHEDULE_SELECTIONS,
+    STORAGE_KEY_SCHEDULE_DRAFTS,
+    STORAGE_KEY_CUSTOM_SCHEDULES,
+    STORAGE_KEY_ENROLLMENTS,
+    STORAGE_KEY_EXAM_ATTEMPTS,
+  ].some((key) => hasNonEmptyParsedValue(storage.getItem(key)));
+}
+
+/**
+ * Idempotent copy-not-delete migration of legacy pre-multicarrera localStorage keys
+ * into plan-scoped keys for the given `planId`. Never deletes the original legacy keys.
+ *
+ * Automatic migration (`!options?.force`) is ONLY safe when `STORAGE_KEY_LEGACY_PLAN_ID`
+ * explicitly proves the unscoped keys belong to `planId`. Otherwise it returns `migrated: false`
+ * without copying so unscoped data (e.g. Sistemas) is never blindly injected into another plan.
+ */
+export function migrateLegacyLocalStorageToPlan(
+  planId: string,
+  storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined,
+  options?: { force?: boolean }
+): { migrated: boolean; copiedKeys: string[] } {
+  if (!storage || !planId || planId === 'current') {
+    return { migrated: false, copiedKeys: [] };
+  }
+
+  const doneKey = getPlanStorageKey(STORAGE_KEY_LEGACY_MIGRATED_PREFIX, planId);
+  if (
+    storage.getItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX) !== null ||
+    storage.getItem(doneKey) === 'true'
+  ) {
+    return { migrated: false, copiedKeys: [] };
+  }
+
+  if (!options?.force) {
+    const recordedLegacyPlanId = storage.getItem(STORAGE_KEY_LEGACY_PLAN_ID);
+    if (!recordedLegacyPlanId || recordedLegacyPlanId !== planId) {
+      return { migrated: false, copiedKeys: [] };
+    }
+  }
+
+  const copiedKeys: string[] = [];
+  for (const baseKey of PLAN_SCOPED_LEGACY_KEYS) {
+    const scopedKey = getPlanStorageKey(baseKey, planId);
+    const existingScoped = storage.getItem(scopedKey);
+    const legacyVal = storage.getItem(baseKey);
+    if (existingScoped === null && legacyVal !== null) {
+      storage.setItem(scopedKey, legacyVal);
+      copiedKeys.push(baseKey);
+    }
+  }
+
+  storage.setItem(doneKey, 'true');
+  storage.setItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX, planId);
+  return {
+    migrated: copiedKeys.length > 0,
+    copiedKeys,
+  };
+}
+
+/**
+ * Sanitizes and deduplicates assigned electives across all plan levels.
+ * Ensures no elective ID exists in more than one level.
+ */
+export function sanitizeAssignedElectives(
+  raw: Record<number, number[]>,
+  validElectiveIds?: Set<number> | number[],
+  totalLevels: number = 5
+): AssignedElectivesByYear {
+  const safeLevels = Math.max(1, Math.floor(totalLevels));
+  const result = buildEmptyAssignedElectives(safeLevels);
   const seenElectiveIds = new Set<number>();
 
-  const validElectiveIds = new Set(ELECTIVES.map((e) => e.id));
+  const validSet = validElectiveIds
+    ? validElectiveIds instanceof Set
+      ? validElectiveIds
+      : new Set(validElectiveIds)
+    : null;
 
-  [1, 2, 3, 4, 5].forEach((year) => {
-    const list = Array.isArray(raw[year]) ? raw[year] : [];
+  for (let level = 1; level <= safeLevels; level++) {
+    const list = Array.isArray(raw?.[level]) ? raw[level] : [];
     list.forEach((id) => {
       const numId = Number(id);
-      if (validElectiveIds.has(numId) && !seenElectiveIds.has(numId)) {
+      const isValid = validSet ? validSet.has(numId) : Number.isInteger(numId) && numId > 0;
+      if (isValid && !seenElectiveIds.has(numId)) {
         seenElectiveIds.add(numId);
-        result[year].push(numId);
+        result[level].push(numId);
       }
     });
-  });
+  }
 
   return result;
 }
 
-export function loadUserState(): UserCareerState {
+export function loadUserState(planId?: string | null): UserCareerState {
   if (typeof localStorage === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_STATE);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, planId));
     if (!raw) return {};
     return JSON.parse(raw);
   } catch (e) {
@@ -82,42 +217,69 @@ export function loadUserState(): UserCareerState {
   }
 }
 
-export function saveUserState(state: UserCareerState): void {
+export function saveUserState(state: UserCareerState, planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state));
+    localStorage.setItem(getPlanStorageKey(STORAGE_KEY_STATE, planId), JSON.stringify(state));
   } catch (e) {
     console.error('Error saving state to localStorage:', e);
   }
 }
 
-export function loadAssignedElectives(userState?: UserCareerState): AssignedElectivesByYear {
-  if (typeof localStorage === 'undefined') return migrateLegacyElectives(userState || {});
+export interface ElectiveStorageOptions {
+  electives?: Subject[];
+  validElectiveIds?: Set<number> | number[];
+  totalLevels?: number;
+  planId?: string | null;
+}
+
+export function loadAssignedElectives(
+  userState?: UserCareerState,
+  options: ElectiveStorageOptions = {}
+): AssignedElectivesByYear {
+  const totalLevels = options.totalLevels ?? 5;
+  const validIds =
+    options.validElectiveIds ??
+    (options.electives ? options.electives.map((e) => e.id) : undefined);
+
+  if (typeof localStorage === 'undefined') {
+    return migrateLegacyElectives(userState || {}, options.electives || [], totalLevels, options.planId);
+  }
+
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_ASSIGNED_ELECTIVES);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_ASSIGNED_ELECTIVES, options.planId));
     if (raw) {
       const parsed = JSON.parse(raw);
-      return sanitizeAssignedElectives(parsed);
+      return sanitizeAssignedElectives(parsed, validIds, totalLevels);
     }
 
-    // Auto-migration from legacy schema or userState
-    return migrateLegacyElectives(userState || loadUserState());
+    return migrateLegacyElectives(
+      userState || loadUserState(options.planId),
+      options.electives || [],
+      totalLevels,
+      options.planId
+    );
   } catch (e) {
     console.error('Error loading assigned electives:', e);
-    return { ...INITIAL_ASSIGNED_ELECTIVES };
+    return buildEmptyAssignedElectives(totalLevels);
   }
 }
 
 /**
  * Migrates electives from legacy slots or active userState
- * Automatically places any configured/marked elective in the year corresponding to its level
+ * Automatically places any configured/marked elective in the level corresponding to its suggested level
  */
-export function migrateLegacyElectives(userState: UserCareerState): AssignedElectivesByYear {
-  const result: AssignedElectivesByYear = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+export function migrateLegacyElectives(
+  userState: UserCareerState,
+  electives: Subject[] = [],
+  totalLevels: number = 5,
+  planId?: string | null
+): AssignedElectivesByYear {
+  const safeLevels = Math.max(1, Math.floor(totalLevels));
+  const result = buildEmptyAssignedElectives(safeLevels);
   const seenIds = new Set<number>();
 
-  if (typeof localStorage !== 'undefined') {
-    // 1. Check old slot storage if available
+  if (typeof localStorage !== 'undefined' && electives.length > 0) {
     try {
       const oldSlotsRaw = localStorage.getItem(STORAGE_KEY_OLD_SLOTS);
       if (oldSlotsRaw) {
@@ -126,9 +288,13 @@ export function migrateLegacyElectives(userState: UserCareerState): AssignedElec
           oldSlots.forEach((slot: { level?: number; selectedElectiveId?: string | number }) => {
             if (slot.selectedElectiveId) {
               const numId = Number(slot.selectedElectiveId);
-              const found = ELECTIVES.find((e) => e.id === numId);
+              const found = electives.find((e) => e.id === numId);
               if (found && !seenIds.has(numId)) {
-                const targetYear = slot.level && slot.level >= 1 && slot.level <= 5 ? slot.level : found.level;
+                const rawTarget =
+                  slot.level && slot.level >= 1 && slot.level <= safeLevels
+                    ? slot.level
+                    : found.level;
+                const targetYear = Math.min(safeLevels, Math.max(1, rawTarget));
                 seenIds.add(numId);
                 result[targetYear].push(numId);
               }
@@ -141,55 +307,70 @@ export function migrateLegacyElectives(userState: UserCareerState): AssignedElec
     }
   }
 
-  // 2. Also check if user has marked any elective in userState
-  ELECTIVES.forEach((e) => {
+  electives.forEach((e) => {
     const st = userState[e.id];
     if (st && st.status && st.status !== 'bloqueada' && st.status !== 'disponible') {
       if (!seenIds.has(e.id)) {
         seenIds.add(e.id);
-        const targetYear = e.level >= 1 && e.level <= 5 ? e.level : 3;
+        const targetYear = Math.min(safeLevels, Math.max(1, e.level));
         result[targetYear].push(e.id);
       }
     }
   });
 
-  saveAssignedElectives(result);
+  if (electives.length > 0) {
+    saveAssignedElectives(result, {
+      validElectiveIds: electives.map((e) => e.id),
+      totalLevels: safeLevels,
+      planId,
+    });
+  }
   return result;
 }
 
-export function saveAssignedElectives(data: AssignedElectivesByYear): void {
+export function saveAssignedElectives(
+  data: AssignedElectivesByYear,
+  options: ElectiveStorageOptions = {}
+): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    const sanitized = sanitizeAssignedElectives(data);
-    localStorage.setItem(STORAGE_KEY_ASSIGNED_ELECTIVES, JSON.stringify(sanitized));
+    const totalLevels = options.totalLevels ?? 5;
+    const validIds =
+      options.validElectiveIds ??
+      (options.electives ? options.electives.map((e) => e.id) : undefined);
+    const sanitized = sanitizeAssignedElectives(data, validIds, totalLevels);
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_ASSIGNED_ELECTIVES, options.planId),
+      JSON.stringify(sanitized)
+    );
   } catch (e) {
     console.error('Error saving assigned electives:', e);
   }
 }
 
-export function loadBasket(): number[] {
+export function loadBasket(planId?: string | null): number[] {
   if (typeof localStorage === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_BASKET);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_BASKET, planId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function saveBasket(basket: number[]): void {
+export function saveBasket(basket: number[], planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_BASKET, JSON.stringify(basket));
+    localStorage.setItem(getPlanStorageKey(STORAGE_KEY_BASKET, planId), JSON.stringify(basket));
   } catch (e) {
     console.error('Error saving basket:', e);
   }
 }
 
-export function loadSettings(): AppSettings {
+export function loadSettings(planId?: string | null): AppSettings {
   if (typeof localStorage === 'undefined') return DEFAULT_SETTINGS;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SETTINGS);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_SETTINGS, planId));
     if (!raw) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(raw);
     return {
@@ -209,28 +390,23 @@ export function loadSettings(): AppSettings {
 
 /**
  * Checks whether the tutorial should start automatically.
- * Rule:
- * 1. If tutorial was already completed/skipped, return false.
- * 2. If user already had saved career data prior to this update, do not show automatically (return false)
- *    and record tutorialCompleted as true.
- * 3. Only brand new users with no prior data will see it automatically.
  */
-export function shouldAutoStartTutorial(userState?: UserCareerState): boolean {
+export function shouldAutoStartTutorial(
+  userState?: UserCareerState,
+  planId?: string | null
+): boolean {
   if (typeof localStorage === 'undefined') return false;
   try {
-    const rawTut = localStorage.getItem(STORAGE_KEY_TUTORIAL);
+    const rawTut = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_TUTORIAL, planId));
     if (rawTut === 'true') return false;
 
-    // Check settings flag
-    const settings = loadSettings();
+    const settings = loadSettings(planId);
     if (settings.tutorialCompleted) return false;
 
-    // Check if user already has saved career subjects prior to this update
-    const activeState = userState || loadUserState();
+    const activeState = userState || loadUserState(planId);
     const hasExistingData = Object.keys(activeState).length > 0;
     if (hasExistingData) {
-      // Legacy user: silently mark completed so it doesn't disturb them
-      markTutorialCompleted();
+      markTutorialCompleted(planId);
       return false;
     }
 
@@ -240,126 +416,141 @@ export function shouldAutoStartTutorial(userState?: UserCareerState): boolean {
   }
 }
 
-export function markTutorialCompleted(): void {
+export function markTutorialCompleted(planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_TUTORIAL, 'true');
-    const settings = loadSettings();
-    saveSettings({ ...settings, tutorialCompleted: true });
+    localStorage.setItem(getPlanStorageKey(STORAGE_KEY_TUTORIAL, planId), 'true');
+    const settings = loadSettings(planId);
+    saveSettings({ ...settings, tutorialCompleted: true }, planId);
   } catch (e) {
     console.error('Error marking tutorial completed:', e);
   }
 }
 
-export function resetTutorialState(): void {
+export function resetTutorialState(planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.removeItem(STORAGE_KEY_TUTORIAL);
-    const settings = loadSettings();
-    saveSettings({ ...settings, tutorialCompleted: false });
+    localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_TUTORIAL, planId));
+    const settings = loadSettings(planId);
+    saveSettings({ ...settings, tutorialCompleted: false }, planId);
   } catch (e) {
     console.error('Error resetting tutorial state:', e);
   }
 }
 
-export function saveSettings(settings: AppSettings): void {
+export function saveSettings(settings: AppSettings, planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+    localStorage.setItem(getPlanStorageKey(STORAGE_KEY_SETTINGS, planId), JSON.stringify(settings));
   } catch (e) {
     console.error('Error saving settings:', e);
   }
 }
 
-export function loadScheduleSelections(): Record<number, string> {
+export function loadScheduleSelections(planId?: string | null): Record<number, string> {
   if (typeof localStorage === 'undefined') return {};
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_SELECTIONS);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_SELECTIONS, planId));
     return raw ? JSON.parse(raw) : {};
   } catch {
     return {};
   }
 }
 
-export function saveScheduleSelections(selections: Record<number, string>): void {
+export function saveScheduleSelections(
+  selections: Record<number, string>,
+  planId?: string | null
+): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_SCHEDULE_SELECTIONS, JSON.stringify(selections));
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_SCHEDULE_SELECTIONS, planId),
+      JSON.stringify(selections)
+    );
   } catch (e) {
     console.error('Error saving schedule selections:', e);
   }
 }
 
-export function loadScheduleDrafts(): ScheduleDraft[] {
+export function loadScheduleDrafts(planId?: string | null): ScheduleDraft[] {
   if (typeof localStorage === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_DRAFTS);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_DRAFTS, planId));
     return raw ? JSON.parse(raw) : [];
   } catch {
     return [];
   }
 }
 
-export function saveScheduleDrafts(drafts: ScheduleDraft[]): void {
+export function saveScheduleDrafts(drafts: ScheduleDraft[], planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_SCHEDULE_DRAFTS, JSON.stringify(drafts));
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_SCHEDULE_DRAFTS, planId),
+      JSON.stringify(drafts)
+    );
   } catch (e) {
     console.error('Error saving schedule drafts:', e);
   }
 }
 
-export function loadCustomSchedules(): SubjectSchedule[] | null {
+export function loadCustomSchedules(planId?: string | null): SubjectSchedule[] | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_CUSTOM_SCHEDULES);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_CUSTOM_SCHEDULES, planId));
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
 }
 
-export function saveCustomSchedules(schedules: SubjectSchedule[]): void {
+export function saveCustomSchedules(
+  schedules: SubjectSchedule[],
+  planId?: string | null
+): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_CUSTOM_SCHEDULES, JSON.stringify(schedules));
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_CUSTOM_SCHEDULES, planId),
+      JSON.stringify(schedules)
+    );
   } catch (e) {
     console.error('Error saving custom schedules:', e);
   }
 }
 
-export function clearCustomSchedules(): void {
+export function clearCustomSchedules(planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.removeItem(STORAGE_KEY_CUSTOM_SCHEDULES);
+    localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_CUSTOM_SCHEDULES, planId));
   } catch (e) {
     console.error('Error clearing custom schedules:', e);
   }
 }
 
-export function loadScheduleTerm(): '1C' | '2C' {
+export function loadScheduleTerm(planId?: string | null): '1C' | '2C' {
   if (typeof localStorage === 'undefined') return '1C';
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_SCHEDULE_TERM);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_TERM, planId));
     return raw === '2C' ? '2C' : '1C';
   } catch {
     return '1C';
   }
 }
 
-export function saveScheduleTerm(term: '1C' | '2C'): void {
+export function saveScheduleTerm(term: '1C' | '2C', planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_SCHEDULE_TERM, term);
+    localStorage.setItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_TERM, planId), term);
   } catch (e) {
     console.error('Error saving schedule term:', e);
   }
 }
 
-export function loadEnrollments(): SubjectEnrollment[] {
+export function loadEnrollments(planId?: string | null): SubjectEnrollment[] {
   if (typeof localStorage === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_ENROLLMENTS);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_ENROLLMENTS, planId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -368,11 +559,10 @@ export function loadEnrollments(): SubjectEnrollment[] {
   }
 }
 
-
-export function loadExamAttempts(): ExamAttempt[] {
+export function loadExamAttempts(planId?: string | null): ExamAttempt[] {
   if (typeof localStorage === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_EXAM_ATTEMPTS);
+    const raw = localStorage.getItem(getPlanStorageKey(STORAGE_KEY_EXAM_ATTEMPTS, planId));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -381,19 +571,28 @@ export function loadExamAttempts(): ExamAttempt[] {
   }
 }
 
-export function saveExamAttempts(attempts: ExamAttempt[]): void {
+export function saveExamAttempts(attempts: ExamAttempt[], planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_EXAM_ATTEMPTS, JSON.stringify(attempts));
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_EXAM_ATTEMPTS, planId),
+      JSON.stringify(attempts)
+    );
   } catch (e) {
     console.error('Error saving exam attempts:', e);
   }
 }
 
-export function saveEnrollments(enrollments: SubjectEnrollment[]): void {
+export function saveEnrollments(
+  enrollments: SubjectEnrollment[],
+  planId?: string | null
+): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY_ENROLLMENTS, JSON.stringify(enrollments));
+    localStorage.setItem(
+      getPlanStorageKey(STORAGE_KEY_ENROLLMENTS, planId),
+      JSON.stringify(enrollments)
+    );
   } catch (e) {
     console.error('Error saving enrollments:', e);
   }
@@ -411,27 +610,34 @@ export function exportCareerToJson(
     scheduleTerm?: '1C' | '2C';
     enrollments?: SubjectEnrollment[];
     examAttempts?: ExamAttempt[];
+    planId?: string | null;
+    planTag?: string;
   }
 ): string {
+  const planId = extra?.planId;
   const exportPayload = {
     version: '2.2',
     exportDate: new Date().toISOString(),
-    plan: 'Plan 2023 ISI UTN',
+    planId: planId ?? undefined,
+    plan: extra?.planTag || 'Stack Plan',
     userState,
     settings,
     basket,
     assignedElectives,
-    scheduleDrafts: extra?.scheduleDrafts || loadScheduleDrafts(),
-    scheduleSelections: extra?.scheduleSelections || loadScheduleSelections(),
-    customSchedules: extra?.customSchedules || loadCustomSchedules(),
-    scheduleTerm: extra?.scheduleTerm || loadScheduleTerm(),
-    enrollments: extra?.enrollments || loadEnrollments(),
-    examAttempts: extra?.examAttempts || loadExamAttempts(),
+    scheduleDrafts: extra?.scheduleDrafts || loadScheduleDrafts(planId),
+    scheduleSelections: extra?.scheduleSelections || loadScheduleSelections(planId),
+    customSchedules: extra?.customSchedules || loadCustomSchedules(planId),
+    scheduleTerm: extra?.scheduleTerm || loadScheduleTerm(planId),
+    enrollments: extra?.enrollments || loadEnrollments(planId),
+    examAttempts: extra?.examAttempts || loadExamAttempts(planId),
   };
   return JSON.stringify(exportPayload, null, 2);
 }
 
-export function importCareerFromJson(jsonString: string): {
+export function importCareerFromJson(
+  jsonString: string,
+  options: ElectiveStorageOptions = {}
+): {
   success: boolean;
   userState?: UserCareerState;
   settings?: AppSettings;
@@ -451,37 +657,44 @@ export function importCareerFromJson(jsonString: string): {
       return { success: false, error: 'Formato de archivo inválido.' };
     }
 
+    const totalLevels = options.totalLevels ?? 5;
+    const validIds =
+      options.validElectiveIds ??
+      (options.electives ? options.electives.map((e) => e.id) : undefined);
+
     const userState = parsed.userState || {};
     const settings = { ...DEFAULT_SETTINGS, ...(parsed.settings || {}) };
     const basket = Array.isArray(parsed.basket) ? parsed.basket : [];
     const assignedElectives = parsed.assignedElectives
-      ? sanitizeAssignedElectives(parsed.assignedElectives)
-      : migrateLegacyElectives(userState);
+      ? sanitizeAssignedElectives(parsed.assignedElectives, validIds, totalLevels)
+      : migrateLegacyElectives(userState, options.electives || [], totalLevels, options.planId);
 
     const scheduleDrafts = Array.isArray(parsed.scheduleDrafts) ? parsed.scheduleDrafts : [];
-    const scheduleSelections = parsed.scheduleSelections && typeof parsed.scheduleSelections === 'object'
-      ? parsed.scheduleSelections
-      : {};
+    const scheduleSelections =
+      parsed.scheduleSelections && typeof parsed.scheduleSelections === 'object'
+        ? parsed.scheduleSelections
+        : {};
     const customSchedules = Array.isArray(parsed.customSchedules) ? parsed.customSchedules : null;
     const scheduleTerm = parsed.scheduleTerm === '2C' ? '2C' : '1C';
     const enrollments = Array.isArray(parsed.enrollments) ? parsed.enrollments : undefined;
     const examAttempts = Array.isArray(parsed.examAttempts) ? parsed.examAttempts : undefined;
 
-    saveUserState(userState);
-    saveSettings(settings);
-    saveBasket(basket);
-    saveAssignedElectives(assignedElectives);
-    saveScheduleDrafts(scheduleDrafts);
-    saveScheduleSelections(scheduleSelections);
+    const planId = options.planId;
+    saveUserState(userState, planId);
+    saveSettings(settings, planId);
+    saveBasket(basket, planId);
+    saveAssignedElectives(assignedElectives, { validElectiveIds: validIds, totalLevels, planId });
+    saveScheduleDrafts(scheduleDrafts, planId);
+    saveScheduleSelections(scheduleSelections, planId);
     if (customSchedules) {
-      saveCustomSchedules(customSchedules);
+      saveCustomSchedules(customSchedules, planId);
     }
-    saveScheduleTerm(scheduleTerm);
+    saveScheduleTerm(scheduleTerm, planId);
     if (enrollments) {
-      saveEnrollments(enrollments);
+      saveEnrollments(enrollments, planId);
     }
     if (examAttempts) {
-      saveExamAttempts(examAttempts);
+      saveExamAttempts(examAttempts, planId);
     }
 
     return {
@@ -502,62 +715,111 @@ export function importCareerFromJson(jsonString: string): {
   }
 }
 
-export function clearCareerData(): void {
+export function clearCareerData(planId?: string | null): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(STORAGE_KEY_STATE);
-  localStorage.removeItem(STORAGE_KEY_ASSIGNED_ELECTIVES);
-  localStorage.removeItem(STORAGE_KEY_OLD_SLOTS);
-  localStorage.removeItem(STORAGE_KEY_BASKET);
-  localStorage.removeItem(STORAGE_KEY_SCHEDULE_SELECTIONS);
-  localStorage.removeItem(STORAGE_KEY_SCHEDULE_DRAFTS);
-  localStorage.removeItem(STORAGE_KEY_CUSTOM_SCHEDULES);
-  localStorage.removeItem(STORAGE_KEY_SCHEDULE_TERM);
-  localStorage.removeItem(STORAGE_KEY_ENROLLMENTS);
-  localStorage.removeItem(STORAGE_KEY_EXAM_ATTEMPTS);
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_STATE, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_ASSIGNED_ELECTIVES, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_OLD_SLOTS, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_BASKET, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_SELECTIONS, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_DRAFTS, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_CUSTOM_SCHEDULES, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_SCHEDULE_TERM, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_ENROLLMENTS, planId));
+  localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_EXAM_ATTEMPTS, planId));
 }
 
+const LEVEL1_SAMPLE_STATES: ReadonlyArray<UserSubjectState> = [
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 7 },
+  { status: 'promocionada', grade: 10 },
+  { status: 'promocionada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'promocionada', grade: 10 },
+];
+
+const LEVEL2_SAMPLE_STATES: ReadonlyArray<UserSubjectState> = [
+  { status: 'regularizada' },
+  { status: 'regularizada' },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'cursando' },
+  { status: 'aprobada', grade: 8 },
+  { status: 'aprobada', grade: 7 },
+];
+
 /**
- * Returns a rich sample state representing a 3rd year student
+ * Generates a dynamic sample academic progress state from the active plan catalog
+ * (without hardcoding specific subject codes) while reproducing ISI Plan 2023 parity.
  */
-export function getSample3rdYearStudent(): {
+export function getSampleStudentForPlan(plan?: ActivePlanCatalog | null): {
   userState: UserCareerState;
   assignedElectives: AssignedElectivesByYear;
 } {
-  const userState: UserCareerState = {
-    // Nivel 1 completo con notas
-    1: { status: 'aprobada', grade: 8 },
-    2: { status: 'promocionada', grade: 9 },
-    3: { status: 'aprobada', grade: 7 },
-    4: { status: 'promocionada', grade: 10 },
-    5: { status: 'promocionada', grade: 8 },
-    6: { status: 'promocionada', grade: 9 },
-    7: { status: 'aprobada', grade: 8 },
-    8: { status: 'promocionada', grade: 9 },
-    11: { status: 'promocionada', grade: 10 },
-    // Nivel 2
-    9: { status: 'regularizada' },
-    10: { status: 'regularizada' },
-    12: { status: 'promocionada', grade: 9 },
-    13: { status: 'aprobada', grade: 8 },
-    14: { status: 'promocionada', grade: 9 },
-    15: { status: 'cursando' },
-    16: { status: 'aprobada', grade: 8 },
-    17: { status: 'aprobada', grade: 7 },
-    // Nivel 3
-    19: { status: 'cursando' },
-    20: { status: 'cursando' },
-    // Electivas de prueba
-    301: { status: 'aprobada', grade: 9 }, // Backend de Aplicaciones (4 cr)
-    404: { status: 'cursando' }, // DevOps (3 cr)
-  };
+  const totalLevels = plan?.plan.config.totalLevels ?? 5;
+  const assignedElectives = buildEmptyAssignedElectives(totalLevels);
+  if (!plan) {
+    return { userState: {}, assignedElectives };
+  }
 
-  const assignedElectives: AssignedElectivesByYear = {
-    1: [],
-    2: [],
-    3: [301], // Backend en 3° año
-    4: [404], // DevOps en 4° año
-    5: [],
-  };
+  const clampLevel = (lvl: number): number => Math.min(totalLevels, Math.max(1, lvl));
+  const userState: UserCareerState = {};
+  const coreSubjects = [...plan.subjects]
+    .filter((s) => !s.isElective && !s.isOptionalTrack)
+    .sort((a, b) => a.level - b.level || a.id - b.id);
+  const electives = [...plan.subjects]
+    .filter((s) => Boolean(s.isElective))
+    .sort((a, b) => a.level - b.level || a.id - b.id);
+
+  const level1Core = coreSubjects.filter((s) => s.level === 1);
+  level1Core.forEach((subj, idx) => {
+    const tpl = LEVEL1_SAMPLE_STATES[idx % LEVEL1_SAMPLE_STATES.length];
+    userState[subj.id] = { ...tpl };
+  });
+
+  const level2Core = coreSubjects.filter((s) => s.level === 2);
+  level2Core.forEach((subj, idx) => {
+    const tpl = LEVEL2_SAMPLE_STATES[idx % LEVEL2_SAMPLE_STATES.length];
+    userState[subj.id] = { ...tpl };
+  });
+
+  const level3Core = coreSubjects.filter((s) => s.level === 3);
+  if (level3Core.length >= 3) {
+    userState[level3Core[1].id] = { status: 'cursando' };
+    userState[level3Core[2].id] = { status: 'cursando' };
+  } else if (level3Core.length >= 1) {
+    userState[level3Core[0].id] = { status: 'cursando' };
+  }
+
+  const distinctElectiveLevels = Array.from(new Set(electives.map((e) => e.level))).sort(
+    (a, b) => a - b
+  );
+
+  if (distinctElectiveLevels.length >= 1) {
+    const firstLevelElectives = electives.filter((e) => e.level === distinctElectiveLevels[0]);
+    const first = firstLevelElectives[0];
+    if (first) {
+      userState[first.id] = { status: 'aprobada', grade: 9 };
+      assignedElectives[clampLevel(first.level)].push(first.id);
+    }
+
+    if (distinctElectiveLevels.length >= 2) {
+      const secondLevelElectives = electives.filter((e) => e.level === distinctElectiveLevels[1]);
+      const second = secondLevelElectives[3] ?? secondLevelElectives[0];
+      if (second) {
+        userState[second.id] = { status: 'cursando' };
+        assignedElectives[clampLevel(second.level)].push(second.id);
+      }
+    } else if (firstLevelElectives.length >= 2) {
+      const second = firstLevelElectives[1];
+      userState[second.id] = { status: 'cursando' };
+      assignedElectives[clampLevel(second.level)].push(second.id);
+    }
+  }
 
   return { userState, assignedElectives };
 }

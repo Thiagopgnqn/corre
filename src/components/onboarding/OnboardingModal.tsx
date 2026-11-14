@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle2, Sparkles, BookOpen, Layers, Award } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
+import { getActiveCoreSubjects } from '../../utils/correlativas';
+import { buildOnboardingModalStructure } from '../../utils/planViewSelectors';
 import type { SubjectStatus } from '../../types/career';
 
 export const OnboardingModal: React.FC = () => {
@@ -12,21 +13,15 @@ export const OnboardingModal: React.FC = () => {
     batchUpdateStatus,
     loadSample,
     settings,
+    coreSubjects,
+    planConfig,
   } = useCareer();
 
-  const corePool = settings.includeAnalistaTrack
-    ? CORE_SUBJECTS
-    : CORE_SUBJECTS.filter((s) => s.id !== 99);
+  const corePool = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
   // Selection state: Map of subjectId -> { selected: boolean, grade: number, status: SubjectStatus }
   const [selections, setSelections] = useState<Record<number, { selected: boolean; grade: number; status: SubjectStatus }>>({});
-  const [defaultGradeByLevel, setDefaultGradeByLevel] = useState<Record<number, number>>({
-    1: 8,
-    2: 8,
-    3: 8,
-    4: 8,
-    5: 8,
-  });
+  const [defaultGradeByLevel, setDefaultGradeByLevel] = useState<Record<number, number>>({});
 
   if (!isOnboardingOpen) return null;
 
@@ -88,7 +83,13 @@ export const OnboardingModal: React.FC = () => {
     setIsOnboardingOpen(false);
   };
 
-  const levels = [1, 2, 3, 4, 5];
+  const onboardingStructure = buildOnboardingModalStructure({
+    coreSubjects,
+    includeIntermediateTrack: settings.includeAnalistaTrack,
+    planConfig,
+    selections,
+    defaultGradeByLevel,
+  });
 
   return (
     <AnimatePresence>
@@ -133,16 +134,17 @@ export const OnboardingModal: React.FC = () => {
               }}
               className="px-3 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600 text-indigo-200 hover:text-white text-xs font-semibold border border-indigo-500/40 transition-all shadow-sm"
             >
-              Cargar demo: Alumno de 3er año
+              {onboardingStructure.demoButtonLabel}
             </button>
           </div>
 
           {/* Body Levels */}
           <div className="p-5 overflow-y-auto space-y-5 flex-1">
-            {levels.map((lvl) => {
-              const subjectsInLevel = corePool.filter((s) => s.level === lvl);
-              const allSelected = subjectsInLevel.every((s) => selections[s.id]?.selected);
-              const someSelected = subjectsInLevel.some((s) => selections[s.id]?.selected);
+            {onboardingStructure.levels.map((lvlGroup) => {
+              const lvl = lvlGroup.level;
+              const subjectsInLevel = lvlGroup.subjects;
+              const allSelected = lvlGroup.allSelected;
+              const someSelected = lvlGroup.someSelected;
 
               return (
                 <div
@@ -152,15 +154,15 @@ export const OnboardingModal: React.FC = () => {
                   <div className="p-3.5 bg-slate-800/40 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80">
                     <div className="flex items-center gap-2.5">
                       <Layers className="w-4 h-4 text-indigo-400" />
-                      <span className="font-bold text-sm text-white">Nivel {lvl}</span>
-                      <span className="text-xs text-slate-400">({subjectsInLevel.length} materias)</span>
+                      <span className="font-bold text-sm text-white">{lvlGroup.title}</span>
+                      <span className="text-xs text-slate-400">{lvlGroup.countLabel}</span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-1.5 text-xs text-slate-400">
                         <span>Nota base:</span>
                         <select
-                          value={defaultGradeByLevel[lvl]}
+                          value={lvlGroup.defaultGrade}
                           onChange={(e) => {
                             const g = Number(e.target.value);
                             setDefaultGradeByLevel((prev) => ({ ...prev, [lvl]: g }));
@@ -250,7 +252,7 @@ export const OnboardingModal: React.FC = () => {
           {/* Footer */}
           <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-between">
             <span className="text-xs text-slate-400">
-              {Object.values(selections).filter((s) => s.selected).length} materias seleccionadas
+              {onboardingStructure.selectedCount} materias seleccionadas
             </span>
 
             <div className="flex items-center gap-2">
@@ -264,7 +266,7 @@ export const OnboardingModal: React.FC = () => {
               <button
                 type="button"
                 onClick={handleApply}
-                disabled={Object.values(selections).filter((s) => s.selected).length === 0}
+                disabled={onboardingStructure.selectedCount === 0}
                 className="px-5 py-2 text-sm font-semibold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2"
               >
                 <BookOpen className="w-4 h-4" />

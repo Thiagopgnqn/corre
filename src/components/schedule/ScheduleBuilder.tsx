@@ -20,22 +20,25 @@ import {
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus } from '../../utils/correlativas';
 import { detectAllConflicts } from '../../utils/scheduleLogic';
-import type { Commission, SubjectSchedule } from '../../types/schedule';
+import { buildScheduleBuilderStructure } from '../../utils/planViewSelectors';
+import type { Commission } from '../../types/schedule';
 import { ScheduleWeeklyGrid } from './ScheduleWeeklyGrid';
 import { ScheduleLeftPanel } from './ScheduleLeftPanel';
 import { ScheduleSummaryPanel } from './ScheduleSummaryPanel';
 import { ScheduleCombinationsModal } from './ScheduleCombinationsModal';
 import { ScheduleImportModal } from './ScheduleImportModal';
+import { ScheduleUnavailableNotice } from './ScheduleUnavailableNotice';
 import { ProfessorDetailModal } from '../professors/ProfessorDetailModal';
 import { ReviewFormModal } from '../professors/ReviewFormModal';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 
-export const ScheduleBuilder: React.FC = () => {
+export interface ScheduleBuilderProps {
+  onNavigateToMap?: () => void;
+}
+
+export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMap }) => {
   const {
     activeState,
     settings,
@@ -44,6 +47,10 @@ export const ScheduleBuilder: React.FC = () => {
     activeSchedules,
     customSchedules,
     setCustomSchedules,
+    scheduleStatus,
+    scheduleError,
+    retryLoadSchedule,
+    currentPlanName,
     scheduleTerm,
     setScheduleTerm,
     scheduleSelections,
@@ -58,6 +65,9 @@ export const ScheduleBuilder: React.FC = () => {
     renameDraft,
     duplicateDraft,
     applyScheduleToEnrolled,
+    coreSubjects,
+    electives,
+    subjectsById,
   } = useCareer();
 
   const { getRatingForProfessor, reloadRatings } = useProfessorRatings(true);
@@ -125,69 +135,36 @@ export const ScheduleBuilder: React.FC = () => {
     hasConflict: boolean;
   } | null>(null);
 
-  // Subject names map
-  const subjectNamesMap = useMemo(() => {
-    const map = new Map<number, string>();
-    CORE_SUBJECTS.forEach((s) => map.set(s.id, s.name));
-    ELECTIVES.forEach((e) => map.set(e.id, e.name));
-    return map;
-  }, []);
-
-  const knownSubjectIds = useMemo(() => {
-    const set = new Set<number | string>();
-    CORE_SUBJECTS.forEach((s) => set.add(s.id));
-    ELECTIVES.forEach((e) => set.add(e.id));
-    return set;
-  }, []);
-
-  // Schedules by subject map
-  const schedulesMap = useMemo(() => {
-    const map = new Map<number, SubjectSchedule>();
-    activeSchedules.forEach((s) => map.set(Number(s.subjectId), s));
-    return map;
-  }, [activeSchedules]);
-
-  // Available subjects pool based on career status
-  const availableSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-
-    // Collect electives that user has planned/assigned
-    const assignedElectiveIds = new Set(
-      Object.values(assignedElectives).flat()
-    );
-    const relevantElectives = ELECTIVES.filter((e) => assignedElectiveIds.has(e.id));
-
-    const pool = [...core, ...relevantElectives];
-
-    return pool.filter((s) => {
-      const st = getSubjectStatus(s, activeState);
-      return st === 'disponible' || st === 'cursando';
-    });
-  }, [activeState, settings.includeAnalistaTrack, assignedElectives]);
-
-  // Full pool of all subjects
-  const allSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    return [...core, ...ELECTIVES];
-  }, [settings.includeAnalistaTrack]);
-
-  // Selected commission objects map: subjectId -> Commission
-  const selectedCommissionsMap = useMemo(() => {
-    const map: Record<number, Commission> = {};
-    Object.entries(scheduleSelections).forEach(([sIdStr, commId]) => {
-      const sId = Number(sIdStr);
-      const sched = schedulesMap.get(sId);
-      const found = sched?.commissions.find((c) => c.id === commId);
-      if (found) {
-        map[sId] = found;
-      }
-    });
-    return map;
-  }, [scheduleSelections, schedulesMap]);
+  const {
+    subjectNamesMap,
+    knownSubjectIds,
+    schedulesMap,
+    availableSubjects,
+    allSubjects,
+    selectedCommissionsMap,
+    totalHours,
+    selectedCount,
+  } = useMemo(
+    () =>
+      buildScheduleBuilderStructure({
+        coreSubjects,
+        electives,
+        includeAnalistaTrack: settings.includeAnalistaTrack,
+        scheduleData: activeSchedules,
+        selectedCommissions: scheduleSelections,
+        activeState,
+        assignedElectives,
+      }),
+    [
+      coreSubjects,
+      electives,
+      settings.includeAnalistaTrack,
+      activeSchedules,
+      scheduleSelections,
+      activeState,
+      assignedElectives,
+    ]
+  );
 
   // Calculate conflicts across current selection
   const { conflicts } = useMemo(() => {
@@ -229,20 +206,52 @@ export const ScheduleBuilder: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Total weekly hours
-  const totalHours = useMemo(() => {
-    let minutes = 0;
-    Object.values(selectedCommissionsMap).forEach((comm) => {
-      comm.slots.forEach((s) => {
-        const [sh, sm] = s.start.split(':').map(Number);
-        const [eh, em] = s.end.split(':').map(Number);
-        minutes += eh * 60 + em - (sh * 60 + sm);
-      });
-    });
-    return Math.round((minutes / 60) * 10) / 10;
-  }, [selectedCommissionsMap]);
+  const handleNavigateToMap = () => {
+    if (onNavigateToMap) {
+      onNavigateToMap();
+    } else if (typeof window !== 'undefined') {
+      window.location.hash = 'graph';
+    }
+  };
 
-  const selectedCount = Object.keys(selectedCommissionsMap).length;
+  if (activeSchedules.length === 0) {
+    if (scheduleStatus === 'loading') {
+      return (
+        <div className="flex-1 w-full max-w-lg mx-auto px-4 py-12 flex flex-col items-center justify-center text-center gap-3">
+          <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          <p className="text-sm text-slate-300 font-medium">
+            Cargando oferta horaria del plan...
+          </p>
+        </div>
+      );
+    }
+
+    const noticeReason = scheduleStatus === 'error' ? 'backend-error' : 'no-schedule';
+    return (
+      <>
+        <ScheduleUnavailableNotice
+          availability={noticeReason}
+          errorDetail={scheduleError}
+          planName={currentPlanName}
+          onRetry={scheduleStatus === 'error' ? () => void retryLoadSchedule() : undefined}
+          onNavigateToMap={handleNavigateToMap}
+          onImportJson={() => setImportModalOpen(true)}
+        />
+        <ScheduleImportModal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          onImportValidSchedules={(newScheds) => {
+            setCustomSchedules(newScheds);
+          }}
+          onResetDefault={() => {
+            setCustomSchedules(null);
+          }}
+          hasCustomSchedules={Boolean(customSchedules && customSchedules.length > 0)}
+          knownSubjectIds={knownSubjectIds}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col gap-2 min-h-0 h-full overflow-hidden lg:h-auto lg:overflow-visible lg:gap-3">
@@ -672,6 +681,7 @@ export const ScheduleBuilder: React.FC = () => {
               hoveredCommission={hoveredCommission}
               conflicts={conflicts}
               subjectNamesMap={subjectNamesMap}
+              subjectsById={subjectsById}
               focusedConflictId={focusedConflictId}
               focusedSubjectId={focusedSubjectId}
               onFocusSubject={(sId) => setFocusedSubjectId(sId)}
@@ -726,6 +736,7 @@ export const ScheduleBuilder: React.FC = () => {
                 hoveredCommission={hoveredCommission}
                 conflicts={conflicts}
                 subjectNamesMap={subjectNamesMap}
+                subjectsById={subjectsById}
                 focusedConflictId={focusedConflictId}
                 focusedSubjectId={focusedSubjectId}
                 onFocusSubject={(sId) => setFocusedSubjectId(sId)}

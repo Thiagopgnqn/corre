@@ -1,4 +1,4 @@
-import type { Subject } from '../types/career';
+import type { Subject } from '../../src/types/career';
 import { ACRONYM_TO_ID } from './acronyms';
 
 export interface ElectiveSubject extends Subject {

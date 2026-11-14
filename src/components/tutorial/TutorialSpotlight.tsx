@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { getAvailableTutorialSteps } from '../../data/tutorialSteps';
+import { buildPlanTutorialSteps } from '../../utils/planText';
 import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import {
   computeTutorialLayout,
@@ -146,12 +147,13 @@ export const TutorialSpotlight: React.FC<TutorialSpotlightProps> = ({
     selectedSubjectId,
     setSelectedSubjectId,
     setIsMoreMenuOpen,
+    activePlan,
   } = useCareer();
 
   const { isAvailable: isScheduleAvailable } = useScheduleAvailability();
   const availableSteps = React.useMemo(
-    () => getAvailableTutorialSteps(isScheduleAvailable),
-    [isScheduleAvailable]
+    () => buildPlanTutorialSteps(getAvailableTutorialSteps(isScheduleAvailable), activePlan),
+    [isScheduleAvailable, activePlan]
   );
   const step = availableSteps[currentTutorialStep] || availableSteps[availableSteps.length - 1];
 

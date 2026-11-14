@@ -21,11 +21,10 @@ import { useCareer } from '../../context/CareerContext';
 import {
   getSubjectStatus,
   getUnlockedBySubject,
-  ALL_SUBJECTS_MAP,
   isApprovedOrHigher,
   isRegularOrHigher,
-  canRenderProyectoFinal,
 } from '../../utils/correlativas';
+import { resolveSpecialRuleView } from '../../utils/planText';
 import { formatEnrollmentPeriodLabel } from '../../utils/enrollmentLogic';
 import { StatusBadge } from '../common/StatusBadge';
 import { libraryApi } from '../../api/library.api';
@@ -49,6 +48,9 @@ export const SubjectDrawer: React.FC = () => {
     getSubjectExamAttempts,
     saveExamAttempt,
     deleteExamAttempt,
+    activePlan,
+    allSubjects,
+    subjectsById,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -88,7 +90,7 @@ export const SubjectDrawer: React.FC = () => {
 
   const status = getSubjectStatus(selectedSubject, activeState);
   const grade = activeState[selectedSubject.id]?.grade;
-  const unlocked = getUnlockedBySubject(selectedSubject.id);
+  const unlocked = getUnlockedBySubject(selectedSubject.id, allSubjects);
   const isInBasket = semesterBasket.includes(selectedSubject.id);
   const subjectEnrollments = getSubjectEnrollments(selectedSubject.id);
   const subjectExamAttempts = selectedSubject ? getSubjectExamAttempts(selectedSubject.id) : [];
@@ -503,7 +505,13 @@ export const SubjectDrawer: React.FC = () => {
 
   // Regla especial
   const renderSpecialRuleSection = () => {
-    if (!selectedSubject.specialRule) return null;
+    const specialRuleView = resolveSpecialRuleView(
+      selectedSubject,
+      activePlan,
+      activeState,
+      settings.includeAnalistaTrack
+    );
+    if (!specialRuleView) return null;
     return (
       <div className="p-3.5 rounded-xl bg-purple-950/30 border border-purple-500/30 text-purple-200 text-xs space-y-1.5">
         <div className="font-semibold text-purple-300 flex items-center gap-1.5">
@@ -511,23 +519,19 @@ export const SubjectDrawer: React.FC = () => {
           <span>Regla Especial de Aprobación</span>
         </div>
         <p className="leading-relaxed break-words">
-          {selectedSubject.id === 36 && !settings.includeAnalistaTrack
-            ? 'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Electivas).'
-            : selectedSubject.specialRule}
+          {specialRuleView.text}
         </p>
-        {selectedSubject.id === 36 && (
+        {specialRuleView.statusBadge && (
           <div className="pt-1 text-[11px]">
-            {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).canRender ? (
+            {specialRuleView.statusBadge.canRender ? (
               <span className="text-emerald-400 font-semibold flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>¡Cumplís todas las materias previas para rendir Proyecto Final!</span>
+                <span>{specialRuleView.statusBadge.message}</span>
               </span>
             ) : (
               <span className="text-rose-400 font-semibold flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5" />
-                <span>
-                  Faltan aprobar {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).missingIds.length} materias previas
-                </span>
+                <span>{specialRuleView.statusBadge.message}</span>
               </span>
             )}
           </div>
@@ -564,7 +568,7 @@ export const SubjectDrawer: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.regularPrereqs.map((reqId) => {
-                  const reqSub = ALL_SUBJECTS_MAP.get(reqId);
+                  const reqSub = subjectsById.get(reqId);
                   const met = isRegularOrHigher(activeState[reqId]);
                   return (
                     <div
@@ -601,7 +605,7 @@ export const SubjectDrawer: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.approvedPrereqs.map((reqId) => {
-                  const reqSub = ALL_SUBJECTS_MAP.get(reqId);
+                  const reqSub = subjectsById.get(reqId);
                   const met = isApprovedOrHigher(activeState[reqId]);
                   return (
                     <div

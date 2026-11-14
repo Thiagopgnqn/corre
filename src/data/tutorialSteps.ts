@@ -32,7 +32,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     id: 'graph-overview',
     title: 'El Mapa de Correlativas',
     description:
-      'Cada nodo es una materia del plan oficial y las 5 columnas representan los años de la carrera (1° a 5° año). Podés arrastrar el lienzo y hacer zoom con la rueda del mouse.',
+      'Cada nodo es una materia del plan oficial y las columnas representan los niveles de la carrera. Podés arrastrar el lienzo y hacer zoom con la rueda del mouse.',
     badge: 'Grafo Visual',
     targetSelector: '[data-tour="graph-canvas"]',
     targetView: 'graph',
@@ -109,12 +109,12 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'FlaskConical',
   },
 
-  // 8. Electivas Libres por Año
+  // 8. Electivas Libres por Nivel
   {
     id: 'electives-tour',
-    title: 'Electivas Libres por Año (Total 20 cr)',
+    title: 'Electivas Libres por Nivel',
     description:
-      'Sin cupos rígidos por nivel: podés agregar cualquier electiva en cualquier año donde cumplas sus correlativas. Para el título de Ingeniero/a se requieren 20 créditos en total.',
+      'Sin cupos rígidos por nivel: podés agregar cualquier electiva en cualquier nivel donde cumplas sus correlativas según los créditos requeridos del plan.',
     badge: 'Oferta Académica',
     targetSelector: '[data-tour="electives-banner"]',
     targetView: 'electives',
@@ -122,12 +122,12 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     iconName: 'Sparkles',
   },
 
-  // 9. Interruptor de Título de Analista
+  // 9. Interruptor de Título Intermedio
   {
     id: 'analista-switch',
-    title: 'Título Intermedio de Analista',
+    title: 'Título Intermedio',
     description:
-      'Si querés tramitar el título intermedio, activá este interruptor. Hará visible el Seminario Integrador (99) y habilitará el seguimiento con sus 4 créditos de electivas requeridos.',
+      'Si tu plan cuenta con un título intermedio opcional, activá este interruptor para habilitar su materia y créditos asociados en el seguimiento.',
     badge: 'Título Intermedio',
     targetSelector: '[data-tour="analista-button"]',
     targetView: 'graph',

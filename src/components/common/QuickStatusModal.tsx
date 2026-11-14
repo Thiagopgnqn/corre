@@ -17,7 +17,6 @@ import {
   getSubjectStatus,
   checkEligibility,
   getUnlockedBySubject,
-  ALL_SUBJECTS_MAP,
 } from '../../utils/correlativas';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from './BottomSheet';
@@ -30,13 +29,15 @@ export const QuickStatusModal: React.FC = () => {
     activeState,
     updateSubjectStatus,
     isSimulationMode,
+    allSubjects,
+    subjectsById,
   } = useCareer();
 
   const isMobile = useIsMobile();
   const [selectedGrade, setSelectedGrade] = useState<number>(8);
   const [targetStatus, setTargetStatus] = useState<SubjectStatus | null>(null);
 
-  const subject = statusModalSubjectId ? ALL_SUBJECTS_MAP.get(statusModalSubjectId) : null;
+  const subject = statusModalSubjectId ? subjectsById.get(statusModalSubjectId) : null;
   const currentSaved = statusModalSubjectId ? activeState[statusModalSubjectId] : undefined;
   const currentStatus = subject ? getSubjectStatus(subject, activeState) : 'bloqueada';
 
@@ -54,7 +55,7 @@ export const QuickStatusModal: React.FC = () => {
   if (!statusModalSubjectId || !subject) return null;
 
   const { eligible, missingRegular, missingApproved } = checkEligibility(subject, activeState);
-  const unlocked = getUnlockedBySubject(subject.id);
+  const unlocked = getUnlockedBySubject(subject.id, allSubjects);
 
   // En modo simulación se permite cualquier estado para proyectar escenarios.
   // En modo real, se verifican correlativas para cursando/regularizada/aprobada.
@@ -66,13 +67,13 @@ export const QuickStatusModal: React.FC = () => {
       if (missingRegular.length > 0 && (statusToCheck === 'cursando' || statusToCheck === 'regularizada')) {
         return {
           allowed: false,
-          reason: `Falta regularizar: ${missingRegular.map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`).join(', ')}`,
+          reason: `Falta regularizar: ${missingRegular.map((id) => subjectsById.get(id)?.name || `#${id}`).join(', ')}`,
         };
       }
       if (missingApproved.length > 0 && (statusToCheck === 'aprobada' || statusToCheck === 'promocionada')) {
         return {
           allowed: false,
-          reason: `Falta aprobar: ${missingApproved.map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`).join(', ')}`,
+          reason: `Falta aprobar: ${missingApproved.map((id) => subjectsById.get(id)?.name || `#${id}`).join(', ')}`,
         };
       }
     }
@@ -174,12 +175,12 @@ export const QuickStatusModal: React.FC = () => {
               </div>
               {missingRegular.length > 0 && (
                 <p className="text-amber-200/90 pl-5">
-                  • Falta regularizar: {missingRegular.map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`).join(', ')}
+                  • Falta regularizar: {missingRegular.map((id) => subjectsById.get(id)?.name || `#${id}`).join(', ')}
                 </p>
               )}
               {missingApproved.length > 0 && (
                 <p className="text-amber-200/90 pl-5">
-                  • Falta aprobar: {missingApproved.map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`).join(', ')}
+                  • Falta aprobar: {missingApproved.map((id) => subjectsById.get(id)?.name || `#${id}`).join(', ')}
                 </p>
               )}
             </div>
@@ -367,7 +368,7 @@ export const QuickStatusModal: React.FC = () => {
                   <p className="text-xs text-amber-200/90 pl-6">
                     • Falta tener regularizadas:{' '}
                     {missingRegular
-                      .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                      .map((id) => subjectsById.get(id)?.name || `#${id}`)
                       .join(', ')}
                   </p>
                 )}
@@ -375,7 +376,7 @@ export const QuickStatusModal: React.FC = () => {
                   <p className="text-xs text-amber-200/90 pl-6">
                     • Falta tener aprobadas:{' '}
                     {missingApproved
-                      .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                      .map((id) => subjectsById.get(id)?.name || `#${id}`)
                       .join(', ')}
                   </p>
                 )}

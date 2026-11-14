@@ -12,11 +12,32 @@ import {
   Sliders,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, isApprovedOrHigher, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus, isApprovedOrHigher } from '../../utils/correlativas';
 import { soundManager } from '../../utils/audio';
 import { fireMilestoneConfetti } from '../../utils/confetti';
+import {
+  getBadgesSectionSubtitle,
+  getDegreeElectiveFootnote,
+  getDegreeElectiveReachedLabel,
+  getFinalDegreeMilestoneDesc,
+  getFinalDegreeMilestoneTitle,
+  getFinalDegreeSectionHeading,
+  getIntermediateDegreeCardHeading,
+  getIntermediateDegreeCreditsValueLabel,
+  getIntermediateDegreeMilestoneDesc,
+  getIntermediateDegreeMilestoneTitle,
+  getIntermediateDegreeRangeLabel,
+  getIntermediateDegreeRangeProgressText,
+  getIntermediateDegreeSpecialSubjectLabel,
+  getLevelNumbers,
+  getLevelProgressRowLabel,
+  getPpsMilestoneDesc,
+  getPpsMilestoneTitle,
+  getProgressCalcSubtitle,
+  getProgressWeightedFooterLabel,
+  getProgressWithElectivesBtnLabel,
+  getWeeklyHoursElectiveFootnote,
+} from '../../utils/planText';
 
 export const StatsDashboard: React.FC = () => {
   const {
@@ -27,7 +48,17 @@ export const StatsDashboard: React.FC = () => {
     updateSettings,
     setSelectedSubjectId,
     examAttempts,
+    coreSubjects,
+    electives,
+    allSubjects,
+    subjectsById,
+    planConfig,
+    planRules,
+    activePlan,
   } = useCareer();
+
+  const planLevels = useMemo(() => getLevelNumbers(planConfig), [planConfig]);
+  const primaryIntermediateDegree = planConfig?.intermediateDegrees?.[0] ?? null;
 
   const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'critical' | 'badges'>('overview');
 
@@ -35,7 +66,7 @@ export const StatsDashboard: React.FC = () => {
   const gradesData = useMemo(() => {
     const list: Array<{ id: number; name: string; level: number; grade: number; status: string }> = [];
 
-    [...CORE_SUBJECTS, ...ELECTIVES].forEach((s) => {
+    allSubjects.forEach((s) => {
       const st = activeState[s.id];
       if (st && st.grade !== undefined && isApprovedOrHigher(st)) {
         if (!settings.includePromotionsInGPA && st.status === 'promocionada') {
@@ -74,22 +105,21 @@ export const StatsDashboard: React.FC = () => {
 
 
     // Average per level
-    const avgByLevel: Record<number, { sum: number; count: number; avg: number }> = {
-      1: { sum: 0, count: 0, avg: 0 },
-      2: { sum: 0, count: 0, avg: 0 },
-      3: { sum: 0, count: 0, avg: 0 },
-      4: { sum: 0, count: 0, avg: 0 },
-      5: { sum: 0, count: 0, avg: 0 },
-    };
+    const avgByLevel: Record<number, { sum: number; count: number; avg: number }> = {};
+    for (const lvl of planLevels) {
+      avgByLevel[lvl] = { sum: 0, count: 0, avg: 0 };
+    }
 
     list.forEach((item) => {
-      if (avgByLevel[item.level]) {
-        avgByLevel[item.level].sum += item.grade;
-        avgByLevel[item.level].count += 1;
+      if (!avgByLevel[item.level]) {
+        avgByLevel[item.level] = { sum: 0, count: 0, avg: 0 };
       }
+      avgByLevel[item.level].sum += item.grade;
+      avgByLevel[item.level].count += 1;
     });
 
-    for (let lvl = 1; lvl <= 5; lvl++) {
+    for (const lvlKey of Object.keys(avgByLevel)) {
+      const lvl = Number(lvlKey);
       if (avgByLevel[lvl].count > 0) {
         avgByLevel[lvl].avg = Number((avgByLevel[lvl].sum / avgByLevel[lvl].count).toFixed(2));
       }
@@ -104,7 +134,7 @@ export const StatsDashboard: React.FC = () => {
       failsCount: failsList.length,
       totalGradesCount: list.length,
     };
-  }, [activeState, settings, examAttempts]);
+  }, [allSubjects, activeState, settings, examAttempts, planLevels]);
 
   // Milestones verification
   const milestones = useMemo(() => {
@@ -136,44 +166,51 @@ export const StatsDashboard: React.FC = () => {
       },
       {
         id: 'graduated',
-        title: 'Graduación (Título Ingeniero/a)',
-        desc: 'Todas las materias obligatorias aprobadas + 20 créditos de electivas',
+        title: getFinalDegreeMilestoneTitle(planConfig),
+        desc: getFinalDegreeMilestoneDesc(planConfig),
         unlocked: computedProgress.isDegreeEligible,
         icon: GraduationCap,
         color: 'from-emerald-500 to-teal-500',
       },
     ];
 
-    if (settings.includeAnalistaTrack) {
+    if (primaryIntermediateDegree && settings.includeAnalistaTrack) {
       list.push({
         id: 'analista',
-        title: 'Título Intermedio: Analista Universitario',
-        desc: 'Materias 1 a 23 + Seminario Integrador 99 + 4 créditos de electivas',
+        title: getIntermediateDegreeMilestoneTitle(primaryIntermediateDegree),
+        desc: getIntermediateDegreeMilestoneDesc(primaryIntermediateDegree, planRules, allSubjects),
         unlocked: computedProgress.isAnalistaEligible,
         icon: Award,
         color: 'from-amber-500 to-orange-500',
       });
     }
 
-    list.push({
-      id: 'pps',
-      title: 'Habilitación PPS',
-      desc: 'Cumplís los requisitos para cursar la Práctica Profesional',
-      unlocked: computedProgress.isPPSEligible,
-      icon: CheckCircle2,
-      color: 'from-cyan-500 to-blue-500',
-    });
+    if (planConfig?.ppsRequirement) {
+      list.push({
+        id: 'pps',
+        title: getPpsMilestoneTitle(planConfig),
+        desc: getPpsMilestoneDesc(planConfig),
+        unlocked: computedProgress.isPPSEligible,
+        icon: CheckCircle2,
+        color: 'from-cyan-500 to-blue-500',
+      });
+    }
 
     return list;
-  }, [computedProgress, settings.includeAnalistaTrack]);
+  }, [
+    computedProgress,
+    settings.includeAnalistaTrack,
+    planConfig,
+    primaryIntermediateDegree,
+    planRules,
+    allSubjects,
+  ]);
 
   // Level progress cards
   const levelProgressList = useMemo(() => {
-    const pool = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    const pool = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
-    return [1, 2, 3, 4, 5].map((lvl) => {
+    return planLevels.map((lvl) => {
       const lvlCore = pool.filter((s) => s.level === lvl);
       const approvedCount = lvlCore.filter((s) => isApprovedOrHigher(activeState[s.id])).length;
       const pct = lvlCore.length > 0 ? Math.round((approvedCount / lvlCore.length) * 100) : 0;
@@ -184,7 +221,7 @@ export const StatsDashboard: React.FC = () => {
         percentage: pct,
       };
     });
-  }, [activeState, settings.includeAnalistaTrack]);
+  }, [coreSubjects, activeState, settings.includeAnalistaTrack, planLevels]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 w-full overflow-hidden">
@@ -244,7 +281,7 @@ export const StatsDashboard: React.FC = () => {
                   Cálculo de Avance de Carrera
                 </span>
                 <span className="text-[11px] text-slate-400 leading-snug">
-                  Elegí si el porcentaje de avance general incluye el bloque de 20 créditos de electivas.
+                  {getProgressCalcSubtitle(planConfig)}
                 </span>
               </div>
             </div>
@@ -268,7 +305,7 @@ export const StatsDashboard: React.FC = () => {
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Con electivas (20 cr)
+                {getProgressWithElectivesBtnLabel(planConfig)}
               </button>
             </div>
           </div>
@@ -293,7 +330,7 @@ export const StatsDashboard: React.FC = () => {
                       </span>{' '}
                       obligatorias +{' '}
                       <span className="font-semibold text-amber-300">
-                        {computedProgress.totalElectiveCreditsApproved} de 20 cr
+                        {computedProgress.totalElectiveCreditsApproved} de {computedProgress.totalElectiveCreditsRequired} cr
                       </span>{' '}
                       electivas
                     </div>
@@ -335,7 +372,7 @@ export const StatsDashboard: React.FC = () => {
               </div>
               <div className="text-[11px] text-slate-400">
                 {settings.includeElectivesInProgress
-                  ? 'Ponderado: obligatorias + bloque electivas (7 eq.)'
+                  ? getProgressWeightedFooterLabel(planConfig)
                   : 'Solo materias obligatorias'}
               </div>
             </div>
@@ -379,9 +416,11 @@ export const StatsDashboard: React.FC = () => {
                   />
                 </svg>
               </div>
-              <div className="text-[10px] text-slate-400 leading-tight">
-                * Las electivas no tienen carga horaria definida, por eso este valor no las incluye
-              </div>
+              {getWeeklyHoursElectiveFootnote(electives.length) && (
+                <div className="text-[10px] text-slate-400 leading-tight">
+                  {getWeeklyHoursElectiveFootnote(electives.length)}
+                </div>
+              )}
             </div>
 
             {/* Pending finals */}
@@ -513,7 +552,7 @@ export const StatsDashboard: React.FC = () => {
               {levelProgressList.map((lvl) => (
                 <div key={lvl.level} className="space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="font-semibold text-slate-300">Nivel {lvl.level} (Año {lvl.level})</span>
+                    <span className="font-semibold text-slate-300">{getLevelProgressRowLabel(lvl.level, planConfig)}</span>
                     <span className="text-slate-400 font-mono">
                       {lvl.approved} / {lvl.total} ({lvl.percentage}%)
                     </span>
@@ -535,7 +574,7 @@ export const StatsDashboard: React.FC = () => {
               <div className="flex items-center gap-2">
                 <GraduationCap className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-                  Requisitos para el Título de Ingeniero/a
+                  {getFinalDegreeSectionHeading(planConfig)}
                 </h3>
               </div>
               <span
@@ -570,7 +609,7 @@ export const StatsDashboard: React.FC = () => {
                     </div>
                     <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
                       {computedProgress.missingCoreForDegree.map((id) => {
-                        const subj = ALL_SUBJECTS_MAP.get(id);
+                        const subj = subjectsById.get(id);
                         return (
                           <button
                             key={id}
@@ -587,56 +626,64 @@ export const StatsDashboard: React.FC = () => {
               </div>
 
               {/* Elective Credits */}
-              <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-slate-300">2. Créditos de Materias Electivas</span>
-                  <span className="font-mono text-amber-400 font-bold">
-                    {computedProgress.totalElectiveCreditsApproved} / {computedProgress.totalElectiveCreditsRequired} cr
-                  </span>
-                </div>
+              {(computedProgress.totalElectiveCreditsRequired > 0 || electives.length > 0) && (
+                <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-slate-300">2. Créditos de Materias Electivas</span>
+                    <span className="font-mono text-amber-400 font-bold">
+                      {computedProgress.totalElectiveCreditsApproved} / {computedProgress.totalElectiveCreditsRequired} cr
+                    </span>
+                  </div>
 
-                <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
-                  <div
-                    className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        (computedProgress.totalElectiveCreditsApproved / computedProgress.totalElectiveCreditsRequired) * 100
-                      )}%`,
-                    }}
-                  />
-                </div>
+                  <div className="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800">
+                    <div
+                      className="h-full bg-gradient-to-r from-amber-500 to-orange-500 rounded-full transition-all duration-500"
+                      style={{
+                        width: `${
+                          computedProgress.totalElectiveCreditsRequired > 0
+                            ? Math.min(
+                                100,
+                                (computedProgress.totalElectiveCreditsApproved /
+                                  computedProgress.totalElectiveCreditsRequired) *
+                                  100
+                              )
+                            : 100
+                        }%`,
+                      }}
+                    />
+                  </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-1">
-                  {computedProgress.missingElectiveCreditsForDegree === 0 ? (
-                    <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>Requisito de 20 créditos alcanzado</span>
-                    </span>
-                  ) : (
-                    <span>
-                      Faltan <span className="text-amber-400 font-bold">{computedProgress.missingElectiveCreditsForDegree}</span> créditos
-                    </span>
-                  )}
-                  {computedProgress.totalElectiveCreditsTaking > 0 && (
-                    <span className="text-cyan-400">
-                      ({computedProgress.totalElectiveCreditsTaking} cr en curso)
-                    </span>
-                  )}
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400 pt-1">
+                    {computedProgress.missingElectiveCreditsForDegree === 0 ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{getDegreeElectiveReachedLabel(planConfig)}</span>
+                      </span>
+                    ) : (
+                      <span>
+                        Faltan <span className="text-amber-400 font-bold">{computedProgress.missingElectiveCreditsForDegree}</span> créditos
+                      </span>
+                    )}
+                    {computedProgress.totalElectiveCreditsTaking > 0 && (
+                      <span className="text-cyan-400">
+                        ({computedProgress.totalElectiveCreditsTaking} cr en curso)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400">
+                    {getDegreeElectiveFootnote(planConfig)}
+                  </p>
                 </div>
-                <p className="text-[10px] text-slate-400">
-                  * 20 créditos requeridos en total, sin importar el nivel de las electivas aprobadas.
-                </p>
-              </div>
+              )}
             </div>
 
-            {/* If Analista is enabled, also show Intermediate Title Card */}
-            {settings.includeAnalistaTrack && (
+            {/* If an intermediate degree is configured and enabled, show Intermediate Title Card */}
+            {primaryIntermediateDegree && settings.includeAnalistaTrack && (
               <div className="mt-3 p-4 rounded-xl bg-amber-950/20 border border-amber-500/30 space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <div className="flex items-center gap-1.5 font-bold text-amber-300">
                     <Award className="w-4 h-4 text-amber-400" />
-                    <span>Título Intermedio: Analista Universitario de Sistemas</span>
+                    <span>{getIntermediateDegreeCardHeading(primaryIntermediateDegree)}</span>
                   </div>
                   <span
                     className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -651,29 +698,45 @@ export const StatsDashboard: React.FC = () => {
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs pt-1">
                   <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
-                    <span className="text-slate-400 block">Materias 1 a 23:</span>
+                    <span className="text-slate-400 block">
+                      {getIntermediateDegreeRangeLabel(primaryIntermediateDegree, planRules, allSubjects)}
+                    </span>
                     <span className="font-bold text-white">
-                      {23 - (computedProgress.missingForAnalista?.missingCoreIds.length || 0)} / 23 aprobadas
+                      {getIntermediateDegreeRangeProgressText(
+                        primaryIntermediateDegree,
+                        planRules,
+                        allSubjects,
+                        computedProgress.missingForAnalista?.missingCoreIds.length || 0
+                      )}
                     </span>
                   </div>
-                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
-                    <span className="text-slate-400 block">Seminario Integrador (99):</span>
-                    <span
-                      className={`font-bold ${
-                        computedProgress.missingForAnalista?.seminarioApproved
-                          ? 'text-emerald-400'
-                          : 'text-amber-400'
-                      }`}
-                    >
-                      {computedProgress.missingForAnalista?.seminarioApproved ? 'Aprobado' : 'Pendiente'}
-                    </span>
-                  </div>
-                  <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
-                    <span className="text-slate-400 block">Créditos de Electivas:</span>
-                    <span className="font-bold text-amber-400">
-                      {computedProgress.totalElectiveCreditsApproved} / 4 cr (aprobados)
-                    </span>
-                  </div>
+                  {getIntermediateDegreeSpecialSubjectLabel(primaryIntermediateDegree, allSubjects) && (
+                    <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
+                      <span className="text-slate-400 block">
+                        {getIntermediateDegreeSpecialSubjectLabel(primaryIntermediateDegree, allSubjects)}
+                      </span>
+                      <span
+                        className={`font-bold ${
+                          computedProgress.missingForAnalista?.seminarioApproved
+                            ? 'text-emerald-400'
+                            : 'text-amber-400'
+                        }`}
+                      >
+                        {computedProgress.missingForAnalista?.seminarioApproved ? 'Aprobado' : 'Pendiente'}
+                      </span>
+                    </div>
+                  )}
+                  {(primaryIntermediateDegree.requiredElectiveCredits ?? 0) > 0 && (
+                    <div className="p-2 rounded bg-slate-950/60 border border-slate-800 text-[11px]">
+                      <span className="text-slate-400 block">Créditos de Electivas:</span>
+                      <span className="font-bold text-amber-400">
+                        {getIntermediateDegreeCreditsValueLabel(
+                          computedProgress.totalElectiveCreditsApproved,
+                          primaryIntermediateDegree
+                        )}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -810,8 +873,8 @@ export const StatsDashboard: React.FC = () => {
               Promedio por Nivel
             </h3>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 sm:gap-3">
-              {[1, 2, 3, 4, 5].map((lvl) => {
-                const data = gradesData.avgByLevel[lvl];
+              {planLevels.map((lvl) => {
+                const data = gradesData.avgByLevel[lvl] || { count: 0, avg: 0 };
                 return (
                   <div
                     key={lvl}
@@ -930,7 +993,7 @@ export const StatsDashboard: React.FC = () => {
             <div>
               <h3 className="text-lg font-bold text-white">Hitos y Títulos Académicos</h3>
               <p className="text-xs text-slate-400">
-                Logros desbloqueados automáticamente al avanzar en el plan 2023.
+                {getBadgesSectionSubtitle(activePlan?.plan.name)}
               </p>
             </div>
 

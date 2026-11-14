@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ShieldCheck, AlertCircle, Mail, CheckCircle2, Check, Loader2 } from 'lucide-react';
 import { APP_NAME, CONTACT_EMAIL } from '../../config/brand';
 import { libraryApi } from '../../api/library.api';
+import type { PlanCareerMeta } from '../../types/career';
+import { getLibraryTermsIntroParagraph } from '../../utils/planText';
 
 interface LibraryTermsPageProps {
   onBack: () => void;
+  career?: Partial<PlanCareerMeta> | null;
 }
 
-export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) => {
+export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack, career }) => {
   const [accepted, setAccepted] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
 
@@ -59,7 +62,7 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack }) =>
           Biblioteca de Material de Estudio — {APP_NAME}
         </h1>
         <p className="text-sm text-slate-400 leading-relaxed max-w-2xl">
-          La Biblioteca de {APP_NAME} es un espacio colaborativo desarrollado para la comunidad estudiantil de Ingeniería en Sistemas de Información, cuyo único propósito es facilitar el intercambio académico libre y sin costo de recursos de aprendizaje.
+          {getLibraryTermsIntroParagraph(career, APP_NAME)}
         </p>
       </div>
 

@@ -18,6 +18,8 @@ import {
   formatRatingDecimal,
   type ProfessorRatingResolver,
 } from '../../utils/professorRatingsLogic';
+import { useCareer } from '../../context/CareerContext';
+import { buildScheduleSummaryExportMetadata } from '../../utils/planViewSelectors';
 
 interface ScheduleSummaryPanelProps {
   selections: Record<number, Commission>;
@@ -42,10 +44,12 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   onNavigateToTab,
   resolveProfessorRating,
 }) => {
+  const { activePlan } = useCareer();
   const [copied, setCopied] = useState(false);
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
   const [confirmApplyOpen, setConfirmApplyOpen] = useState(false);
 
+  const exportMeta = useMemo(() => buildScheduleSummaryExportMetadata(activePlan), [activePlan]);
   const selectedCommissions = useMemo(() => Object.values(selections), [selections]);
   const selectedCount = Object.keys(selections).length;
 
@@ -62,7 +66,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
   const handleCopyText = () => {
     if (selectedCount === 0) return;
 
-    let text = '📅 MI HORARIO DE CURSADA — UTN ISI (Plan 2023)\n';
+    let text = exportMeta.clipboardHeader;
     text += '═══════════════════════════════════════════════\n\n';
 
     Object.entries(selections).forEach(([sIdStr, comm]) => {
@@ -124,7 +128,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
     const ics = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Stack//Armador de Horarios//ES',
+      exportMeta.icsProdId,
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
     ];
@@ -148,7 +152,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
 
         ics.push(
           'BEGIN:VEVENT',
-          `UID:${Date.now()}-${sId}-${comm.id}-${idx}@micarrera.utn`,
+          `UID:${Date.now()}-${sId}-${comm.id}-${idx}${exportMeta.icsUidDomain}`,
           `DTSTAMP:${y}${m}${d}T000000Z`,
           `DTSTART:${dtstart}`,
           `DTEND:${dtend}`,
@@ -167,7 +171,7 @@ export const ScheduleSummaryPanel: React.FC<ScheduleSummaryPanelProps> = ({
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `horarios-utn-${new Date().toISOString().slice(0, 10)}.ics`;
+    link.download = buildScheduleSummaryExportMetadata(activePlan).icsFilename;
     link.click();
     URL.revokeObjectURL(url);
   };

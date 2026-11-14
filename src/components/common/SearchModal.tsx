@@ -2,9 +2,8 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Layers, Clock, ArrowRight } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
 import { getSubjectStatus } from '../../utils/correlativas';
+import { buildSearchModalStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from './StatusBadge';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { SubjectStatus } from '../../types/career';
@@ -17,6 +16,10 @@ export const SearchModal: React.FC = () => {
     setSelectedSubjectId,
     setStatusModalSubjectId,
     settings,
+    coreSubjects,
+    electives,
+    planConfig,
+    acronyms,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -47,36 +50,38 @@ export const SearchModal: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isSearchOpen, setIsSearchOpen]);
 
-  const allSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    return [...core, ...ELECTIVES];
-  }, [settings.includeAnalistaTrack]);
-
-  const filtered = useMemo(() => {
-    return allSubjects.filter((subject) => {
-      // Search term
-      const matchesQuery =
-        subject.name.toLowerCase().includes(query.toLowerCase()) ||
-        subject.code.toLowerCase().includes(query.toLowerCase());
-
-      if (!matchesQuery) return false;
-
-      // Level filter
-      if (levelFilter !== 'all' && subject.level !== levelFilter) {
-        return false;
-      }
-
-      // Status filter
-      if (statusFilter !== 'all') {
-        const status = getSubjectStatus(subject, activeState);
-        if (status !== statusFilter) return false;
-      }
-
-      return true;
-    });
-  }, [allSubjects, query, levelFilter, statusFilter, activeState]);
+  const {
+    filtered,
+    levelFilterOptions,
+    statusFilterOptions,
+    desktopPlaceholder,
+    countLabelMobile,
+    countLabelDesktop,
+  } = useMemo(
+    () =>
+      buildSearchModalStructure({
+        coreSubjects,
+        electives,
+        activeState,
+        includeIntermediateTrack: settings.includeAnalistaTrack,
+        query,
+        levelFilter,
+        statusFilter,
+        planConfig,
+        acronyms,
+      }),
+    [
+      coreSubjects,
+      electives,
+      activeState,
+      settings.includeAnalistaTrack,
+      query,
+      levelFilter,
+      statusFilter,
+      planConfig,
+      acronyms,
+    ]
+  );
 
   if (!isSearchOpen) return null;
 
@@ -126,40 +131,38 @@ export const SearchModal: React.FC = () => {
         {/* Mobile Quick Filters */}
         <div className="px-3 py-2 bg-slate-900/40 border-b border-slate-800/80 flex items-center gap-1.5 text-xs overflow-x-auto no-scrollbar shrink-0">
           <span className="text-slate-400 font-medium shrink-0">Nivel:</span>
-          {(['all', 1, 2, 3, 4, 5] as const).map((lvl) => (
+          {levelFilterOptions.map((opt) => (
             <button
-              key={lvl}
+              key={String(opt.value)}
               type="button"
-              onClick={() => setLevelFilter(lvl)}
+              onClick={() => setLevelFilter(opt.value)}
               className={`min-h-[44px] px-3 py-1.5 rounded-xl font-semibold transition-colors shrink-0 flex items-center cursor-pointer ${
-                levelFilter === lvl
+                levelFilter === opt.value
                   ? 'bg-indigo-600 text-white shadow-md'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              {lvl === 'all' ? 'Todos' : `${lvl}°`}
+              {opt.label}
             </button>
           ))}
 
           <div className="h-5 w-[1px] bg-slate-800 mx-1 shrink-0" />
 
           <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
-          {(['all', 'disponible', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada'] as const).map(
-            (st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`min-h-[44px] px-3 py-1.5 rounded-xl font-semibold capitalize transition-colors shrink-0 flex items-center cursor-pointer ${
-                  statusFilter === st
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                {st === 'all' ? 'Todos' : st}
-              </button>
-            )
-          )}
+          {statusFilterOptions.map((st) => (
+            <button
+              key={st}
+              type="button"
+              onClick={() => setStatusFilter(st)}
+              className={`min-h-[44px] px-3 py-1.5 rounded-xl font-semibold capitalize transition-colors shrink-0 flex items-center cursor-pointer ${
+                statusFilter === st
+                  ? 'bg-indigo-600 text-white shadow-md'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+              }`}
+            >
+              {st === 'all' ? 'Todos' : st}
+            </button>
+          ))}
         </div>
 
         {/* Results List */}
@@ -232,7 +235,7 @@ export const SearchModal: React.FC = () => {
 
         {/* Mobile Results Count */}
         <div className="p-3 bg-slate-950/90 border-t border-slate-800 text-xs text-slate-500 text-center shrink-0">
-          {filtered.length} {filtered.length === 1 ? 'materia encontrada' : 'materias encontradas'}
+          {countLabelMobile}
         </div>
       </div>
     );
@@ -259,7 +262,7 @@ export const SearchModal: React.FC = () => {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar materia por nombre o código... (ej. Algoritmos, 14, DDS, Física)"
+              placeholder={desktopPlaceholder}
               className="w-full bg-transparent text-white placeholder-slate-500 text-base focus:outline-none"
             />
             {query && (
@@ -279,40 +282,38 @@ export const SearchModal: React.FC = () => {
           {/* Quick Filters */}
           <div className="px-3 sm:px-4 py-2 bg-slate-950/30 border-b border-slate-800 flex items-center gap-1.5 text-xs overflow-x-auto no-scrollbar">
             <span className="text-slate-400 font-medium shrink-0">Nivel:</span>
-            {(['all', 1, 2, 3, 4, 5] as const).map((lvl) => (
+            {levelFilterOptions.map((opt) => (
               <button
-                key={lvl}
+                key={String(opt.value)}
                 type="button"
-                onClick={() => setLevelFilter(lvl)}
+                onClick={() => setLevelFilter(opt.value)}
                 className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
-                  levelFilter === lvl
+                  levelFilter === opt.value
                     ? 'bg-indigo-600 text-white font-semibold'
                     : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {lvl === 'all' ? 'Todos' : `${lvl}°`}
+                {opt.label}
               </button>
             ))}
 
             <div className="h-4 w-[1px] bg-slate-800 mx-1 shrink-0" />
 
             <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
-            {(['all', 'disponible', 'cursando', 'regularizada', 'aprobada', 'promocionada', 'bloqueada'] as const).map(
-              (st) => (
-                <button
-                  key={st}
-                  type="button"
-                  onClick={() => setStatusFilter(st)}
-                  className={`px-2 py-0.5 rounded-md capitalize transition-colors cursor-pointer ${
-                    statusFilter === st
-                      ? 'bg-indigo-600 text-white font-semibold'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  {st === 'all' ? 'Todos' : st}
-                </button>
-              )
-            )}
+            {statusFilterOptions.map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setStatusFilter(st)}
+                className={`px-2 py-0.5 rounded-md capitalize transition-colors cursor-pointer ${
+                  statusFilter === st
+                    ? 'bg-indigo-600 text-white font-semibold'
+                    : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {st === 'all' ? 'Todos' : st}
+              </button>
+            ))}
           </div>
 
           {/* Results list */}
@@ -387,7 +388,7 @@ export const SearchModal: React.FC = () => {
 
           {/* Footer */}
           <div className="p-3 bg-slate-950/80 border-t border-slate-800 text-xs text-slate-500 flex items-center justify-between">
-            <span>{filtered.length} materias encontradas</span>
+            <span>{countLabelDesktop}</span>
             <span>Tip: Usá Ctrl + K para abrir en cualquier momento</span>
           </div>
         </motion.div>

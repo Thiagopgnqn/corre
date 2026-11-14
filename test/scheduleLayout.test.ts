@@ -2,8 +2,11 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const rootDir = 'c:/Users/msgar/OneDrive/Escritorio/codigos/corre';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, '..');
 
 describe('Layout y Scroll del Armador de Horarios (ScheduleBuilder)', () => {
   it('App.tsx aplica overflow-hidden y h-[100dvh] exclusivamente en la vista de horarios', () => {

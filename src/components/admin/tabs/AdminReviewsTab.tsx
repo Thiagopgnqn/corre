@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   AlertTriangle,
   EyeOff,
@@ -20,10 +20,12 @@ import { adminApi } from '../../../api/admin.api';
 import type { AdminModerationQueueData, AdminReviewCatalogItem } from '../../../types/professor';
 import { StarRating } from '../../professors/StarRating';
 import { AdminReauthModal } from '../AdminReauthModal';
-import { CORE_SUBJECTS } from '../../../data/plan2023';
+import { useCareer } from '../../../context/CareerContext';
+import { buildAdminPlanSubjectOptions } from '../../../utils/planViewSelectors';
 
 export const AdminReviewsTab: React.FC = () => {
-  const subjects = CORE_SUBJECTS;
+  const { coreSubjects: subjects } = useCareer();
+  const subjectOptions = useMemo(() => buildAdminPlanSubjectOptions(subjects), [subjects]);
 
   // Tab: 'queue' (moderación) vs 'catalog' (todas con autor) vs 'professors' (docentes y fusiones)
   const [subTab, setSubTab] = useState<'queue' | 'catalog' | 'professors'>('queue');
@@ -888,9 +890,9 @@ export const AdminReviewsTab: React.FC = () => {
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
                 >
                   <option value="">Seleccionar materia...</option>
-                  {subjects.map((s) => (
-                    <option key={s.id} value={String(s.id)}>
-                      #{s.code} {s.name}
+                  {subjectOptions.map((s) => (
+                    <option key={s.id} value={s.value}>
+                      {s.label}
                     </option>
                   ))}
                 </select>

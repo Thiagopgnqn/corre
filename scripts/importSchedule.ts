@@ -5,7 +5,7 @@ import {
   resolveSubjectIds,
   isGenericElective,
   normalizeSubjectName,
-} from '../src/data/subjectAliases';
+} from '../test/fixtures/subjectAliases';
 import { validateScheduleData } from '../src/utils/scheduleLogic';
 import type { DayOfWeek, Shift, TermType } from '../src/types/schedule';
 
@@ -622,7 +622,38 @@ export function parseCourseSheet(
   return result;
 }
 
-export function importAllSchedules(dataDir = path.resolve('data-source')) {
+export const DEFAULT_GENERATED_SCHEDULE_OUTPUT = path.resolve('artifacts/schedule.generated.json');
+export const SEED_SCHEDULE_OUTPUT = path.resolve('server/seed-data/schedule.json');
+export const DEFAULT_GENERATED_REPORT_OUTPUT = path.resolve('artifacts/import-report.generated.md');
+export const SEED_REPORT_OUTPUT = path.resolve('import-report.md');
+
+export interface ImportScheduleOptions {
+  dataDir?: string;
+  writeOutput?: boolean;
+  outputPath?: string;
+  writeSeed?: boolean;
+  writeReport?: boolean;
+  reportPath?: string;
+}
+
+export function importAllSchedules(optionsOrDataDir: string | ImportScheduleOptions = {}) {
+  const opts: ImportScheduleOptions =
+    typeof optionsOrDataDir === 'string' ? { dataDir: optionsOrDataDir } : optionsOrDataDir;
+  const dataDir = path.resolve(opts.dataDir ?? 'data-source');
+  const writeOutput = opts.writeOutput ?? true;
+  const writeSeed = opts.writeSeed ?? false;
+  const outputPath = opts.outputPath
+    ? path.resolve(opts.outputPath)
+    : writeSeed
+      ? SEED_SCHEDULE_OUTPUT
+      : DEFAULT_GENERATED_SCHEDULE_OUTPUT;
+  const writeReport = opts.writeReport ?? writeOutput;
+  const reportPath = opts.reportPath
+    ? path.resolve(opts.reportPath)
+    : writeSeed
+      ? SEED_REPORT_OUTPUT
+      : DEFAULT_GENERATED_REPORT_OUTPUT;
+
   const warnings: WarningEntry[] = [];
   const omittedSheets: OmittedSheetEntry[] = [];
   const discardedCommissions: DiscardedCommissionEntry[] = [];
@@ -792,10 +823,18 @@ export function importAllSchedules(dataDir = path.resolve('data-source')) {
   };
   const validation = validateScheduleData(payload);
 
-  // Write schedule.json
-  const outputPath = path.resolve('src/data/schedule.json');
-  fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf-8');
-  console.log(`\n Archivo generado con éxito: ${outputPath} (${finalSchedules.length} materias/términos, ${validation.commissionsCount} comisiones, ${uniqueReservedElectiveSlots.length} franjas reservadas de electiva)`);
+  // Write generated schedule (protects server/seed-data/schedule.json unless --write-seed / writeSeed is passed)
+  if (writeOutput) {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf-8');
+    console.log(
+      `\n Archivo generado con éxito: ${outputPath} (${finalSchedules.length} materias/términos, ${validation.commissionsCount} comisiones, ${uniqueReservedElectiveSlots.length} franjas reservadas de electiva)`
+    );
+  } else {
+    console.log(
+      `\n Validación en memoria completada sin escritura (${finalSchedules.length} materias/términos, ${validation.commissionsCount} comisiones, ${uniqueReservedElectiveSlots.length} franjas reservadas de electiva)`
+    );
+  }
 
   // Analyze anomalies
   // 1. Materias en grilla sin docentes
@@ -848,8 +887,7 @@ export function importAllSchedules(dataDir = path.resolve('data-source')) {
   const course1K1 = getCourseVerificationTable('1K1');
   const course4K1 = getCourseVerificationTable('4K1');
 
-  // Generate import-report.md
-  const reportPath = path.resolve('import-report.md');
+  // Generate report markdown only when requested / writing outputs
   const uniqueWarnings = Array.from(
     new Set(
       warnings.map(
@@ -992,10 +1030,15 @@ ${
 }
 `;
 
-  fs.writeFileSync(reportPath, reportMarkdown, 'utf-8');
-  console.log(` Reporte generado: ${reportPath}`);
+  if (writeReport) {
+    fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+    fs.writeFileSync(reportPath, reportMarkdown, 'utf-8');
+    console.log(` Reporte generado: ${reportPath}`);
+  }
 
   return {
+    outputPath,
+    reportPath,
     finalSchedules,
     uniqueReservedElectiveSlots,
     filesStats,
@@ -1007,5 +1050,8 @@ ${
 }
 
 if (process.argv[1]?.endsWith('importSchedule.ts') || process.argv[1]?.endsWith('importSchedule.js')) {
-  importAllSchedules();
+  const writeSeed = process.argv.includes('--write-seed');
+  const outArg = process.argv.find((arg) => arg.startsWith('--out='));
+  const outputPath = outArg ? outArg.slice('--out='.length) : undefined;
+  importAllSchedules({ writeSeed, outputPath });
 }

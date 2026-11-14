@@ -1,0 +1,1328 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+import {
+  evaluatePlanProgress,
+  checkAnalistaTitle,
+  isPPSEligible,
+} from '../src/utils/correlativas';
+import { calculateCriticalPath } from '../src/utils/criticalPath';
+import {
+  DEFAULT_SETTINGS,
+  STORAGE_KEY_STATE,
+  STORAGE_KEY_BASKET,
+  STORAGE_KEY_SETTINGS,
+  STORAGE_KEY_LEGACY_PLAN_ID,
+  getPlanStorageKey,
+  hasUnmigratedLegacyLocalStorage,
+  migrateLegacyLocalStorageToPlan,
+  loadUserState,
+  saveUserState,
+  exportCareerToJson,
+} from '../src/utils/storage';
+import {
+  type CareerHydrationState,
+  applyCatalogSnapshot,
+  beginServerReload,
+  canPersistScopedStorage,
+  canSyncServerState,
+  completeServerStateHydration,
+  createCareerHydrationState,
+  executeServerReloadCycle,
+  resetHydrationOnLogout,
+} from '../src/utils/careerHydrationGuard';
+import {
+  CATALOG_CACHE_SCHEMA,
+  CatalogShapeError,
+  getCatalogCacheKey,
+  isValidPlanCatalogShape,
+  readCachedCatalog,
+  writeCachedCatalog,
+  loadPlanCatalogSmart,
+} from '../src/api/catalog.api';
+import { getScheduleUnavailableMessage } from '../src/utils/scheduleAvailability';
+import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
+
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const rootDir = path.resolve(currentDir, '..');
+
+function createMockStorage(initial: Record<string, string> = {}): Storage {
+  const store = new Map<string, string>(Object.entries(initial));
+  return {
+    get length() {
+      return store.size;
+    },
+    clear() {
+      store.clear();
+    },
+    getItem(key: string) {
+      return store.has(key) ? store.get(key)! : null;
+    },
+    key(index: number) {
+      return Array.from(store.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      store.delete(key);
+    },
+    setItem(key: string, value: string) {
+      store.set(key, String(value));
+    },
+  };
+}
+
+function withMockLocalStorage<T>(storage: Storage, fn: () => T): T {
+  const globalRecord = globalThis as unknown as { localStorage?: Storage };
+  const hadOwn = Object.prototype.hasOwnProperty.call(globalRecord, 'localStorage');
+  const previous = globalRecord.localStorage;
+  globalRecord.localStorage = storage;
+  try {
+    return fn();
+  } finally {
+    if (hadOwn) {
+      globalRecord.localStorage = previous;
+    } else {
+      delete globalRecord.localStorage;
+    }
+  }
+}
+
+function buildFictitious3LevelPlan(options?: {
+  planId?: string;
+  electiveSlotsEquivalent?: number;
+  requiredElectiveCredits?: number;
+}): ActivePlanCatalog {
+  const planId = options?.planId ?? 'plan-ici-3y';
+  return {
+    plan: {
+      id: planId,
+      name: 'Tecnicatura Demo 3 Años',
+      year: 2026,
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      config: {
+        requiredElectiveCredits: options?.requiredElectiveCredits ?? 10,
+        electiveSlotsEquivalent: options?.electiveSlotsEquivalent ?? 0,
+        defaultMinPassingGrade: 4,
+        totalLevels: 3,
+        levelLabel: 'Año',
+        shortTag: 'TD · Plan 2026',
+        ppsRequirement: null,
+        intermediateDegrees: [],
+      },
+    },
+    career: {
+      id: 'career-td',
+      name: 'Tecnicatura Demo',
+      code: 'TD',
+      facultyId: 'fac-demo',
+    },
+    subjects: [
+      {
+        id: 1,
+        name: 'Intro A',
+        shortName: 'IA',
+        level: 1,
+        modality: 'cuatrimestral',
+        weeklyHours: 4,
+        regularPrereqs: [],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 2,
+        name: 'Intro B',
+        shortName: 'IB',
+        level: 2,
+        modality: 'cuatrimestral',
+        weeklyHours: 4,
+        regularPrereqs: [1],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 3,
+        name: 'Integradora Final',
+        shortName: 'IF',
+        level: 3,
+        modality: 'anual',
+        weeklyHours: 6,
+        regularPrereqs: [2],
+        approvedPrereqs: [1],
+        isElective: false,
+      },
+      {
+        id: 201,
+        name: 'Optativa Libre 1',
+        shortName: 'OP1',
+        level: 2,
+        modality: 'cuatrimestral',
+        weeklyHours: 3,
+        regularPrereqs: [],
+        approvedPrereqs: [1],
+        isElective: true,
+        credits: 6,
+      },
+      {
+        id: 202,
+        name: 'Optativa Libre 2',
+        shortName: 'OP2',
+        level: 3,
+        modality: 'cuatrimestral',
+        weeklyHours: 3,
+        regularPrereqs: [2],
+        approvedPrereqs: [],
+        isElective: true,
+        credits: 4,
+      },
+      {
+        id: 203,
+        name: 'Optativa Libre 3',
+        shortName: 'OP3',
+        level: 3,
+        modality: 'cuatrimestral',
+        weeklyHours: 3,
+        regularPrereqs: [],
+        approvedPrereqs: [2],
+        isElective: true,
+        credits: 4,
+      },
+    ],
+    rules: [],
+    acronyms: {
+      IA: 1,
+      IB: 2,
+      IF: 3,
+      OP1: 201,
+      OP2: 202,
+      OP3: 203,
+    },
+  };
+}
+
+describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
+  it('evaluates a fictitious 3-level plan without PPS, special rules or intermediate degrees', () => {
+    const plan = buildFictitious3LevelPlan({
+      requiredElectiveCredits: 10,
+      electiveSlotsEquivalent: 0,
+    });
+    const userState: UserCareerState = {
+      1: { status: 'aprobada', grade: 9 },
+      2: { status: 'regularizada' },
+      201: { status: 'aprobada', grade: 8 },
+    };
+
+    const evaluated = evaluatePlanProgress({
+      plan,
+      userState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+
+    assert.equal(evaluated.progress.totalSubjects, 3);
+    assert.equal(evaluated.progress.approvedCount, 1);
+    assert.equal(evaluated.progress.regularizedCount, 1);
+    assert.equal(evaluated.progress.totalElectiveCreditsApproved, 6);
+    assert.equal(evaluated.progress.totalElectiveCreditsRequired, 10);
+    assert.equal(evaluated.progress.missingElectiveCreditsForDegree, 4);
+    assert.equal(evaluated.progress.isAnalistaEligible, false);
+    assert.equal(evaluated.progress.isPPSEligible, false);
+    assert.equal(evaluated.progress.isDegreeEligible, false);
+    assert.deepStrictEqual(evaluated.pps, { eligible: false, missingRegular: [], missingApproved: [] });
+    assert.deepStrictEqual(isPPSEligible(userState, plan), {
+      eligible: false,
+      missingRegular: [],
+      missingApproved: [],
+    });
+    assert.equal(checkAnalistaTitle(userState, plan, 6).eligible, false);
+    assert.deepStrictEqual(evaluated.availableCoreIds, [3]);
+    assert.deepStrictEqual(evaluated.availableElectiveIds, [202]);
+    assert.equal(evaluated.electiveStatuses[203], 'bloqueada');
+
+    const pctSum =
+      evaluated.progress.percentageApproved +
+      evaluated.progress.percentageRegularized +
+      evaluated.progress.percentageTaking +
+      evaluated.progress.percentagePending;
+    assert.equal(pctSum, 100);
+
+    const cp = calculateCriticalPath(userState, plan, false);
+    assert.deepStrictEqual(
+      cp.chain.map((s) => s.id),
+      [2, 3]
+    );
+    assert.equal(cp.length, 2);
+
+    // Parameterized plan with electiveSlotsEquivalent = 2 achieves 100% and degree eligibility without PPS or Analista
+    const planWithSlots = buildFictitious3LevelPlan({
+      requiredElectiveCredits: 10,
+      electiveSlotsEquivalent: 2,
+    });
+    const gradState: UserCareerState = {
+      1: { status: 'aprobada', grade: 9 },
+      2: { status: 'promocionada', grade: 9 },
+      3: { status: 'aprobada', grade: 10 },
+      201: { status: 'aprobada', grade: 8 },
+      202: { status: 'aprobada', grade: 9 },
+    };
+    const evaluatedGrad = evaluatePlanProgress({
+      plan: planWithSlots,
+      userState: gradState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(evaluatedGrad.progress.totalEquivalentSlots, 5);
+    assert.equal(evaluatedGrad.progress.approvedEquivalentSlots, 5);
+    assert.equal(evaluatedGrad.progress.percentageApproved, 100);
+    assert.equal(evaluatedGrad.progress.isDegreeEligible, true);
+    assert.equal(evaluatedGrad.progress.isPPSEligible, false);
+    assert.equal(evaluatedGrad.progress.isAnalistaEligible, false);
+
+    // Design guarantee (Point 5): electives with weeklyHours > 0 never enter careerPercentageByHours / totalWeeklyHours / approvedWeeklyHours
+    const planWithOnlyCore1Approved = evaluatePlanProgress({
+      plan: buildFictitious3LevelPlan({ requiredElectiveCredits: 10, electiveSlotsEquivalent: 2 }),
+      userState: {
+        1: { status: 'aprobada', grade: 9 }, // weeklyHours: 4
+        201: { status: 'aprobada', grade: 9 }, // elective weeklyHours: 3
+        202: { status: 'promocionada', grade: 8 }, // elective weeklyHours: 3
+      },
+      settings: { ...DEFAULT_SETTINGS, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(planWithOnlyCore1Approved.progress.totalWeeklyHours, 14); // 4 + 4 + 6 (excludes 3 + 3 + 3 of electives)
+    assert.equal(planWithOnlyCore1Approved.progress.approvedWeeklyHours, 4); // excludes approved electives 201 & 202
+    assert.equal(planWithOnlyCore1Approved.progress.careerPercentageByHours, Math.round((4 / 14) * 100));
+  });
+
+  it('gates the StatsDashboard PPS milestone card behind planConfig?.ppsRequirement', () => {
+    const statsPath = path.resolve(rootDir, 'src/components/stats/StatsDashboard.tsx');
+    const source = fs.readFileSync(statsPath, 'utf8');
+    assert.match(
+      source,
+      /if\s*\(\s*planConfig\?\.ppsRequirement\s*\)\s*\{\s*list\.push\(\s*\{\s*id:\s*'pps'/,
+      'StatsDashboard must only include PPS milestone when planConfig?.ppsRequirement is present'
+    );
+  });
+
+  it('usuario con plan distinto de Sistemas y claves legadas no recibe migración automática ciega y delega al modal', () => {
+    const legacySystemsState = { 1: { status: 'aprobada', grade: 9 }, 6: { status: 'cursando' } };
+    const mockStorage = createMockStorage({
+      [STORAGE_KEY_STATE]: JSON.stringify(legacySystemsState),
+      [STORAGE_KEY_BASKET]: JSON.stringify([2, 6]),
+      [STORAGE_KEY_SETTINGS]: JSON.stringify({ minPassingGrade: 6 }),
+    });
+
+    // Sin STORAGE_KEY_LEGACY_PLAN_ID no se sabe a qué plan pertenecen las claves legadas: NO migrar automáticamente
+    const blockedAuto = migrateLegacyLocalStorageToPlan('plan-quimica-2023', mockStorage);
+    assert.equal(blockedAuto.migrated, false);
+    assert.deepStrictEqual(blockedAuto.copiedKeys, []);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), true);
+    assert.equal(
+      mockStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, 'plan-quimica-2023')),
+      null
+    );
+
+    withMockLocalStorage(mockStorage, () => {
+      assert.deepStrictEqual(loadUserState('plan-quimica-2023'), {});
+    });
+
+    // Incluso si tiene marcado explícitamente que era de Sistemas, otro plan tampoco lo auto-importa
+    mockStorage.setItem(STORAGE_KEY_LEGACY_PLAN_ID, 'plan-isi-2023');
+    const mismatchedPlanAuto = migrateLegacyLocalStorageToPlan('plan-quimica-2023', mockStorage);
+    assert.equal(mismatchedPlanAuto.migrated, false);
+    assert.deepStrictEqual(mismatchedPlanAuto.copiedKeys, []);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), true);
+
+    withMockLocalStorage(mockStorage, () => {
+      assert.deepStrictEqual(loadUserState('plan-quimica-2023'), {});
+    });
+
+    // Cuando el usuario confirma explícitamente desde el modal (force: true) sí copia al plan destino
+    const forcedResult = migrateLegacyLocalStorageToPlan('plan-isi-2023', mockStorage, { force: true });
+    assert.equal(forcedResult.migrated, true);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), false);
+    assert.equal(
+      mockStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, 'plan-isi-2023')),
+      JSON.stringify(legacySystemsState)
+    );
+  });
+
+  it('performs idempotent copy-not-delete legacy localStorage migration when plan matches and isolates plans', () => {
+    const mockStorage = createMockStorage({
+      [STORAGE_KEY_LEGACY_PLAN_ID]: 'plan-isi-2023',
+      [STORAGE_KEY_STATE]: JSON.stringify({ 1: { status: 'aprobada', grade: 9 } }),
+      [STORAGE_KEY_BASKET]: JSON.stringify([2, 6]),
+      [STORAGE_KEY_SETTINGS]: JSON.stringify({ minPassingGrade: 6 }),
+    });
+
+    const firstPass = migrateLegacyLocalStorageToPlan('plan-isi-2023', mockStorage);
+    assert.equal(firstPass.migrated, true);
+    assert.ok(firstPass.copiedKeys.includes(STORAGE_KEY_STATE));
+    assert.ok(firstPass.copiedKeys.includes(STORAGE_KEY_BASKET));
+    assert.ok(firstPass.copiedKeys.includes(STORAGE_KEY_SETTINGS));
+
+    // Legacy keys are never deleted
+    assert.ok(mockStorage.getItem(STORAGE_KEY_STATE) !== null);
+    assert.ok(mockStorage.getItem(STORAGE_KEY_BASKET) !== null);
+    assert.ok(mockStorage.getItem(STORAGE_KEY_SETTINGS) !== null);
+
+    // Scoped keys receive copies
+    assert.equal(
+      mockStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, 'plan-isi-2023')),
+      JSON.stringify({ 1: { status: 'aprobada', grade: 9 } })
+    );
+
+    // Idempotent second run copies nothing (even when switching to another plan later)
+    const secondPass = migrateLegacyLocalStorageToPlan('plan-isi-2023', mockStorage);
+    assert.equal(secondPass.migrated, false);
+    assert.deepStrictEqual(secondPass.copiedKeys, []);
+
+    const otherPlanPass = migrateLegacyLocalStorageToPlan('plan-other', mockStorage);
+    assert.equal(otherPlanPass.migrated, false);
+    assert.deepStrictEqual(otherPlanPass.copiedKeys, []);
+
+    withMockLocalStorage(mockStorage, () => {
+      saveUserState({ 1: { status: 'aprobada', grade: 10 } }, 'plan-a');
+      saveUserState({ 10: { status: 'cursando' } }, 'plan-b');
+
+      assert.deepStrictEqual(loadUserState('plan-a'), { 1: { status: 'aprobada', grade: 10 } });
+      assert.deepStrictEqual(loadUserState('plan-b'), { 10: { status: 'cursando' } });
+
+      const exported = JSON.parse(
+        exportCareerToJson(
+          { 1: { status: 'aprobada', grade: 10 } },
+          DEFAULT_SETTINGS,
+          [],
+          { 1: [] },
+          { planId: 'plan-b', planTag: 'ICI · Plan 2024' }
+        )
+      );
+      assert.equal(exported.plan, 'ICI · Plan 2024');
+      assert.equal(exported.planId, 'plan-b');
+      assert.notEqual(exported.plan, 'Plan 2023 ISI UTN');
+    });
+  });
+
+  it('validates per-plan catalog cache, refreshes stale versions, handles 503 wake-up retries and never falls back across plans', async () => {
+    const planA = buildFictitious3LevelPlan({ planId: 'plan-a' });
+    const planB = buildFictitious3LevelPlan({ planId: 'plan-b' });
+    const mockStorage = createMockStorage();
+
+    // 1) Initial load writes cache
+    let planFetchesA = 0;
+    const initialA = await loadPlanCatalogSmart({
+      planId: 'plan-a',
+      storage: mockStorage,
+      getVersion: async () => ({ success: true, version: 'v1' }),
+      getPlan: async (id) => {
+        planFetchesA++;
+        assert.equal(id, 'plan-a');
+        return { success: true, data: planA };
+      },
+    });
+    assert.equal(initialA.fromCache, false);
+    assert.equal(initialA.version, 'v1');
+    assert.equal(planFetchesA, 1);
+    assert.ok(readCachedCatalog('plan-a', mockStorage));
+
+    // 2) Cache hit on matching version skips getPlan
+    const hitA = await loadPlanCatalogSmart({
+      planId: 'plan-a',
+      storage: mockStorage,
+      getVersion: async () => ({ success: true, version: 'v1' }),
+      getPlan: async () => {
+        throw new Error('getPlan must not be called when cache version matches');
+      },
+    });
+    assert.equal(hitA.fromCache, true);
+    assert.equal(hitA.staleOffline, false);
+    assert.equal(hitA.catalog.plan.id, 'plan-a');
+
+    // 3) Stale version refreshes getPlan and updates cache
+    const updatedPlanA: ActivePlanCatalog = {
+      ...planA,
+      plan: { ...planA.plan, name: 'Plan A v2' },
+    };
+    const refreshedA = await loadPlanCatalogSmart({
+      planId: 'plan-a',
+      storage: mockStorage,
+      getVersion: async () => ({ success: true, version: 'v2' }),
+      getPlan: async () => ({ success: true, data: updatedPlanA }),
+    });
+    assert.equal(refreshedA.fromCache, false);
+    assert.equal(refreshedA.version, 'v2');
+    assert.equal(refreshedA.catalog.plan.name, 'Plan A v2');
+    const cachedAfterUpdate = JSON.parse(
+      mockStorage.getItem(getCatalogCacheKey('plan-a'))!
+    );
+    assert.equal(cachedAfterUpdate.version, 'v2');
+    assert.equal(cachedAfterUpdate.schema, CATALOG_CACHE_SCHEMA);
+
+    // 4) Transient 503 triggers onWakingChange(true) -> retries -> succeeds -> onWakingChange(false)
+    let attemptsB = 0;
+    const wakingEvents: boolean[] = [];
+    const loadedB = await loadPlanCatalogSmart({
+      planId: 'plan-b',
+      storage: mockStorage,
+      wakingDelayMs: 5000,
+      maxRetries: 3,
+      baseBackoffMs: 1,
+      sleep: async () => {},
+      onWakingChange: (waking) => wakingEvents.push(waking),
+      getVersion: async () => ({ success: true, version: 'v1-b' }),
+      getPlan: async () => {
+        attemptsB++;
+        if (attemptsB < 3) {
+          const err = new Error('Service Unavailable') as Error & { status?: number };
+          err.status = 503;
+          throw err;
+        }
+        return { success: true, data: planB };
+      },
+    });
+    assert.equal(attemptsB, 3);
+    assert.equal(loadedB.catalog.plan.id, 'plan-b');
+    assert.deepStrictEqual(wakingEvents, [true, false]);
+
+    // 5) Missing cache for plan-c must throw when network fails, never falling back to plan-a or Sistemas
+    await assert.rejects(
+      () =>
+        loadPlanCatalogSmart({
+          planId: 'plan-c',
+          storage: mockStorage,
+          maxRetries: 1,
+          baseBackoffMs: 1,
+          sleep: async () => {},
+          getPlan: async () => {
+            const err = new Error('Backend down') as Error & { status?: number };
+            err.status = 503;
+            throw err;
+          },
+        }),
+      /Backend down/
+    );
+  });
+
+  it('ignores outdated or schema-less catalog caches when CATALOG_CACHE_SCHEMA does not match', async () => {
+    const planLegacy = buildFictitious3LevelPlan({ planId: 'plan-schema-test' });
+    const freshCatalog: ActivePlanCatalog = {
+      ...planLegacy,
+      plan: { ...planLegacy.plan, name: 'Plan Fresh Schema' },
+    };
+    const mockStorage = createMockStorage();
+
+    // Case A: old cache without schema property
+    mockStorage.setItem(
+      getCatalogCacheKey('plan-schema-test'),
+      JSON.stringify({
+        planId: 'plan-schema-test',
+        version: 'v1',
+        cachedAt: '2026-01-01T00:00:00.000Z',
+        catalog: planLegacy,
+      })
+    );
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
+
+    assert.equal(CATALOG_CACHE_SCHEMA, 6);
+
+    // Case B: cache with outdated schema number (specifically schema: 5)
+    mockStorage.setItem(
+      getCatalogCacheKey('plan-schema-test'),
+      JSON.stringify({
+        schema: 5,
+        planId: 'plan-schema-test',
+        version: 'v1',
+        cachedAt: '2026-01-01T00:00:00.000Z',
+        catalog: planLegacy,
+      })
+    );
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
+
+    let remotePlanCalls = 0;
+    const loaded = await loadPlanCatalogSmart({
+      planId: 'plan-schema-test',
+      storage: mockStorage,
+      getVersion: async () => ({ success: true, version: 'v1' }),
+      getPlan: async () => {
+        remotePlanCalls++;
+        return { success: true, data: freshCatalog };
+      },
+      onImmediateCache: () => {
+        throw new Error('onImmediateCache must not be called for outdated cache schema');
+      },
+    });
+
+    assert.equal(remotePlanCalls, 1);
+    assert.equal(loaded.fromCache, false);
+    assert.equal(loaded.catalog.plan.name, 'Plan Fresh Schema');
+
+    // Re-stored entry now includes current CATALOG_CACHE_SCHEMA and passes readCachedCatalog
+    const reStoredRaw = JSON.parse(
+      mockStorage.getItem(getCatalogCacheKey('plan-schema-test'))!
+    );
+    assert.equal(reStoredRaw.schema, CATALOG_CACHE_SCHEMA);
+    assert.equal(readCachedCatalog('plan-schema-test', mockStorage)?.schema, CATALOG_CACHE_SCHEMA);
+
+    // Explicitly verify writeCachedCatalog stamps schema
+    const directStorage = createMockStorage();
+    writeCachedCatalog('current', 'v9', freshCatalog, directStorage);
+    const written = readCachedCatalog('current', directStorage);
+    assert.ok(written);
+    assert.equal(written.schema, CATALOG_CACHE_SCHEMA);
+    assert.equal(written.catalog.plan.id, 'plan-schema-test');
+  });
+
+  it('rejects malformed or incomplete catalog payloads as outdated server without caching them', async () => {
+    const validCatalog = buildFictitious3LevelPlan({ planId: 'plan-shape-test' });
+    assert.equal(isValidPlanCatalogShape(validCatalog), true);
+    assert.equal(
+      isValidPlanCatalogShape({
+        ...validCatalog,
+        career: {
+          ...validCatalog.career,
+          facultyName: 'Facultad Regional Córdoba',
+          institutionName: 'Universidad Tecnológica Nacional',
+          facultyCode: 'FRC',
+          institutionCode: 'UTN',
+        },
+        plan: {
+          ...validCatalog.plan,
+          config: {
+            ...validCatalog.plan.config,
+            finalDegreeTitle: 'Técnico/a Demo',
+            ppsRequirement: { referenceSubjectCode: 3, label: 'Habilitación PPS' },
+          },
+        },
+        subjects: validCatalog.subjects.map((s, idx) =>
+          idx === 0 ? { ...s, isIntegrator: true, specialRule: 'Regla especial de prueba.' } : s
+        ),
+      }),
+      true
+    );
+
+    const invalidVariants: Array<{ label: string; payload: unknown }> = [
+      {
+        label: 'sin career',
+        payload: { ...validCatalog, career: undefined },
+      },
+      {
+        label: 'con career.facultyName vacío',
+        payload: { ...validCatalog, career: { ...validCatalog.career, facultyName: '' } },
+      },
+      {
+        label: 'con career.institutionName no string',
+        payload: { ...validCatalog, career: { ...validCatalog.career, institutionName: 123 } },
+      },
+      {
+        label: 'con plan.config.finalDegreeTitle vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, finalDegreeTitle: '  ' },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.ppsRequirement.label vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              ppsRequirement: { referenceSubjectCode: 3, label: '' },
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.ppsRequirement.description vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              ppsRequirement: { referenceSubjectCode: 3, description: '   ' },
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.intermediateDegrees[0].shortLabel vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              intermediateDegrees: [{ key: 'inter', name: 'Intermedio', shortLabel: '' }],
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.intermediateDegrees[0].shortTitle vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              intermediateDegrees: [{ key: 'inter', name: 'Intermedio', shortTitle: '  ' }],
+            },
+          },
+        },
+      },
+      {
+        label: 'sin plan.config.totalLevels',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, totalLevels: undefined },
+          },
+        },
+      },
+      {
+        label: 'sin plan.config.levelLabel',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, levelLabel: '' },
+          },
+        },
+      },
+      {
+        label: 'sin subjects[].shortName',
+        payload: {
+          ...validCatalog,
+          subjects: validCatalog.subjects.map((s, idx) =>
+            idx === 0 ? { ...s, shortName: '' } : s
+          ),
+        },
+      },
+      {
+        label: 'con subjects[].isIntegrator no booleano',
+        payload: {
+          ...validCatalog,
+          subjects: validCatalog.subjects.map((s, idx) =>
+            idx === 0 ? { ...s, isIntegrator: 'true' } : s
+          ),
+        },
+      },
+      {
+        label: 'con subjects[].specialRule vacío',
+        payload: {
+          ...validCatalog,
+          subjects: validCatalog.subjects.map((s, idx) =>
+            idx === 0 ? { ...s, specialRule: '   ' } : s
+          ),
+        },
+      },
+      {
+        label: 'sin rules',
+        payload: { ...validCatalog, rules: undefined },
+      },
+      {
+        label: 'sin acronyms',
+        payload: { ...validCatalog, acronyms: null },
+      },
+    ];
+
+    for (const variant of invalidVariants) {
+      assert.equal(
+        isValidPlanCatalogShape(variant.payload),
+        false,
+        `isValidPlanCatalogShape debe rechazar payload ${variant.label}`
+      );
+
+      const mockStorage = createMockStorage();
+      await assert.rejects(
+        () =>
+          loadPlanCatalogSmart({
+            planId: 'plan-shape-test',
+            storage: mockStorage,
+            maxRetries: 2,
+            baseBackoffMs: 1,
+            getVersion: async () => ({ success: true, version: 'v1' }),
+            getPlan: async () => ({
+              success: true,
+              data: variant.payload as ActivePlanCatalog,
+            }),
+          }),
+        (err: unknown) =>
+          err instanceof CatalogShapeError &&
+          /el servidor está desactualizado/i.test(err.message),
+        `loadPlanCatalogSmart debe fallar por servidor desactualizado ante ${variant.label}`
+      );
+      assert.equal(
+        mockStorage.getItem(getCatalogCacheKey('plan-shape-test')),
+        null,
+        `No debe cachear payload inválido (${variant.label})`
+      );
+    }
+
+    // Even when a valid v1 cache existed, an invalid v2 payload must throw and never overwrite the cache
+    const cachedStorage = createMockStorage();
+    writeCachedCatalog('plan-shape-test', 'v1', validCatalog, cachedStorage);
+    const invalidV2Payload = {
+      ...validCatalog,
+      subjects: validCatalog.subjects.map((s) => ({ ...s, shortName: undefined })),
+    };
+
+    await assert.rejects(
+      () =>
+        loadPlanCatalogSmart({
+          planId: 'plan-shape-test',
+          storage: cachedStorage,
+          getVersion: async () => ({ success: true, version: 'v2' }),
+          getPlan: async () => ({
+            success: true,
+            data: invalidV2Payload as unknown as ActivePlanCatalog,
+          }),
+        }),
+      /el servidor está desactualizado/i
+    );
+
+    const preservedCache = readCachedCatalog('plan-shape-test', cachedStorage);
+    assert.ok(preservedCache, 'El caché v1 previo válido no debe corromperse ni borrarse');
+    assert.equal(preservedCache.version, 'v1');
+  });
+
+  it('rejects an exact master-era /api/catalog/plans/current payload, triggers error+retry state without fallback, and recovers on retry', async () => {
+    const mockStorage = createMockStorage();
+    // Payload exacto emitido por master:server/src/modules/catalog/catalog.controller.ts (getPlan):
+    // sin `career`, sin `plan.config.totalLevels/levelLabel`, con `ppsSubjectCode: 36` y `subjects[].shortName` ausente (`code` = acrónimo).
+    const masterBackendPlanPayload = {
+      plan: {
+        id: 'plan-isi-2023-uuid',
+        name: 'Plan 2023',
+        year: 2023,
+        config: {
+          requiredElectiveCredits: 20,
+          defaultMinPassingGrade: 4,
+          intermediateDegrees: [
+            {
+              key: 'analista',
+              name: 'Analista Universitario en Sistemas',
+              specialRuleSubjectCode: 99,
+            },
+          ],
+          ppsSubjectCode: 36,
+        },
+        updatedAt: '2026-04-01T00:00:00.000Z',
+      },
+      subjects: [
+        {
+          id: 1,
+          uuid: 'subj-1-uuid',
+          code: 'AM1',
+          name: 'Análisis Matemático I',
+          level: 1,
+          modality: 'anual',
+          contraCuatrimestral: false,
+          weeklyHours: 5,
+          isElective: false,
+          isOptionalTrack: false,
+          regularPrereqs: [],
+          approvedPrereqs: [],
+        },
+        {
+          id: 36,
+          uuid: 'subj-36-uuid',
+          code: 'PFS',
+          name: 'Proyecto Final',
+          level: 5,
+          modality: 'anual',
+          contraCuatrimestral: false,
+          weeklyHours: 6,
+          isElective: false,
+          isOptionalTrack: false,
+          regularPrereqs: [1],
+          approvedPrereqs: [],
+        },
+      ],
+      rules: [
+        {
+          id: 'rule-pps-uuid',
+          subjectCode: 36,
+          ruleType: 'all_prior_and_all_level_regular',
+          params: { targetLevel: 5 },
+          description: 'Regla PPS',
+        },
+      ],
+      acronyms: { AM1: 1, PFS: 36 },
+    };
+
+    assert.equal(isValidPlanCatalogShape(masterBackendPlanPayload), false);
+
+    let backendUpgraded = false;
+    const upgradedHeadCatalog = buildFictitious3LevelPlan({ planId: 'plan-isi-2023-uuid' });
+
+    let hydration = createCareerHydrationState();
+    let catalogStatus: 'loading' | 'ready' | 'error' = 'loading';
+    let catalogError: string | null = null;
+    let activeCatalog: ActivePlanCatalog | null = null;
+    let stateFetchCount = 0;
+
+    const runLoad = () => {
+      catalogStatus = 'loading';
+      catalogError = null;
+      return executeServerReloadCycle<ActivePlanCatalog, { ok: boolean }>({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: () =>
+          loadPlanCatalogSmart({
+            planId: 'current',
+            storage: mockStorage,
+            maxRetries: 2,
+            baseBackoffMs: 1,
+            getVersion: async () => ({ success: true, version: backendUpgraded ? 'v-head' : 'v-master' }),
+            getPlan: async () => ({
+              success: true,
+              data: (backendUpgraded
+                ? upgradedHeadCatalog
+                : masterBackendPlanPayload) as unknown as ActivePlanCatalog,
+            }),
+          }),
+        applyCatalogToUi: (cat) => {
+          activeCatalog = cat;
+          catalogStatus = 'ready';
+        },
+        fetchServerState: async () => {
+          stateFetchCount += 1;
+          return { success: true, data: { ok: true } };
+        },
+        applyServerStateToUi: () => {},
+        onCatalogError: (err) => {
+          activeCatalog = null;
+          catalogStatus = 'error';
+          catalogError = err instanceof Error ? err.message : 'Error desconocido';
+        },
+      });
+    };
+
+    const firstOutcome = await runLoad();
+    assert.equal(firstOutcome.status, 'catalog_error');
+    assert.equal(catalogStatus, 'error', 'Debe activar pantalla de error ante payload viejo de master');
+    assert.match(catalogError ?? '', /servidor está desactualizado/i);
+    assert.equal(activeCatalog, null, 'No debe aplicar catálogo de respaldo estático ante payload viejo');
+    assert.equal(stateFetchCount, 0, 'No debe hidratar ni sincronizar estado si falla la forma del catálogo');
+    assert.equal(mockStorage.length, 0, 'No debe cachear ni guardar puntero current ante payload de master');
+
+    // Simula que el usuario presiona "Reintentar" luego de actualizarse el backend
+    backendUpgraded = true;
+    const retryOutcome = await runLoad();
+    assert.equal(retryOutcome.status, 'hydrated');
+    assert.equal(catalogStatus, 'ready');
+    assert.equal(catalogError, null);
+    assert.equal(activeCatalog?.plan.id, 'plan-isi-2023-uuid');
+    assert.equal(stateFetchCount, 1);
+  });
+
+  it('builds explicit schedule unavailable messages for backend errors and empty plans without static fallback', () => {
+    const errorFallback = getScheduleUnavailableMessage('backend-error');
+    assert.match(errorFallback, /servidor/i);
+    assert.match(errorFallback, /intentá/i);
+
+    const errorCustom = getScheduleUnavailableMessage('backend-error', {
+      errorDetail: 'Timeout al consultar horarios',
+    });
+    assert.equal(errorCustom, 'Timeout al consultar horarios');
+
+    const noScheduleMsg = getScheduleUnavailableMessage('no-schedule', {
+      planName: 'Plan 2026',
+    });
+    assert.match(noScheduleMsg, /Plan 2026/);
+    assert.match(noScheduleMsg, /horarios/i);
+
+    const noticeSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/components/schedule/ScheduleUnavailableNotice.tsx'),
+      'utf8'
+    );
+    assert.match(noticeSrc, /Reintentar/, 'Notice debe incluir botón Reintentar ante error de servidor');
+    assert.match(noticeSrc, /no-schedule/, 'Notice debe soportar estado sin oferta horaria cargada');
+  });
+
+  it('contains zero static Sistemas/schedule data modules or ISI career fallbacks inside src/', () => {
+    assert.equal(
+      fs.existsSync(path.resolve(rootDir, 'src/data/schedule.ts')),
+      false,
+      'src/data/schedule.ts debe haberse eliminado'
+    );
+    assert.equal(
+      fs.existsSync(path.resolve(rootDir, 'src/data/schedule.json')),
+      false,
+      'src/data/schedule.json debe haberse eliminado'
+    );
+
+    const srcDir = path.resolve(rootDir, 'src');
+    const forbiddenModulePattern =
+      /from\s+['"][^'"]*(?:data\/plan2023|data\/electives|data\/acronyms|data\/subjectAliases|data\/schedule|test\/fixtures)/;
+    const forbiddenIsiGuardPattern = /career\??\.code\s*===\s*['"]ISI['"]|\bisIsi2023\b/;
+    const violations: string[] = [];
+
+    function walk(dir: string) {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+          const content = fs.readFileSync(fullPath, 'utf8');
+          if (forbiddenModulePattern.test(content) || forbiddenIsiGuardPattern.test(content)) {
+            violations.push(path.relative(rootDir, fullPath));
+          }
+        }
+      }
+    }
+
+    walk(srcDir);
+    assert.deepStrictEqual(
+      violations,
+      [],
+      `Found forbidden static Sistemas/schedule imports or ISI guards in src/: ${violations.join(', ')}`
+    );
+  });
+
+  it('ProfessorsDirectory filters by numeric subject.id rather than formatted code strings like E-301', () => {
+    const dirSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/components/professors/ProfessorsDirectory.tsx'),
+      'utf8'
+    );
+    const idOptionMatches = dirSrc.match(/<option key=\{sub\.id\} value=\{String\(sub\.id\)\}>/g) || [];
+    assert.equal(
+      idOptionMatches.length,
+      2,
+      'ProfessorsDirectory debe enviar String(sub.id) en los dos selectores de materia (desktop y mobile)'
+    );
+    assert.equal(
+      /value=\{String\(sub\.code\)\}/.test(dirSrc),
+      false,
+      'ProfessorsDirectory no debe enviar sub.code ("E-301", "X-408") al endpoint subjectId del backend'
+    );
+  });
+});
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('Career hydration guard (data-overwrite protection)', () => {
+  const __dirnameLocal = path.dirname(fileURLToPath(import.meta.url));
+  const rootDir = path.resolve(__dirnameLocal, '..');
+
+  it('(a) blocks all server auto-sync calls until userStateApi.getState completes for the active plan', async () => {
+    let hydration = createCareerHydrationState();
+    const serverWrites: Array<{ planId: string; op: string }> = [];
+
+    const attemptServerSync = (op: string, targetPlanId: string | null) => {
+      if (canSyncServerState(true, hydration, targetPlanId)) {
+        serverWrites.push({ planId: targetPlanId ?? 'unknown', op });
+      }
+    };
+
+    // Unauthenticated or pre-reload mutations never touch server
+    assert.equal(canSyncServerState(false, hydration), false);
+    assert.equal(canSyncServerState(true, hydration), false);
+    attemptServerSync('updateProgress', 'plan-a');
+    assert.equal(serverWrites.length, 0);
+
+    const pendingState = createDeferred<{
+      success: boolean;
+      data: { progress: Record<number, { status: string }> };
+    }>();
+    const uiApplied: string[] = [];
+
+    const cyclePromise = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: async ({ onImmediateCache }) => {
+        const cached = { plan: { id: 'plan-a', name: 'Plan A' } };
+        onImmediateCache(cached);
+        return { catalog: cached };
+      },
+      applyCatalogToUi: (cat) => {
+        uiApplied.push(`catalog:${cat.plan.id}`);
+      },
+      fetchServerState: () => pendingState.promise,
+      applyServerStateToUi: (_data, cat) => {
+        uiApplied.push(`server:${cat.plan.id}`);
+      },
+    });
+
+    // Wait microtasks so loadCatalog resolves and fetchServerState is in-flight
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Catalog is already displayed and scoped localStorage is ready, BUT server hydration has not finished yet
+    assert.equal(hydration.hydratedStoragePlanId, 'plan-a');
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedServerPlanId, null);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), true);
+    assert.equal(canSyncServerState(true, hydration), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+
+    // Simulated progress/settings/basket/simulation actions while server state is loading send 0 server writes
+    attemptServerSync('updateProgress', 'plan-a');
+    attemptServerSync('updateSettings', 'plan-a');
+    attemptServerSync('updateElectives', 'plan-a');
+    attemptServerSync('updateBasket', 'plan-a');
+    attemptServerSync('applySimulation', 'plan-a');
+    assert.equal(serverWrites.length, 0);
+
+    // Once userStateApi.getState resolves cleanly, server sync unlocks for plan-a
+    pendingState.resolve({
+      success: true,
+      data: { progress: { 1: { status: 'aprobada' } } },
+    });
+    const outcome = await cyclePromise;
+    assert.equal(outcome.status, 'hydrated');
+    assert.equal(hydration.hasHydrated, true);
+    assert.equal(hydration.hydratedServerPlanId, 'plan-a');
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), true);
+
+    attemptServerSync('updateProgress', 'plan-a');
+    assert.deepEqual(serverWrites, [{ planId: 'plan-a', op: 'updateProgress' }]);
+    assert.deepEqual(uiApplied, ['catalog:plan-a', 'server:plan-a']);
+  });
+
+  it('(b) keeps server sync locked and never syncs empty defaults when catalog load or getState fails', async () => {
+    // b1: catalog fetch rejects
+    {
+      let hydration: CareerHydrationState = completeServerStateHydration(
+        beginServerReload(createCareerHydrationState()).state,
+        1,
+        'plan-a'
+      );
+      let catalogErrorCalled = false;
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => {
+          throw new Error('503 Service Unavailable');
+        },
+        applyCatalogToUi: () => {
+          throw new Error('should not apply catalog on failure');
+        },
+        fetchServerState: async () => {
+          throw new Error('should not fetch userState after catalog failure');
+        },
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state on failure');
+        },
+        onCatalogError: () => {
+          catalogErrorCalled = true;
+        },
+      });
+
+      assert.equal(outcome.status, 'catalog_error');
+      assert.equal(catalogErrorCalled, true);
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedStoragePlanId, null);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration), false);
+      assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+      if (canSyncServerState(true, hydration)) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b2: catalog succeeds, fetchServerState throws network/500 error
+    {
+      let hydration = createCareerHydrationState();
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => ({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } }),
+        applyCatalogToUi: () => {},
+        fetchServerState: async () => {
+          throw new Error('Failed to fetch user state');
+        },
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state');
+        },
+      });
+
+      assert.equal(outcome.status, 'state_error');
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+      if (canSyncServerState(true, hydration, 'plan-a')) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b3: catalog succeeds, fetchServerState returns { success: false, data: null }
+    {
+      let hydration = createCareerHydrationState();
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => ({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } }),
+        applyCatalogToUi: () => {},
+        fetchServerState: async () => ({ success: false, data: null }),
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state when unavailable');
+        },
+      });
+
+      assert.equal(outcome.status, 'state_unavailable');
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+      if (canSyncServerState(true, hydration, 'plan-a')) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b4: CareerContext actually wires executeServerReloadCycle, canSyncServerState, canPersistScopedStorage & applySimulation guard
+    const contextSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/context/CareerContext.tsx'),
+      'utf8'
+    );
+    assert.ok(contextSrc.includes('executeServerReloadCycle'));
+    assert.ok(contextSrc.includes('canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)'));
+    assert.ok(contextSrc.includes('resetHydrationOnLogout(hydrationStateRef.current)'));
+    assert.match(
+      contextSrc,
+      /const applySimulation = useCallback[\s\S]*?canSyncServerState\(isAuthenticated,\s*hydrationStateRef\.current/
+    );
+  });
+
+  it('(c) resets hydration synchronously on Plan A -> Plan B switch and drops late Plan A responses without cross-plan leaks', async () => {
+    // 1. Start fully hydrated on Plan A
+    let hydration = completeServerStateHydration(
+      applyCatalogSnapshot(beginServerReload(createCareerHydrationState()).state, 1, 'plan-a'),
+      1,
+      'plan-a'
+    );
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), true);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), false);
+
+    // 2. User switches to Plan B while Plan A's background reload & Plan B's slow load race
+    const planACatalogDef = createDeferred<{ catalog: { plan: { id: string; name: string } } }>();
+    const planBCatalogDef = createDeferred<{ catalog: { plan: { id: string; name: string } } }>();
+    const planBStateDef = createDeferred<{
+      success: boolean;
+      data: { marker: string };
+    }>();
+
+    const appliedCatalogs: string[] = [];
+    const appliedStates: Array<{ planId: string; marker: string }> = [];
+    const serverWrites: Array<{ planId: string; marker: string }> = [];
+
+    // Start reload for Plan A (will lag)
+    const planAReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: () => planACatalogDef.promise,
+      applyCatalogToUi: (cat) => appliedCatalogs.push(cat.plan.id),
+      fetchServerState: async () => ({ success: true, data: { marker: 'A-stale' } }),
+      applyServerStateToUi: (d, cat) => appliedStates.push({ planId: cat.plan.id, marker: d.marker }),
+    });
+
+    // Synchronously verify reload start already invalidated previous Plan A hydration
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedStoragePlanId, null);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+
+    // Now switch immediately to Plan B BEFORE Plan A resolves
+    const planBReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: () => planBCatalogDef.promise,
+      applyCatalogToUi: (cat) => appliedCatalogs.push(cat.plan.id),
+      fetchServerState: () => planBStateDef.promise,
+      applyServerStateToUi: (d, cat) => appliedStates.push({ planId: cat.plan.id, marker: d.marker }),
+    });
+
+    // While Plan B is loading, NEITHER Plan A nor Plan B may sync or persist storage
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedStoragePlanId, null);
+    assert.equal(hydration.hydratedServerPlanId, null);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), false);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+    assert.equal(canPersistScopedStorage('plan-b', hydration), false);
+
+    // Resolve Plan B completely first
+    planBCatalogDef.resolve({ catalog: { plan: { id: 'plan-b', name: 'Plan B' } } });
+    planBStateDef.resolve({ success: true, data: { marker: 'B-fresh' } });
+    const planBOutcome = await planBReload;
+    assert.equal(planBOutcome.status, 'hydrated');
+    assert.equal(hydration.hydratedServerPlanId, 'plan-b');
+    assert.equal(hydration.hydratedStoragePlanId, 'plan-b');
+
+    // Now resolve the stale Plan A promise AFTER Plan B is active & hydrated
+    planACatalogDef.resolve({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } });
+    const planAOutcome = await planAReload;
+    assert.equal(planAOutcome.status, 'aborted');
+
+    // Plan A must NEVER overwrite Plan B's catalog, UI state, storage scope, or server hydration target
+    assert.deepEqual(appliedCatalogs, ['plan-b']);
+    assert.deepEqual(appliedStates, [{ planId: 'plan-b', marker: 'B-fresh' }]);
+    assert.equal(hydration.hasHydrated, true);
+    assert.equal(hydration.hydratedServerPlanId, 'plan-b');
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), true);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+    assert.equal(canPersistScopedStorage('plan-b', hydration), true);
+
+    if (canSyncServerState(true, hydration, 'plan-a')) {
+      serverWrites.push({ planId: 'plan-a', marker: 'leak' });
+    }
+    if (canSyncServerState(true, hydration, 'plan-b')) {
+      serverWrites.push({ planId: 'plan-b', marker: 'B-fresh' });
+    }
+    assert.deepEqual(serverWrites, [{ planId: 'plan-b', marker: 'B-fresh' }]);
+
+    // Logout while a Plan C reload is in-flight also aborts stale completion
+    const planCStateDef = createDeferred<{ success: boolean; data: { marker: string } }>();
+    const planCReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: async () => ({ catalog: { plan: { id: 'plan-c', name: 'Plan C' } } }),
+      applyCatalogToUi: () => {},
+      fetchServerState: () => planCStateDef.promise,
+      applyServerStateToUi: () => {
+        throw new Error('must not hydrate after logout');
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    hydration = resetHydrationOnLogout(hydration);
+    planCStateDef.resolve({ success: true, data: { marker: 'C-after-logout' } });
+    const planCOutcome = await planCReload;
+    assert.equal(planCOutcome.status, 'aborted');
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(canSyncServerState(false, hydration), false);
+  });
+});

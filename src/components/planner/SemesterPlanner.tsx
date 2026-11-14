@@ -15,9 +15,7 @@ import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import { BottomSheet } from '../common/BottomSheet';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { buildSemesterPlannerStructure } from '../../utils/planViewSelectors';
 
 export interface SemesterPlannerProps {
   onNavigateToSchedule?: () => void;
@@ -32,6 +30,10 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
     batchUpdateStatus,
     setSelectedSubjectId,
     settings,
+    coreSubjects,
+    electives,
+    subjectsById,
+    planConfig,
   } = useCareer();
 
   const [termFilter, setTermFilter] = useState<'all' | '1C' | '2C' | 'A'>('all');
@@ -40,66 +42,37 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
   const { isAvailable: isScheduleAvailable } = useScheduleAvailability();
   const [isMobileBasketOpen, setIsMobileBasketOpen] = useState(false);
 
-  // Available subjects pool
-  const availableSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    const pool = includeElectives ? [...core, ...ELECTIVES] : core;
-
-    return pool.filter((s) => {
-      const status = getSubjectStatus(s, activeState);
-      if (status !== 'disponible') return false;
-
-      if (termFilter === 'all') return true;
-      if (termFilter === 'A') return s.modality === 'A';
-      if (termFilter === '1C') return s.modality.includes('1C') || s.modality === 'A';
-      if (termFilter === '2C') return s.modality.includes('2C') || s.modality === 'A';
-      return true;
-    });
-  }, [includeElectives, termFilter, activeState, settings.includeAnalistaTrack]);
-
-  // Basket subjects details & calculation
-  const basketSubjects = useMemo(() => {
-    return semesterBasket.map((id) => ALL_SUBJECTS_MAP.get(id)!).filter(Boolean);
-  }, [semesterBasket]);
-
-  const totalWeeklyHours = useMemo(() => {
-    return basketSubjects.reduce((acc, s) => acc + s.weeklyHours, 0);
-  }, [basketSubjects]);
-
-  // Workload analysis
-  const workloadInfo = useMemo(() => {
-    if (totalWeeklyHours === 0) {
-      return { label: 'Sin materias seleccionadas', color: 'text-slate-400', bg: 'bg-slate-800' };
-    }
-    if (totalWeeklyHours <= 14) {
-      return {
-        label: 'Carga Liviana (fácil de llevar)',
-        color: 'text-emerald-400',
-        bg: 'bg-emerald-950/70 border-emerald-500/40',
-      };
-    }
-    if (totalWeeklyHours <= 22) {
-      return {
-        label: 'Carga Recomendada (ritmo estándar)',
-        color: 'text-cyan-400',
-        bg: 'bg-cyan-950/70 border-cyan-500/40',
-      };
-    }
-    if (totalWeeklyHours <= 28) {
-      return {
-        label: 'Carga Intensa (exigente pero alcanzable)',
-        color: 'text-amber-400',
-        bg: 'bg-amber-950/70 border-amber-500/40',
-      };
-    }
-    return {
-      label: 'Carga Muy Pesada (cuidado con superposición)',
-      color: 'text-rose-400',
-      bg: 'bg-rose-950/70 border-rose-500/40',
-    };
-  }, [totalWeeklyHours]);
+  const {
+    showIncludeElectivesToggle,
+    availableSubjects,
+    basketSubjects,
+    totalWeeklyHours,
+    workloadInfo,
+  } = useMemo(
+    () =>
+      buildSemesterPlannerStructure({
+        coreSubjects,
+        electives,
+        activeState,
+        subjectsById,
+        semesterBasket,
+        includeIntermediateTrack: settings.includeAnalistaTrack,
+        includeElectives,
+        termFilter,
+        planConfig,
+      }),
+    [
+      coreSubjects,
+      electives,
+      activeState,
+      subjectsById,
+      semesterBasket,
+      settings.includeAnalistaTrack,
+      includeElectives,
+      termFilter,
+      planConfig,
+    ]
+  );
 
   const handleStartTakingAll = () => {
     if (basketSubjects.length === 0) return;
@@ -164,15 +137,17 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
             </button>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-900 px-3.5 py-2 min-h-[44px] rounded-xl border border-slate-800">
-            <input
-              type="checkbox"
-              checked={includeElectives}
-              onChange={(e) => setIncludeElectives(e.target.checked)}
-              className="rounded border-slate-700 text-cyan-500 focus:ring-0 bg-slate-800"
-            />
-            <span>Incluir Electivas</span>
-          </label>
+          {showIncludeElectivesToggle && (
+            <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-900 px-3.5 py-2 min-h-[44px] rounded-xl border border-slate-800">
+              <input
+                type="checkbox"
+                checked={includeElectives}
+                onChange={(e) => setIncludeElectives(e.target.checked)}
+                className="rounded border-slate-700 text-cyan-500 focus:ring-0 bg-slate-800"
+              />
+              <span>Incluir Electivas</span>
+            </label>
+          )}
         </div>
       </div>
 

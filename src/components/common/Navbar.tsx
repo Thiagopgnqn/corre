@@ -36,6 +36,13 @@ import { BrandLogo } from './BrandLogo';
 import { BottomSheet } from './BottomSheet';
 import { AboutStackModal } from './AboutStackModal';
 import { APP_NAME } from '../../config/brand';
+import {
+  getDemoNavbarLabel,
+  getIntermediateDegreeMobileSubtitle,
+  getIntermediateDegreeToggleDropdownLabel,
+  getIntermediateDegreeToggleShortLabel,
+  getIntermediateDegreeToggleTooltip,
+} from '../../utils/planText';
 
 export type AppView =
   | 'graph'
@@ -76,7 +83,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
     isMoreMenuOpen,
     setIsMoreMenuOpen,
     isTutorialOpen,
+    planConfig,
+    allSubjects,
   } = useCareer();
+
+  const primaryIntermediateDegree = planConfig?.intermediateDegrees?.[0] ?? null;
 
   const isMobile = useIsMobile();
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
@@ -269,30 +280,34 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           {/* Actions & Utilities */}
           <div className="flex items-center gap-1 min-[380px]:gap-1.5 sm:gap-2 shrink-0">
             {/* Secondary Actions (Desktop >= 1900px) */}
-            <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
-              <button
-                data-tour="analista-button"
-                onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shrink-0 cursor-pointer ${
-                  settings.includeAnalistaTrack
-                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
-                    : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
-                }`}
-                title={
-                  settings.includeAnalistaTrack
-                    ? 'Seminario Integrador y Título Analista: ACTIVADO (Click para desactivar)'
-                    : 'Seminario Integrador y Título Analista: DESACTIVADO (Click para activar)'
-                }
-              >
-                <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="whitespace-nowrap">Analista (99)</span>
-                <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
-                  settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                </span>
-              </button>
-            </div>
+            {primaryIntermediateDegree && (
+              <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
+                <button
+                  data-tour="analista-button"
+                  onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                  className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 border shrink-0 cursor-pointer ${
+                    settings.includeAnalistaTrack
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                      : 'bg-slate-900/80 text-slate-400 hover:text-slate-200 border-slate-700/80 hover:border-slate-600'
+                  }`}
+                  title={getIntermediateDegreeToggleTooltip(
+                    primaryIntermediateDegree,
+                    allSubjects,
+                    settings.includeAnalistaTrack
+                  )}
+                >
+                  <Award className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="whitespace-nowrap">
+                    {getIntermediateDegreeToggleShortLabel(primaryIntermediateDegree)}
+                  </span>
+                  <span className={`text-[10px] px-1 py-0.2 rounded font-bold ${
+                    settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                  }`}>
+                    {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+              </div>
+            )}
 
             {/* Simulation Mode Toggle Button ("¿Y si...?") */}
             <button
@@ -389,24 +404,26 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                   </div>
 
                   <div className="py-1">
-                    {/* Analista toggle in dropdown */}
-                    <button
-                      data-tour="analista-button"
-                      onClick={() => {
-                        updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Award className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Título Analista (99)</span>
-                      </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                      </span>
-                    </button>
+                    {/* Intermediate degree toggle in dropdown */}
+                    {primaryIntermediateDegree && (
+                      <button
+                        data-tour="analista-button"
+                        onClick={() => {
+                          updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
+                        }}
+                        className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Award className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>{getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}</span>
+                        </div>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                          settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                        }`}>
+                          {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                        </span>
+                      </button>
+                    )}
 
                     {/* Simulation toggle in dropdown */}
                     <button
@@ -471,7 +488,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                       className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
                     >
                       <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>Cargar demo (3er año)</span>
+                      <span>{getDemoNavbarLabel(planConfig)}</span>
                     </button>
 
                     {/* Tutorial */}
@@ -724,32 +741,38 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
               Preferencias
             </h3>
             <div className="space-y-1.5">
-              {/* Analista switch */}
-              <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <Award className="w-5 h-5 text-amber-400 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold text-white">Título Analista (99)</div>
-                    <div className="text-[11px] text-slate-400">Seminario Integrador y 4 cr. electivas</div>
+              {/* Intermediate degree switch */}
+              {primaryIntermediateDegree && (
+                <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Award className="w-5 h-5 text-amber-400 shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold text-white">
+                        {getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        {getIntermediateDegreeMobileSubtitle(primaryIntermediateDegree, allSubjects)}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  data-tour="analista-button"
-                  role="switch"
-                  aria-checked={settings.includeAnalistaTrack}
-                  onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    settings.includeAnalistaTrack ? 'bg-amber-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      settings.includeAnalistaTrack ? 'translate-x-5' : 'translate-x-0'
+                  <button
+                    type="button"
+                    data-tour="analista-button"
+                    role="switch"
+                    aria-checked={settings.includeAnalistaTrack}
+                    onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      settings.includeAnalistaTrack ? 'bg-amber-500' : 'bg-slate-700'
                     }`}
-                  />
-                </button>
-              </div>
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        settings.includeAnalistaTrack ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
 
               {/* Simulation switch */}
               <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
@@ -837,7 +860,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
               >
                 <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
-                <span>Cargar demo (3er año)</span>
+                <span>{getDemoNavbarLabel(planConfig)}</span>
               </button>
 
               <button

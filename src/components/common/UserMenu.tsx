@@ -29,12 +29,13 @@ interface UserMenuProps {
 }
 
 export const UserMenu: React.FC<UserMenuProps> = ({
-  currentPlanName = 'Plan 2023',
+  currentPlanName,
   onOpenPlanSelector,
   onNavigateAdmin,
 }) => {
   const { user, logout, deleteAccount } = useAuth();
-  const { settings, updateSettings } = useCareer();
+  const { settings, updateSettings, currentPlanName: contextPlanName } = useCareer();
+  const resolvedPlanName = currentPlanName || contextPlanName || 'Plan de estudio';
   const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -146,7 +147,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
               )}
             </div>
             <div className="text-sm font-semibold text-white truncate">{user.email}</div>
-            <div className="text-xs text-indigo-400 mt-0.5">{currentPlanName}</div>
+            <div className="text-xs text-indigo-400 mt-0.5">{resolvedPlanName}</div>
           </div>
 
           {/* Menu actions */}
@@ -291,7 +292,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
                   </div>
                   <div className="flex items-center gap-1.5 mt-1 text-xs text-indigo-400 font-medium">
                     <GraduationCap className="w-3.5 h-3.5" />
-                    <span>{currentPlanName}</span>
+                    <span>{resolvedPlanName}</span>
                   </div>
                 </div>
               </div>
