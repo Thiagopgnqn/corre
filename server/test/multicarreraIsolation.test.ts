@@ -15,6 +15,10 @@ import {
   type LiveUserStatusRecord,
 } from '../src/middlewares/auth.middleware.js';
 import {
+  InMemoryCatalogStore,
+  setCatalogStoreForTesting,
+} from '../src/modules/catalog/catalog.store.js';
+import {
   InMemoryLibraryService,
   resetInitUploadRateLimits,
   setLibraryServiceForTesting,
@@ -238,12 +242,66 @@ async function main() {
 
   const reviewsStore = new InMemoryReviewsStore();
   const userStateStore = new InMemoryUserStateStore();
+  const catalogStore = new InMemoryCatalogStore();
+  setCatalogStoreForTesting(catalogStore);
 
+  const instId = crypto.randomUUID();
   const facA = crypto.randomUUID();
   const facB = crypto.randomUUID();
+  const careerDraftId = crypto.randomUUID();
+  const careerAId = crypto.randomUUID();
+  const careerBId = crypto.randomUUID();
+  const careerA2Id = crypto.randomUUID();
   const planA = crypto.randomUUID();
   const planB = crypto.randomUUID();
   const planA2 = crypto.randomUUID(); // Segunda carrera en Facultad A (comparte materia con Plan A)
+
+  catalogStore.institutions.push({ id: instId, name: 'UTN', code: 'UTN' });
+  catalogStore.faculties.push(
+    { id: facA, institutionId: instId, name: 'FRC', code: 'FRC' },
+    { id: facB, institutionId: instId, name: 'FRBA', code: 'FRBA' }
+  );
+  catalogStore.careers.push(
+    { id: careerDraftId, facultyId: facA, name: 'Borrador', code: 'DRAFT', status: 'published' },
+    { id: careerAId, facultyId: facA, name: 'Ingeniería en Sistemas', code: 'ISI', status: 'published' },
+    { id: careerBId, facultyId: facB, name: 'Ingeniería Industrial', code: 'IND', status: 'published' },
+    { id: careerA2Id, facultyId: facA, name: 'Ingeniería Electrónica', code: 'IEL', status: 'published' }
+  );
+  catalogStore.plans.push(
+    {
+      id: planA,
+      careerId: careerAId,
+      name: 'Sistemas Plan 2023',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-02-01T00:00:00Z'),
+      updatedAt: new Date('2024-02-01T00:00:00Z'),
+    },
+    {
+      id: planB,
+      careerId: careerBId,
+      name: 'Industrial Plan 2024',
+      year: 2024,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-03-01T00:00:00Z'),
+      updatedAt: new Date('2024-03-01T00:00:00Z'),
+    },
+    {
+      id: planA2,
+      careerId: careerA2Id,
+      name: 'Electrónica Plan 2023',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-04-01T00:00:00Z'),
+      updatedAt: new Date('2024-04-01T00:00:00Z'),
+    }
+  );
 
   // Sembrar planes en stores
   reviewsStore.seedPlan(planA, facA);
@@ -1037,6 +1095,54 @@ async function main() {
 
     // Caso HTTP real en testApp: usuario autenticado con selectedPlanId=null (también con un draft presente)
     const httpDraftPlanId = crypto.randomUUID();
+    catalogStore.plans.unshift({
+      id: httpDraftPlanId,
+      careerId: careerDraftId,
+      name: 'Plan Borrador HTTP',
+      year: 2026,
+      status: 'draft',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-01-01T00:00:00Z'),
+      updatedAt: new Date('2024-01-01T00:00:00Z'),
+    });
+    const draftLibSub = {
+      id: crypto.randomUUID(),
+      name: 'Materia Draft Biblioteca',
+      codeInPlan: 999,
+      level: 1,
+      kind: 'obligatoria',
+      planId: httpDraftPlanId,
+      sharedSubjectId: crypto.randomUUID(),
+    };
+    libraryStore.seedSubject(draftLibSub);
+    const draftLibFileId = crypto.randomUUID();
+    libraryStore.files.set(draftLibFileId, {
+      id: draftLibFileId,
+      uploaderUserId: multiUserId,
+      subjectId: draftLibSub.id,
+      sharedSubjectId: draftLibSub.sharedSubjectId,
+      sourcePlanId: httpDraftPlanId,
+      kind: 'apunte',
+      title: 'Apunte en Draft',
+      description: null,
+      academicYear: 2026,
+      term: '1C',
+      examInstance: null,
+      professorText: null,
+      hasSolution: false,
+      originalFilename: 'draft.pdf',
+      storageKey: 'library/draft.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 512,
+      status: 'approved',
+      rejectionReason: null,
+      downloadCount: 0,
+      helpfulCount: 0,
+      reportsCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
     userStateStore.seedPlan({
       id: httpDraftPlanId,
       name: 'Plan Borrador HTTP',
@@ -1074,9 +1180,18 @@ async function main() {
       overall: 5,
       comment: 'Reseña en plan fallback publicado cuando selectedPlanId es null.',
     });
+    const nullLibSubs = await api('GET', '/api/library/subjects', nullHttpToken);
+    const nullLibFiles = await api('GET', '/api/library/files', nullHttpToken);
+    const nullLibDraftDetail = await api('GET', `/api/library/files/${draftLibFileId}`, nullHttpToken);
 
     const nullProfIds = new Set(
       (nullProfs.data?.data?.professors || []).map((p: any) => p.id)
+    );
+    const nullLibSubIds = new Set(
+      (nullLibSubs.data?.data || []).map((s: any) => s.id)
+    );
+    const nullLibFileIds = new Set(
+      (nullLibFiles.data?.data?.items || []).map((f: any) => f.id)
     );
     assert(
       nullStateRes.status === 200 &&
@@ -1087,11 +1202,19 @@ async function main() {
         nullProfIds.has(profA.id) &&
         !nullProfIds.has(profB.id) &&
         nullReviewable.status === 200 &&
-        nullCreateRev.status === 201,
-      'Usuario con selectedPlanId=null opera /api/state (planA), /api/enrollments (GET/PUT), /api/professors, /api/me/reviewable y POST /api/reviews sin elegir el draft',
-      `statuses=${nullStateRes.status}/${nullEnrollList.status}/${nullEnrollPut.status}/${nullProfs.status}/${nullReviewable.status}/${nullCreateRev.status}, selectedPlanId=${nullStateRes.data?.data?.selectedPlanId}`
+        nullCreateRev.status === 201 &&
+        nullLibSubs.status === 200 &&
+        nullLibSubIds.has(subA_core.id) &&
+        !nullLibSubIds.has(draftLibSub.id) &&
+        !nullLibSubIds.has(subB_only.id) &&
+        nullLibFiles.status === 200 &&
+        !nullLibFileIds.has(draftLibFileId) &&
+        nullLibDraftDetail.status === 404,
+      'Usuario con selectedPlanId=null opera /api/state (planA), /api/enrollments, /api/professors, /api/me/reviewable, POST /api/reviews y /api/library sin elegir el draft',
+      `statuses=${nullStateRes.status}/${nullEnrollList.status}/${nullEnrollPut.status}/${nullProfs.status}/${nullReviewable.status}/${nullCreateRev.status}/${nullLibSubs.status}/${nullLibFiles.status}/${nullLibDraftDetail.status}, selectedPlanId=${nullStateRes.data?.data?.selectedPlanId}`
     );
   } finally {
+    setCatalogStoreForTesting(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
