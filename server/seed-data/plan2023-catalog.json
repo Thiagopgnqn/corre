@@ -108,7 +108,7 @@
     {
       "codeInPlan": 1,
       "name": "Análisis Matemático 1",
-      "shortName": "Análisis Matemático 1",
+      "shortName": "Análisis Mat. 1",
       "level": 1,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -123,7 +123,7 @@
     {
       "codeInPlan": 2,
       "name": "Álgebra y Geometría Analítica",
-      "shortName": "Álgebra y Geometría Analítica",
+      "shortName": "Álgebra y Geom.",
       "level": 1,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -168,7 +168,7 @@
     {
       "codeInPlan": 5,
       "name": "Lógica y Estructuras Discretas",
-      "shortName": "Lógica y Estructuras Discretas",
+      "shortName": "Lógica y Estruct.",
       "level": 1,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -183,7 +183,7 @@
     {
       "codeInPlan": 6,
       "name": "Algoritmos y Estructuras de Datos",
-      "shortName": "Algoritmos y Estructuras de Datos",
+      "shortName": "Algoritmos (AED)",
       "level": 1,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -198,7 +198,7 @@
     {
       "codeInPlan": 7,
       "name": "Arquitectura de Computadoras",
-      "shortName": "Arquitectura de Computadoras",
+      "shortName": "Arquitectura (ACO)",
       "level": 1,
       "modality": "2C-CC",
       "contraCuatrimestral": true,
@@ -213,7 +213,7 @@
     {
       "codeInPlan": 8,
       "name": "Sistemas y Procesos de Negocio",
-      "shortName": "Sistemas y Procesos de Negocio",
+      "shortName": "Sist. y Procesos (SPN)",
       "level": 1,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -228,7 +228,7 @@
     {
       "codeInPlan": 11,
       "name": "Ingeniería y Sociedad",
-      "shortName": "Ingeniería y Sociedad",
+      "shortName": "Ing. y Sociedad",
       "level": 1,
       "modality": "2C-CC",
       "contraCuatrimestral": true,
@@ -243,7 +243,7 @@
     {
       "codeInPlan": 9,
       "name": "Análisis Matemático 2",
-      "shortName": "Análisis Matemático 2",
+      "shortName": "Análisis Mat. 2",
       "level": 2,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -296,7 +296,7 @@
     {
       "codeInPlan": 13,
       "name": "Sintaxis y Semántica de los Lenguajes",
-      "shortName": "Sintaxis y Semántica de los Lenguajes",
+      "shortName": "Sintaxis (SSL)",
       "level": 2,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -314,7 +314,7 @@
     {
       "codeInPlan": 14,
       "name": "Paradigmas de Programación",
-      "shortName": "Paradigmas de Programación",
+      "shortName": "Paradigmas (PPR)",
       "level": 2,
       "modality": "2C-CC",
       "contraCuatrimestral": true,
@@ -349,7 +349,7 @@
     {
       "codeInPlan": 16,
       "name": "Análisis de Sistemas de Información",
-      "shortName": "Análisis de Sistemas de Información",
+      "shortName": "Análisis de Sistemas",
       "level": 2,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -367,7 +367,7 @@
     {
       "codeInPlan": 17,
       "name": "Probabilidad y Estadísticas",
-      "shortName": "Probabilidad y Estadísticas",
+      "shortName": "Probabilidad y Est.",
       "level": 2,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -424,7 +424,7 @@
     {
       "codeInPlan": 20,
       "name": "Desarrollo de Software",
-      "shortName": "Desarrollo de Software",
+      "shortName": "Desarrollo Software (DDS)",
       "level": 3,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -445,7 +445,7 @@
     {
       "codeInPlan": 21,
       "name": "Comunicación de Datos",
-      "shortName": "Comunicación de Datos",
+      "shortName": "Com. de Datos",
       "level": 3,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -483,7 +483,7 @@
     {
       "codeInPlan": 23,
       "name": "Diseño de Sistemas de Información",
-      "shortName": "Diseño de Sistemas de Información",
+      "shortName": "Diseño de Sist. (DSI)",
       "level": 3,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -505,7 +505,7 @@
     {
       "codeInPlan": 99,
       "name": "Seminario Integrador (Analista)",
-      "shortName": "Seminario Integrador (Analista)",
+      "shortName": "Seminario Integrador",
       "level": 3,
       "modality": "2C",
       "contraCuatrimestral": false,
@@ -544,7 +544,7 @@
     {
       "codeInPlan": 25,
       "name": "Ingeniería y Calidad de Software",
-      "shortName": "Ingeniería y Calidad de Software",
+      "shortName": "Calidad de Software",
       "level": 4,
       "modality": "2C-CC",
       "contraCuatrimestral": true,
@@ -566,7 +566,7 @@
     {
       "codeInPlan": 26,
       "name": "Redes de Datos",
-      "shortName": "Redes de Datos",
+      "shortName": "Redes de Datos (RDA)",
       "level": 4,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -621,7 +621,7 @@
     {
       "codeInPlan": 29,
       "name": "Tecnologías para la Automatización",
-      "shortName": "Tecnologías para la Automatización",
+      "shortName": "Automatización (TPA)",
       "level": 4,
       "modality": "2C-CC",
       "contraCuatrimestral": true,
@@ -641,7 +641,7 @@
     {
       "codeInPlan": 30,
       "name": "Administración de Sistemas de Información",
-      "shortName": "Administración de Sistemas de Información",
+      "shortName": "Admin. de Sistemas",
       "level": 4,
       "modality": "A",
       "contraCuatrimestral": false,
@@ -741,7 +741,7 @@
     {
       "codeInPlan": 35,
       "name": "Seguridad en los Sistemas de Información",
-      "shortName": "Seguridad en los Sistemas de Información",
+      "shortName": "Seguridad en Sistemas",
       "level": 5,
       "modality": "1C-CC",
       "contraCuatrimestral": true,
@@ -887,7 +887,7 @@
     {
       "codeInPlan": 405,
       "name": "Desarrollo de Aplicaciones con Objetos",
-      "shortName": "Desarrollo de Aplicaciones con Objetos",
+      "shortName": "Aplic. con Objetos (DAO)",
       "level": 4,
       "modality": "2C",
       "contraCuatrimestral": false,
@@ -1064,7 +1064,7 @@
     {
       "codeInPlan": 507,
       "name": "Decisiones en Escenarios Complejos",
-      "shortName": "Decisiones en Escenarios Complejos",
+      "shortName": "Decisiones (DEC)",
       "level": 5,
       "modality": "1C",
       "contraCuatrimestral": false,
@@ -1103,7 +1103,7 @@
     {
       "codeInPlan": 509,
       "name": "Seguridad en el Desarrollo de Software",
-      "shortName": "Seguridad en el Desarrollo de Software",
+      "shortName": "Seguridad SW (SDS)",
       "level": 5,
       "modality": "2C",
       "contraCuatrimestral": false,
@@ -1145,7 +1145,7 @@
     {
       "codeInPlan": 511,
       "name": "Ingeniería de Software de fuentes abiertas/libres",
-      "shortName": "Ingeniería de Software de fuentes abiertas/libres",
+      "shortName": "Software Libre (ISFA)",
       "level": 5,
       "modality": "2C",
       "contraCuatrimestral": false,
@@ -1167,7 +1167,7 @@
     {
       "codeInPlan": 408,
       "name": "Experiencia e Interfaces de Usuario (UI/UX)",
-      "shortName": "Experiencia e Interfaces de Usuario (UI/UX)",
+      "shortName": "Interfaces y UIX",
       "level": 4,
       "modality": "1C/2C",
       "contraCuatrimestral": false,
@@ -1205,7 +1205,7 @@
     {
       "codeInPlan": 513,
       "name": "Creatividad y Desarrollo de Entornos Virtuales",
-      "shortName": "Creatividad y Desarrollo de Entornos Virtuales",
+      "shortName": "Entornos Virtuales",
       "level": 5,
       "modality": "1C/2C",
       "contraCuatrimestral": false,
@@ -1224,7 +1224,7 @@
     {
       "codeInPlan": 514,
       "name": "Práctica Profesional Supervisada",
-      "shortName": "Práctica Profesional Supervisada",
+      "shortName": "PPS",
       "level": 5,
       "modality": "A",
       "contraCuatrimestral": false,

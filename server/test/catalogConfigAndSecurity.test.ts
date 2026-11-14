@@ -149,10 +149,123 @@ async function main() {
     '0009 completa finalDegreeTitle y ppsRequirement.label preservando claves existentes, incrementa catalog_versions solo en corrida 1 y es no-op en corrida 2'
   );
 
+  const hasJournal0009 = journal.entries.some(
+    (e: any) => e?.idx === 9 && e?.tag === '0009_isi_plan_pps_config'
+  );
+  assert(
+    hasJournal0009,
+    'meta/_journal.json registra 0009_isi_plan_pps_config'
+  );
+
+  // 1b. Migración 0010 (short_name de 28 materias ISI 2023, idempotencia y CTE catalog_versions)
+  console.log('\n📌 1b. Migración 0010 (short_name 28 materias ISI 2023, dos corridas)');
+  const sql0010Path = path.resolve(__dirname, '../drizzle/0010_isi_plan_short_names.sql');
+  const sql0010 = fs.readFileSync(sql0010Path, 'utf8');
+
+  assert(
+    !/\b(DROP|DELETE|ALTER|CREATE|TRUNCATE)\b/i.test(sql0010) &&
+      /\bWITH\s+target_names\b/i.test(sql0010) &&
+      /\bupd\s+AS\s*\(\s*UPDATE\s+"subjects"\s+s\b/i.test(sql0010) &&
+      /\bRETURNING\s+s\."id"/i.test(sql0010),
+    '0010 usa una única sentencia CTE aditiva sobre subjects RETURNING s.id'
+  );
+  assert(
+    sql0010.includes(`c."code" = 'ISI'`) &&
+      sql0010.includes('sp."year" = 2023') &&
+      sql0010.includes(`s."short_name" = s."name"`) &&
+      sql0010.includes(`INSERT INTO "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql0010),
+    '0010 apunta a ISI 2023 con condición s.short_name = s.name y sube catalog_versions solo si EXISTS upd'
+  );
+
+  const parsedPairs = Array.from(sql0010.matchAll(/\((\d+),\s*'([^']+)'\)/g)).map((m) => ({
+    codeInPlan: Number(m[1]),
+    shortName: m[2],
+  }));
+  const expected0010Ids = [
+    1, 2, 5, 6, 7, 8, 9, 11, 13, 14, 16, 17, 20, 21, 23, 25, 26, 29, 30, 35, 99, 405, 408, 507, 509, 511, 513, 514,
+  ];
+  const forbidden0010Ids = [301, 401, 402, 403, 404, 406, 407, 501, 502, 503, 504, 505, 506, 508, 510, 512];
+  const parsedIds = parsedPairs.map((p) => p.codeInPlan);
+  assert(
+    parsedPairs.length === 28 &&
+      expected0010Ids.every((id) => parsedIds.includes(id)) &&
+      forbidden0010Ids.every((id) => !parsedIds.includes(id)),
+    '0010 actualiza exactamente las 28 materias indicadas y excluye las 14 electivas desalineadas y la 301'
+  );
+
+  // Simulación funcional de dos corridas de la CTE de 0010
+  const targetMap = new Map(parsedPairs.map((p) => [p.codeInPlan, p.shortName]));
+  const simulate0010Run = (
+    rows: Array<{
+      id: string;
+      careerCode: string;
+      year: number;
+      codeInPlan: number;
+      name: string;
+      shortName: string;
+    }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    const updIds: string[] = [];
+    for (const s of rows) {
+      const targetShort = targetMap.get(s.codeInPlan);
+      if (
+        targetShort !== undefined &&
+        s.careerCode === 'ISI' &&
+        s.year === 2023 &&
+        s.shortName === s.name
+      ) {
+        s.shortName = targetShort;
+        updIds.push(s.id);
+      }
+    }
+    if (updIds.length > 0) {
+      versions.set('default', `v-${fakeTs}-${fakeHex}`);
+    }
+    return { updatedRows: updIds.length, version: versions.get('default') || null };
+  };
+
+  const simSubjects = [
+    ...expected0010Ids.map((code) => ({
+      id: `isi-${code}`,
+      careerCode: 'ISI',
+      year: 2023,
+      codeInPlan: code,
+      name: code === 11 ? 'Ingeniería y Sociedad' : `Materia ${code}`,
+      shortName: code === 11 ? 'Custom Sociedad' : `Materia ${code}`,
+    })),
+    // Electiva 301 y electiva desalineada 401: NO deben tocarse
+    { id: 'isi-301', careerCode: 'ISI', year: 2023, codeInPlan: 301, name: 'Backend de Aplicaciones', shortName: 'Backend de Aplicaciones' },
+    { id: 'isi-401', careerCode: 'ISI', year: 2023, codeInPlan: 401, name: 'Green Software', shortName: 'Green Software' },
+    // Otra carrera / año con mismo codeInPlan: NO debe tocarse
+    { id: 'mec-1', careerCode: 'MEC', year: 2025, codeInPlan: 1, name: 'Mecánica 1', shortName: 'Mecánica 1' },
+  ];
+  const sim0010Versions = new Map<string, string>([['default', 'v-1700000000000-000000']]);
+
+  const run0010First = simulate0010Run(simSubjects, sim0010Versions, 1700000100111, 'abc123');
+  const run0010Second = simulate0010Run(simSubjects, sim0010Versions, 1700000200222, 'def456');
+
+  assert(
+    run0010First.updatedRows === 27 &&
+      run0010First.version === 'v-1700000100111-abc123' &&
+      simSubjects.find((s) => s.id === 'isi-1')?.shortName === 'Análisis Mat. 1' &&
+      simSubjects.find((s) => s.id === 'isi-514')?.shortName === 'PPS' &&
+      simSubjects.find((s) => s.id === 'isi-11')?.shortName === 'Custom Sociedad' &&
+      simSubjects.find((s) => s.id === 'isi-301')?.shortName === 'Backend de Aplicaciones' &&
+      simSubjects.find((s) => s.id === 'isi-401')?.shortName === 'Green Software' &&
+      simSubjects.find((s) => s.id === 'mec-1')?.shortName === 'Mecánica 1' &&
+      run0010Second.updatedRows === 0 &&
+      run0010Second.version === run0010First.version,
+    '0010 actualiza materias ISI 2023 donde short_name=name en corrida 1, respeta custom/301/401/MEC y es no-op en corrida 2'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 9 && lastJournalEntry?.tag === '0009_isi_plan_pps_config',
-    'meta/_journal.json registra 0009_isi_plan_pps_config como última entrada'
+    lastJournalEntry?.idx === 10 && lastJournalEntry?.tag === '0010_isi_plan_short_names',
+    'meta/_journal.json registra 0010_isi_plan_short_names como última entrada'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
@@ -300,13 +413,18 @@ async function main() {
     const subjById = new Map<number, any>(d.subjects.map((s: any) => [s.id, s]));
     assert(
       subjById.get(1)?.code === '1' &&
+        subjById.get(1)?.shortName === 'Análisis Mat. 1' &&
         subjById.get(99)?.code === '99' &&
+        subjById.get(99)?.shortName === 'Seminario Integrador' &&
         subjById.get(301)?.code === 'E-301' &&
+        subjById.get(301)?.shortName === 'Backend de Aplicaciones' &&
         subjById.get(405)?.code === 'E-405' &&
         subjById.get(501)?.code === 'E-501' &&
         subjById.get(408)?.code === 'X-408' &&
-        subjById.get(514)?.code === 'X-514',
-      'Payload expone subject.code con formato exacto ("1", "99", "E-301", "X-408") en vez de shortName'
+        subjById.get(408)?.shortName === 'Interfaces y UIX' &&
+        subjById.get(514)?.code === 'X-514' &&
+        subjById.get(514)?.shortName === 'PPS',
+      'Payload expone subject.code con formato exacto ("1", "99", "E-301", "X-408") y shortName actualizado por 0010'
     );
     assert(
       d.rules.some((r: any) => r.subjectCode === 99 && r.ruleType === 'approved_range') &&
