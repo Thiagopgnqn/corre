@@ -69,14 +69,33 @@ Con `NODE_ENV=development` y las variables opcionales **omitidas** (tal como fig
 > 1. Compará manualmente el **host** de `DATABASE_URL` y `DIRECT_URL` en `server/.env` contra el host de tu base de **producción** en Neon (ej. verificá que el endpoint `ep-...` pertenece a la rama temporal y **NO** al endpoint de `main`).
 > 2. **Si el host coincide con producción o tenés cualquier duda, ABORTÁ de inmediato** y regenerá `server/.env` con la cadena de tu rama temporal.
 > 3. Confirmá además que `server/.env` no copia secretos ni variables de producción (`EMAIL_PROVIDER`, `BREVO_API_KEY`, `RESEND_API_KEY`, `R2_*`, `NODE_ENV=production`).
+> 4. **Nunca pegues los archivos `.sql` a mano en el ensayo:** correr SQL manualmente deja el estado de tablas/datos inconsistente respecto del registro interno `drizzle.__drizzle_migrations`, oculta errores del migrador y **vuelve inválido el ensayo**.
 
-En la raíz del repo (`correlativas/`):
+### Verificación estricta de migración en una sola corrida + segunda corrida no-op
 
-```bash
-npm --prefix server run build
-npm --prefix server run db:migrate
-npm --prefix server run dev
-```
+Trabajando **siempre sobre una copia limpia de producción en la rama temporal de Neon**:
+
+1. **Antes de migrar**, anotá la línea base exacta ejecutando en SQL sobre la rama temporal:
+   ```sql
+   SELECT id, created_at FROM drizzle.__drizzle_migrations ORDER BY id;
+   SELECT version, updated_at FROM catalog_versions WHERE id = 'default';
+   ```
+   En una copia limpia de producción deben existir **`8` filas** (`0000` a `0007`), con la última fila en `created_at = 1793670000000`. Anotá también la `version` inicial del catálogo (si ya existiera la fila `'default'`).
+2. Compilá y corré **ÚNICAMENTE** `db:migrate` (1ª corrida):
+   ```bash
+   npm --prefix server run build
+   npm --prefix server run db:migrate
+   ```
+3. **Después de la 1ª corrida**, verificá en SQL:
+   - `SELECT id, created_at FROM drizzle.__drizzle_migrations ORDER BY id;` -> debe tener **`14` filas** (última fila en `1793730000000`, `0008` a `0013` aplicadas en una sola corrida).
+   - `SELECT version, updated_at FROM catalog_versions WHERE id = 'default';` -> la versión del catálogo **cambió** respecto del paso 1. Anotá ese valor exacto (`v_1`).
+4. Volvé a correr `npm --prefix server run db:migrate` una **2ª vez** y re-consultá ambas tablas:
+   - `drizzle.__drizzle_migrations` sigue teniendo **`14` filas** (sin cambios).
+   - `catalog_versions` sigue teniendo exactamente la misma `version` (`v_1`) y `updated_at` (no-op idempotente).
+5. Recién entonces levantá el backend local:
+   ```bash
+   npm --prefix server run dev
+   ```
 
 Verificaciones rápidas antes de abrir el navegador (por ejemplo con `curl` o en otra pestaña del navegador):
 1. `GET http://localhost:4000/api/health` -> debe responder `200 OK`.

@@ -769,6 +769,128 @@ async function main() {
     'meta/_journal.json registra 0013_isi_plan_intermediate_and_pps_copy como última entrada'
   );
 
+  // 1f. Integridad global de _journal.json y simulación exacta de drizzle-orm migrate
+  console.log('\n📌 1f. Integridad de _journal.json y simulación de migraciones pendientes en drizzle-orm');
+  type JournalEntry = { idx: number; when: number; tag: string };
+  const journalEntries = (journal.entries ?? []) as JournalEntry[];
+
+  // (a) "when" estrictamente crecientes en orden del arreglo
+  let prevWhen = -Infinity;
+  let monotonicWhen = true;
+  let sequentialIdx = true;
+  let nonMonotonicDetail = '';
+  for (let i = 0; i < journalEntries.length; i++) {
+    const entry = journalEntries[i];
+    if (entry.idx !== i) {
+      sequentialIdx = false;
+      nonMonotonicDetail = `idx esperado ${i}, recibido ${entry.idx}`;
+      break;
+    }
+    if (typeof entry.when !== 'number' || !Number.isFinite(entry.when) || entry.when <= prevWhen) {
+      monotonicWhen = false;
+      nonMonotonicDetail = `idx=${entry.idx} (${entry.tag}) when=${entry.when} <= prevWhen=${prevWhen}`;
+      break;
+    }
+    prevWhen = entry.when;
+  }
+  assert(
+    monotonicWhen && sequentialIdx,
+    '(a) Todos los "when" de _journal.json son estrictamente crecientes en orden del arreglo (e idx consecutivos)',
+    nonMonotonicDetail || undefined
+  );
+
+  // (b) Cada .sql de server/drizzle/ tiene entrada en journal y viceversa, con coincidencia exacta de tag
+  const drizzleDir = path.resolve(__dirname, '../drizzle');
+  const sqlFiles = fs
+    .readdirSync(drizzleDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+  const journalSqlNames = journalEntries.map((e) => `${e.tag}.sql`);
+  const sortedJournalSqlNames = [...journalSqlNames].sort();
+  const sqlWithoutJournal = sqlFiles.filter((f) => !sortedJournalSqlNames.includes(f));
+  const journalWithoutSql = sortedJournalFilesMissingCheck(journalSqlNames, sqlFiles);
+  const allMatchFilePrefixAndName = journalEntries.every((e, i) => {
+    const expectedPrefix = `${String(i).padStart(4, '0')}_`;
+    return (
+      typeof e.tag === 'string' &&
+      e.tag.startsWith(expectedPrefix) &&
+      fs.existsSync(path.join(drizzleDir, `${e.tag}.sql`))
+    );
+  });
+  function sortedJournalFilesMissingCheck(journalList: string[], diskList: string[]): string[] {
+    const diskSet = new Set(diskList);
+    return journalList.filter((name) => !diskSet.has(name));
+  }
+  assert(
+    sqlFiles.length === journalEntries.length &&
+      sqlWithoutJournal.length === 0 &&
+      journalWithoutSql.length === 0 &&
+      allMatchFilePrefixAndName,
+    '(b) Cada .sql de server/drizzle/ tiene entrada en _journal.json y viceversa con coincidencia exacta de tag',
+    `sqlWithoutJournal=${JSON.stringify(sqlWithoutJournal)} journalWithoutSql=${JSON.stringify(journalWithoutSql)}`
+  );
+
+  const simulateDrizzlePending = (
+    entries: JournalEntry[],
+    lastDbMigration: { created_at: number | string } | null
+  ): string[] => {
+    const pending: string[] = [];
+    for (const migration of entries) {
+      if (!lastDbMigration || Number(lastDbMigration.created_at) < migration.when) {
+        pending.push(migration.tag);
+      }
+    }
+    return pending;
+  };
+
+  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0013 en orden
+  const prod0007 = journalEntries.find((e) => e.idx === 7);
+  const pendingFromProd = simulateDrizzlePending(
+    journalEntries,
+    prod0007 ? { created_at: prod0007.when } : { created_at: 1793670000000 }
+  );
+  assert(
+    prod0007?.when === 1793670000000 &&
+      JSON.stringify(pendingFromProd) ===
+        JSON.stringify([
+          '0008_multicarrera_and_shared_subjects',
+          '0009_isi_plan_pps_config',
+          '0010_isi_plan_short_names',
+          '0011_isi_plan_integrator_subjects',
+          '0012_isi_plan_special_rules_descriptions',
+          '0013_isi_plan_intermediate_and_pps_copy',
+        ]),
+    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0013 en orden',
+    `pendientes=${JSON.stringify(pendingFromProd)}`
+  );
+
+  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0013 en orden
+  const trial0010 = journalEntries.find((e) => e.idx === 10);
+  const pendingFromTrial0010 = simulateDrizzlePending(
+    journalEntries,
+    trial0010 ? { created_at: trial0010.when } : { created_at: 1793700000000 }
+  );
+  assert(
+    trial0010?.when === 1793700000000 &&
+      JSON.stringify(pendingFromTrial0010) ===
+        JSON.stringify([
+          '0011_isi_plan_integrator_subjects',
+          '0012_isi_plan_special_rules_descriptions',
+          '0013_isi_plan_intermediate_and_pps_copy',
+        ]),
+    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0013 en orden',
+    `pendientes=${JSON.stringify(pendingFromTrial0010)}`
+  );
+
+  // (e) Base vacía (sin filas en __drizzle_migrations) -> todas pendientes
+  const pendingFromEmpty = simulateDrizzlePending(journalEntries, null);
+  assert(
+    pendingFromEmpty.length === journalEntries.length &&
+      JSON.stringify(pendingFromEmpty) === JSON.stringify(journalEntries.map((e) => e.tag)),
+    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0013)',
+    `pendientes=${JSON.stringify(pendingFromEmpty)}`
+  );
+
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
   console.log('\n📌 2. normalizePlanConfig aplica defaults neutros sin valores de Sistemas');
   const neutralCfg = normalizePlanConfig(
