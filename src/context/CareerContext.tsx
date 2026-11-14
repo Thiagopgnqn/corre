@@ -1,12 +1,16 @@
 import React, { createContext, useContext, useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type {
-  SubjectStatus,
-  UserCareerState,
+  ActivePlanCatalog,
+  AssignedElectivesByYear,
   CareerProgress,
   CriticalPathResult,
-  Subject,
-  AssignedElectivesByYear,
   ExamAttempt,
+  PlanCareerMeta,
+  PlanConfig,
+  PlanSpecialRule,
+  Subject,
+  SubjectStatus,
+  UserCareerState,
 } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
 import type {
@@ -17,22 +21,13 @@ import type {
   UpsertEnrollmentInput,
 } from '../types/enrollment';
 import { DEFAULT_SCHEDULES, SAMPLE_SCHEDULES } from '../data/schedule';
-import { CORE_SUBJECTS } from '../data/plan2023';
-import {
-  ELECTIVES,
-  REQUIRED_ELECTIVE_CREDITS_TOTAL,
-  ELECTIVE_SLOTS_EQUIVALENT,
-} from '../data/electives';
 import { getAvailableTutorialSteps } from '../data/tutorialSteps';
 import { getScheduleAvailability } from '../utils/scheduleAvailability';
 import {
-  getSubjectStatus,
-  isApprovedOrHigher,
-  checkAnalistaTitle,
-  isPPSEligible,
+  buildSubjectsMap,
+  evaluatePlanProgress,
   getNewlyUnlockedOnStateChange,
-  calculateProgressBreakdown,
-  ALL_SUBJECTS_MAP,
+  getSubjectStatus,
 } from '../utils/correlativas';
 import {
   evaluateCommissionPromptOnStatusChange,
@@ -49,13 +44,17 @@ import {
   saveBasket,
   loadSettings,
   saveSettings,
+  DEFAULT_SETTINGS,
   type AppSettings,
   loadAssignedElectives,
   saveAssignedElectives,
+  sanitizeAssignedElectives,
+  buildEmptyAssignedElectives,
   clearCareerData,
   exportCareerToJson,
   importCareerFromJson,
-  getSample3rdYearStudent,
+  getSampleStudentForPlan,
+  migrateLegacyLocalStorageToPlan,
   shouldAutoStartTutorial,
   loadScheduleSelections,
   saveScheduleSelections,
@@ -73,7 +72,7 @@ import {
 } from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { userStateApi } from '../api/userState.api';
-import { catalogApi } from '../api/catalog.api';
+import { catalogApi, loadPlanCatalogSmart } from '../api/catalog.api';
 import { enrollmentsApi } from '../api/enrollments.api';
 import { professorsApi } from '../api/professors.api';
 import type { SyncStatus } from '../components/common/SyncStatusBadge';
@@ -224,41 +223,107 @@ interface CareerContextType {
   ) => Promise<ExamAttempt>;
   deleteExamAttempt: (id: string) => Promise<void>;
 
+  // Active dynamic catalog metadata
+  activePlan: ActivePlanCatalog | null;
+  activeCareer: PlanCareerMeta | null;
+  planConfig: PlanConfig | null;
+  planRules: PlanSpecialRule[];
+  coreSubjects: Subject[];
+  electives: Subject[];
+  allSubjects: Subject[];
+  subjectsById: Map<number, Subject>;
+  acronyms: Record<string, number>;
+  requiredElectiveCredits: number;
+  totalLevels: number;
+  levelLabel: string;
+  catalogStatus: 'loading' | 'ready' | 'error';
+  isWakingCatalogServer: boolean;
+  catalogError: string | null;
+  retryLoadCatalog: () => Promise<void>;
+
   // Full-Stack & Sync features
   syncStatus: SyncStatus;
   showMigrationModal: boolean;
   setShowMigrationModal: (show: boolean) => void;
   currentPlanName: string;
-  reloadServerState: () => Promise<void>;
+  reloadServerState: (overridePlanId?: string) => Promise<void>;
 }
 
 const CareerContext = createContext<CareerContextType | undefined>(undefined);
 
-export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuth();
+const EMPTY_PROGRESS: CareerProgress = {
+  totalSubjects: 0,
+  approvedCount: 0,
+  promotedCount: 0,
+  regularizedCount: 0,
+  takingCount: 0,
+  blockedCount: 0,
+  availableCount: 0,
+  totalWeeklyHours: 0,
+  approvedWeeklyHours: 0,
+  careerPercentageBySubjects: 0,
+  careerPercentageByHours: 0,
+  percentageApproved: 0,
+  percentageTaking: 0,
+  percentageRegularized: 0,
+  percentagePending: 0,
+  totalEquivalentSlots: 0,
+  approvedEquivalentSlots: 0,
+  averageGrade: 0,
+  averageGradeWithPromotions: 0,
+  averageGradeWithoutFails: 0,
+  averageGradeWithFails: 0,
+  totalFailsCount: 0,
+  libreCount: 0,
+  pendingFinalsCount: 0,
+  totalElectiveCreditsApproved: 0,
+  totalElectiveCreditsTaking: 0,
+  totalElectiveCreditsRegularized: 0,
+  totalElectiveCreditsRequired: 0,
+  missingElectiveCreditsForDegree: 0,
+  missingCoreForDegree: [],
+  isAnalistaEligible: false,
+  missingForAnalista: {
+    missingCoreIds: [],
+    seminarioApproved: false,
+    electiveCredits: 0,
+  },
+  isPPSEligible: false,
+  isDegreeEligible: false,
+};
 
-  const [userState, setUserState] = useState<UserCareerState>(() => loadUserState());
+export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isAuthenticated, user } = useAuth();
+
+  const [activePlan, setActivePlan] = useState<ActivePlanCatalog | null>(null);
+  const [catalogStatus, setCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [isWakingCatalogServer, setIsWakingCatalogServer] = useState<boolean>(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  const [userState, setUserState] = useState<UserCareerState>({});
   const [simulationState, setSimulationState] = useState<UserCareerState | null>(null);
-  const [assignedElectives, setAssignedElectives] = useState<AssignedElectivesByYear>(() => loadAssignedElectives());
-  const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
+  const [assignedElectives, setAssignedElectives] = useState<AssignedElectivesByYear>(() =>
+    buildEmptyAssignedElectives(5)
+  );
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(() => soundManager.getSoundEnabled());
   const [selectedSubjectId, setSelectedSubjectId] = useState<number | null>(null);
   const [statusModalSubjectId, setStatusModalSubjectId] = useState<number | null>(null);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState<boolean>(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState<boolean>(false);
-  const [semesterBasket, setSemesterBasket] = useState<number[]>(() => loadBasket());
+  const [semesterBasket, setSemesterBasket] = useState<number[]>([]);
   const [showElectivesInGraph, setShowElectivesInGraph] = useState<boolean>(false);
 
   // Schedule builder state
-  const [scheduleSelections, setScheduleSelections] = useState<Record<number, string>>(() => loadScheduleSelections());
-  const [scheduleDrafts, setScheduleDrafts] = useState<ScheduleDraft[]>(() => loadScheduleDrafts());
-  const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(() => loadCustomSchedules());
-  const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>(() => loadScheduleTerm());
+  const [scheduleSelections, setScheduleSelections] = useState<Record<number, string>>({});
+  const [scheduleDrafts, setScheduleDrafts] = useState<ScheduleDraft[]>([]);
+  const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(null);
+  const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>('1C');
 
   // Enrollments & Recommendations state
-  const [enrollments, setEnrollments] = useState<SubjectEnrollment[]>(() => loadEnrollments());
-  const [examAttempts, setExamAttempts] = useState<ExamAttempt[]>(() => loadExamAttempts());
+  const [enrollments, setEnrollments] = useState<SubjectEnrollment[]>([]);
+  const [examAttempts, setExamAttempts] = useState<ExamAttempt[]>([]);
   const [pendingCommissionPrompt, setPendingCommissionPrompt] =
     useState<PendingCommissionPrompt | null>(null);
   const [kanbanEnrollmentHint, setKanbanEnrollmentHint] =
@@ -274,10 +339,31 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Full Stack sync state
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('saved');
   const [showMigrationModal, setShowMigrationModal] = useState<boolean>(false);
-  const [currentPlanName, setCurrentPlanName] = useState<string>('Plan 2023');
+  const [currentPlanName, setCurrentPlanName] = useState<string>('Plan de estudio');
 
+  const activePlanRef = useRef<ActivePlanCatalog | null>(null);
+  const hydratedStoragePlanIdRef = useRef<string | null>(null);
   const hasHydratedRef = useRef(false);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const activeCareer = activePlan?.career ?? null;
+  const planConfig = activePlan?.plan.config ?? null;
+  const planRules = activePlan?.rules ?? [];
+  const acronyms = activePlan?.acronyms ?? {};
+  const allSubjects = activePlan?.subjects ?? [];
+  const coreSubjects = useMemo(
+    () => allSubjects.filter((s) => !s.isElective),
+    [allSubjects]
+  );
+  const electives = useMemo(
+    () => allSubjects.filter((s) => Boolean(s.isElective)),
+    [allSubjects]
+  );
+  const subjectsById = useMemo(() => buildSubjectsMap(allSubjects), [allSubjects]);
+  const validElectiveIds = useMemo(() => new Set(electives.map((e) => e.id)), [electives]);
+  const totalLevels = planConfig?.totalLevels ?? 5;
+  const levelLabel = planConfig?.levelLabel ?? 'Año';
+  const requiredElectiveCredits = planConfig?.requiredElectiveCredits ?? 0;
 
   const refreshReviewableSummary = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -306,81 +392,203 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isAuthenticated]);
 
-  // Load server state when authenticated
-  const reloadServerState = useCallback(async () => {
-    if (!isAuthenticated) return;
+  const applyLoadedCatalogToState = useCallback((catalog: ActivePlanCatalog) => {
+    activePlanRef.current = catalog;
+    setActivePlan(catalog);
+    setCatalogStatus('ready');
+    setCatalogError(null);
+    setCurrentPlanName(catalog.plan.name);
 
-    try {
-      setSyncStatus('saving');
-
-      // 1. Cargar plan activo
-      const planRes = await catalogApi.getPlan('current').catch(() => null);
-      if (planRes?.success && planRes.data?.plan) {
-        setCurrentPlanName(planRes.data.plan.name);
-      }
-
-      // 2. Cargar estado de usuario
-      const stateRes = await userStateApi.getState();
-      if (stateRes.success && stateRes.data) {
-        const d = stateRes.data;
-        setUserState(d.progress || {});
-        setSettings(d.settings);
-        setAssignedElectives(d.assignedElectives);
-        setSemesterBasket(d.basket || []);
-        setScheduleSelections(d.scheduleSelections || {});
-        if (d.scheduleProposals) {
-          setScheduleDrafts(d.scheduleProposals);
-        }
-        if (Array.isArray(d.enrollments)) {
-          setEnrollments(d.enrollments);
-        }
-        if (Array.isArray(d.examAttempts)) {
-          setExamAttempts(d.examAttempts);
-        }
-
-        // Si la cuenta en la nube es virgen pero el navegador tiene datos locales
-        const localState = loadUserState();
-        if (!d.hasSavedData && Object.keys(localState).length > 0) {
-          setShowMigrationModal(true);
-        }
-
-        hasHydratedRef.current = true;
-        setSyncStatus('saved');
-      }
-
-      // 3. Cargar oferta de horarios desde la API de catálogo
-      const schedRes = await catalogApi.getSchedule().catch(() => null);
-      if (schedRes?.success && schedRes.data?.schedule && schedRes.data.schedule.length > 0) {
-        setCustomSchedules(schedRes.data.schedule);
-      }
-
-      // 4. Cargar resumen de recomendaciones de reseñas
-      await refreshReviewableSummary();
-    } catch (e) {
-      console.error('Error hydrating from server:', e);
-      setSyncStatus('offline');
+    const planId = catalog.plan.id;
+    if (catalog.career.code === 'ISI' && catalog.plan.year === 2023) {
+      migrateLegacyLocalStorageToPlan(planId);
     }
-  }, [isAuthenticated, refreshReviewableSummary]);
+
+    const planElectives = catalog.subjects.filter((s) => Boolean(s.isElective));
+    const planTotalLevels = catalog.plan.config.totalLevels;
+    const localState = loadUserState(planId);
+
+    setUserState(localState);
+    setAssignedElectives(
+      loadAssignedElectives(localState, {
+        electives: planElectives,
+        totalLevels: planTotalLevels,
+        planId,
+      })
+    );
+    setSettings(loadSettings(planId));
+    setSemesterBasket(loadBasket(planId));
+    setScheduleSelections(loadScheduleSelections(planId));
+    setScheduleDrafts(loadScheduleDrafts(planId));
+    setCustomSchedules(loadCustomSchedules(planId));
+    setScheduleTerm(loadScheduleTerm(planId));
+    setEnrollments(loadEnrollments(planId));
+    setExamAttempts(loadExamAttempts(planId));
+    setSimulationState(null);
+    setSelectedSubjectId(null);
+    hydratedStoragePlanIdRef.current = planId;
+  }, []);
+
+  const reloadSeqRef = useRef(0);
+
+  // Load server catalog + state when authenticated
+  const reloadServerState = useCallback(
+    async (overridePlanId?: string) => {
+      if (!isAuthenticated) return;
+
+      const seq = ++reloadSeqRef.current;
+      hydratedStoragePlanIdRef.current = null;
+      hasHydratedRef.current = false;
+
+      const isPlanSwitch =
+        typeof overridePlanId === 'string' || activePlanRef.current !== null;
+      const requestedPlanId =
+        overridePlanId ?? (isPlanSwitch ? 'current' : user?.selectedPlanId || 'current');
+
+      setCatalogStatus('loading');
+      setCatalogError(null);
+
+      let loadedCatalog: ActivePlanCatalog;
+      let immediateAppliedId: string | null = null;
+      try {
+        const result = await loadPlanCatalogSmart({
+          planId: requestedPlanId,
+          forceRefresh: isPlanSwitch && !overridePlanId,
+          onWakingChange: setIsWakingCatalogServer,
+          onImmediateCache: (cachedCatalog) => {
+            if (seq !== reloadSeqRef.current) return;
+            immediateAppliedId = cachedCatalog.plan.id;
+            applyLoadedCatalogToState(cachedCatalog);
+          },
+        });
+        if (seq !== reloadSeqRef.current) return;
+        loadedCatalog = result.catalog;
+
+        if (immediateAppliedId !== loadedCatalog.plan.id) {
+          applyLoadedCatalogToState(loadedCatalog);
+        } else {
+          activePlanRef.current = loadedCatalog;
+          setActivePlan(loadedCatalog);
+          setCurrentPlanName(loadedCatalog.plan.name);
+        }
+      } catch (e) {
+        if (seq !== reloadSeqRef.current) return;
+        console.error('Error loading active plan catalog:', e);
+        setCatalogError(
+          e instanceof Error && e.message
+            ? e.message
+            : 'No se pudo cargar tu plan de estudio. Verificá tu conexión e intentá nuevamente.'
+        );
+        setCatalogStatus('error');
+        setSyncStatus('offline');
+        return;
+      }
+
+      const planId = loadedCatalog.plan.id;
+      const planElectiveIds = new Set(
+        loadedCatalog.subjects.filter((s) => Boolean(s.isElective)).map((s) => s.id)
+      );
+      const planTotalLevels = loadedCatalog.plan.config.totalLevels;
+
+      try {
+        setSyncStatus('saving');
+
+        // 2. Cargar estado de usuario para el plan activo
+        const stateRes = await userStateApi.getState();
+        if (seq !== reloadSeqRef.current) return;
+
+        let effectiveStateForTutorial = loadUserState(planId);
+        let effectiveSettingsForTutorial = loadSettings(planId);
+
+        if (stateRes.success && stateRes.data) {
+          const d = stateRes.data;
+          const nextState = d.progress || {};
+          effectiveStateForTutorial = nextState;
+          effectiveSettingsForTutorial = d.settings || DEFAULT_SETTINGS;
+
+          setUserState(nextState);
+          setSettings(d.settings);
+          setAssignedElectives(
+            sanitizeAssignedElectives(d.assignedElectives || {}, planElectiveIds, planTotalLevels)
+          );
+          setSemesterBasket(d.basket || []);
+          setScheduleSelections(d.scheduleSelections || {});
+          if (d.scheduleProposals) {
+            setScheduleDrafts(d.scheduleProposals);
+          }
+          if (Array.isArray(d.enrollments)) {
+            setEnrollments(d.enrollments);
+          }
+          if (Array.isArray(d.examAttempts)) {
+            setExamAttempts(d.examAttempts);
+          }
+
+          // Si la cuenta en la nube es virgen pero el navegador tiene datos locales de este plan
+          const localState = loadUserState(planId);
+          if (!d.hasSavedData && Object.keys(localState).length > 0) {
+            setShowMigrationModal(true);
+          }
+
+          hasHydratedRef.current = true;
+          setSyncStatus('saved');
+        }
+
+        if (!effectiveSettingsForTutorial.tutorialCompleted && shouldAutoStartTutorial(effectiveStateForTutorial, planId)) {
+          setIsTutorialOpen(true);
+        }
+
+        // 3. Cargar oferta de horarios del plan activo
+        const schedRes = await catalogApi.getSchedule({ planId }).catch(() => null);
+        if (seq !== reloadSeqRef.current) return;
+        if (schedRes?.success && schedRes.data?.schedule && schedRes.data.schedule.length > 0) {
+          setCustomSchedules(schedRes.data.schedule);
+        } else {
+          setCustomSchedules(null);
+        }
+
+        // 4. Cargar resumen de recomendaciones de reseñas
+        await refreshReviewableSummary();
+      } catch (e) {
+        if (seq !== reloadSeqRef.current) return;
+        console.error('Error hydrating from server:', e);
+        setSyncStatus('offline');
+      }
+    },
+    [isAuthenticated, user?.selectedPlanId, applyLoadedCatalogToState, refreshReviewableSummary]
+  );
+
+  const retryLoadCatalog = useCallback(async () => {
+    await reloadServerState();
+  }, [reloadServerState]);
 
   useEffect(() => {
     if (isAuthenticated) {
       reloadServerState();
     } else {
       hasHydratedRef.current = false;
+      hydratedStoragePlanIdRef.current = null;
+      activePlanRef.current = null;
+      setActivePlan(null);
+      setCatalogStatus('loading');
+      setCatalogError(null);
       setUnseenRecommendationsCount(0);
     }
   }, [isAuthenticated, reloadServerState]);
 
   const activeSchedules = useMemo(() => {
-    return customSchedules && customSchedules.length > 0
-      ? customSchedules
-      : DEFAULT_SCHEDULES.length > 0
-      ? DEFAULT_SCHEDULES
-      : SAMPLE_SCHEDULES;
-  }, [customSchedules]);
+    if (customSchedules && customSchedules.length > 0) {
+      return customSchedules;
+    }
+    const isIsi2023 =
+      activePlan?.career?.code === 'ISI' && activePlan?.plan?.year === 2023;
+    if (!isIsi2023) {
+      return [];
+    }
+    return DEFAULT_SCHEDULES.length > 0 ? DEFAULT_SCHEDULES : SAMPLE_SCHEDULES;
+  }, [customSchedules, activePlan]);
 
   // Tutorial state & sandbox snapshot
-  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(() => shouldAutoStartTutorial());
+  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
   const [currentTutorialStep, setCurrentTutorialStep] = useState<number>(0);
   const realUserStateBackupRef = useRef<UserCareerState | null>(null);
 
@@ -390,50 +598,62 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [isTutorialOpen, userState]);
 
-  // Sync state to local storage when real state changes
-  useEffect(() => {
-    saveUserState(userState);
-  }, [userState]);
+  // Sync state to plan-scoped local storage when real state changes (never before hydration)
+  const scopedPlanId = activePlan?.plan.id ?? null;
 
   useEffect(() => {
-    saveAssignedElectives(assignedElectives);
-  }, [assignedElectives]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveUserState(userState, scopedPlanId);
+  }, [userState, scopedPlanId]);
 
   useEffect(() => {
-    saveSettings(settings);
-  }, [settings]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveAssignedElectives(assignedElectives, { validElectiveIds, totalLevels, planId: scopedPlanId });
+  }, [assignedElectives, scopedPlanId, validElectiveIds, totalLevels]);
 
   useEffect(() => {
-    saveBasket(semesterBasket);
-  }, [semesterBasket]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveSettings(settings, scopedPlanId);
+  }, [settings, scopedPlanId]);
 
   useEffect(() => {
-    saveScheduleSelections(scheduleSelections);
-  }, [scheduleSelections]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveBasket(semesterBasket, scopedPlanId);
+  }, [semesterBasket, scopedPlanId]);
 
   useEffect(() => {
-    saveScheduleDrafts(scheduleDrafts);
-  }, [scheduleDrafts]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveScheduleSelections(scheduleSelections, scopedPlanId);
+  }, [scheduleSelections, scopedPlanId]);
 
   useEffect(() => {
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveScheduleDrafts(scheduleDrafts, scopedPlanId);
+  }, [scheduleDrafts, scopedPlanId]);
+
+  useEffect(() => {
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
     if (customSchedules) {
-      saveCustomSchedules(customSchedules);
+      saveCustomSchedules(customSchedules, scopedPlanId);
     } else {
-      clearCustomSchedules();
+      clearCustomSchedules(scopedPlanId);
     }
-  }, [customSchedules]);
+  }, [customSchedules, scopedPlanId]);
 
   useEffect(() => {
-    saveScheduleTerm(scheduleTerm);
-  }, [scheduleTerm]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveScheduleTerm(scheduleTerm, scopedPlanId);
+  }, [scheduleTerm, scopedPlanId]);
 
   useEffect(() => {
-    saveEnrollments(enrollments);
-  }, [enrollments]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveEnrollments(enrollments, scopedPlanId);
+  }, [enrollments, scopedPlanId]);
 
   useEffect(() => {
-    saveExamAttempts(examAttempts);
-  }, [examAttempts]);
+    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    saveExamAttempts(examAttempts, scopedPlanId);
+  }, [examAttempts, scopedPlanId]);
 
   const isSimulationMode = simulationState !== null;
   const activeState = simulationState ?? userState;
@@ -453,7 +673,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editingEnrollment?: SubjectEnrollment | null;
       }
     ) => {
-      const sub = ALL_SUBJECTS_MAP.get(subjectCode);
+      const sub = subjectsById.get(subjectCode);
       const currentStatus =
         options?.targetStatus ||
         (sub ? getSubjectStatus(sub, activeState) : 'cursando');
@@ -465,7 +685,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setKanbanEnrollmentHint(null);
     },
-    [activeState]
+    [activeState, subjectsById]
   );
 
   const dismissKanbanEnrollmentHint = useCallback(() => {
@@ -699,13 +919,13 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ) => {
       const targetState = isSimulationMode ? simulationState! : userState;
       const prevSubState = targetState[id];
-      const subjectObj = ALL_SUBJECTS_MAP.get(id);
+      const subjectObj = subjectsById.get(id);
       const prevStatus = subjectObj
         ? getSubjectStatus(subjectObj, targetState)
         : prevSubState?.status;
 
       // Check if newly unlocked subjects appear
-      const newlyUnlocked = getNewlyUnlockedOnStateChange(id, status, targetState);
+      const newlyUnlocked = getNewlyUnlockedOnStateChange(id, status, targetState, coreSubjects);
 
       const nextSubjectState = {
         ...prevSubState,
@@ -814,6 +1034,8 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isTutorialOpen,
       enrollments,
       refreshReviewableSummary,
+      subjectsById,
+      coreSubjects,
     ]
   );
 
@@ -851,18 +1073,15 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     [isSimulationMode, simulationState, userState, isAuthenticated, refreshReviewableSummary]
   );
 
-  // Elective assignment handlers (strictly prevent duplication across years)
+  // Elective assignment handlers (strictly prevent duplication across levels)
   const addElectiveToYear = useCallback(
     (electiveId: number, targetYear: number) => {
-      const validYear = Math.max(1, Math.min(5, targetYear));
+      const validYear = Math.max(1, Math.min(totalLevels, targetYear));
       setAssignedElectives((prev) => {
-        const next: AssignedElectivesByYear = {
-          1: prev[1].filter((id) => id !== electiveId),
-          2: prev[2].filter((id) => id !== electiveId),
-          3: prev[3].filter((id) => id !== electiveId),
-          4: prev[4].filter((id) => id !== electiveId),
-          5: prev[5].filter((id) => id !== electiveId),
-        };
+        const next = buildEmptyAssignedElectives(totalLevels);
+        for (let lvl = 1; lvl <= totalLevels; lvl++) {
+          next[lvl] = (prev[lvl] || []).filter((id) => id !== electiveId);
+        }
         next[validYear].push(electiveId);
 
         if (isAuthenticated && hasHydratedRef.current) {
@@ -877,7 +1096,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       soundManager.playClick();
     },
-    [isAuthenticated]
+    [isAuthenticated, totalLevels]
   );
 
   const removeElectiveFromYear = useCallback(
@@ -906,15 +1125,12 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const moveElectiveYear = useCallback(
     (electiveId: number, _fromYear: number, toYear: number) => {
-      const validToYear = Math.max(1, Math.min(5, toYear));
+      const validToYear = Math.max(1, Math.min(totalLevels, toYear));
       setAssignedElectives((prev) => {
-        const next: AssignedElectivesByYear = {
-          1: prev[1].filter((id) => id !== electiveId),
-          2: prev[2].filter((id) => id !== electiveId),
-          3: prev[3].filter((id) => id !== electiveId),
-          4: prev[4].filter((id) => id !== electiveId),
-          5: prev[5].filter((id) => id !== electiveId),
-        };
+        const next = buildEmptyAssignedElectives(totalLevels);
+        for (let lvl = 1; lvl <= totalLevels; lvl++) {
+          next[lvl] = (prev[lvl] || []).filter((id) => id !== electiveId);
+        }
         next[validToYear].push(electiveId);
 
         if (isAuthenticated && hasHydratedRef.current) {
@@ -929,7 +1145,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       soundManager.playClick();
     },
-    [isAuthenticated]
+    [isAuthenticated, totalLevels]
   );
 
   const updateSettings = useCallback(
@@ -990,181 +1206,26 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const selectedSubject = useMemo(() => {
     if (!selectedSubjectId) return null;
-    const core = CORE_SUBJECTS.find((s) => s.id === selectedSubjectId);
-    if (core) return core;
-    const elective = ELECTIVES.find((e) => e.id === selectedSubjectId);
-    return elective || null;
-  }, [selectedSubjectId]);
+    return subjectsById.get(selectedSubjectId) || null;
+  }, [selectedSubjectId, subjectsById]);
 
-  // Global statistics calculation
+  // Global statistics calculation delegated cleanly to pure engine
   const computedProgress = useMemo<CareerProgress>(() => {
-    const activeCoreSubjects = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-
-    let approvedCount = 0;
-    let promotedCount = 0;
-    let regularizedCount = 0;
-    let takingCount = 0;
-    let blockedCount = 0;
-    let availableCount = 0;
-    let libreCount = 0;
-
-    let totalWeeklyHours = 0;
-    let approvedWeeklyHours = 0;
-
-    const gradesToAverage: number[] = [];
-
-    activeCoreSubjects.forEach((subject) => {
-      totalWeeklyHours += subject.weeklyHours;
-      const status = getSubjectStatus(subject, activeState);
-      const st = activeState[subject.id];
-
-      if (status === 'aprobada') {
-        approvedCount++;
-        approvedWeeklyHours += subject.weeklyHours;
-        if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-          gradesToAverage.push(st.grade);
-        }
-      } else if (status === 'promocionada') {
-        promotedCount++;
-        approvedWeeklyHours += subject.weeklyHours;
-        if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-          gradesToAverage.push(st.grade);
-        }
-      } else if (status === 'regularizada') {
-        regularizedCount++;
-      } else if (status === 'cursando') {
-        takingCount++;
-      } else if (status === 'disponible') {
-        availableCount++;
-      } else if (status === 'libre') {
-        libreCount++;
-        blockedCount++;
-      } else {
-        blockedCount++;
-      }
-    });
-
-    // Electives credits computation (global total, regardless of level)
-    let totalElectiveCreditsApproved = 0;
-    let totalElectiveCreditsRegularized = 0;
-    let totalElectiveCreditsTaking = 0;
-
-    ELECTIVES.forEach((el) => {
-      const st = activeState[el.id];
-      if (isApprovedOrHigher(st)) {
-        totalElectiveCreditsApproved += el.credits;
-        if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-          gradesToAverage.push(st.grade);
-        }
-      } else if (st?.status === 'regularizada') {
-        totalElectiveCreditsRegularized += el.credits;
-      } else if (st?.status === 'cursando') {
-        totalElectiveCreditsTaking += el.credits;
-      }
-    });
-
-    const coreApproved = approvedCount + promotedCount;
-    const corePending = blockedCount + availableCount;
-
-    const breakdown = calculateProgressBreakdown({
-      coreApproved,
-      coreRegularized: regularizedCount,
-      coreTaking: takingCount,
-      corePending,
-      totalCore: activeCoreSubjects.length,
-      electiveCreditsApproved: totalElectiveCreditsApproved,
-      electiveCreditsRegularized: totalElectiveCreditsRegularized,
-      electiveCreditsTaking: totalElectiveCreditsTaking,
-      includeElectives: settings.includeElectivesInProgress,
-      electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
-      requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
-    });
-
-    const careerPercentageBySubjects = breakdown.percentageApproved;
-    const careerPercentageByHours = totalWeeklyHours > 0
-      ? Math.round((approvedWeeklyHours / totalWeeklyHours) * 100)
-      : 0;
-
-
-    const failGrades = examAttempts
-      .filter((att) => !att.isPassed || att.grade < settings.minPassingGrade)
-      .map((att) => att.grade);
-
-    const allGradesWithFails = [...gradesToAverage, ...failGrades];
-
-    const averageGradeWithoutFails = gradesToAverage.length > 0
-      ? Number((gradesToAverage.reduce((a, b) => a + b, 0) / gradesToAverage.length).toFixed(2))
-      : 0;
-
-    const averageGradeWithFails = allGradesWithFails.length > 0
-      ? Number((allGradesWithFails.reduce((a, b) => a + b, 0) / allGradesWithFails.length).toFixed(2))
-      : averageGradeWithoutFails;
-
-    const averageGrade = settings.includeFailsInGPA
-      ? averageGradeWithFails
-      : averageGradeWithoutFails;
-
-
-    const missingElectiveCreditsForDegree = Math.max(0, REQUIRED_ELECTIVE_CREDITS_TOTAL - totalElectiveCreditsApproved);
-    const missingCoreForDegree = activeCoreSubjects
-      .filter((s) => !isApprovedOrHigher(activeState[s.id]))
-      .map((s) => s.id);
-
-    const analistaCheck = checkAnalistaTitle(activeState, totalElectiveCreditsApproved);
-    const ppsCheck = isPPSEligible(activeState);
-
-    // Degree eligible: all active core subjects approved + 20 total elective credits
-    const isDegreeEligible =
-      missingCoreForDegree.length === 0 &&
-      totalElectiveCreditsApproved >= REQUIRED_ELECTIVE_CREDITS_TOTAL;
-
-    return {
-      totalSubjects: activeCoreSubjects.length,
-      approvedCount,
-      promotedCount,
-      regularizedCount,
-      takingCount,
-      blockedCount,
-      availableCount,
-      totalWeeklyHours,
-      approvedWeeklyHours,
-      careerPercentageBySubjects,
-      careerPercentageByHours,
-      percentageApproved: breakdown.percentageApproved,
-      percentageTaking: breakdown.percentageTaking,
-      percentageRegularized: breakdown.percentageRegularized,
-      percentagePending: breakdown.percentagePending,
-      totalEquivalentSlots: breakdown.totalEquivalentSlots,
-      approvedEquivalentSlots: breakdown.approvedEquivalentSlots,
-      averageGrade,
-      averageGradeWithPromotions: averageGrade,
-      averageGradeWithoutFails,
-      averageGradeWithFails,
-      totalFailsCount: failGrades.length,
-      libreCount,
-      pendingFinalsCount: regularizedCount,
-      totalElectiveCreditsApproved,
-      totalElectiveCreditsTaking,
-      totalElectiveCreditsRegularized,
-      totalElectiveCreditsRequired: REQUIRED_ELECTIVE_CREDITS_TOTAL,
-      missingElectiveCreditsForDegree,
-      missingCoreForDegree,
-      isAnalistaEligible: analistaCheck.eligible,
-      missingForAnalista: {
-        missingCoreIds: analistaCheck.missingCoreIds,
-        seminarioApproved: analistaCheck.seminarioApproved,
-        electiveCredits: analistaCheck.electiveCredits,
-      },
-      isPPSEligible: ppsCheck.eligible,
-      isDegreeEligible,
-    };
-  }, [activeState, settings, examAttempts]);
+    if (!activePlan) return EMPTY_PROGRESS;
+    return evaluatePlanProgress({
+      plan: activePlan,
+      userState: activeState,
+      settings,
+      examAttempts,
+    }).progress;
+  }, [activePlan, activeState, settings, examAttempts]);
 
   const criticalPath = useMemo<CriticalPathResult>(() => {
-    return calculateCriticalPath(activeState, settings.includeAnalistaTrack);
-  }, [activeState, settings.includeAnalistaTrack]);
+    if (!activePlan) {
+      return { chain: [], length: 0, estimatedTerms: 0 };
+    }
+    return calculateCriticalPath(activeState, activePlan, settings.includeAnalistaTrack);
+  }, [activePlan, activeState, settings.includeAnalistaTrack]);
 
   // Schedule Builder Actions
   const selectCommission = useCallback(
@@ -1315,7 +1376,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         const refProfUuids = (comm.professorRefs || [])
           .map((r) => r.id)
           .filter((pid): pid is string => Boolean(pid && UUID_REGEX.test(pid)));
-        const subjectObj = ALL_SUBJECTS_MAP.get(id);
+        const subjectObj = subjectsById.get(id);
         const effectiveTerm: EnrollmentTerm =
           subjectObj?.modality === 'A' ? 'A' : scheduleTerm;
 
@@ -1366,6 +1427,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     activeSchedules,
     scheduleTerm,
     refreshReviewableSummary,
+    subjectsById,
   ]);
 
   const exportData = useCallback((): string => {
@@ -1376,6 +1438,8 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       scheduleTerm,
       enrollments,
       examAttempts,
+      planId: activePlan?.plan.id,
+      planTag: planConfig?.shortTag || activePlan?.plan.name,
     });
   }, [
     userState,
@@ -1388,11 +1452,18 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     scheduleTerm,
     enrollments,
     examAttempts,
+    activePlan,
+    planConfig,
   ]);
 
   const importData = useCallback(
     (json: string): { success: boolean; error?: string } => {
-      const result = importCareerFromJson(json);
+      const result = importCareerFromJson(json, {
+        validElectiveIds,
+        electives,
+        totalLevels,
+        planId: activePlan?.plan.id,
+      });
       if (result.success) {
         if (result.userState) setUserState(result.userState);
         if (result.settings) setSettings(result.settings);
@@ -1428,20 +1499,22 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       }
       return { success: false, error: result.error };
     },
-    [isAuthenticated, reloadServerState]
+    [isAuthenticated, reloadServerState, validElectiveIds, electives, totalLevels, activePlan]
   );
 
   const resetAll = useCallback(() => {
-    clearCareerData();
+    const pId = activePlan?.plan.id;
+    const emptyElectives = buildEmptyAssignedElectives(totalLevels);
+    clearCareerData(pId);
     setUserState({});
     setSemesterBasket([]);
-    setAssignedElectives({ 1: [], 2: [], 3: [], 4: [], 5: [] });
+    setAssignedElectives(emptyElectives);
     setScheduleSelections({});
     setScheduleDrafts([]);
     setCustomSchedules(null);
     setEnrollments([]);
     setExamAttempts([]);
-    setSettings(loadSettings());
+    setSettings(loadSettings(pId));
     soundManager.playClick();
 
     if (isAuthenticated) {
@@ -1450,16 +1523,16 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         .importLegacyData({
           userState: {},
           basket: [],
-          assignedElectives: { 1: [], 2: [], 3: [], 4: [], 5: [] },
+          assignedElectives: emptyElectives,
           scheduleSelections: {},
         })
         .then(() => setSyncStatus('saved'))
         .catch(() => setSyncStatus('error'));
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, activePlan, totalLevels]);
 
   const loadSample = useCallback(() => {
-    const sample = getSample3rdYearStudent();
+    const sample = getSampleStudentForPlan(activePlan);
     setUserState(sample.userState);
     setSemesterBasket([]);
     setAssignedElectives(sample.assignedElectives);
@@ -1476,7 +1549,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         })
         .catch(() => setSyncStatus('error'));
     }
-  }, [isAuthenticated, refreshReviewableSummary]);
+  }, [isAuthenticated, activePlan, refreshReviewableSummary]);
 
   // Interactive Tour controls
   const startTutorial = useCallback((fromStep: number = 0) => {
@@ -1630,6 +1703,22 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         importData,
         resetAll,
         loadSample,
+        activePlan,
+        activeCareer,
+        planConfig,
+        planRules,
+        coreSubjects,
+        electives,
+        allSubjects,
+        subjectsById,
+        acronyms,
+        requiredElectiveCredits,
+        totalLevels,
+        levelLabel,
+        catalogStatus,
+        isWakingCatalogServer,
+        catalogError,
+        retryLoadCatalog,
         syncStatus,
         showMigrationModal,
         setShowMigrationModal,

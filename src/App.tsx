@@ -24,7 +24,7 @@ import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
 import { ReviewFormModal } from './components/professors/ReviewFormModal';
 import { LibraryHome } from './components/library/LibraryHome';
-import { Loader2, WifiOff } from 'lucide-react';
+import { Loader2, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { APP_NAME } from './config/brand';
 
 const AdminDashboard = React.lazy(() => import('./components/admin/AdminDashboard'));
@@ -54,7 +54,7 @@ const parseHashState = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated, isEmailVerified, isLoading, user } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading, isWakingServer, user } = useAuth();
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -79,6 +79,11 @@ const AppContent: React.FC = () => {
     closeGlobalReviewModal,
     refreshReviewableSummary,
     startTutorial,
+    activePlan,
+    catalogStatus,
+    isWakingCatalogServer,
+    catalogError,
+    retryLoadCatalog,
   } = useCareer();
   const [hashState, setHashState] = useState(parseHashState);
   const currentView = hashState.view;
@@ -145,11 +150,16 @@ const AppContent: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100">
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100 px-4 text-center">
         <div className="w-12 h-12 rounded-2xl bg-[#171A52]/60 border border-indigo-500/30 flex items-center justify-center mb-4 text-[#FFB938] shadow-lg shadow-[#171A52]/50">
           <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
         </div>
         <p className="text-sm font-medium text-slate-300">Cargando {APP_NAME}...</p>
+        {isWakingServer && (
+          <p className="text-xs text-slate-400 mt-2 max-w-sm">
+            El servidor está despertando, puede tardar hasta 1 minuto
+          </p>
+        )}
       </div>
     );
   }
@@ -160,6 +170,46 @@ const AppContent: React.FC = () => {
 
   if (!isEmailVerified) {
     return <VerifyEmailScreen />;
+  }
+
+  if (catalogStatus === 'error') {
+    return (
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100 px-4 text-center">
+        <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center mb-4 text-rose-400">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <h2 className="text-base font-bold text-white mb-1">No pudimos cargar tu plan de estudio</h2>
+        <p className="text-xs text-slate-400 max-w-md mb-5">
+          {catalogError || 'Ocurrió un error al conectar con el servidor. Verificá tu conexión e intentá nuevamente.'}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            void retryLoadCatalog();
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors"
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>Reintentar</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (catalogStatus === 'loading' || !activePlan) {
+    return (
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100 px-4 text-center">
+        <div className="w-12 h-12 rounded-2xl bg-[#171A52]/60 border border-indigo-500/30 flex items-center justify-center mb-4 text-[#FFB938] shadow-lg shadow-[#171A52]/50">
+          <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+        </div>
+        <p className="text-sm font-medium text-slate-300">Cargando plan de estudio...</p>
+        {isWakingCatalogServer && (
+          <p className="text-xs text-slate-400 mt-2 max-w-sm">
+            El servidor está despertando, puede tardar hasta 1 minuto
+          </p>
+        )}
+      </div>
+    );
   }
 
   return (

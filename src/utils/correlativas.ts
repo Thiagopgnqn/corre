@@ -533,7 +533,7 @@ export interface PlanEvaluationSettings {
   minPassingGrade: number;
   includeAnalistaTrack: boolean;
   includeElectivesInProgress: boolean;
-  includeFailsInGPA: boolean;
+  includeFailsInGPA?: boolean;
 }
 
 export interface PlanEvaluationResult {
