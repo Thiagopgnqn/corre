@@ -793,6 +793,139 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     assert.equal(preservedCache.version, 'v1');
   });
 
+  it('rejects an exact master-era /api/catalog/plans/current payload, triggers error+retry state without fallback, and recovers on retry', async () => {
+    const mockStorage = createMockStorage();
+    // Payload exacto emitido por master:server/src/modules/catalog/catalog.controller.ts (getPlan):
+    // sin `career`, sin `plan.config.totalLevels/levelLabel`, con `ppsSubjectCode: 36` y `subjects[].shortName` ausente (`code` = acrónimo).
+    const masterBackendPlanPayload = {
+      plan: {
+        id: 'plan-isi-2023-uuid',
+        name: 'Plan 2023',
+        year: 2023,
+        config: {
+          requiredElectiveCredits: 20,
+          defaultMinPassingGrade: 4,
+          intermediateDegrees: [
+            {
+              key: 'analista',
+              name: 'Analista Universitario en Sistemas',
+              specialRuleSubjectCode: 99,
+            },
+          ],
+          ppsSubjectCode: 36,
+        },
+        updatedAt: '2026-04-01T00:00:00.000Z',
+      },
+      subjects: [
+        {
+          id: 1,
+          uuid: 'subj-1-uuid',
+          code: 'AM1',
+          name: 'Análisis Matemático I',
+          level: 1,
+          modality: 'anual',
+          contraCuatrimestral: false,
+          weeklyHours: 5,
+          isElective: false,
+          isOptionalTrack: false,
+          regularPrereqs: [],
+          approvedPrereqs: [],
+        },
+        {
+          id: 36,
+          uuid: 'subj-36-uuid',
+          code: 'PFS',
+          name: 'Proyecto Final',
+          level: 5,
+          modality: 'anual',
+          contraCuatrimestral: false,
+          weeklyHours: 6,
+          isElective: false,
+          isOptionalTrack: false,
+          regularPrereqs: [1],
+          approvedPrereqs: [],
+        },
+      ],
+      rules: [
+        {
+          id: 'rule-pps-uuid',
+          subjectCode: 36,
+          ruleType: 'all_prior_and_all_level_regular',
+          params: { targetLevel: 5 },
+          description: 'Regla PPS',
+        },
+      ],
+      acronyms: { AM1: 1, PFS: 36 },
+    };
+
+    assert.equal(isValidPlanCatalogShape(masterBackendPlanPayload), false);
+
+    let backendUpgraded = false;
+    const upgradedHeadCatalog = buildFictitious3LevelPlan({ planId: 'plan-isi-2023-uuid' });
+
+    let hydration = createCareerHydrationState();
+    let catalogStatus: 'loading' | 'ready' | 'error' = 'loading';
+    let catalogError: string | null = null;
+    let activeCatalog: ActivePlanCatalog | null = null;
+    let stateFetchCount = 0;
+
+    const runLoad = () => {
+      catalogStatus = 'loading';
+      catalogError = null;
+      return executeServerReloadCycle<ActivePlanCatalog, { ok: boolean }>({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: () =>
+          loadPlanCatalogSmart({
+            planId: 'current',
+            storage: mockStorage,
+            maxRetries: 2,
+            baseBackoffMs: 1,
+            getVersion: async () => ({ success: true, version: backendUpgraded ? 'v-head' : 'v-master' }),
+            getPlan: async () => ({
+              success: true,
+              data: (backendUpgraded
+                ? upgradedHeadCatalog
+                : masterBackendPlanPayload) as unknown as ActivePlanCatalog,
+            }),
+          }),
+        applyCatalogToUi: (cat) => {
+          activeCatalog = cat;
+          catalogStatus = 'ready';
+        },
+        fetchServerState: async () => {
+          stateFetchCount += 1;
+          return { success: true, data: { ok: true } };
+        },
+        applyServerStateToUi: () => {},
+        onCatalogError: (err) => {
+          activeCatalog = null;
+          catalogStatus = 'error';
+          catalogError = err instanceof Error ? err.message : 'Error desconocido';
+        },
+      });
+    };
+
+    const firstOutcome = await runLoad();
+    assert.equal(firstOutcome.status, 'catalog_error');
+    assert.equal(catalogStatus, 'error', 'Debe activar pantalla de error ante payload viejo de master');
+    assert.match(catalogError ?? '', /servidor está desactualizado/i);
+    assert.equal(activeCatalog, null, 'No debe aplicar catálogo de respaldo estático ante payload viejo');
+    assert.equal(stateFetchCount, 0, 'No debe hidratar ni sincronizar estado si falla la forma del catálogo');
+    assert.equal(mockStorage.length, 0, 'No debe cachear ni guardar puntero current ante payload de master');
+
+    // Simula que el usuario presiona "Reintentar" luego de actualizarse el backend
+    backendUpgraded = true;
+    const retryOutcome = await runLoad();
+    assert.equal(retryOutcome.status, 'hydrated');
+    assert.equal(catalogStatus, 'ready');
+    assert.equal(catalogError, null);
+    assert.equal(activeCatalog?.plan.id, 'plan-isi-2023-uuid');
+    assert.equal(stateFetchCount, 1);
+  });
+
   it('builds explicit schedule unavailable messages for backend errors and empty plans without static fallback', () => {
     const errorFallback = getScheduleUnavailableMessage('backend-error');
     assert.match(errorFallback, /servidor/i);
