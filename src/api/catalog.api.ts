@@ -74,7 +74,7 @@ export interface ScheduleResponse {
 
 export const CATALOG_CACHE_KEY_PREFIX = 'mi_carrera_catalog_cache_v1:';
 export const CATALOG_CURRENT_POINTER_KEY = 'mi_carrera_catalog_current_plan_id_v1';
-export const CATALOG_CACHE_SCHEMA = 3;
+export const CATALOG_CACHE_SCHEMA = 4;
 
 export class CatalogShapeError extends Error {
   constructor(

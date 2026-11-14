@@ -297,6 +297,17 @@ async function main() {
         d.subjects.every((s: any) => typeof s.shortName === 'string' && s.shortName.length > 0),
       'Payload contiene 60 materias (37 obligatorias + 23 electivas) con shortName y kind'
     );
+    const subjById = new Map<number, any>(d.subjects.map((s: any) => [s.id, s]));
+    assert(
+      subjById.get(1)?.code === '1' &&
+        subjById.get(99)?.code === '99' &&
+        subjById.get(301)?.code === 'E-301' &&
+        subjById.get(405)?.code === 'E-405' &&
+        subjById.get(501)?.code === 'E-501' &&
+        subjById.get(408)?.code === 'X-408' &&
+        subjById.get(514)?.code === 'X-514',
+      'Payload expone subject.code con formato exacto ("1", "99", "E-301", "X-408") en vez de shortName'
+    );
     assert(
       d.rules.some((r: any) => r.subjectCode === 99 && r.ruleType === 'approved_range') &&
         d.rules.some((r: any) => r.subjectCode === 36 && r.ruleType === 'all_previous_core_approved') &&

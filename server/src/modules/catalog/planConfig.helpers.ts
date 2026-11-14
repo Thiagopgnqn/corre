@@ -209,6 +209,22 @@ export interface BuildPlanCatalogInput {
   }>;
 }
 
+const X_PREFIX_ELECTIVE_CODES = new Set([408, 512, 513, 514]);
+
+/**
+ * Formats the display code for a subject badge (`#1`, `#E-301`, `#X-408`) matching legacy fixtures.
+ */
+export function formatSubjectDisplayCode(subject: {
+  codeInPlan: number;
+  kind: string;
+}): string {
+  if (subject.kind !== 'electiva') {
+    return String(subject.codeInPlan);
+  }
+  const prefix = X_PREFIX_ELECTIVE_CODES.has(subject.codeInPlan) ? 'X-' : 'E-';
+  return `${prefix}${subject.codeInPlan}`;
+}
+
 export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
   const { plan, career, faculty, institution, subjects, prerequisites, rules, acronyms } = input;
 
@@ -243,7 +259,7 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
   const formattedSubjects = subjects.map((s) => ({
     id: s.codeInPlan,
     uuid: s.id,
-    code: s.shortName,
+    code: formatSubjectDisplayCode(s),
     shortName: s.shortName,
     name: s.name,
     level: s.level,

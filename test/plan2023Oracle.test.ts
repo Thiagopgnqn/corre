@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
 import { evaluatePlanProgress } from '../src/utils/correlativas';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
+import { ELECTIVES } from './fixtures/electives';
 import type {
   ActivePlanCatalog,
   CareerProgress,
@@ -326,5 +328,71 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
     const sampleNoBlocked = oracle.scenarios.find((s) => s.id === '03-sample-3rd-year-no-fails-in-gpa')!;
     const sampleBlockedTrue = oracle.scenarios.find((s) => s.id === '20-allow-blocked-electives-planning-true')!;
     assert.deepStrictEqual(sampleBlockedTrue.expected, sampleNoBlocked.expected);
+  });
+
+  it('builds the 60 UI Subject models from formatted catalog payload matching fixtures field by field', () => {
+    const fixtureSubjects = [...CORE_SUBJECTS, ...ELECTIVES];
+    const seedById = new Map(seedRaw.subjects.map((s) => [s.codeInPlan, s]));
+
+    assert.equal(seedOrderPlan.subjects.length, 60);
+    assert.equal(fixtureSubjects.length, 60);
+
+    const payloadById = new Map(seedOrderPlan.subjects.map((s) => [s.id, s]));
+
+    for (const fixtureSubj of fixtureSubjects) {
+      const payloadSubj = payloadById.get(fixtureSubj.id);
+      assert.ok(payloadSubj, `Falta la materia #${fixtureSubj.id} en el payload formateado`);
+
+      const seedEntry = seedById.get(fixtureSubj.id);
+      assert.ok(seedEntry, `Falta la materia #${fixtureSubj.id} en plan2023-catalog.json`);
+
+      assert.equal(payloadSubj.id, fixtureSubj.id, `id de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.code, fixtureSubj.code, `code de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.name, fixtureSubj.name, `name de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.level, fixtureSubj.level, `level de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.modality, fixtureSubj.modality, `modality de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.weeklyHours, fixtureSubj.weeklyHours, `weeklyHours de #${fixtureSubj.id}`);
+      assert.equal(payloadSubj.credits, fixtureSubj.credits, `credits de #${fixtureSubj.id}`);
+      assert.equal(
+        Boolean(payloadSubj.isElective),
+        Boolean(fixtureSubj.isElective),
+        `isElective de #${fixtureSubj.id}`
+      );
+      assert.deepStrictEqual(
+        [...payloadSubj.regularPrereqs].sort((a, b) => a - b),
+        [...fixtureSubj.regularPrereqs].sort((a, b) => a - b),
+        `regularPrereqs de #${fixtureSubj.id}`
+      );
+      assert.deepStrictEqual(
+        [...payloadSubj.approvedPrereqs].sort((a, b) => a - b),
+        [...fixtureSubj.approvedPrereqs].sort((a, b) => a - b),
+        `approvedPrereqs de #${fixtureSubj.id}`
+      );
+
+      // isOptionalTrack / trackKey vienen del seed y corresponden exclusivamente a Analista (99)
+      assert.equal(
+        Boolean(payloadSubj.isOptionalTrack),
+        Boolean(seedEntry.isOptionalTrack),
+        `isOptionalTrack vs seed de #${fixtureSubj.id}`
+      );
+      assert.equal(
+        payloadSubj.trackKey ?? undefined,
+        seedEntry.trackKey ?? undefined,
+        `trackKey vs seed de #${fixtureSubj.id}`
+      );
+      if (fixtureSubj.id === 99) {
+        assert.equal(payloadSubj.isOptionalTrack, true);
+        assert.equal(payloadSubj.trackKey, 'analista');
+      } else {
+        assert.equal(payloadSubj.isOptionalTrack, false);
+        assert.equal(payloadSubj.trackKey, undefined);
+      }
+      if (fixtureSubj.isOptionalTrack !== undefined) {
+        assert.equal(payloadSubj.isOptionalTrack, fixtureSubj.isOptionalTrack);
+      }
+      if (fixtureSubj.trackKey !== undefined) {
+        assert.equal(payloadSubj.trackKey, fixtureSubj.trackKey);
+      }
+    }
   });
 });

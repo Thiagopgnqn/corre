@@ -498,13 +498,13 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     );
     assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
 
-    assert.equal(CATALOG_CACHE_SCHEMA, 3);
+    assert.equal(CATALOG_CACHE_SCHEMA, 4);
 
-    // Case B: cache with outdated schema number (specifically schema: 2)
+    // Case B: cache with outdated schema number (specifically schema: 3)
     mockStorage.setItem(
       getCatalogCacheKey('plan-schema-test'),
       JSON.stringify({
-        schema: 2,
+        schema: 3,
         planId: 'plan-schema-test',
         version: 'v1',
         cachedAt: '2026-01-01T00:00:00.000Z',
@@ -768,6 +768,24 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
       violations,
       [],
       `Found forbidden static Sistemas/schedule imports or ISI guards in src/: ${violations.join(', ')}`
+    );
+  });
+
+  it('ProfessorsDirectory filters by numeric subject.id rather than formatted code strings like E-301', () => {
+    const dirSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/components/professors/ProfessorsDirectory.tsx'),
+      'utf8'
+    );
+    const idOptionMatches = dirSrc.match(/<option key=\{sub\.id\} value=\{String\(sub\.id\)\}>/g) || [];
+    assert.equal(
+      idOptionMatches.length,
+      2,
+      'ProfessorsDirectory debe enviar String(sub.id) en los dos selectores de materia (desktop y mobile)'
+    );
+    assert.equal(
+      /value=\{String\(sub\.code\)\}/.test(dirSrc),
+      false,
+      'ProfessorsDirectory no debe enviar sub.code ("E-301", "X-408") al endpoint subjectId del backend'
     );
   });
 });

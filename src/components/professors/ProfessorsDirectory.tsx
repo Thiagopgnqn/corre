@@ -604,7 +604,7 @@ export const ProfessorsDirectory: React.FC = () => {
           >
             <option value="">Todas las materias</option>
             {allPlanSubjects.map((sub) => (
-              <option key={sub.id} value={String(sub.code)}>
+              <option key={sub.id} value={String(sub.id)}>
                 {sub.level}° · {sub.name}
               </option>
             ))}
@@ -811,7 +811,7 @@ export const ProfessorsDirectory: React.FC = () => {
             >
               <option value="">Todas las materias</option>
               {allPlanSubjects.map((sub) => (
-                <option key={sub.id} value={String(sub.code)}>
+                <option key={sub.id} value={String(sub.id)}>
                   {sub.level}° · {sub.name}
                 </option>
               ))}

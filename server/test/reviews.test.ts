@@ -1184,6 +1184,45 @@ async function main() {
       revTarget && revTarget.attendedDeclared === true,
       'Tras mergeProfessors, attendedDeclared se mantiene correctamente recalculado'
     );
+
+    // 11.10 Filtro subjectId de GET /api/professors con código numérico vs UUID vs code E-/X-
+    const elective301 = store.seedSubject({
+      codeInPlan: 301,
+      name: 'Backend de Aplicaciones',
+      shortName: 'Backend de Aplicaciones',
+      level: 3,
+      kind: 'electiva',
+    });
+    const profElective = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Elective, Docente Prueba',
+    });
+    store.seedCommissionTeaching({
+      professorId: profElective.id,
+      subjectId: elective301.id,
+      termLabel: '2026 2C',
+      isCurrent: true,
+    });
+
+    const filterByNumCore = await api('GET', `/api/professors?subjectId=${subjects[0].codeInPlan}`, tokenA);
+    const filterByNumElective = await api('GET', '/api/professors?subjectId=301', tokenA);
+    const filterByUuidElective = await api('GET', `/api/professors?subjectId=${elective301.id}`, tokenA);
+    const filterByFormattedCode = await api('GET', '/api/professors?subjectId=E-301', tokenA);
+
+    assert(
+      filterByNumCore.status === 200 &&
+        (filterByNumCore.data?.data?.professors || []).some((p: any) => p.id === profBotta1.id),
+      'GET /api/professors?subjectId=1 (codeInPlan numérico) devuelve docentes de Materia 1'
+    );
+    assert(
+      filterByNumElective.status === 200 &&
+        (filterByNumElective.data?.data?.professors || []).some((p: any) => p.id === profElective.id) &&
+        filterByUuidElective.status === 200 &&
+        (filterByUuidElective.data?.data?.professors || []).some((p: any) => p.id === profElective.id) &&
+        filterByFormattedCode.status === 200 &&
+        (filterByFormattedCode.data?.data?.professors || []).length === 0,
+      'GET /api/professors acepta id numérico (301) y UUID de electiva, pero rechaza "E-301"'
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
