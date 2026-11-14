@@ -29,7 +29,7 @@ function scanRawSpreadsheetAnomalies(): Array<{ location: string; rawCell: strin
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.xlsx'));
   for (const file of files) {
     try {
-      const wb = XLSX.readFile(path.join(dir, file));
+      const wb = XLSX.read(fs.readFileSync(path.join(dir, file)), { type: 'buffer' });
       for (const sheetName of wb.SheetNames) {
         const sheet = wb.Sheets[sheetName];
         if (!sheet || !sheet['!ref']) continue;
