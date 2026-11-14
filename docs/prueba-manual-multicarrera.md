@@ -130,7 +130,7 @@ Compará lado a lado (o pestaña a pestaña) con la versión actual en producci�
 5. **Estadísticas (`StatsDashboard`):**
    - Con *Incluir electivas en progreso* activo: denominador equivalente **`43`** (`36 + 7`) con Analista OFF, y **`44`** (`37 + 7`) con Analista ON.
    - Verificá que la tarjeta **"Habilitación PPS"** aparece visible y responde al cumplimiento de correlativas de la materia **`36`** (bloqueada inicialmente, habilitada cuando se cumplen las regulares `[25, 26, 30]` y aprobadas `[12, 20, 23]`).
-   - Con Analista ON: debe verse el seguimiento de **Analista Universitario** (`23` materias + `99` aprobada + `4` cr. de electivas).
+   - Con Analista ON: debe verse el seguimiento de **Analista Universitario** (`23` materias + `99` aprobada + `4` cr. de electivas). El encabezado de la tarjeta de requisitos muestra **`"Título Intermedio: Analista Universitario de Sistemas de Información"`** (única diferencia visible intencional respecto de producción, donde decía `"Título Intermedio: Analista Universitario de Sistemas"`).
    - Confirmá el cálculo del **Camino Crítico**.
 6. **Armador de Horarios, Profesores y Biblioteca:**
    - **Armador (`ScheduleBuilder` / `ScheduleWeeklyGrid`):** las etiquetas de la grilla semanal muestran nombres cortos claros (migración `0010` y configuración actual), detección de conflictos y sugeridor de combinaciones sin choques.

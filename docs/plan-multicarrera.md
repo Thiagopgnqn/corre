@@ -782,7 +782,16 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
    - `src/utils/libraryUploadLogic.ts` (`L101`): comentario `'por omisión en biblioteca UTN'` -> limpieza menor en **Tanda 2c**.
    - Identificadores internos de compatibilidad (`includeAnalistaTrack`, `isAnalistaEligible`, `missingForAnalista`, `canRenderSeminario`, `checkAnalistaTitle`, `id: 'analista-switch'`, `[data-tour="analista-button"]` y alias legacy en `correlativas.ts` / `storage.ts` / `types/career.ts` / `tutorialLayout.ts`): nombres de propiedades de contratos internos sin exposición en textos visibles de UI.
 
-4. **Línea base verificada tras `df61517` y Tanda 2b:**
+4. **Línea base verificada tras `df61517` y Tanda 2b (aprobada):**
    - **Backend (`npm --prefix server test`):** **`393` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 45`) + `npm --prefix server run build` OK (`tsc`).
    - **Frontend (`npm test`):** **`15 / 15` archivos en verde** (`plan2023Oracle 25/0`, `multicarreraEngine 13/0`, `planText 8/0`, `mobileFrontend 37/0`, `scheduleAvailability 13/0`, `tutorialLayout 12/0`, `scheduleLayout 6/0`, `brand 33/0`, `libraryFrontend 31/0`, `apiContract 2/0`, más `correlativas`, `scheduleImport`, `reviewsFrontend`, `authFrontend`, `adminFrontend`) + `npm run build` OK (`tsc -b && vite build`).
-   - **Estado:** detenido tras **Tanda 2b**, antes de **Tanda 2c**.
+
+---
+
+### 9.11 Corrección de nombre oficial del título intermedio (Commit 1)
+
+1. **Actualización a `"Analista Universitario de Sistemas de Información"`:**
+   - Reemplazado en `server/drizzle/0013_isi_plan_intermediate_and_pps_copy.sql` (ampliando la condición para actualizar tanto el legado `'Analista Universitario en Sistemas'` como el intermedio `'Analista Universitario de Sistemas'`, manteniendo idempotencia, preservando nombres personalizados distintos y disparando la CTE de `catalog_versions` solo cuando hay filas modificadas), `server/seed-data/plan2023-catalog.json`, `server/tools/generateSeedData.ts` y los fixtures/tests correspondientes (`test/correlativas.test.ts`, `test/planText.test.ts`, `server/test/catalogConfigAndSecurity.test.ts`).
+   - Se conservan sin cambios `shortLabel` (`"Analista"`) y `shortTitle` (`"Analista Universitario"`).
+   - **Única diferencia visible intencional respecto de producción:** en `StatsDashboard`, la tarjeta de requisitos del título intermedio pasa a mostrar `"Título Intermedio: Analista Universitario de Sistemas de Información"` (en producción mostraba `"Título Intermedio: Analista Universitario de Sistemas"`). Documentado también en `docs/prueba-manual-multicarrera.md`.
+   - Además se incorpora `getScheduleIcsProdId()` en `src/utils/planText.ts` junto con la cobertura de `getScheduleIcsUidDomain`, `getScheduleIcsProdId` y `getScheduleIcsFilename`.

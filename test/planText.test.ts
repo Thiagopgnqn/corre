@@ -66,6 +66,7 @@ import {
   getProgressWithElectivesBtnLabel,
   getScheduleClipboardHeader,
   getScheduleIcsFilename,
+  getScheduleIcsProdId,
   getScheduleIcsUidDomain,
   getScheduleShortSubjectName,
   getWeeklyHoursElectiveFootnote,
@@ -181,7 +182,7 @@ const ISI_2023_FROZEN_UI_TEXTS = {
     ppsTitle: 'Habilitación PPS',
     ppsDesc: 'Cumplís los requisitos para cursar la Práctica Profesional',
     analistaMilestoneTitle: 'Título Intermedio: Analista Universitario',
-    analistaCardHeading: 'Título Intermedio: Analista Universitario de Sistemas',
+    analistaCardHeading: 'Título Intermedio: Analista Universitario de Sistemas de Información',
     analistaMilestoneDesc: 'Materias 1 a 23 + Seminario Integrador 99 + 4 créditos de electivas',
     analistaRangeLabel: 'Materias 1 a 23:',
     analistaRangeProgressZeroDone: '0 / 23 aprobadas',
@@ -211,6 +212,7 @@ const ISI_2023_FROZEN_UI_TEXTS = {
   },
   schedule: {
     clipboardHeader: '📅 MI HORARIO DE CURSADA — UTN ISI (Plan 2023)\n',
+    icsProdId: 'PRODID:-//Stack//Armador de Horarios//ES',
     icsFilename: 'horarios-utn-2026-11-14.ics',
     icsUidDomain: '@micarrera.utn',
   },
@@ -378,6 +380,7 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     );
 
     assert.equal(getScheduleClipboardHeader(ISI_PLAN), ISI_2023_FROZEN_UI_TEXTS.schedule.clipboardHeader);
+    assert.equal(getScheduleIcsProdId(), ISI_2023_FROZEN_UI_TEXTS.schedule.icsProdId);
     assert.equal(
       getScheduleIcsFilename(ISI_PLAN.career, '2026-11-14'),
       ISI_2023_FROZEN_UI_TEXTS.schedule.icsFilename
@@ -538,6 +541,7 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       getElectivesAssignedHeading(2, bioPlan.plan.config),
       getElectivesSuggestedLevelsFootnote([], bioPlan.career),
       getScheduleClipboardHeader(bioPlan),
+      getScheduleIcsProdId(),
       getScheduleIcsFilename(bioPlan.career, '2026-11-14'),
       getScheduleIcsUidDomain(bioPlan.career),
       getLibraryHeroDescription(bioPlan.career),
@@ -572,6 +576,7 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(getDemoNavbarLabel(bioPlan.plan.config), 'Cargar demo (2do cuatrimestre)');
     assert.equal(getDemoOnboardingLabel(bioPlan.plan.config), 'Cargar demo: Alumno de 2do cuatrimestre');
     assert.equal(getScheduleClipboardHeader(bioPlan), '📅 MI HORARIO DE CURSADA — BIO (Plan 2026)\n');
+    assert.equal(getScheduleIcsProdId(), 'PRODID:-//Stack//Armador de Horarios//ES');
     assert.equal(getScheduleIcsFilename(bioPlan.career, '2026-11-14'), 'horarios-cursada-2026-11-14.ics');
     assert.equal(getScheduleIcsUidDomain(bioPlan.career), '@micarrera.local');
 

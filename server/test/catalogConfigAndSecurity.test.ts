@@ -529,7 +529,8 @@ async function main() {
       sql0013.includes('sp."year" = 2023') &&
       sql0013.includes(`"shortLabel":"Analista"`) &&
       sql0013.includes(`"shortTitle":"Analista Universitario"`) &&
-      sql0013.includes(`Analista Universitario de Sistemas`) &&
+      sql0013.includes(`Analista Universitario de Sistemas de Información`) &&
+      sql0013.includes(`IN ('Analista Universitario en Sistemas', 'Analista Universitario de Sistemas')`) &&
       sql0013.includes(`Cumplís los requisitos para cursar la Práctica Profesional`) &&
       sql0013.includes(`INSERT INTO "catalog_versions"`) &&
       /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql0013),
@@ -555,7 +556,10 @@ async function main() {
       const deg0IsObj = degsIsArr && rawDegs[0] !== null && typeof rawDegs[0] === 'object' && !Array.isArray(rawDegs[0]);
       const deg0 = deg0IsObj ? (rawDegs[0] as Record<string, unknown>) : {};
       const deg0NameTrimmed = typeof deg0.name === 'string' ? deg0.name.trim() : '';
-      const needsNameUpgrade = (deg0NameTrimmed || 'Analista Universitario en Sistemas') === 'Analista Universitario en Sistemas';
+      const resolvedName = deg0NameTrimmed || 'Analista Universitario en Sistemas';
+      const needsNameUpgrade =
+        resolvedName === 'Analista Universitario en Sistemas' ||
+        resolvedName === 'Analista Universitario de Sistemas';
 
       const needsUpdate =
         !ppsIsObj ||
@@ -578,11 +582,11 @@ async function main() {
             requiredElectiveCredits: 4,
             specialRuleSubjectCode: 99,
             ...deg0,
-            name: needsNameUpgrade ? 'Analista Universitario de Sistemas' : deg0.name,
+            name: needsNameUpgrade ? 'Analista Universitario de Sistemas de Información' : deg0.name,
           }
         : {
             key: 'analista',
-            name: 'Analista Universitario de Sistemas',
+            name: 'Analista Universitario de Sistemas de Información',
             shortLabel: 'Analista',
             shortTitle: 'Analista Universitario',
             requiredElectiveCredits: 4,
@@ -646,7 +650,7 @@ async function main() {
     run0013First.updatedRows === 1 &&
       run0013First.version === 'v-1700001000111-ee1122' &&
       stdDegs.length === 2 &&
-      stdDegs[0].name === 'Analista Universitario de Sistemas' &&
+      stdDegs[0].name === 'Analista Universitario de Sistemas de Información' &&
       stdDegs[0].shortLabel === 'Analista' &&
       stdDegs[0].shortTitle === 'Analista Universitario' &&
       stdDegs[1].name === 'Segundo Elemento Preservado' &&
@@ -655,6 +659,46 @@ async function main() {
       run0013Second.updatedRows === 0 &&
       run0013Second.version === run0013First.version,
     '0013 actualiza ISI 2023 en corrida 1 preservando elementos [1..] y otras carreras, y es no-op en corrida 2'
+  );
+
+  // Estado desde versión intermedia anterior ("Analista Universitario de Sistemas") también actualiza y es idempotente
+  const sim0013Intermediate = [
+    {
+      id: 'p-isi-inter',
+      careerCode: 'ISI',
+      year: 2023,
+      config: {
+        ppsRequirement: {
+          referenceSubjectCode: 36,
+          label: 'Habilitación PPS',
+          description: 'Cumplís los requisitos para cursar la Práctica Profesional',
+        },
+        intermediateDegrees: [
+          {
+            key: 'analista',
+            name: 'Analista Universitario de Sistemas',
+            shortLabel: 'Analista',
+            shortTitle: 'Analista Universitario',
+            requiredElectiveCredits: 4,
+            specialRuleSubjectCode: 99,
+          },
+        ],
+      } as Record<string, unknown>,
+    },
+  ];
+  const sim0013InterVersions = new Map<string, string>([['default', 'v-1700001150000-000000']]);
+  const run0013Inter1 = simulate0013Run(sim0013Intermediate, sim0013InterVersions, 1700001160111, 'aa9988');
+  const run0013Inter2 = simulate0013Run(sim0013Intermediate, sim0013InterVersions, 1700001170222, 'bb7766');
+  const interDeg0 = (sim0013Intermediate[0].config.intermediateDegrees as Array<Record<string, unknown>>)[0];
+  assert(
+    run0013Inter1.updatedRows === 1 &&
+      run0013Inter1.version === 'v-1700001160111-aa9988' &&
+      interDeg0.name === 'Analista Universitario de Sistemas de Información' &&
+      interDeg0.shortLabel === 'Analista' &&
+      interDeg0.shortTitle === 'Analista Universitario' &&
+      run0013Inter2.updatedRows === 0 &&
+      run0013Inter2.version === run0013Inter1.version,
+    '0013 actualiza también la versión intermedia "Analista Universitario de Sistemas" al nombre oficial y es no-op en corrida 2'
   );
 
   // Estado parcial: shortLabel personalizado ya presente y falta shortTitle + upgrade de name; y nombre custom no se pisa
@@ -711,7 +755,7 @@ async function main() {
       run0013Partial1.version === 'v-1700001300111-123abc' &&
       partDeg0.shortLabel === 'Tecnicatura' &&
       partDeg0.shortTitle === 'Analista Universitario' &&
-      partDeg0.name === 'Analista Universitario de Sistemas' &&
+      partDeg0.name === 'Analista Universitario de Sistemas de Información' &&
       run0013Partial2.updatedRows === 0 &&
       run0013Partial2.version === run0013Partial1.version &&
       run0013Custom.updatedRows === 0 &&
@@ -846,7 +890,7 @@ async function main() {
         d.plan.config.ppsRequirement?.label === 'Habilitación PPS' &&
         d.plan.config.ppsRequirement?.description === 'Cumplís los requisitos para cursar la Práctica Profesional' &&
         Object.keys(d.plan.config.ppsRequirement || {}).length === 3 &&
-        d.plan.config.intermediateDegrees?.[0]?.name === 'Analista Universitario de Sistemas' &&
+        d.plan.config.intermediateDegrees?.[0]?.name === 'Analista Universitario de Sistemas de Información' &&
         d.plan.config.intermediateDegrees?.[0]?.shortLabel === 'Analista' &&
         d.plan.config.intermediateDegrees?.[0]?.shortTitle === 'Analista Universitario' &&
         !('ppsSubjectCode' in d.plan.config) &&

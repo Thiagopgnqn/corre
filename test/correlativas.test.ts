@@ -55,7 +55,7 @@ const PLAN_2023_FIXTURE: ActivePlanCatalog = {
       intermediateDegrees: [
         {
           key: 'analista',
-          name: 'Analista Universitario de Sistemas',
+          name: 'Analista Universitario de Sistemas de Información',
           shortLabel: 'Analista',
           shortTitle: 'Analista Universitario',
           requiredElectiveCredits: 4,

@@ -518,6 +518,10 @@ export function getScheduleIcsUidDomain(career?: Partial<PlanCareerMeta> | null)
   return `@micarrera.${slug}`;
 }
 
+export function getScheduleIcsProdId(): string {
+  return 'PRODID:-//Stack//Armador de Horarios//ES';
+}
+
 // ── Library Career Copy (preserving legal text structure) ───────────────────
 
 export function getLibraryHeroDescription(career?: Partial<PlanCareerMeta> | null): string {

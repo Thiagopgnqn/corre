@@ -3,9 +3,10 @@
 -- Data-only, additive and idempotent:
 --   1. Left-merges defaults on intermediateDegrees[0] ("shortLabel": "Analista",
 --      "shortTitle": "Analista Universitario") without overwriting existing keys,
---      and upgrades legacy "Analista Universitario en Sistemas" (or missing/empty name)
---      to "Analista Universitario de Sistemas" while preserving any custom admin name.
---      Preserves any additional elements [1..] in intermediateDegrees.
+--      and upgrades legacy "Analista Universitario en Sistemas" or intermediate
+--      "Analista Universitario de Sistemas" (or missing/empty name) to
+--      "Analista Universitario de Sistemas de Información" while preserving any
+--      custom admin name. Preserves any additional elements [1..] in intermediateDegrees.
 --   2. Left-merges "description": "Cumplís los requisitos para cursar la Práctica Profesional"
 --      into ppsRequirement without overwriting existing keys.
 --   3. Only updates rows that actually need at least one of these changes.
@@ -38,8 +39,8 @@ WITH upd AS (
               WHEN COALESCE(
                 NULLIF(btrim(COALESCE(sp."config", '{}'::jsonb)->'intermediateDegrees'->0->>'name'), ''),
                 'Analista Universitario en Sistemas'
-              ) = 'Analista Universitario en Sistemas'
-              THEN '"Analista Universitario de Sistemas"'::jsonb
+              ) IN ('Analista Universitario en Sistemas', 'Analista Universitario de Sistemas')
+              THEN '"Analista Universitario de Sistemas de Información"'::jsonb
               ELSE COALESCE(sp."config", '{}'::jsonb)->'intermediateDegrees'->0->'name'
             END,
             true
@@ -47,7 +48,7 @@ WITH upd AS (
           false
         )
         ELSE jsonb_build_array(
-          '{"key":"analista","name":"Analista Universitario de Sistemas","shortLabel":"Analista","shortTitle":"Analista Universitario","requiredElectiveCredits":4,"specialRuleSubjectCode":99}'::jsonb
+          '{"key":"analista","name":"Analista Universitario de Sistemas de Información","shortLabel":"Analista","shortTitle":"Analista Universitario","requiredElectiveCredits":4,"specialRuleSubjectCode":99}'::jsonb
         )
       END,
       'ppsRequirement',
@@ -76,7 +77,7 @@ WITH upd AS (
       OR COALESCE(
         NULLIF(btrim(COALESCE(sp."config", '{}'::jsonb)->'intermediateDegrees'->0->>'name'), ''),
         'Analista Universitario en Sistemas'
-      ) = 'Analista Universitario en Sistemas'
+      ) IN ('Analista Universitario en Sistemas', 'Analista Universitario de Sistemas')
     )
   RETURNING sp."id"
 ),
