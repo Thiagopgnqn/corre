@@ -33,6 +33,10 @@ import {
   parseProfessorName,
   pickBestDisplayName,
 } from '../professors/professorNormalizer.js';
+import {
+  findDefaultPublishedPlan,
+  type PublishedPlanWithCareer,
+} from '../catalog/catalog.helpers.js';
 
 export type ReviewStatus = 'published' | 'hidden' | 'removed';
 export type ReportReason = 'ofensiva' | 'datos personales' | 'falsa o spam' | 'otra';
@@ -638,7 +642,14 @@ function isMissingMigrationError(err: unknown): boolean {
 // 1. IMPLEMENTACIÓN POSTGRESQL / DRIZZLE ORM (PRODUCCIÓN)
 // ============================================================================
 
+export interface DrizzleReviewsStoreDeps {
+  findDefaultPlan?: () => Promise<Pick<PublishedPlanWithCareer, 'plan' | 'career'> | null>;
+  getUserSelectedPlanId?: (userId: string) => Promise<string | null>;
+}
+
 export class DrizzleReviewsStore implements ReviewsStore {
+  constructor(private readonly deps: DrizzleReviewsStoreDeps = {}) {}
+
   async resolvePlanContext(
     userId: string,
     requestedPlanId?: string | null
@@ -646,35 +657,42 @@ export class DrizzleReviewsStore implements ReviewsStore {
     let planId = requestedPlanId || null;
 
     if (!planId || planId === 'current' || planId === 'default') {
-      const [user] = await db
-        .select({ selectedPlanId: users.selectedPlanId })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      planId = user?.selectedPlanId || null;
+      if (this.deps.getUserSelectedPlanId) {
+        planId = await this.deps.getUserSelectedPlanId(userId);
+      } else {
+        const [user] = await db
+          .select({ selectedPlanId: users.selectedPlanId })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        planId = user?.selectedPlanId || null;
+      }
     }
 
-    let planRow;
     if (planId && this.isValidUuid(planId)) {
-      [planRow] = await db.select().from(studyPlans).where(eq(studyPlans.id, planId)).limit(1);
-    }
-    if (!planRow) {
-      [planRow] = await db
-        .select()
+      const [row] = await db
+        .select({
+          planId: studyPlans.id,
+          facultyId: careers.facultyId,
+        })
         .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
+        .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+        .where(eq(studyPlans.id, planId))
         .limit(1);
+      if (row) {
+        return { planId: row.planId, facultyId: row.facultyId };
+      }
     }
-    if (!planRow) return null;
 
-    const [career] = await db
-      .select()
-      .from(careers)
-      .where(eq(careers.id, planRow.careerId))
-      .limit(1);
-    if (!career) return null;
+    const defaultPublished = await (this.deps.findDefaultPlan
+      ? this.deps.findDefaultPlan()
+      : findDefaultPublishedPlan());
+    if (!defaultPublished) return null;
 
-    return { planId: planRow.id, facultyId: career.facultyId };
+    return {
+      planId: defaultPublished.plan.id,
+      facultyId: defaultPublished.career.facultyId,
+    };
   }
 
   async getDefaultFacultyId(): Promise<string | null> {
@@ -2883,11 +2901,21 @@ export class DrizzleReviewsStore implements ReviewsStore {
 // 2. IMPLEMENTACIÓN EN MEMORIA (AISLADA SIN TOCAR NEON PARA TESTS HTTP)
 // ============================================================================
 
+export interface InMemoryReviewPlanMeta {
+  facultyId: string;
+  status: 'draft' | 'published' | 'archived';
+  isActive: boolean;
+  careerStatus: 'draft' | 'published' | 'archived';
+  careerCode?: string;
+  year?: number;
+}
+
 export class InMemoryReviewsStore implements ReviewsStore {
   public defaultFacultyId: string = crypto.randomUUID();
   public defaultPlanId: string = crypto.randomUUID();
   public planFaculties = new Map<string, string>();
-  public userPlans = new Map<string, string>();
+  public planMetadata = new Map<string, InMemoryReviewPlanMeta>();
+  public userPlans = new Map<string, string | null>();
   public subjectsMap = new Map<string, PlanSubjectRef & { planId: string }>();
   public professorsMap = new Map<string, ProfessorEntity>();
   public aliasesList: ProfessorAliasEntity[] = [];
@@ -3016,11 +3044,23 @@ export class InMemoryReviewsStore implements ReviewsStore {
     return comm;
   }
 
-  seedPlan(planId: string, facultyId: string) {
+  seedPlan(
+    planId: string,
+    facultyId: string,
+    options?: Partial<Omit<InMemoryReviewPlanMeta, 'facultyId'>>
+  ) {
     this.planFaculties.set(planId, facultyId);
+    this.planMetadata.set(planId, {
+      facultyId,
+      status: options?.status ?? 'published',
+      isActive: options?.isActive ?? true,
+      careerStatus: options?.careerStatus ?? 'published',
+      careerCode: options?.careerCode,
+      year: options?.year,
+    });
   }
 
-  seedUserPlan(userId: string, planId: string) {
+  seedUserPlan(userId: string, planId: string | null) {
     this.userPlans.set(userId, planId);
   }
 
@@ -3062,16 +3102,48 @@ export class InMemoryReviewsStore implements ReviewsStore {
     this.commissionTeachings.push(params);
   }
 
+  private resolveDefaultPublishedPlanContext(): PlanContext | null {
+    if (this.planMetadata.size === 0) {
+      return { planId: this.defaultPlanId, facultyId: this.defaultFacultyId };
+    }
+
+    const candidates = Array.from(this.planMetadata.entries()).filter(
+      ([, meta]) =>
+        meta.status === 'published' &&
+        meta.isActive === true &&
+        meta.careerStatus === 'published'
+    );
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const canonical = candidates.find(
+      ([, meta]) => meta.careerCode === 'ISI' && meta.year === 2023
+    );
+    const [pickedPlanId, pickedMeta] = canonical || candidates[0];
+    return { planId: pickedPlanId, facultyId: pickedMeta.facultyId };
+  }
+
   async resolvePlanContext(
     userId: string,
     requestedPlanId?: string | null
   ): Promise<PlanContext | null> {
-    const planId =
-      requestedPlanId && requestedPlanId !== 'current' && requestedPlanId !== 'default'
-        ? requestedPlanId
-        : this.userPlans.get(userId) || this.defaultPlanId;
-    const facultyId = this.planFaculties.get(planId) || this.defaultFacultyId;
-    return { planId, facultyId };
+    if (requestedPlanId && requestedPlanId !== 'current' && requestedPlanId !== 'default') {
+      const facultyId = this.planFaculties.get(requestedPlanId) || this.defaultFacultyId;
+      return { planId: requestedPlanId, facultyId };
+    }
+
+    const userPlanId = this.userPlans.get(userId) || null;
+    if (userPlanId) {
+      const meta = this.planMetadata.get(userPlanId);
+      const existsOrLegacy = this.planMetadata.size === 0 || Boolean(meta);
+      if (existsOrLegacy) {
+        const facultyId = this.planFaculties.get(userPlanId) || this.defaultFacultyId;
+        return { planId: userPlanId, facultyId };
+      }
+    }
+
+    return this.resolveDefaultPublishedPlanContext();
   }
 
   async getDefaultFacultyId(): Promise<string | null> {

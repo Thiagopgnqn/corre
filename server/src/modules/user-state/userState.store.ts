@@ -900,9 +900,20 @@ export class DrizzleUserStateStore implements UserStateStore {
   }
 }
 
+export interface InMemoryUserStatePlan {
+  id: string;
+  name: string;
+  facultyId: string;
+  status?: 'draft' | 'published' | 'archived';
+  isActive?: boolean;
+  careerStatus?: 'draft' | 'published' | 'archived';
+  careerCode?: string;
+  year?: number;
+}
+
 export class InMemoryUserStateStore implements UserStateStore {
   public usersPlan = new Map<string, string | null>();
-  public plans = new Map<string, { id: string; name: string; facultyId: string }>();
+  public plans = new Map<string, InMemoryUserStatePlan>();
   public subjects = new Map<string, PlanSubjectInfo & { planId: string }>();
   public settings = new Map<string, StoredUserSettingsLike & { updatedAt: Date }>();
   public progress = new Map<string, SubjectProgressEntry>(); // `${userId}::${subjectId}`
@@ -914,7 +925,7 @@ export class InMemoryUserStateStore implements UserStateStore {
   public examAttempts = new Map<string, ExamAttemptEntry & { userId: string }>();
   public deletedUsers = new Set<string>();
 
-  seedPlan(plan: { id: string; name: string; facultyId: string }) {
+  seedPlan(plan: InMemoryUserStatePlan) {
     this.plans.set(plan.id, plan);
   }
 
@@ -947,13 +958,40 @@ export class InMemoryUserStateStore implements UserStateStore {
     return t;
   }
 
+  private findDefaultPublishedPlan(): InMemoryUserStatePlan | undefined {
+    const candidates = Array.from(this.plans.values()).filter(
+      (p) =>
+        (p.status ?? 'published') === 'published' &&
+        (p.isActive ?? true) === true &&
+        (p.careerStatus ?? 'published') === 'published'
+    );
+    if (candidates.length === 0) return undefined;
+    return candidates.find((p) => p.careerCode === 'ISI' && p.year === 2023) || candidates[0];
+  }
+
   async resolveUserActivePlan(
     userId: string,
     fallbackPlanId?: string | null
   ): Promise<ActivePlanContext | null> {
     if (!this.usersPlan.has(userId) && !fallbackPlanId) return null;
-    const planId = this.usersPlan.get(userId) ?? fallbackPlanId ?? null;
-    const plan = planId ? this.plans.get(planId) : undefined;
+    let planId = this.usersPlan.get(userId) ?? fallbackPlanId ?? null;
+    let plan = planId ? this.plans.get(planId) : undefined;
+
+    if (planId && !plan) {
+      planId = null;
+    }
+
+    if (!planId) {
+      const defaultPublished = this.findDefaultPublishedPlan();
+      if (defaultPublished) {
+        plan = defaultPublished;
+        planId = defaultPublished.id;
+        if (this.usersPlan.has(userId)) {
+          this.usersPlan.set(userId, planId);
+        }
+      }
+    }
+
     return {
       userId,
       planId: plan ? plan.id : planId,

@@ -973,6 +973,124 @@ async function main() {
       pendingBlockedRes.status === 429 && pendingBlockedRes.data?.code === 'LIMIT_PENDING_UPLOADS',
       'Límite de archivos pendientes se aplica por usuario (429 LIMIT_PENDING_UPLOADS)'
     );
+
+    // -------------------------------------------------------------------------
+    // 9. USUARIOS CON selectedPlanId = null Y EXCLUSIÓN DE PLANES EN BORRADOR
+    // -------------------------------------------------------------------------
+    console.log('\n📌 9. Resolución fallback para selectedPlanId = null sin elegir planes draft');
+
+    const isolatedNullUserId = crypto.randomUUID();
+    const draftFacId = crypto.randomUUID();
+    const draftPlanId = crypto.randomUUID();
+    const publishedFallbackId = crypto.randomUUID();
+
+    const isoUserState = new InMemoryUserStateStore();
+    const isoReviews = new InMemoryReviewsStore();
+    // Sembrar PRIMERO un plan en borrador con isActive: true
+    isoUserState.seedPlan({
+      id: draftPlanId,
+      name: 'Carrera en Borrador',
+      facultyId: draftFacId,
+      status: 'draft',
+      isActive: true,
+    });
+    isoReviews.seedPlan(draftPlanId, draftFacId, {
+      status: 'draft',
+      isActive: true,
+    });
+    isoUserState.seedUser(isolatedNullUserId, null);
+    isoReviews.seedUserPlan(isolatedNullUserId, null);
+
+    const onlyDraftState = await isoUserState.resolveUserActivePlan(isolatedNullUserId, null);
+    const onlyDraftRev = await isoReviews.resolvePlanContext(isolatedNullUserId, null);
+    assert(
+      onlyDraftState !== null &&
+        onlyDraftState.planId === null &&
+        onlyDraftRev === null,
+      'InMemoryUserStateStore e InMemoryReviewsStore NO eligen un plan draft (status="draft", isActive=true) como fallback'
+    );
+
+    // Agregar DESPUÉS un plan publicado: ambos deben seleccionarlo ignorando el draft anterior
+    isoUserState.seedPlan({
+      id: publishedFallbackId,
+      name: 'Sistemas Plan 2023',
+      facultyId: draftFacId,
+      status: 'published',
+      isActive: true,
+      careerCode: 'ISI',
+      year: 2023,
+    });
+    isoReviews.seedPlan(publishedFallbackId, draftFacId, {
+      status: 'published',
+      isActive: true,
+      careerCode: 'ISI',
+      year: 2023,
+    });
+    const pubFallbackState = await isoUserState.resolveUserActivePlan(isolatedNullUserId, null);
+    const pubFallbackRev = await isoReviews.resolvePlanContext(isolatedNullUserId, null);
+    assert(
+      pubFallbackState?.planId === publishedFallbackId &&
+        isoUserState.usersPlan.get(isolatedNullUserId) === publishedFallbackId &&
+        pubFallbackRev?.planId === publishedFallbackId,
+      'Cuando existe un plan publicado además de un draft, selectedPlanId=null resuelve al plan publicado y lo backfillea'
+    );
+
+    // Caso HTTP real en testApp: usuario autenticado con selectedPlanId=null (también con un draft presente)
+    const httpDraftPlanId = crypto.randomUUID();
+    userStateStore.seedPlan({
+      id: httpDraftPlanId,
+      name: 'Plan Borrador HTTP',
+      facultyId: facA,
+      status: 'draft',
+      isActive: true,
+    });
+    reviewsStore.seedPlan(httpDraftPlanId, facA, {
+      status: 'draft',
+      isActive: true,
+    });
+    const nullHttpUserId = crypto.randomUUID();
+    registerUser({
+      id: nullHttpUserId,
+      email: 'sin.plan.http@frc.utn.edu.ar',
+      role: 'user',
+      selectedPlanId: null,
+    });
+    const nullHttpToken = signUserToken(nullHttpUserId);
+
+    reviewsStore.seedUserProgress(nullHttpUserId, subA_core.id, 'aprobada', 8);
+    const nullStateRes = await api('GET', '/api/state', nullHttpToken);
+    const nullEnrollList = await api('GET', '/api/enrollments', nullHttpToken);
+    const nullEnrollPut = await api('PUT', `/api/enrollments/${subA_core.id}`, nullHttpToken, {
+      academicYear: 2026,
+      term: '1C',
+    });
+    const nullProfs = await api('GET', '/api/professors', nullHttpToken);
+    const nullReviewable = await api('GET', '/api/me/reviewable', nullHttpToken);
+    const nullCreateRev = await api('POST', '/api/reviews', nullHttpToken, {
+      professorId: profA.id,
+      subjectId: subA_core.id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 5,
+      comment: 'Reseña en plan fallback publicado cuando selectedPlanId es null.',
+    });
+
+    const nullProfIds = new Set(
+      (nullProfs.data?.data?.professors || []).map((p: any) => p.id)
+    );
+    assert(
+      nullStateRes.status === 200 &&
+        nullStateRes.data?.data?.selectedPlanId === planA &&
+        nullEnrollList.status === 200 &&
+        nullEnrollPut.status === 200 &&
+        nullProfs.status === 200 &&
+        nullProfIds.has(profA.id) &&
+        !nullProfIds.has(profB.id) &&
+        nullReviewable.status === 200 &&
+        nullCreateRev.status === 201,
+      'Usuario con selectedPlanId=null opera /api/state (planA), /api/enrollments (GET/PUT), /api/professors, /api/me/reviewable y POST /api/reviews sin elegir el draft',
+      `statuses=${nullStateRes.status}/${nullEnrollList.status}/${nullEnrollPut.status}/${nullProfs.status}/${nullReviewable.status}/${nullCreateRev.status}, selectedPlanId=${nullStateRes.data?.data?.selectedPlanId}`
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
