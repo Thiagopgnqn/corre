@@ -507,10 +507,222 @@ async function main() {
     '0012 funciona ante estado parcial actualizando solo la fila distinta y es no-op en corrida 2'
   );
 
+  const hasJournal0012 = journal.entries.some(
+    (e: any) => e?.idx === 12 && e?.tag === '0012_isi_plan_special_rules_descriptions'
+  );
+  assert(
+    hasJournal0012,
+    'meta/_journal.json registra 0012_isi_plan_special_rules_descriptions'
+  );
+
+  // 1e. Migración 0013 (intermediateDegrees + ppsRequirement.description, idempotencia y estado parcial)
+  console.log('\n📌 1e. Migración 0013 (intermediateDegrees + ppsRequirement.description, dos corridas y estado parcial)');
+  const sql0013Path = path.resolve(__dirname, '../drizzle/0013_isi_plan_intermediate_and_pps_copy.sql');
+  const sql0013 = fs.readFileSync(sql0013Path, 'utf8');
+
+  assert(
+    sql0013.split('--> statement-breakpoint').filter((s) => s.trim()).length === 1 &&
+      !/\b(DROP|DELETE|TRUNCATE|ALTER TABLE)\b/i.test(sql0013) &&
+      /\bWITH\s+upd\s+AS\s*\(\s*UPDATE\s+"study_plans"\s+sp\b/i.test(sql0013) &&
+      /\bRETURNING\s+sp\."id"/i.test(sql0013) &&
+      sql0013.includes(`c."code" = 'ISI'`) &&
+      sql0013.includes('sp."year" = 2023') &&
+      sql0013.includes(`"shortLabel":"Analista"`) &&
+      sql0013.includes(`"shortTitle":"Analista Universitario"`) &&
+      sql0013.includes(`Analista Universitario de Sistemas`) &&
+      sql0013.includes(`Cumplís los requisitos para cursar la Práctica Profesional`) &&
+      sql0013.includes(`INSERT INTO "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql0013),
+    '0013 usa CTE única aditiva e idempotente sobre study_plans RETURNING sp.id con merge a izquierda y bump condicional de catalog_versions'
+  );
+
+  const simulate0013Run = (
+    plans: Array<{ id: string; careerCode: string; year: number; config: Record<string, unknown> }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    const updIds: string[] = [];
+    for (const sp of plans) {
+      if (sp.careerCode !== 'ISI' || sp.year !== 2023) continue;
+      const cfg = sp.config || {};
+      const rawPps = cfg.ppsRequirement;
+      const ppsIsObj = rawPps !== null && typeof rawPps === 'object' && !Array.isArray(rawPps);
+      const ppsObj = ppsIsObj ? (rawPps as Record<string, unknown>) : {};
+
+      const rawDegs = cfg.intermediateDegrees;
+      const degsIsArr = Array.isArray(rawDegs) && rawDegs.length > 0;
+      const deg0IsObj = degsIsArr && rawDegs[0] !== null && typeof rawDegs[0] === 'object' && !Array.isArray(rawDegs[0]);
+      const deg0 = deg0IsObj ? (rawDegs[0] as Record<string, unknown>) : {};
+      const deg0NameTrimmed = typeof deg0.name === 'string' ? deg0.name.trim() : '';
+      const needsNameUpgrade = (deg0NameTrimmed || 'Analista Universitario en Sistemas') === 'Analista Universitario en Sistemas';
+
+      const needsUpdate =
+        !ppsIsObj ||
+        !Object.prototype.hasOwnProperty.call(ppsObj, 'referenceSubjectCode') ||
+        !Object.prototype.hasOwnProperty.call(ppsObj, 'label') ||
+        !Object.prototype.hasOwnProperty.call(ppsObj, 'description') ||
+        !degsIsArr ||
+        !deg0IsObj ||
+        !Object.prototype.hasOwnProperty.call(deg0, 'shortLabel') ||
+        !Object.prototype.hasOwnProperty.call(deg0, 'shortTitle') ||
+        needsNameUpgrade;
+
+      if (!needsUpdate) continue;
+
+      const mergedDeg0 = degsIsArr
+        ? {
+            key: 'analista',
+            shortLabel: 'Analista',
+            shortTitle: 'Analista Universitario',
+            requiredElectiveCredits: 4,
+            specialRuleSubjectCode: 99,
+            ...deg0,
+            name: needsNameUpgrade ? 'Analista Universitario de Sistemas' : deg0.name,
+          }
+        : {
+            key: 'analista',
+            name: 'Analista Universitario de Sistemas',
+            shortLabel: 'Analista',
+            shortTitle: 'Analista Universitario',
+            requiredElectiveCredits: 4,
+            specialRuleSubjectCode: 99,
+          };
+
+      const nextDegs = degsIsArr ? [mergedDeg0, ...rawDegs.slice(1)] : [mergedDeg0];
+      sp.config = {
+        ...cfg,
+        intermediateDegrees: nextDegs,
+        ppsRequirement: {
+          referenceSubjectCode: 36,
+          label: 'Habilitación PPS',
+          description: 'Cumplís los requisitos para cursar la Práctica Profesional',
+          ...ppsObj,
+        },
+      };
+      updIds.push(sp.id);
+    }
+
+    if (updIds.length > 0) {
+      versions.set('default', `v-${fakeTs}-${fakeHex}`);
+    }
+    return { updatedRows: updIds.length, version: versions.get('default') || null };
+  };
+
+  // Corrida 1 y 2 desde estado pre-0013
+  const sim0013Standard = [
+    {
+      id: 'p-isi',
+      careerCode: 'ISI',
+      year: 2023,
+      config: {
+        finalDegreeTitle: 'Ingeniero/a',
+        ppsRequirement: { referenceSubjectCode: 36, label: 'Habilitación PPS' },
+        intermediateDegrees: [
+          {
+            key: 'analista',
+            name: 'Analista Universitario en Sistemas',
+            requiredElectiveCredits: 4,
+            specialRuleSubjectCode: 99,
+          },
+          { key: 'extra', name: 'Segundo Elemento Preservado' },
+        ],
+      } as Record<string, unknown>,
+    },
+    {
+      id: 'p-mec',
+      careerCode: 'MEC',
+      year: 2023,
+      config: { ppsRequirement: { referenceSubjectCode: 10 }, intermediateDegrees: [] } as Record<string, unknown>,
+    },
+  ];
+  const sim0013Versions = new Map<string, string>([['default', 'v-1700000000000-000000']]);
+  const run0013First = simulate0013Run(sim0013Standard, sim0013Versions, 1700001000111, 'ee1122');
+  const run0013Second = simulate0013Run(sim0013Standard, sim0013Versions, 1700001100222, 'ff3344');
+
+  const stdDegs = sim0013Standard[0].config.intermediateDegrees as Array<Record<string, unknown>>;
+  const stdPps = sim0013Standard[0].config.ppsRequirement as Record<string, unknown>;
+  assert(
+    run0013First.updatedRows === 1 &&
+      run0013First.version === 'v-1700001000111-ee1122' &&
+      stdDegs.length === 2 &&
+      stdDegs[0].name === 'Analista Universitario de Sistemas' &&
+      stdDegs[0].shortLabel === 'Analista' &&
+      stdDegs[0].shortTitle === 'Analista Universitario' &&
+      stdDegs[1].name === 'Segundo Elemento Preservado' &&
+      stdPps.description === 'Cumplís los requisitos para cursar la Práctica Profesional' &&
+      (sim0013Standard[1].config.intermediateDegrees as unknown[]).length === 0 &&
+      run0013Second.updatedRows === 0 &&
+      run0013Second.version === run0013First.version,
+    '0013 actualiza ISI 2023 en corrida 1 preservando elementos [1..] y otras carreras, y es no-op en corrida 2'
+  );
+
+  // Estado parcial: shortLabel personalizado ya presente y falta shortTitle + upgrade de name; y nombre custom no se pisa
+  const sim0013Partial = [
+    {
+      id: 'p-isi-partial',
+      careerCode: 'ISI',
+      year: 2023,
+      config: {
+        ppsRequirement: { referenceSubjectCode: 36, label: 'Habilitación PPS' },
+        intermediateDegrees: [
+          {
+            key: 'analista',
+            name: 'Analista Universitario en Sistemas',
+            shortLabel: 'Tecnicatura',
+            requiredElectiveCredits: 4,
+            specialRuleSubjectCode: 99,
+          },
+        ],
+      } as Record<string, unknown>,
+    },
+  ];
+  const sim0013PartialVersions = new Map<string, string>([['default', 'v-1700001200000-000000']]);
+  const run0013Partial1 = simulate0013Run(sim0013Partial, sim0013PartialVersions, 1700001300111, '123abc');
+  const run0013Partial2 = simulate0013Run(sim0013Partial, sim0013PartialVersions, 1700001400222, '456def');
+  const partDeg0 = (sim0013Partial[0].config.intermediateDegrees as Array<Record<string, unknown>>)[0];
+
+  const sim0013Custom = [
+    {
+      id: 'p-isi-custom',
+      careerCode: 'ISI',
+      year: 2023,
+      config: {
+        ppsRequirement: {
+          referenceSubjectCode: 36,
+          label: 'PPS Custom',
+          description: 'Descripción Custom Admin',
+        },
+        intermediateDegrees: [
+          {
+            key: 'analista',
+            name: 'Analista Custom Admin',
+            shortLabel: 'Custom',
+            shortTitle: 'Título Custom',
+          },
+        ],
+      } as Record<string, unknown>,
+    },
+  ];
+  const sim0013CustomVersions = new Map<string, string>([['default', 'v-1700001500000-000000']]);
+  const run0013Custom = simulate0013Run(sim0013Custom, sim0013CustomVersions, 1700001600111, '789abc');
+  assert(
+    run0013Partial1.updatedRows === 1 &&
+      run0013Partial1.version === 'v-1700001300111-123abc' &&
+      partDeg0.shortLabel === 'Tecnicatura' &&
+      partDeg0.shortTitle === 'Analista Universitario' &&
+      partDeg0.name === 'Analista Universitario de Sistemas' &&
+      run0013Partial2.updatedRows === 0 &&
+      run0013Partial2.version === run0013Partial1.version &&
+      run0013Custom.updatedRows === 0 &&
+      run0013Custom.version === 'v-1700001500000-000000',
+    '0013 maneja estado parcial sin pisar shortLabel/claves custom existentes y respeta custom name/description'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 12 && lastJournalEntry?.tag === '0012_isi_plan_special_rules_descriptions',
-    'meta/_journal.json registra 0012_isi_plan_special_rules_descriptions como última entrada'
+    lastJournalEntry?.idx === 13 && lastJournalEntry?.tag === '0013_isi_plan_intermediate_and_pps_copy',
+    'meta/_journal.json registra 0013_isi_plan_intermediate_and_pps_copy como última entrada'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
@@ -632,7 +844,11 @@ async function main() {
         d.plan.config.finalDegreeTitle === 'Ingeniero/a' &&
         d.plan.config.ppsRequirement?.referenceSubjectCode === 36 &&
         d.plan.config.ppsRequirement?.label === 'Habilitación PPS' &&
-        Object.keys(d.plan.config.ppsRequirement || {}).length === 2 &&
+        d.plan.config.ppsRequirement?.description === 'Cumplís los requisitos para cursar la Práctica Profesional' &&
+        Object.keys(d.plan.config.ppsRequirement || {}).length === 3 &&
+        d.plan.config.intermediateDegrees?.[0]?.name === 'Analista Universitario de Sistemas' &&
+        d.plan.config.intermediateDegrees?.[0]?.shortLabel === 'Analista' &&
+        d.plan.config.intermediateDegrees?.[0]?.shortTitle === 'Analista Universitario' &&
         !('ppsSubjectCode' in d.plan.config) &&
         d.plan.config.electiveSlotsEquivalent === 7 &&
         d.plan.config.totalLevels === 5 &&

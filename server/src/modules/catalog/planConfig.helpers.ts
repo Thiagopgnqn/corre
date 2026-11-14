@@ -1,6 +1,8 @@
 export interface NormalizedIntermediateDegree {
   key: string;
   name: string;
+  shortLabel?: string;
+  shortTitle?: string;
   requiredElectiveCredits?: number;
   specialRuleSubjectCode?: number;
 }
@@ -8,6 +10,7 @@ export interface NormalizedIntermediateDegree {
 export interface PpsRequirementConfig {
   referenceSubjectCode: number;
   label?: string;
+  description?: string;
 }
 
 export interface NormalizedPlanConfig {
@@ -70,6 +73,18 @@ function normalizeIntermediateDegrees(raw: unknown): NormalizedIntermediateDegre
     if (!key || !name) continue;
 
     const degree: NormalizedIntermediateDegree = { key, name };
+    const shortLabel =
+      typeof obj.shortLabel === 'string' && obj.shortLabel.trim().length > 0
+        ? obj.shortLabel.trim()
+        : undefined;
+    if (shortLabel !== undefined) degree.shortLabel = shortLabel;
+
+    const shortTitle =
+      typeof obj.shortTitle === 'string' && obj.shortTitle.trim().length > 0
+        ? obj.shortTitle.trim()
+        : undefined;
+    if (shortTitle !== undefined) degree.shortTitle = shortTitle;
+
     const reqCredits = parseFiniteNonNegativeNumber(obj.requiredElectiveCredits);
     if (reqCredits !== null) degree.requiredElectiveCredits = reqCredits;
 
@@ -91,9 +106,15 @@ export function normalizePpsRequirement(raw: unknown): PpsRequirementConfig | nu
     typeof obj.label === 'string' && obj.label.trim().length > 0
       ? obj.label.trim()
       : undefined;
-  return label !== undefined
-    ? { referenceSubjectCode: refCode, label }
-    : { referenceSubjectCode: refCode };
+  const description =
+    typeof obj.description === 'string' && obj.description.trim().length > 0
+      ? obj.description.trim()
+      : undefined;
+  return {
+    referenceSubjectCode: refCode,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+  };
 }
 
 /**

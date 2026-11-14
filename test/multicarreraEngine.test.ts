@@ -278,6 +278,21 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     assert.equal(evaluatedGrad.progress.isDegreeEligible, true);
     assert.equal(evaluatedGrad.progress.isPPSEligible, false);
     assert.equal(evaluatedGrad.progress.isAnalistaEligible, false);
+
+    // Design guarantee (Point 5): electives with weeklyHours > 0 never enter careerPercentageByHours / totalWeeklyHours / approvedWeeklyHours
+    const planWithOnlyCore1Approved = evaluatePlanProgress({
+      plan: buildFictitious3LevelPlan({ requiredElectiveCredits: 10, electiveSlotsEquivalent: 2 }),
+      userState: {
+        1: { status: 'aprobada', grade: 9 }, // weeklyHours: 4
+        201: { status: 'aprobada', grade: 9 }, // elective weeklyHours: 3
+        202: { status: 'promocionada', grade: 8 }, // elective weeklyHours: 3
+      },
+      settings: { ...DEFAULT_SETTINGS, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(planWithOnlyCore1Approved.progress.totalWeeklyHours, 14); // 4 + 4 + 6 (excludes 3 + 3 + 3 of electives)
+    assert.equal(planWithOnlyCore1Approved.progress.approvedWeeklyHours, 4); // excludes approved electives 201 & 202
+    assert.equal(planWithOnlyCore1Approved.progress.careerPercentageByHours, Math.round((4 / 14) * 100));
   });
 
   it('gates the StatsDashboard PPS milestone card behind planConfig?.ppsRequirement', () => {
@@ -618,6 +633,45 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
             config: {
               ...validCatalog.plan.config,
               ppsRequirement: { referenceSubjectCode: 3, label: '' },
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.ppsRequirement.description vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              ppsRequirement: { referenceSubjectCode: 3, description: '   ' },
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.intermediateDegrees[0].shortLabel vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              intermediateDegrees: [{ key: 'inter', name: 'Intermedio', shortLabel: '' }],
+            },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.intermediateDegrees[0].shortTitle vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              intermediateDegrees: [{ key: 'inter', name: 'Intermedio', shortTitle: '  ' }],
             },
           },
         },

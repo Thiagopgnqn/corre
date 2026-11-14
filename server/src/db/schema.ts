@@ -84,10 +84,13 @@ export const studyPlans = pgTable(
         ppsRequirement?: {
           referenceSubjectCode: number;
           label?: string;
+          description?: string;
         } | null;
         intermediateDegrees?: Array<{
           key: string;
           name: string;
+          shortLabel?: string;
+          shortTitle?: string;
           requiredElectiveCredits?: number;
           specialRuleSubjectCode?: number;
         }>;

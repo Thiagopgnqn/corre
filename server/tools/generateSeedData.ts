@@ -40,13 +40,18 @@ const catalog = {
       totalLevels: 5,
       levelLabel: 'Año',
       shortTag: 'ISI · Plan 2023',
+      finalDegreeTitle: 'Ingeniero/a',
       ppsRequirement: {
         referenceSubjectCode: 36,
+        label: 'Habilitación PPS',
+        description: 'Cumplís los requisitos para cursar la Práctica Profesional',
       },
       intermediateDegrees: [
         {
           key: 'analista',
-          name: 'Analista Universitario en Sistemas',
+          name: 'Analista Universitario de Sistemas',
+          shortLabel: 'Analista',
+          shortTitle: 'Analista Universitario',
           requiredElectiveCredits: 4,
           specialRuleSubjectCode: 99,
         },

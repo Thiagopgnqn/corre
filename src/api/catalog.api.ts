@@ -32,7 +32,7 @@ export interface Institution {
               levelLabel?: string;
               shortTag?: string;
               finalDegreeTitle?: string;
-              ppsRequirement?: { referenceSubjectCode: number; label?: string } | null;
+              ppsRequirement?: { referenceSubjectCode: number; label?: string; description?: string } | null;
               intermediateDegrees?: PlanIntermediateDegree[];
               [key: string]: unknown;
             };
@@ -128,7 +128,7 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
     return false;
   }
 
-  const { totalLevels, levelLabel, finalDegreeTitle, ppsRequirement } = plan.config;
+  const { totalLevels, levelLabel, finalDegreeTitle, ppsRequirement, intermediateDegrees } = plan.config;
   if (
     typeof totalLevels !== 'number' ||
     !Number.isFinite(totalLevels) ||
@@ -152,6 +152,30 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
       !isNonEmptyString(ppsRequirement.label)
     ) {
       return false;
+    }
+    if (
+      ppsRequirement.description !== undefined &&
+      ppsRequirement.description !== null &&
+      !isNonEmptyString(ppsRequirement.description)
+    ) {
+      return false;
+    }
+  }
+
+  if (intermediateDegrees !== undefined && intermediateDegrees !== null) {
+    if (!Array.isArray(intermediateDegrees)) {
+      return false;
+    }
+    for (const deg of intermediateDegrees) {
+      if (!isPlainObject(deg) || !isNonEmptyString(deg.key) || !isNonEmptyString(deg.name)) {
+        return false;
+      }
+      if (deg.shortLabel !== undefined && deg.shortLabel !== null && !isNonEmptyString(deg.shortLabel)) {
+        return false;
+      }
+      if (deg.shortTitle !== undefined && deg.shortTitle !== null && !isNonEmptyString(deg.shortTitle)) {
+        return false;
+      }
     }
   }
 

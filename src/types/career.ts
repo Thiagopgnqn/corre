@@ -34,11 +34,14 @@ export interface Subject {
 export interface PlanPpsRequirement {
   referenceSubjectCode: number;
   label?: string;
+  description?: string;
 }
 
 export interface PlanIntermediateDegree {
   key: string;
   name: string;
+  shortLabel?: string;
+  shortTitle?: string;
   requiredElectiveCredits?: number;
   specialRuleSubjectCode?: number;
 }

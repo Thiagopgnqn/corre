@@ -27,7 +27,7 @@ const DEFAULT_FALLBACK_LEVEL_LABEL = 'Año';
 const DEFAULT_FALLBACK_FINAL_DEGREE_HEADING = 'Requisitos para el Título Final';
 const DEFAULT_FALLBACK_FINAL_MILESTONE = 'Graduación (Título Final)';
 const DEFAULT_FALLBACK_PPS_LABEL = 'Habilitación PPS';
-const DEFAULT_FALLBACK_PPS_DESC = 'Cumplís los requisitos para cursar la Práctica Profesional';
+const DEFAULT_FALLBACK_PPS_DESC = 'Cumplís los requisitos académicos exigidos por el plan';
 
 function trimOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
@@ -237,15 +237,25 @@ export function getPpsMilestoneTitle(config?: Partial<PlanConfig> | null): strin
   return label || DEFAULT_FALLBACK_PPS_LABEL;
 }
 
-export function getPpsMilestoneDesc(): string {
-  return DEFAULT_FALLBACK_PPS_DESC;
+export function getPpsMilestoneDesc(config?: Partial<PlanConfig> | null): string {
+  return trimOrEmpty(config?.ppsRequirement?.description) || DEFAULT_FALLBACK_PPS_DESC;
 }
 
 // ── Intermediate Degree Texts ───────────────────────────────────────────────
 
-export function getIntermediateDegreeShortLabel(degree: Pick<PlanIntermediateDegree, 'name'>): string {
+export function getIntermediateDegreeShortLabel(
+  degree: Pick<PlanIntermediateDegree, 'name' | 'shortLabel'>
+): string {
+  const explicit = trimOrEmpty(degree.shortLabel);
+  if (explicit) return explicit;
   const firstWord = trimOrEmpty(degree.name).split(/\s+/)[0];
   return firstWord || 'Intermedio';
+}
+
+export function getIntermediateDegreeShortTitle(
+  degree: Pick<PlanIntermediateDegree, 'name' | 'shortTitle'>
+): string {
+  return trimOrEmpty(degree.shortTitle) || trimOrEmpty(degree.name) || 'Título Intermedio';
 }
 
 function getIntermediateSpecialSubject(
@@ -331,8 +341,10 @@ export function getIntermediateDegreeMobileSubtitle(
   return parts.join(' y ') || 'Seguimiento de título intermedio';
 }
 
-export function getIntermediateDegreeMilestoneTitle(degree: PlanIntermediateDegree): string {
-  return `Título Intermedio: ${trimOrEmpty(degree.name) || 'Título Intermedio'}`;
+export function getIntermediateDegreeMilestoneTitle(
+  degree: Pick<PlanIntermediateDegree, 'name' | 'shortTitle'>
+): string {
+  return `Título Intermedio: ${getIntermediateDegreeShortTitle(degree)}`;
 }
 
 export function getIntermediateDegreeCardHeading(degree: PlanIntermediateDegree): string {
@@ -438,8 +450,14 @@ export function getElectivesSuggestedLevelsFootnote(
   const levelsPart =
     distinctLevels.length > 0 ? `(${distinctLevels.map((lvl) => `${lvl}°`).join(', ')}) ` : '';
   const instCode = trimOrEmpty(career?.institutionCode);
-  const instSuffix = instCode ? `de la ${instCode}` : 'del plan de estudios';
+  const instSuffix = instCode ? `de la ${instCode}` : 'de la institución';
   return `* Los niveles ${levelsPart}de las electivas son solo sugerencias académicas ${instSuffix}.`;
+}
+
+export function getWeeklyHoursElectiveFootnote(electivesCount: number): string | null {
+  return electivesCount > 0
+    ? '* Las electivas no tienen carga horaria definida, por eso este valor no las incluye'
+    : null;
 }
 
 export function getDemoTargetLevel(config?: Partial<PlanConfig> | null): number {

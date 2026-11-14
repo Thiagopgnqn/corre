@@ -30,6 +30,8 @@ import {
   getIntermediateDegreeMobileSubtitle,
   getIntermediateDegreeRangeLabel,
   getIntermediateDegreeRangeProgressText,
+  getIntermediateDegreeShortLabel,
+  getIntermediateDegreeShortTitle,
   getIntermediateDegreeSpecialSubjectLabel,
   getIntermediateDegreeToggleDropdownLabel,
   getIntermediateDegreeToggleShortLabel,
@@ -48,6 +50,7 @@ import {
   getScheduleIcsFilename,
   getScheduleIcsUidDomain,
   getScheduleShortSubjectName,
+  getWeeklyHoursElectiveFootnote,
   resolveSpecialRuleView,
 } from '../src/utils/planText';
 
@@ -159,6 +162,8 @@ const ISI_2023_FROZEN_UI_TEXTS = {
     badgesSubtitle: 'Logros desbloqueados automáticamente al avanzar en el plan 2023.',
     ppsTitle: 'Habilitación PPS',
     ppsDesc: 'Cumplís los requisitos para cursar la Práctica Profesional',
+    analistaMilestoneTitle: 'Título Intermedio: Analista Universitario',
+    analistaCardHeading: 'Título Intermedio: Analista Universitario de Sistemas',
     analistaMilestoneDesc: 'Materias 1 a 23 + Seminario Integrador 99 + 4 créditos de electivas',
     analistaRangeLabel: 'Materias 1 a 23:',
     analistaRangeProgressZeroDone: '0 / 23 aprobadas',
@@ -280,7 +285,11 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(getBadgesSectionSubtitle(ISI_PLAN.plan.name), ISI_2023_FROZEN_UI_TEXTS.statsDashboard.badgesSubtitle);
 
     assert.equal(getPpsMilestoneTitle(cfg), ISI_2023_FROZEN_UI_TEXTS.statsDashboard.ppsTitle);
-    assert.equal(getPpsMilestoneDesc(), ISI_2023_FROZEN_UI_TEXTS.statsDashboard.ppsDesc);
+    assert.equal(getPpsMilestoneDesc(cfg), ISI_2023_FROZEN_UI_TEXTS.statsDashboard.ppsDesc);
+    assert.equal(
+      getWeeklyHoursElectiveFootnote(electives.length),
+      '* Las electivas no tienen carga horaria definida, por eso este valor no las incluye'
+    );
 
     assert.equal(
       getIntermediateDegreeMilestoneDesc(analistaDegree, ISI_PLAN.rules, ISI_PLAN.subjects),
@@ -306,14 +315,13 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       getIntermediateDegreeCreditsValueLabel(2, analistaDegree),
       ISI_2023_FROZEN_UI_TEXTS.statsDashboard.analistaCreditsLabel
     );
-    // Documented minor wording discrepancy: catalog DB stores "en Sistemas" while current StatsDashboard L152/L641 show shortened / "de Sistemas"
     assert.equal(
       getIntermediateDegreeMilestoneTitle(analistaDegree),
-      'Título Intermedio: Analista Universitario en Sistemas'
+      ISI_2023_FROZEN_UI_TEXTS.statsDashboard.analistaMilestoneTitle
     );
     assert.equal(
       getIntermediateDegreeCardHeading(analistaDegree),
-      'Título Intermedio: Analista Universitario en Sistemas'
+      ISI_2023_FROZEN_UI_TEXTS.statsDashboard.analistaCardHeading
     );
 
     assert.equal(getLevelProgressRowLabel(1, cfg), ISI_2023_FROZEN_UI_TEXTS.statsDashboard.levelRow1);
@@ -509,6 +517,19 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
 
     assert.equal(getFinalDegreeMilestoneTitle(bioPlan.plan.config), 'Graduación (Título Final)');
     assert.equal(getFinalDegreeMilestoneDesc(bioPlan.plan.config), 'Todas las materias obligatorias aprobadas');
+    assert.equal(getPpsMilestoneDesc(bioPlan.plan.config), 'Cumplís los requisitos académicos exigidos por el plan');
+    assert.equal(getPpsMilestoneDesc(bioPlan.plan.config).includes('Práctica Profesional'), false);
+    assert.equal(getIntermediateDegreeShortLabel({ name: 'Tecnicatura Universitaria' }), 'Tecnicatura');
+    assert.equal(getIntermediateDegreeShortTitle({ name: 'Tecnicatura Universitaria' }), 'Tecnicatura Universitaria');
+    assert.equal(
+      getIntermediateDegreeMilestoneTitle({ name: 'Tecnicatura Universitaria' }),
+      'Título Intermedio: Tecnicatura Universitaria'
+    );
+    assert.equal(
+      getElectivesSuggestedLevelsFootnote([], bioPlan.career),
+      '* Los niveles de las electivas son solo sugerencias académicas de la institución.'
+    );
+    assert.equal(getWeeklyHoursElectiveFootnote(0), null);
     assert.deepEqual(getLevelNumbers(bioPlan.plan.config), [1, 2, 3, 4]);
     assert.equal(getDemoTargetLevel(bioPlan.plan.config), 2);
     assert.equal(getDemoNavbarLabel(bioPlan.plan.config), 'Cargar demo (2do cuatrimestre)');
