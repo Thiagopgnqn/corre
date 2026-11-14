@@ -1,5 +1,26 @@
 import { Request, Response } from 'express';
+import { getCatalogStore } from '../catalog/catalog.store.js';
 import { getLibraryService } from './library.service.js';
+
+/**
+ * Resuelve el plan efectivo para operaciones de biblioteca.
+ * Los admins con `allowAdminGlobal` conservan alcance global (null);
+ * los usuarios comunes con `selectedPlanId = null` caen al plan publicado por defecto
+ * (nunca a un plan en borrador o archivado).
+ */
+async function resolveLibraryPlanId(
+  req: Request,
+  allowAdminGlobal: boolean = false
+): Promise<string | null> {
+  if (allowAdminGlobal && req.user?.role === 'admin') {
+    return null;
+  }
+  if (req.user?.selectedPlanId) {
+    return req.user.selectedPlanId;
+  }
+  const defaultPublished = await getCatalogStore().resolvePublishedPlan('current');
+  return defaultPublished?.plan.id || null;
+}
 
 export async function getTermsStatus(req: Request, res: Response): Promise<void> {
   try {
@@ -26,7 +47,7 @@ export async function acceptTerms(req: Request, res: Response): Promise<void> {
 
 export async function listSubjects(req: Request, res: Response): Promise<void> {
   try {
-    const planId = (req.query.planId as string) || req.user?.selectedPlanId || null;
+    const planId = await resolveLibraryPlanId(req);
     const subjects = await getLibraryService().listSubjectsWithCounts(planId);
     res.json({ success: true, data: subjects });
   } catch (err: any) {
@@ -37,11 +58,13 @@ export async function listSubjects(req: Request, res: Response): Promise<void> {
 
 export async function listFiles(req: Request, res: Response): Promise<void> {
   try {
+    const planId = await resolveLibraryPlanId(req);
     const subjectId = req.params.subjectId ? String(req.params.subjectId) : (req.query.subjectId as string | undefined);
     const { kind, year, term, professorId, hasSolution, search, sort, page, pageSize } = req.query;
 
     const result = await getLibraryService().listFiles(
       {
+        planId,
         subjectId,
         kind: kind as string,
         year: year ? parseInt(year as string, 10) : undefined,
@@ -67,7 +90,8 @@ export async function getFileDetail(req: Request, res: Response): Promise<void> 
   try {
     const id = String(req.params.id);
     const isAdmin = req.user?.role === 'admin';
-    const detail = await getLibraryService().getFileDetail(id, req.user?.id, isAdmin);
+    const planId = await resolveLibraryPlanId(req, true);
+    const detail = await getLibraryService().getFileDetail(id, req.user?.id, isAdmin, planId);
     res.json({ success: true, data: detail });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -102,21 +126,26 @@ export async function initUpload(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const result = await getLibraryService().initUpload(userId, {
-      subjectId,
-      kind,
-      academicYear: academicYear ? parseInt(academicYear, 10) : undefined,
-      term,
-      examInstance,
-      hasSolution: Boolean(hasSolution),
-      title,
-      description,
-      originalFilename,
-      mimeType,
-      sizeBytes: parseInt(sizeBytes, 10),
-      professorIds: Array.isArray(professorIds) ? professorIds : undefined,
-      acceptTerms: Boolean(acceptTerms),
-    });
+    const planId = await resolveLibraryPlanId(req);
+    const result = await getLibraryService().initUpload(
+      userId,
+      {
+        subjectId,
+        kind,
+        academicYear: academicYear ? parseInt(academicYear, 10) : undefined,
+        term,
+        examInstance,
+        hasSolution: Boolean(hasSolution),
+        title,
+        description,
+        originalFilename,
+        mimeType,
+        sizeBytes: parseInt(sizeBytes, 10),
+        professorIds: Array.isArray(professorIds) ? professorIds : undefined,
+        acceptTerms: Boolean(acceptTerms),
+      },
+      planId
+    );
 
     res.status(201).json({ success: true, data: result });
   } catch (err: any) {
@@ -135,6 +164,7 @@ export async function initUpload(req: Request, res: Response): Promise<void> {
 export async function completeUpload(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
+    const planId = await resolveLibraryPlanId(req);
     const fileId = req.params.id ? String(req.params.id) : (req.body?.fileId as string);
 
     if (!fileId) {
@@ -142,7 +172,7 @@ export async function completeUpload(req: Request, res: Response): Promise<void>
       return;
     }
 
-    const result = await getLibraryService().completeUpload(userId, fileId);
+    const result = await getLibraryService().completeUpload(userId, fileId, planId);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -162,8 +192,9 @@ export async function downloadFile(req: Request, res: Response): Promise<void> {
     const userId = req.user!.id;
     const id = String(req.params.id);
     const isAdmin = req.user?.role === 'admin';
+    const planId = await resolveLibraryPlanId(req, true);
 
-    const result = await getLibraryService().getDownloadUrl(id, userId, isAdmin);
+    const result = await getLibraryService().getDownloadUrl(id, userId, isAdmin, planId);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -179,8 +210,9 @@ export async function toggleHelpful(req: Request, res: Response): Promise<void> 
   try {
     const userId = req.user!.id;
     const id = String(req.params.id);
+    const planId = await resolveLibraryPlanId(req);
 
-    const result = await getLibraryService().toggleHelpful(id, userId);
+    const result = await getLibraryService().toggleHelpful(id, userId, planId);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -192,6 +224,7 @@ export async function reportFile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
     const id = String(req.params.id);
+    const planId = await resolveLibraryPlanId(req);
     const { reason, note } = req.body;
 
     if (!reason) {
@@ -199,7 +232,7 @@ export async function reportFile(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const result = await getLibraryService().reportFile(id, userId, reason, note);
+    const result = await getLibraryService().reportFile(id, userId, reason, note, planId);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -224,8 +257,9 @@ export async function updateMyFile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
     const id = String(req.params.id);
+    const planId = await resolveLibraryPlanId(req);
 
-    const updated = await getLibraryService().updateMyFile(userId, id, req.body);
+    const updated = await getLibraryService().updateMyFile(userId, id, req.body, planId);
     res.json({ success: true, data: updated });
   } catch (err: any) {
     const statusCode = err.status || 500;
@@ -237,8 +271,9 @@ export async function deleteMyFile(req: Request, res: Response): Promise<void> {
   try {
     const userId = req.user!.id;
     const id = String(req.params.id);
+    const planId = await resolveLibraryPlanId(req);
 
-    const result = await getLibraryService().deleteMyFile(userId, id);
+    const result = await getLibraryService().deleteMyFile(userId, id, planId);
     res.json({ success: true, data: result });
   } catch (err: any) {
     const statusCode = err.status || 500;

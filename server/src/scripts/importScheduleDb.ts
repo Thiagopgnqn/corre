@@ -134,9 +134,8 @@ async function runScheduleImport() {
       const candidates = [
         path.resolve(__dirname, '../../seed-data/schedule.json'),
         path.resolve(__dirname, '../seed-data/schedule.json'),
-        path.resolve(__dirname, '../../../src/data/schedule.json'),
         path.resolve(process.cwd(), 'seed-data/schedule.json'),
-        path.resolve(process.cwd(), 'src/data/schedule.json'),
+        path.resolve(process.cwd(), 'server/seed-data/schedule.json'),
       ];
       for (const cand of candidates) {
         if (fs.existsSync(cand)) {

@@ -1,9 +1,5 @@
 // Configurar entorno aislado en memoria ANTES de importar módulos del servidor (CERO conexión a Neon)
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET =
-  process.env.JWT_SECRET || 'test_jwt_secret_super_seguro_de_al_menos_32_caracteres_2026';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
+import './setupTestEnv.js';
 
 import http from 'http';
 import crypto from 'crypto';
@@ -12,7 +8,9 @@ import jwt from 'jsonwebtoken';
 async function main() {
   const { env } = await import('../src/config/env.js');
   const { createApp } = await import('../src/app.js');
-  const { InMemoryReviewsStore } = await import('../src/modules/reviews/reviews.store.js');
+  const { DrizzleReviewsStore, InMemoryReviewsStore } = await import(
+    '../src/modules/reviews/reviews.store.js'
+  );
   const {
     parseProfessorName,
     compareProfessorParsed,
@@ -115,7 +113,8 @@ async function main() {
         id: user.id,
         email: user.email,
         role: user.role,
-        selectedPlanId: user.selectedPlanId ?? store.defaultPlanId,
+        selectedPlanId:
+          'selectedPlanId' in user ? user.selectedPlanId : store.defaultPlanId,
         emailVerified: user.emailVerified ?? true,
       },
       env.JWT_SECRET,
@@ -1187,6 +1186,136 @@ async function main() {
     assert(
       revTarget && revTarget.attendedDeclared === true,
       'Tras mergeProfessors, attendedDeclared se mantiene correctamente recalculado'
+    );
+
+    // 11.10 Filtro subjectId de GET /api/professors con código numérico vs UUID vs code E-/X-
+    const elective301 = store.seedSubject({
+      codeInPlan: 301,
+      name: 'Backend de Aplicaciones',
+      shortName: 'Backend de Aplicaciones',
+      level: 3,
+      kind: 'electiva',
+    });
+    const profElective = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Elective, Docente Prueba',
+    });
+    store.seedCommissionTeaching({
+      professorId: profElective.id,
+      subjectId: elective301.id,
+      termLabel: '2026 2C',
+      isCurrent: true,
+    });
+
+    const filterByNumCore = await api('GET', `/api/professors?subjectId=${subjects[0].codeInPlan}`, tokenA);
+    const filterByNumElective = await api('GET', '/api/professors?subjectId=301', tokenA);
+    const filterByUuidElective = await api('GET', `/api/professors?subjectId=${elective301.id}`, tokenA);
+    const filterByFormattedCode = await api('GET', '/api/professors?subjectId=E-301', tokenA);
+
+    assert(
+      filterByNumCore.status === 200 &&
+        (filterByNumCore.data?.data?.professors || []).some((p: any) => p.id === profBotta1.id),
+      'GET /api/professors?subjectId=1 (codeInPlan numérico) devuelve docentes de Materia 1'
+    );
+    assert(
+      filterByNumElective.status === 200 &&
+        (filterByNumElective.data?.data?.professors || []).some((p: any) => p.id === profElective.id) &&
+        filterByUuidElective.status === 200 &&
+        (filterByUuidElective.data?.data?.professors || []).some((p: any) => p.id === profElective.id) &&
+        filterByFormattedCode.status === 200 &&
+        (filterByFormattedCode.data?.data?.professors || []).length === 0,
+      'GET /api/professors acepta id numérico (301) y UUID de electiva, pero rechaza "E-301"'
+    );
+
+    // 11.11 Usuario con selectedPlanId = null y exclusión de plan draft como fallback
+    const nullPlanUser = {
+      id: crypto.randomUUID(),
+      email: 'sin.plan.reviews@frc.utn.edu.ar',
+      role: 'user' as const,
+      selectedPlanId: null as string | null,
+    };
+    testUsersMap.set(nullPlanUser.id, {
+      ...nullPlanUser,
+      status: 'active',
+      emailVerified: true,
+    });
+    const nullPlanToken = makeToken(nullPlanUser);
+
+    store.seedUserProgress(nullPlanUser.id, subjects[0].id, 'aprobada', 9);
+    const nullProfs = await api('GET', '/api/professors', nullPlanToken);
+    const nullEnroll = await api('GET', '/api/enrollments', nullPlanToken);
+    const nullReviewable = await api('GET', '/api/me/reviewable', nullPlanToken);
+    const nullCreateRev = await api('POST', '/api/reviews', nullPlanToken, {
+      professorId: profBotta1.id,
+      subjectId: subjects[0].id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 5,
+      comment: 'Excelente cursada con usuario cuyo JWT tiene selectedPlanId null.',
+    });
+    assert(
+      nullProfs.status === 200 &&
+        nullEnroll.status === 200 &&
+        nullReviewable.status === 200 &&
+        nullCreateRev.status === 201,
+      'Usuario con selectedPlanId = null opera /api/professors (200), /api/enrollments (200), /api/me/reviewable (200) y POST /api/reviews (201)',
+      `statuses=${nullProfs.status}/${nullEnroll.status}/${nullReviewable.status}/${nullCreateRev.status}`
+    );
+
+    const isolatedDraftFirst = new InMemoryReviewsStore();
+    const draftFacId = crypto.randomUUID();
+    const draftPlanId = crypto.randomUUID();
+    const pubPlanId = crypto.randomUUID();
+    isolatedDraftFirst.seedPlan(draftPlanId, draftFacId, {
+      status: 'draft',
+      isActive: true,
+    });
+    isolatedDraftFirst.seedUserPlan(nullPlanUser.id, null);
+
+    const onlyDraftResolved = await isolatedDraftFirst.resolvePlanContext(nullPlanUser.id, null);
+    assert(
+      onlyDraftResolved === null,
+      'InMemoryReviewsStore.resolvePlanContext NO elige un plan draft (aunque isActive sea true)'
+    );
+
+    isolatedDraftFirst.seedPlan(pubPlanId, draftFacId, {
+      status: 'published',
+      isActive: true,
+    });
+    const fallbackPubResolved = await isolatedDraftFirst.resolvePlanContext(nullPlanUser.id, null);
+    assert(
+      fallbackPubResolved?.planId === pubPlanId &&
+        fallbackPubResolved?.facultyId === draftFacId,
+      'InMemoryReviewsStore.resolvePlanContext salta el plan draft y elige el plan published por defecto'
+    );
+
+    let defaultFinderCalls = 0;
+    const drizzleStoreFallback = new DrizzleReviewsStore({
+      getUserSelectedPlanId: async () => null,
+      findDefaultPlan: async () => {
+        defaultFinderCalls++;
+        return {
+          plan: { id: pubPlanId } as any,
+          career: { facultyId: draftFacId } as any,
+        };
+      },
+    });
+    const drizzleResolved = await drizzleStoreFallback.resolvePlanContext(nullPlanUser.id, null);
+    assert(
+      defaultFinderCalls === 1 &&
+        drizzleResolved?.planId === pubPlanId &&
+        drizzleResolved?.facultyId === draftFacId,
+      'DrizzleReviewsStore.resolvePlanContext delega en findDefaultPublishedPlan cuando selectedPlanId es null'
+    );
+
+    const drizzleNoPublished = new DrizzleReviewsStore({
+      getUserSelectedPlanId: async () => null,
+      findDefaultPlan: async () => null,
+    });
+    const drizzleNullResolved = await drizzleNoPublished.resolvePlanContext(nullPlanUser.id, null);
+    assert(
+      drizzleNullResolved === null,
+      'DrizzleReviewsStore.resolvePlanContext devuelve null cuando findDefaultPublishedPlan no encuentra planes publicados'
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

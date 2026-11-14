@@ -33,6 +33,10 @@ import {
   parseProfessorName,
   pickBestDisplayName,
 } from '../professors/professorNormalizer.js';
+import {
+  findDefaultPublishedPlan,
+  type PublishedPlanWithCareer,
+} from '../catalog/catalog.helpers.js';
 
 export type ReviewStatus = 'published' | 'hidden' | 'removed';
 export type ReportReason = 'ofensiva' | 'datos personales' | 'falsa o spam' | 'otra';
@@ -45,6 +49,7 @@ export interface PlanContext {
 
 export interface PlanSubjectRef {
   id: string;
+  planId?: string;
   codeInPlan: number;
   name: string;
   shortName: string;
@@ -376,6 +381,7 @@ export interface ReviewsStore {
   listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
@@ -636,7 +642,14 @@ function isMissingMigrationError(err: unknown): boolean {
 // 1. IMPLEMENTACIÓN POSTGRESQL / DRIZZLE ORM (PRODUCCIÓN)
 // ============================================================================
 
+export interface DrizzleReviewsStoreDeps {
+  findDefaultPlan?: () => Promise<Pick<PublishedPlanWithCareer, 'plan' | 'career'> | null>;
+  getUserSelectedPlanId?: (userId: string) => Promise<string | null>;
+}
+
 export class DrizzleReviewsStore implements ReviewsStore {
+  constructor(private readonly deps: DrizzleReviewsStoreDeps = {}) {}
+
   async resolvePlanContext(
     userId: string,
     requestedPlanId?: string | null
@@ -644,35 +657,42 @@ export class DrizzleReviewsStore implements ReviewsStore {
     let planId = requestedPlanId || null;
 
     if (!planId || planId === 'current' || planId === 'default') {
-      const [user] = await db
-        .select({ selectedPlanId: users.selectedPlanId })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      planId = user?.selectedPlanId || null;
+      if (this.deps.getUserSelectedPlanId) {
+        planId = await this.deps.getUserSelectedPlanId(userId);
+      } else {
+        const [user] = await db
+          .select({ selectedPlanId: users.selectedPlanId })
+          .from(users)
+          .where(eq(users.id, userId))
+          .limit(1);
+        planId = user?.selectedPlanId || null;
+      }
     }
 
-    let planRow;
-    if (planId) {
-      [planRow] = await db.select().from(studyPlans).where(eq(studyPlans.id, planId)).limit(1);
-    }
-    if (!planRow) {
-      [planRow] = await db
-        .select()
+    if (planId && this.isValidUuid(planId)) {
+      const [row] = await db
+        .select({
+          planId: studyPlans.id,
+          facultyId: careers.facultyId,
+        })
         .from(studyPlans)
-        .where(eq(studyPlans.isActive, true))
+        .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+        .where(eq(studyPlans.id, planId))
         .limit(1);
+      if (row) {
+        return { planId: row.planId, facultyId: row.facultyId };
+      }
     }
-    if (!planRow) return null;
 
-    const [career] = await db
-      .select()
-      .from(careers)
-      .where(eq(careers.id, planRow.careerId))
-      .limit(1);
-    if (!career) return null;
+    const defaultPublished = await (this.deps.findDefaultPlan
+      ? this.deps.findDefaultPlan()
+      : findDefaultPublishedPlan());
+    if (!defaultPublished) return null;
 
-    return { planId: planRow.id, facultyId: career.facultyId };
+    return {
+      planId: defaultPublished.plan.id,
+      facultyId: defaultPublished.career.facultyId,
+    };
   }
 
   async getDefaultFacultyId(): Promise<string | null> {
@@ -681,9 +701,11 @@ export class DrizzleReviewsStore implements ReviewsStore {
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
+    if (!this.isValidUuid(planId)) return [];
     const rows = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -699,11 +721,13 @@ export class DrizzleReviewsStore implements ReviewsStore {
     planId: string,
     idOrCode: string | number
   ): Promise<PlanSubjectRef | null> {
+    if (!this.isValidUuid(planId)) return null;
     if (typeof idOrCode === 'number' || /^\d+$/.test(String(idOrCode))) {
       const numCode = Number(idOrCode);
       const [row] = await db
         .select({
           id: subjects.id,
+          planId: subjects.planId,
           codeInPlan: subjects.codeInPlan,
           name: subjects.name,
           shortName: subjects.shortName,
@@ -716,9 +740,11 @@ export class DrizzleReviewsStore implements ReviewsStore {
       return row || null;
     }
 
+    if (!this.isValidUuid(String(idOrCode))) return null;
     const [row] = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -726,7 +752,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         kind: subjects.kind,
       })
       .from(subjects)
-      .where(eq(subjects.id, String(idOrCode)))
+      .where(and(eq(subjects.planId, planId), eq(subjects.id, String(idOrCode))))
       .limit(1);
     return row || null;
   }
@@ -734,9 +760,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async getSubjectsByIds(subjectIds: string[]): Promise<Map<string, PlanSubjectRef>> {
     const map = new Map<string, PlanSubjectRef>();
     if (subjectIds.length === 0) return map;
+    const validIds = subjectIds.filter((id) => this.isValidUuid(id));
+    if (validIds.length === 0) return map;
     const rows = await db
       .select({
         id: subjects.id,
+        planId: subjects.planId,
         codeInPlan: subjects.codeInPlan,
         name: subjects.name,
         shortName: subjects.shortName,
@@ -744,7 +773,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
         kind: subjects.kind,
       })
       .from(subjects)
-      .where(inArray(subjects.id, subjectIds));
+      .where(inArray(subjects.id, validIds));
     for (const r of rows) map.set(r.id, r);
     return map;
   }
@@ -1058,17 +1087,30 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
     viewerUserId?: string;
   }) {
+    if (params.allowedSubjectIds !== undefined && params.allowedSubjectIds.length === 0) {
+      return {
+        items: [],
+        total: 0,
+        viewerHelpfulIds: new Set<string>(),
+        viewerReportedIds: new Set<string>(),
+      };
+    }
+
     const conditions = [
       eq(professorReviews.professorId, params.professorId),
       eq(professorReviews.status, 'published'),
     ];
     if (params.subjectUuid) {
       conditions.push(eq(professorReviews.subjectId, params.subjectUuid));
+    }
+    if (params.allowedSubjectIds && params.allowedSubjectIds.length > 0) {
+      conditions.push(inArray(professorReviews.subjectId, params.allowedSubjectIds));
     }
     const whereClause = and(...conditions);
 
@@ -2526,10 +2568,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
       let hydrated = await this.hydrateEnrollmentRows(rows);
       if (planId) {
         const planSubs = await this.getPlanSubjects(planId);
-        if (planSubs.length > 0) {
-          const validIds = new Set(planSubs.map((s) => s.id));
-          hydrated = hydrated.filter((e) => validIds.has(e.subjectId));
-        }
+        const validIds = new Set(planSubs.map((s) => s.id));
+        hydrated = hydrated.filter((e) => validIds.has(e.subjectId));
       }
       return hydrated;
     } catch (err) {
@@ -2861,9 +2901,21 @@ export class DrizzleReviewsStore implements ReviewsStore {
 // 2. IMPLEMENTACIÓN EN MEMORIA (AISLADA SIN TOCAR NEON PARA TESTS HTTP)
 // ============================================================================
 
+export interface InMemoryReviewPlanMeta {
+  facultyId: string;
+  status: 'draft' | 'published' | 'archived';
+  isActive: boolean;
+  careerStatus: 'draft' | 'published' | 'archived';
+  careerCode?: string;
+  year?: number;
+}
+
 export class InMemoryReviewsStore implements ReviewsStore {
   public defaultFacultyId: string = crypto.randomUUID();
   public defaultPlanId: string = crypto.randomUUID();
+  public planFaculties = new Map<string, string>();
+  public planMetadata = new Map<string, InMemoryReviewPlanMeta>();
+  public userPlans = new Map<string, string | null>();
   public subjectsMap = new Map<string, PlanSubjectRef & { planId: string }>();
   public professorsMap = new Map<string, ProfessorEntity>();
   public aliasesList: ProfessorAliasEntity[] = [];
@@ -2992,6 +3044,26 @@ export class InMemoryReviewsStore implements ReviewsStore {
     return comm;
   }
 
+  seedPlan(
+    planId: string,
+    facultyId: string,
+    options?: Partial<Omit<InMemoryReviewPlanMeta, 'facultyId'>>
+  ) {
+    this.planFaculties.set(planId, facultyId);
+    this.planMetadata.set(planId, {
+      facultyId,
+      status: options?.status ?? 'published',
+      isActive: options?.isActive ?? true,
+      careerStatus: options?.careerStatus ?? 'published',
+      careerCode: options?.careerCode,
+      year: options?.year,
+    });
+  }
+
+  seedUserPlan(userId: string, planId: string | null) {
+    this.userPlans.set(userId, planId);
+  }
+
   seedSubject(input: {
     codeInPlan: number;
     name: string;
@@ -2999,11 +3071,12 @@ export class InMemoryReviewsStore implements ReviewsStore {
     level?: number;
     kind?: string;
     id?: string;
+    planId?: string;
   }): PlanSubjectRef {
     const id = input.id || crypto.randomUUID();
     const sub = {
       id,
-      planId: this.defaultPlanId,
+      planId: input.planId || this.defaultPlanId,
       codeInPlan: input.codeInPlan,
       name: input.name,
       shortName: input.shortName || input.name,
@@ -3029,15 +3102,48 @@ export class InMemoryReviewsStore implements ReviewsStore {
     this.commissionTeachings.push(params);
   }
 
+  private resolveDefaultPublishedPlanContext(): PlanContext | null {
+    if (this.planMetadata.size === 0) {
+      return { planId: this.defaultPlanId, facultyId: this.defaultFacultyId };
+    }
+
+    const candidates = Array.from(this.planMetadata.entries()).filter(
+      ([, meta]) =>
+        meta.status === 'published' &&
+        meta.isActive === true &&
+        meta.careerStatus === 'published'
+    );
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const canonical = candidates.find(
+      ([, meta]) => meta.careerCode === 'ISI' && meta.year === 2023
+    );
+    const [pickedPlanId, pickedMeta] = canonical || candidates[0];
+    return { planId: pickedPlanId, facultyId: pickedMeta.facultyId };
+  }
+
   async resolvePlanContext(
-    _userId: string,
+    userId: string,
     requestedPlanId?: string | null
   ): Promise<PlanContext | null> {
-    const planId =
-      requestedPlanId && requestedPlanId !== 'current' && requestedPlanId !== 'default'
-        ? requestedPlanId
-        : this.defaultPlanId;
-    return { planId, facultyId: this.defaultFacultyId };
+    if (requestedPlanId && requestedPlanId !== 'current' && requestedPlanId !== 'default') {
+      const facultyId = this.planFaculties.get(requestedPlanId) || this.defaultFacultyId;
+      return { planId: requestedPlanId, facultyId };
+    }
+
+    const userPlanId = this.userPlans.get(userId) || null;
+    if (userPlanId) {
+      const meta = this.planMetadata.get(userPlanId);
+      const existsOrLegacy = this.planMetadata.size === 0 || Boolean(meta);
+      if (existsOrLegacy) {
+        const facultyId = this.planFaculties.get(userPlanId) || this.defaultFacultyId;
+        return { planId: userPlanId, facultyId };
+      }
+    }
+
+    return this.resolveDefaultPublishedPlanContext();
   }
 
   async getDefaultFacultyId(): Promise<string | null> {
@@ -3059,7 +3165,8 @@ export class InMemoryReviewsStore implements ReviewsStore {
       }
       return null;
     }
-    return this.subjectsMap.get(String(idOrCode)) || null;
+    const sub = this.subjectsMap.get(String(idOrCode));
+    return sub && sub.planId === planId ? sub : null;
   }
 
   async getSubjectsByIds(subjectIds: string[]): Promise<Map<string, PlanSubjectRef>> {
@@ -3197,16 +3304,20 @@ export class InMemoryReviewsStore implements ReviewsStore {
   async listPublishedReviews(params: {
     professorId: string;
     subjectUuid?: string;
+    allowedSubjectIds?: string[];
     sort: 'recent' | 'helpful';
     page: number;
     pageSize: number;
     viewerUserId?: string;
   }) {
+    const allowedSet =
+      params.allowedSubjectIds !== undefined ? new Set(params.allowedSubjectIds) : null;
     let list = Array.from(this.reviewsMap.values()).filter(
       (r) =>
         r.professorId === params.professorId &&
         r.status === 'published' &&
-        (!params.subjectUuid || r.subjectId === params.subjectUuid)
+        (!params.subjectUuid || r.subjectId === params.subjectUuid) &&
+        (!allowedSet || allowedSet.has(r.subjectId))
     );
 
     list.sort((a, b) => {
@@ -4113,7 +4224,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         if (e.userId !== userId) return false;
         if (planId) {
           const sub = this.subjectsMap.get(e.subjectId);
-          if (sub && sub.planId !== planId) return false;
+          if (!sub || sub.planId !== planId) return false;
         }
         return true;
       })

@@ -37,6 +37,7 @@ import {
 import { validationSemaphore } from '../../utils/semaphore.js';
 import { logAdminAction } from '../admin/admin.audit.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
+import { isValidUuid } from '../catalog/catalog.helpers.js';
 
 interface RateLimitEntry {
   count: number;
@@ -90,6 +91,7 @@ export interface InitUploadInput {
 }
 
 export interface ListLibraryFilesFilters {
+  planId?: string | null;
   subjectId?: string;
   kind?: string;
   year?: number;
@@ -114,17 +116,17 @@ export interface ListAdminLibraryFilters {
 export interface ILibraryService {
   acceptTerms(userId: string, version?: string): Promise<{ success: boolean; acceptedAt: Date; version: string }>;
   getTermsStatus(userId: string): Promise<{ accepted: boolean; acceptedAt: Date | null; version: string | null; currentVersion: string }>;
-  initUpload(userId: string, input: InitUploadInput): Promise<any>;
-  completeUpload(userId: string, fileId: string): Promise<any>;
+  initUpload(userId: string, input: InitUploadInput, planId?: string | null): Promise<any>;
+  completeUpload(userId: string, fileId: string, planId?: string | null): Promise<any>;
   listSubjectsWithCounts(planId?: string | null): Promise<any[]>;
   listFiles(filters: ListLibraryFilesFilters, currentUserId?: string): Promise<any>;
-  getFileDetail(fileId: string, currentUserId?: string, isAdmin?: boolean): Promise<any>;
-  getDownloadUrl(fileId: string, userId: string, isAdmin?: boolean): Promise<any>;
-  toggleHelpful(fileId: string, userId: string): Promise<any>;
-  reportFile(fileId: string, userId: string, reason: any, note?: string): Promise<any>;
+  getFileDetail(fileId: string, currentUserId?: string, isAdmin?: boolean, planId?: string | null): Promise<any>;
+  getDownloadUrl(fileId: string, userId: string, isAdmin?: boolean, planId?: string | null): Promise<any>;
+  toggleHelpful(fileId: string, userId: string, planId?: string | null): Promise<any>;
+  reportFile(fileId: string, userId: string, reason: any, note?: string, planId?: string | null): Promise<any>;
   listMyUploads(userId: string, markChecked?: boolean): Promise<any>;
-  updateMyFile(userId: string, fileId: string, updates: any): Promise<any>;
-  deleteMyFile(userId: string, fileId: string): Promise<any>;
+  updateMyFile(userId: string, fileId: string, updates: any, planId?: string | null): Promise<any>;
+  deleteMyFile(userId: string, fileId: string, planId?: string | null): Promise<any>;
   listPendingFiles(): Promise<any[]>;
   listAllFilesAdmin(filters: ListAdminLibraryFilters): Promise<any>;
   getPreviewUrl(fileId: string): Promise<any>;
@@ -272,7 +274,44 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     };
   }
 
-  async initUpload(userId: string, input: InitUploadInput) {
+  private async getPlanSubjectScope(planId: string) {
+    if (!isValidUuid(planId)) return [];
+    return await db
+      .select({
+        id: subjects.id,
+        name: subjects.name,
+        codeInPlan: subjects.codeInPlan,
+        level: subjects.level,
+        kind: subjects.kind,
+        sharedSubjectId: subjects.sharedSubjectId,
+      })
+      .from(subjects)
+      .where(eq(subjects.planId, planId))
+      .orderBy(asc(subjects.level), asc(subjects.codeInPlan));
+  }
+
+  private async isFileAccessibleInPlan(
+    file: { subjectId: string; sharedSubjectId?: string | null; sourcePlanId?: string | null },
+    planId?: string | null
+  ): Promise<boolean> {
+    if (!planId) return true;
+    if (!isValidUuid(planId)) return false;
+    if (file.sourcePlanId === planId) return true;
+
+    const matchCond = file.sharedSubjectId
+      ? or(eq(subjects.id, file.subjectId), eq(subjects.sharedSubjectId, file.sharedSubjectId))!
+      : eq(subjects.id, file.subjectId);
+
+    const [match] = await db
+      .select({ id: subjects.id })
+      .from(subjects)
+      .where(and(eq(subjects.planId, planId), matchCond))
+      .limit(1);
+
+    return Boolean(match);
+  }
+
+  async initUpload(userId: string, input: InitUploadInput, planId?: string | null) {
     checkInitUploadRateLimit(userId);
 
     const currentYear = new Date().getFullYear();
@@ -325,10 +364,24 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       );
     }
 
+    if (!isValidUuid(input.subjectId) || (planId && !isValidUuid(planId))) {
+      throw Object.assign(new Error('La materia especificada no existe en el catálogo.'), {
+        status: 404,
+      });
+    }
+
     const [subject] = await db
-      .select({ id: subjects.id })
+      .select({
+        id: subjects.id,
+        planId: subjects.planId,
+        sharedSubjectId: subjects.sharedSubjectId,
+      })
       .from(subjects)
-      .where(eq(subjects.id, input.subjectId))
+      .where(
+        planId
+          ? and(eq(subjects.id, input.subjectId), eq(subjects.planId, planId))
+          : eq(subjects.id, input.subjectId)
+      )
       .limit(1);
 
     if (!subject) {
@@ -492,7 +545,10 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       await tx.insert(libraryFiles).values({
         id: fileId,
         uploaderUserId: userId,
-        subjectId: input.subjectId,
+        subjectId: subject.id,
+        sharedSubjectId: subject.sharedSubjectId ?? null,
+        sourceSubjectId: subject.id,
+        sourcePlanId: subject.planId ?? null,
         kind: input.kind,
         academicYear: input.academicYear || null,
         term: input.term || null,
@@ -537,14 +593,21 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     });
   }
 
-  async completeUpload(userId: string, fileId: string) {
+  async completeUpload(userId: string, fileId: string, planId?: string | null) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(
+        new Error('Archivo no encontrado o la sesión de subida expiró por inactividad.'),
+        { status: 404, code: 'UPLOAD_NOT_FOUND_OR_EXPIRED' }
+      );
+    }
+
     const [file] = await db
       .select()
       .from(libraryFiles)
       .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file || file.uploaderUserId !== userId) {
+    if (!file || file.uploaderUserId !== userId || !(await this.isFileAccessibleInPlan(file, planId))) {
       throw Object.assign(
         new Error('Archivo no encontrado o la sesión de subida expiró por inactividad.'),
         { status: 404, code: 'UPLOAD_NOT_FOUND_OR_EXPIRED' }
@@ -624,13 +687,18 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       throw Object.assign(new Error(reason), { status: 400 });
     }
 
-    // Pre-chequeo de duplicados por SHA-256
+    const dupScopeCond = file.sharedSubjectId
+      ? eq(libraryFiles.sharedSubjectId, file.sharedSubjectId)
+      : eq(libraryFiles.subjectId, file.subjectId);
+
+    // Pre-chequeo de duplicados por SHA-256 (agrupado por sharedSubjectId cuando existe)
     const [existingDuplicate] = await db
       .select({ id: libraryFiles.id, title: libraryFiles.title })
       .from(libraryFiles)
       .where(
         and(
           eq(libraryFiles.sha256, validation.sha256),
+          dupScopeCond,
           sql`${libraryFiles.status} NOT IN ('removed', 'rejected')`,
           sql`${libraryFiles.id} != ${fileId}`
         )
@@ -687,6 +755,8 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
   }
 
   async listSubjectsWithCounts(planId?: string | null) {
+    if (planId && !isValidUuid(planId)) return [];
+
     const conditions = [];
     if (planId) {
       conditions.push(eq(subjects.planId, planId));
@@ -701,29 +771,52 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         codeInPlan: subjects.codeInPlan,
         level: subjects.level,
         kind: subjects.kind,
+        sharedSubjectId: subjects.sharedSubjectId,
       })
       .from(subjects)
       .where(whereClause)
       .orderBy(asc(subjects.level), asc(subjects.codeInPlan));
 
-    const countsRows = await db
-      .select({
-        subjectId: libraryFiles.subjectId,
-        approvedCount: count(),
-      })
-      .from(libraryFiles)
-      .where(eq(libraryFiles.status, 'approved'))
-      .groupBy(libraryFiles.subjectId);
+    if (subjectsRows.length === 0) return [];
 
-    const countsMap = new Map<string, number>();
-    for (const r of countsRows) {
-      countsMap.set(r.subjectId, Number(r.approvedCount || 0));
+    const subjectIds = subjectsRows.map((s) => s.id);
+    const sharedIds = Array.from(
+      new Set(
+        subjectsRows
+          .map((s) => s.sharedSubjectId)
+          .filter((sid): sid is string => Boolean(sid))
+      )
+    );
+
+    const fileMatchConds = [inArray(libraryFiles.subjectId, subjectIds)];
+    if (sharedIds.length > 0) {
+      fileMatchConds.push(inArray(libraryFiles.sharedSubjectId, sharedIds));
     }
 
-    return subjectsRows.map((s) => ({
-      ...s,
-      approvedFilesCount: countsMap.get(s.id) || 0,
-    }));
+    const approvedFiles = await db
+      .select({
+        id: libraryFiles.id,
+        subjectId: libraryFiles.subjectId,
+        sharedSubjectId: libraryFiles.sharedSubjectId,
+      })
+      .from(libraryFiles)
+      .where(and(eq(libraryFiles.status, 'approved'), or(...fileMatchConds)!));
+
+    return subjectsRows.map((s) => {
+      const seenIds = new Set<string>();
+      for (const f of approvedFiles) {
+        if (
+          f.subjectId === s.id ||
+          (s.sharedSubjectId && f.sharedSubjectId === s.sharedSubjectId)
+        ) {
+          seenIds.add(f.id);
+        }
+      }
+      return {
+        ...s,
+        approvedFilesCount: seenIds.size,
+      };
+    });
   }
 
   async listFiles(filters: ListLibraryFilesFilters, currentUserId?: string) {
@@ -732,9 +825,79 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     const offset = (page - 1) * limit;
 
     const conditions = [eq(libraryFiles.status, 'approved')];
+    let targetPlanSubject: {
+      id: string;
+      name: string;
+      codeInPlan: number;
+      sharedSubjectId: string | null;
+    } | null = null;
+    const planSubById = new Map<
+      string,
+      { id: string; name: string; codeInPlan: number; sharedSubjectId: string | null }
+    >();
+    const planSubByShared = new Map<
+      string,
+      { id: string; name: string; codeInPlan: number; sharedSubjectId: string | null }
+    >();
 
-    if (filters.subjectId) {
-      conditions.push(eq(libraryFiles.subjectId, filters.subjectId));
+    if (filters.planId) {
+      const planSubs = await this.getPlanSubjectScope(filters.planId);
+      for (const s of planSubs) {
+        planSubById.set(s.id, s);
+        if (s.sharedSubjectId) planSubByShared.set(s.sharedSubjectId, s);
+      }
+
+      if (filters.subjectId) {
+        const matchedSub = isValidUuid(filters.subjectId)
+          ? planSubById.get(filters.subjectId)
+          : undefined;
+        if (!matchedSub) {
+          throw Object.assign(
+            new Error('La materia especificada no pertenece a tu plan de estudios.'),
+            { status: 404 }
+          );
+        }
+        targetPlanSubject = matchedSub;
+        if (matchedSub.sharedSubjectId) {
+          conditions.push(
+            or(
+              eq(libraryFiles.sharedSubjectId, matchedSub.sharedSubjectId),
+              eq(libraryFiles.subjectId, matchedSub.id)
+            )!
+          );
+        } else {
+          conditions.push(eq(libraryFiles.subjectId, matchedSub.id));
+        }
+      } else {
+        const subIds = planSubs.map((s) => s.id);
+        const sharedIds = Array.from(planSubByShared.keys());
+        const scopeOrs = [];
+        if (subIds.length > 0) scopeOrs.push(inArray(libraryFiles.subjectId, subIds));
+        if (sharedIds.length > 0) scopeOrs.push(inArray(libraryFiles.sharedSubjectId, sharedIds));
+        if (scopeOrs.length === 0) {
+          return { items: [], total: 0, page, pageSize: limit, totalPages: 0 };
+        }
+        conditions.push(or(...scopeOrs)!);
+      }
+    } else if (filters.subjectId) {
+      if (!isValidUuid(filters.subjectId)) {
+        return { items: [], total: 0, page, pageSize: limit, totalPages: 0 };
+      }
+      const [sub] = await db
+        .select({ id: subjects.id, sharedSubjectId: subjects.sharedSubjectId })
+        .from(subjects)
+        .where(eq(subjects.id, filters.subjectId))
+        .limit(1);
+      if (sub?.sharedSubjectId) {
+        conditions.push(
+          or(
+            eq(libraryFiles.sharedSubjectId, sub.sharedSubjectId),
+            eq(libraryFiles.subjectId, sub.id)
+          )!
+        );
+      } else {
+        conditions.push(eq(libraryFiles.subjectId, filters.subjectId));
+      }
     }
     if (filters.kind && filters.kind !== 'all') {
       conditions.push(eq(libraryFiles.kind, filters.kind));
@@ -789,6 +952,9 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       .select({
         id: libraryFiles.id,
         subjectId: libraryFiles.subjectId,
+        sharedSubjectId: libraryFiles.sharedSubjectId,
+        sourceSubjectId: libraryFiles.sourceSubjectId,
+        sourcePlanId: libraryFiles.sourcePlanId,
         subjectName: subjects.name,
         subjectCode: subjects.codeInPlan,
         kind: libraryFiles.kind,
@@ -847,12 +1013,22 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       votes.forEach((v) => helpfulMap.add(v.fileId));
     }
 
-    const items = fileRows.map((f) => ({
-      ...f,
-      uploaderDisplay: 'Subido por un estudiante',
-      professors: profsMap.get(f.id) || [],
-      userHasVotedHelpful: helpfulMap.has(f.id),
-    }));
+    const items = fileRows.map((f) => {
+      const resolvedSub =
+        targetPlanSubject ||
+        planSubById.get(f.subjectId) ||
+        (f.sharedSubjectId ? planSubByShared.get(f.sharedSubjectId) : undefined);
+
+      return {
+        ...f,
+        subjectId: resolvedSub?.id || f.subjectId,
+        subjectName: resolvedSub?.name || f.subjectName,
+        subjectCode: resolvedSub?.codeInPlan ?? f.subjectCode,
+        uploaderDisplay: 'Subido por un estudiante',
+        professors: profsMap.get(f.id) || [],
+        userHasVotedHelpful: helpfulMap.has(f.id),
+      };
+    });
 
     return {
       items,
@@ -863,11 +1039,22 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     };
   }
 
-  async getFileDetail(fileId: string, currentUserId?: string, isAdmin = false) {
+  async getFileDetail(
+    fileId: string,
+    currentUserId?: string,
+    isAdmin = false,
+    planId?: string | null
+  ) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
     const [file] = await db
       .select({
         id: libraryFiles.id,
         subjectId: libraryFiles.subjectId,
+        sharedSubjectId: libraryFiles.sharedSubjectId,
+        sourcePlanId: libraryFiles.sourcePlanId,
         subjectName: subjects.name,
         subjectCode: subjects.codeInPlan,
         kind: libraryFiles.kind,
@@ -891,7 +1078,7 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file) {
+    if (!file || (!isAdmin && !(await this.isFileAccessibleInPlan(file, planId)))) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -920,11 +1107,28 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       userHasVotedHelpful = Boolean(v);
     }
 
+    let resolvedSubjectId = file.subjectId;
+    let resolvedSubjectName = file.subjectName;
+    let resolvedSubjectCode = file.subjectCode;
+    if (planId) {
+      const planSubs = await this.getPlanSubjectScope(planId);
+      const matched =
+        planSubs.find((s) => s.id === file.subjectId) ||
+        (file.sharedSubjectId ? planSubs.find((s) => s.sharedSubjectId === file.sharedSubjectId) : undefined);
+      if (matched) {
+        resolvedSubjectId = matched.id;
+        resolvedSubjectName = matched.name;
+        resolvedSubjectCode = matched.codeInPlan;
+      }
+    }
+
     return {
       id: file.id,
-      subjectId: file.subjectId,
-      subjectName: file.subjectName,
-      subjectCode: file.subjectCode,
+      subjectId: resolvedSubjectId,
+      subjectName: resolvedSubjectName,
+      subjectCode: resolvedSubjectCode,
+      sharedSubjectId: file.sharedSubjectId ?? null,
+      sourcePlanId: file.sourcePlanId ?? null,
       kind: file.kind,
       academicYear: file.academicYear,
       term: file.term,
@@ -945,14 +1149,18 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     };
   }
 
-  async getDownloadUrl(fileId: string, userId: string, isAdmin = false) {
+  async getDownloadUrl(fileId: string, userId: string, isAdmin = false, planId?: string | null) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
     const [file] = await db
       .select()
       .from(libraryFiles)
       .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file) {
+    if (!file || (!isAdmin && !(await this.isFileAccessibleInPlan(file, planId)))) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -1023,14 +1231,25 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     };
   }
 
-  async toggleHelpful(fileId: string, userId: string) {
+  async toggleHelpful(fileId: string, userId: string, planId?: string | null) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no disponible.'), { status: 404 });
+    }
+
     const [file] = await db
-      .select({ id: libraryFiles.id, helpfulCount: libraryFiles.helpfulCount, status: libraryFiles.status })
+      .select({
+        id: libraryFiles.id,
+        helpfulCount: libraryFiles.helpfulCount,
+        status: libraryFiles.status,
+        subjectId: libraryFiles.subjectId,
+        sharedSubjectId: libraryFiles.sharedSubjectId,
+        sourcePlanId: libraryFiles.sourcePlanId,
+      })
       .from(libraryFiles)
       .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file || file.status !== 'approved') {
+    if (!file || file.status !== 'approved' || !(await this.isFileAccessibleInPlan(file, planId))) {
       throw Object.assign(new Error('Archivo no disponible.'), { status: 404 });
     }
 
@@ -1067,15 +1286,26 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     fileId: string,
     userId: string,
     reason: 'derechos_de_autor' | 'contenido_inapropiado' | 'incorrecto_o_enganoso' | 'duplicado' | 'otro',
-    note?: string
+    note?: string,
+    planId?: string | null
   ) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
     const [file] = await db
-      .select({ id: libraryFiles.id, status: libraryFiles.status })
+      .select({
+        id: libraryFiles.id,
+        status: libraryFiles.status,
+        subjectId: libraryFiles.subjectId,
+        sharedSubjectId: libraryFiles.sharedSubjectId,
+        sourcePlanId: libraryFiles.sourcePlanId,
+      })
       .from(libraryFiles)
       .where(eq(libraryFiles.id, fileId))
       .limit(1);
 
-    if (!file) {
+    if (!file || !(await this.isFileAccessibleInPlan(file, planId))) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -1209,15 +1439,20 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       term?: '1C' | '2C' | 'A';
       examInstance?: string;
       hasSolution?: boolean;
-    }
+    },
+    planId?: string | null
   ) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
     const [file] = await db
       .select()
       .from(libraryFiles)
       .where(and(eq(libraryFiles.id, fileId), eq(libraryFiles.uploaderUserId, userId)))
       .limit(1);
 
-    if (!file || file.status === 'removed') {
+    if (!file || file.status === 'removed' || !(await this.isFileAccessibleInPlan(file, planId))) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -1263,7 +1498,31 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       (updates.subjectId && updates.subjectId !== file.subjectId) ||
       (updates.kind && updates.kind !== file.kind)
     ) {
-      if (updates.subjectId) payload.subjectId = updates.subjectId;
+      if (updates.subjectId) {
+        if (!isValidUuid(updates.subjectId)) {
+          throw Object.assign(new Error('La materia especificada no pertenece a tu plan de estudios.'), { status: 404 });
+        }
+        const [newSub] = await db
+          .select({
+            id: subjects.id,
+            planId: subjects.planId,
+            sharedSubjectId: subjects.sharedSubjectId,
+          })
+          .from(subjects)
+          .where(
+            planId
+              ? and(eq(subjects.id, updates.subjectId), eq(subjects.planId, planId))
+              : eq(subjects.id, updates.subjectId)
+          )
+          .limit(1);
+        if (!newSub) {
+          throw Object.assign(new Error('La materia especificada no pertenece a tu plan de estudios.'), { status: 404 });
+        }
+        payload.subjectId = newSub.id;
+        payload.sharedSubjectId = newSub.sharedSubjectId ?? null;
+        payload.sourceSubjectId = newSub.id;
+        payload.sourcePlanId = newSub.planId ?? null;
+      }
       if (updates.kind) payload.kind = updates.kind;
       payload.status = 'pending';
       payload.rejectionReason = null;
@@ -1280,14 +1539,18 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     return updated;
   }
 
-  async deleteMyFile(userId: string, fileId: string) {
+  async deleteMyFile(userId: string, fileId: string, planId?: string | null) {
+    if (!isValidUuid(fileId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
+
     const [file] = await db
       .select()
       .from(libraryFiles)
       .where(and(eq(libraryFiles.id, fileId), eq(libraryFiles.uploaderUserId, userId)))
       .limit(1);
 
-    if (!file) {
+    if (!file || !(await this.isFileAccessibleInPlan(file, planId))) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -1966,7 +2229,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     notifyLibraryEmail?: boolean;
   }>();
 
-  public subjects = new Map<string, { id: string; name: string; codeInPlan: number; level: number; kind: string; planId?: string }>();
+  public subjects = new Map<string, { id: string; name: string; codeInPlan: number; level: number; kind: string; planId?: string; sharedSubjectId?: string | null }>();
   public professors = new Map<string, { id: string; displayName: string }>();
   public files = new Map<string, any>();
   public fileProfessors = new Map<string, Set<string>>(); // fileId -> Set<professorId>
@@ -2083,7 +2346,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     });
   }
 
-  seedSubject(s: { id: string; name: string; codeInPlan: number; level: number; kind?: string; planId?: string }) {
+  seedSubject(s: { id: string; name: string; codeInPlan: number; level: number; kind?: string; planId?: string; sharedSubjectId?: string | null }) {
     this.subjects.set(s.id, {
       id: s.id,
       name: s.name,
@@ -2091,6 +2354,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
       level: s.level,
       kind: s.kind || 'integradora',
       planId: s.planId || 'plan-2023',
+      sharedSubjectId: s.sharedSubjectId ?? null,
     });
   }
 
@@ -2120,7 +2384,21 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     };
   }
 
-  async initUpload(userId: string, input: InitUploadInput) {
+  private isFileAccessibleInPlanInMemory(
+    file: { subjectId: string; sharedSubjectId?: string | null; sourcePlanId?: string | null },
+    planId?: string | null
+  ): boolean {
+    if (!planId) return true;
+    if (file.sourcePlanId === planId) return true;
+    for (const s of this.subjects.values()) {
+      if (s.planId !== planId) continue;
+      if (s.id === file.subjectId) return true;
+      if (file.sharedSubjectId && s.sharedSubjectId === file.sharedSubjectId) return true;
+    }
+    return false;
+  }
+
+  async initUpload(userId: string, input: InitUploadInput, planId?: string | null) {
     return await this.withUserLock(userId, async () => {
       checkInitUploadRateLimit(userId);
 
@@ -2167,7 +2445,8 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
         throw Object.assign(new Error(`El archivo excede el tamaño máximo permitido para ${typeLabel}.`), { status: 400 });
       }
 
-      if (!this.subjects.has(input.subjectId)) {
+      const subject = this.subjects.get(input.subjectId);
+      if (!subject || (planId && subject.planId !== planId)) {
         throw Object.assign(new Error('La materia especificada no existe en el catálogo.'), { status: 404 });
       }
 
@@ -2273,7 +2552,10 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
       const fileRecord = {
         id: fileId,
         uploaderUserId: userId,
-        subjectId: input.subjectId,
+        subjectId: subject.id,
+        sharedSubjectId: subject.sharedSubjectId ?? null,
+        sourceSubjectId: subject.id,
+        sourcePlanId: subject.planId ?? null,
         kind: input.kind,
         academicYear: input.academicYear || null,
         term: input.term || null,
@@ -2324,9 +2606,9 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     });
   }
 
-  async completeUpload(userId: string, fileId: string) {
+  async completeUpload(userId: string, fileId: string, planId?: string | null) {
     const file = this.files.get(fileId);
-    if (!file || file.uploaderUserId !== userId) {
+    if (!file || file.uploaderUserId !== userId || !this.isFileAccessibleInPlanInMemory(file, planId)) {
       throw Object.assign(
         new Error('Archivo no encontrado o la sesión de subida expiró por inactividad.'),
         { status: 404, code: 'UPLOAD_NOT_FOUND_OR_EXPIRED' }
@@ -2387,9 +2669,15 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
       throw Object.assign(new Error(reason), { status: 400 });
     }
 
-    // Comprobación de duplicados (Requisito 1: pre-chequeo)
+    // Comprobación de duplicados por SHA-256 (agrupado por sharedSubjectId cuando existe)
     const existingDuplicate = Array.from(this.files.values()).find(
-      (f) => f.id !== fileId && f.sha256 === validation.sha256 && !['removed', 'rejected'].includes(f.status)
+      (f) =>
+        f.id !== fileId &&
+        f.sha256 === validation.sha256 &&
+        !['removed', 'rejected'].includes(f.status) &&
+        (file.sharedSubjectId && f.sharedSubjectId
+          ? f.sharedSubjectId === file.sharedSubjectId
+          : f.subjectId === file.subjectId)
     );
 
     if (existingDuplicate || this.simulateSha256CollisionOnComplete) {
@@ -2417,13 +2705,17 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
   async listSubjectsWithCounts(planId?: string | null) {
     const result: any[] = [];
     for (const s of this.subjects.values()) {
-      if (planId && s.planId && s.planId !== planId) continue;
-      const approvedCount = Array.from(this.files.values()).filter(
-        (f) => f.subjectId === s.id && f.status === 'approved'
-      ).length;
+      if (planId && s.planId !== planId) continue;
+      const seenIds = new Set<string>();
+      for (const f of this.files.values()) {
+        if (f.status !== 'approved') continue;
+        if (f.subjectId === s.id || (s.sharedSubjectId && f.sharedSubjectId === s.sharedSubjectId)) {
+          seenIds.add(f.id);
+        }
+      }
       result.push({
         ...s,
-        approvedFilesCount: approvedCount,
+        approvedFilesCount: seenIds.size,
       });
     }
     return result.sort((a, b) => a.level - b.level || a.codeInPlan - b.codeInPlan);
@@ -2431,8 +2723,44 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
 
   async listFiles(filters: ListLibraryFilesFilters, currentUserId?: string) {
     let items = Array.from(this.files.values()).filter((f) => f.status === 'approved');
+    let targetPlanSubject: { id: string; name: string; codeInPlan: number; sharedSubjectId?: string | null } | null = null;
+    const planSubById = new Map<string, { id: string; name: string; codeInPlan: number; sharedSubjectId?: string | null }>();
+    const planSubByShared = new Map<string, { id: string; name: string; codeInPlan: number; sharedSubjectId?: string | null }>();
 
-    if (filters.subjectId) items = items.filter((f) => f.subjectId === filters.subjectId);
+    if (filters.planId) {
+      for (const s of this.subjects.values()) {
+        if (s.planId !== filters.planId) continue;
+        planSubById.set(s.id, s);
+        if (s.sharedSubjectId) planSubByShared.set(s.sharedSubjectId, s);
+      }
+
+      if (filters.subjectId) {
+        const matched = planSubById.get(filters.subjectId);
+        if (!matched) {
+          throw Object.assign(new Error('La materia especificada no pertenece a tu plan de estudios.'), { status: 404 });
+        }
+        targetPlanSubject = matched;
+        items = items.filter(
+          (f) =>
+            f.subjectId === matched.id ||
+            Boolean(matched.sharedSubjectId && f.sharedSubjectId === matched.sharedSubjectId)
+        );
+      } else {
+        items = items.filter(
+          (f) =>
+            planSubById.has(f.subjectId) ||
+            Boolean(f.sharedSubjectId && planSubByShared.has(f.sharedSubjectId))
+        );
+      }
+    } else if (filters.subjectId) {
+      const sub = this.subjects.get(filters.subjectId);
+      items = items.filter(
+        (f) =>
+          f.subjectId === filters.subjectId ||
+          Boolean(sub?.sharedSubjectId && f.sharedSubjectId === sub.sharedSubjectId)
+      );
+    }
+
     if (filters.kind && filters.kind !== 'all') items = items.filter((f) => f.kind === filters.kind);
     if (filters.year) items = items.filter((f) => f.academicYear === filters.year);
     if (filters.term && filters.term !== 'all') items = items.filter((f) => f.term === filters.term);
@@ -2459,12 +2787,18 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     }
 
     const paged = items.slice(offset, offset + pageSize).map((f) => {
-      const sub = this.subjects.get(f.subjectId);
+      const resolvedSub =
+        targetPlanSubject ||
+        planSubById.get(f.subjectId) ||
+        (f.sharedSubjectId ? planSubByShared.get(f.sharedSubjectId) : undefined);
+      const sub = resolvedSub || this.subjects.get(f.subjectId);
       const profIds = Array.from(this.fileProfessors.get(f.id) || []);
       const profs = profIds.map((pid) => this.professors.get(pid)).filter(Boolean);
       return {
         id: f.id,
-        subjectId: f.subjectId,
+        subjectId: sub?.id || f.subjectId,
+        sharedSubjectId: f.sharedSubjectId ?? sub?.sharedSubjectId ?? null,
+        sourcePlanId: f.sourcePlanId ?? null,
         subjectName: sub?.name || 'Materia',
         subjectCode: sub?.codeInPlan || 0,
         kind: f.kind,
@@ -2495,20 +2829,38 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     };
   }
 
-  async getFileDetail(fileId: string, currentUserId?: string, isAdmin = false) {
+  async getFileDetail(
+    fileId: string,
+    currentUserId?: string,
+    isAdmin = false,
+    planId?: string | null
+  ) {
     const f = this.files.get(fileId);
-    if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (!f || (!isAdmin && !this.isFileAccessibleInPlanInMemory(f, planId))) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
     if (f.status !== 'approved' && !isAdmin && f.uploaderUserId !== currentUserId) {
       throw Object.assign(new Error('El archivo no está disponible públicamente.'), { status: 403 });
     }
 
-    const sub = this.subjects.get(f.subjectId);
+    let sub = this.subjects.get(f.subjectId);
+    if (planId) {
+      for (const cand of this.subjects.values()) {
+        if (cand.planId !== planId) continue;
+        if (cand.id === f.subjectId || (f.sharedSubjectId && cand.sharedSubjectId === f.sharedSubjectId)) {
+          sub = cand;
+          break;
+        }
+      }
+    }
     const profIds = Array.from(this.fileProfessors.get(f.id) || []);
     const profs = profIds.map((pid) => this.professors.get(pid)).filter(Boolean);
 
     return {
       id: f.id,
-      subjectId: f.subjectId,
+      subjectId: sub?.id || f.subjectId,
+      sharedSubjectId: f.sharedSubjectId ?? sub?.sharedSubjectId ?? null,
+      sourcePlanId: f.sourcePlanId ?? null,
       subjectName: sub?.name || 'Materia',
       subjectCode: sub?.codeInPlan || 0,
       kind: f.kind,
@@ -2531,9 +2883,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     };
   }
 
-  async getDownloadUrl(fileId: string, userId: string, isAdmin = false) {
+  async getDownloadUrl(fileId: string, userId: string, isAdmin = false, planId?: string | null) {
     const f = this.files.get(fileId);
-    if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (!f || (!isAdmin && !this.isFileAccessibleInPlanInMemory(f, planId))) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
 
     if (f.status === 'rejected' || f.status === 'removed') {
       throw Object.assign(
@@ -2582,9 +2936,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     };
   }
 
-  async toggleHelpful(fileId: string, userId: string) {
+  async toggleHelpful(fileId: string, userId: string, planId?: string | null) {
     const f = this.files.get(fileId);
-    if (!f || f.status !== 'approved') throw Object.assign(new Error('Archivo no disponible.'), { status: 404 });
+    if (!f || f.status !== 'approved' || !this.isFileAccessibleInPlanInMemory(f, planId)) {
+      throw Object.assign(new Error('Archivo no disponible.'), { status: 404 });
+    }
 
     const key = `${fileId}:${userId}`;
     if (this.helpfulVotes.has(key)) {
@@ -2598,9 +2954,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     }
   }
 
-  async reportFile(fileId: string, userId: string, reason: any, note?: string) {
+  async reportFile(fileId: string, userId: string, reason: any, note?: string, planId?: string | null) {
     const f = this.files.get(fileId);
-    if (!f) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (!f || !this.isFileAccessibleInPlanInMemory(f, planId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
 
     const reportId = crypto.randomUUID();
     this.reports.set(reportId, {
@@ -2692,9 +3050,14 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     };
   }
 
-  async updateMyFile(userId: string, fileId: string, updates: any) {
+  async updateMyFile(userId: string, fileId: string, updates: any, planId?: string | null) {
     const f = this.files.get(fileId);
-    if (!f || f.uploaderUserId !== userId || f.status === 'removed') {
+    if (
+      !f ||
+      f.uploaderUserId !== userId ||
+      f.status === 'removed' ||
+      !this.isFileAccessibleInPlanInMemory(f, planId)
+    ) {
       throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
     }
 
@@ -2731,7 +3094,16 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     if (updates.hasSolution !== undefined) f.hasSolution = Boolean(updates.hasSolution);
 
     if ((updates.subjectId && updates.subjectId !== f.subjectId) || (updates.kind && updates.kind !== f.kind)) {
-      if (updates.subjectId) f.subjectId = updates.subjectId;
+      if (updates.subjectId) {
+        const newSub = this.subjects.get(updates.subjectId);
+        if (!newSub || (planId && newSub.planId !== planId)) {
+          throw Object.assign(new Error('La materia especificada no pertenece a tu plan de estudios.'), { status: 404 });
+        }
+        f.subjectId = newSub.id;
+        f.sharedSubjectId = newSub.sharedSubjectId ?? null;
+        f.sourceSubjectId = newSub.id;
+        f.sourcePlanId = newSub.planId ?? null;
+      }
       if (updates.kind) f.kind = updates.kind;
       f.status = 'pending';
       f.rejectionReason = null;
@@ -2742,9 +3114,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     return f;
   }
 
-  async deleteMyFile(userId: string, fileId: string) {
+  async deleteMyFile(userId: string, fileId: string, planId?: string | null) {
     const f = this.files.get(fileId);
-    if (!f || f.uploaderUserId !== userId) throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    if (!f || f.uploaderUserId !== userId || !this.isFileAccessibleInPlanInMemory(f, planId)) {
+      throw Object.assign(new Error('Archivo no encontrado.'), { status: 404 });
+    }
 
     await this.r2.deleteObject(f.storageKey);
     f.status = 'removed';

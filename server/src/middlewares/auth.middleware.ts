@@ -27,6 +27,7 @@ export interface LiveUserStatusRecord {
   role: 'user' | 'admin';
   status: 'active' | 'suspended';
   emailVerified: boolean;
+  selectedPlanId?: string | null;
 }
 
 interface CachedUserRecord extends LiveUserStatusRecord {
@@ -70,6 +71,7 @@ export async function getUserLiveStatus(userId: string): Promise<LiveUserStatusR
         role: users.role,
         status: users.status,
         emailVerifiedAt: users.emailVerifiedAt,
+        selectedPlanId: users.selectedPlanId,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -86,6 +88,7 @@ export async function getUserLiveStatus(userId: string): Promise<LiveUserStatusR
       role: (row.role as 'user' | 'admin') || 'user',
       status: (row.status as 'active' | 'suspended') || 'active',
       emailVerified: Boolean(row.emailVerifiedAt),
+      selectedPlanId: row.selectedPlanId ?? null,
       expiresAt: now + 5000, // 5 segundos de caché en memoria para alto rendimiento
     };
     userStatusCache.set(userId, record);
@@ -99,6 +102,7 @@ export async function getUserLiveStatus(userId: string): Promise<LiveUserStatusR
           email: users.email,
           role: users.role,
           emailVerifiedAt: users.emailVerifiedAt,
+          selectedPlanId: users.selectedPlanId,
         })
         .from(users)
         .where(eq(users.id, userId))
@@ -111,6 +115,7 @@ export async function getUserLiveStatus(userId: string): Promise<LiveUserStatusR
           role: (fallbackRow.role as 'user' | 'admin') || 'user',
           status: 'active',
           emailVerified: Boolean(fallbackRow.emailVerifiedAt),
+          selectedPlanId: fallbackRow.selectedPlanId ?? null,
           expiresAt: now + 5000,
         };
         userStatusCache.set(userId, record);
@@ -172,6 +177,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       ...decoded,
       role: liveUser ? liveUser.role : decoded.role,
       emailVerified: liveUser ? liveUser.emailVerified : decoded.emailVerified === true,
+      selectedPlanId:
+        liveUser && liveUser.selectedPlanId !== undefined
+          ? liveUser.selectedPlanId
+          : decoded.selectedPlanId,
     };
 
     // Actualizar users.last_seen_at debounced como máximo una vez por hora por usuario (Ajuste 2)

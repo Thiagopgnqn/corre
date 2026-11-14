@@ -1,7 +1,9 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'test') {
+  dotenv.config();
+}
 
 const baseSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL (conexión pooled de Neon) es requerida'),

@@ -1,9 +1,5 @@
-// Configurar entorno aislado en memoria ANTES de importar módulos del servidor
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET =
-  process.env.JWT_SECRET || 'test_jwt_secret_super_seguro_de_al_menos_32_caracteres_2026';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
+// Configurar entorno aislado en memoria ANTES de evaluar cualquier módulo del servidor
+import './setupTestEnv.js';
 
 import http from 'http';
 import { Readable } from 'stream';
@@ -35,6 +31,10 @@ import {
 import { defaultMailer } from '../src/modules/mailer/mailer.service.js';
 import { Semaphore, validationSemaphore } from '../src/utils/semaphore.js';
 import { setLiveUserResolverForTesting } from '../src/middlewares/auth.middleware.js';
+import {
+  InMemoryCatalogStore,
+  setCatalogStoreForTesting,
+} from '../src/modules/catalog/catalog.store.js';
 import { createApp } from '../src/app.js';
 
 async function main() {
@@ -169,6 +169,8 @@ async function main() {
   const mockR2 = new MemoryMockR2Service();
   const libraryStore = new InMemoryLibraryService(mockR2);
   setLibraryServiceForTesting(libraryStore);
+  const catalogStore = new InMemoryCatalogStore();
+  setCatalogStoreForTesting(catalogStore);
 
   // Sembrar materias de prueba
   libraryStore.seedSubject({ id: 'sub-sintaxis', name: 'Sintaxis y Semántica de los Lenguajes', codeInPlan: 204, level: 2 });
@@ -198,6 +200,7 @@ async function main() {
       role: u.role,
       status: u.status,
       emailVerified: Boolean(u.emailVerifiedAt),
+      selectedPlanId: (u as any).selectedPlanId,
     };
   });
 
@@ -206,7 +209,13 @@ async function main() {
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const port = (server.address() as any).port;
 
-  function signToken(payload: { id: string; email: string; role: 'user' | 'admin'; emailVerified?: boolean }) {
+  function signToken(payload: {
+    id: string;
+    email: string;
+    role: 'user' | 'admin';
+    emailVerified?: boolean;
+    selectedPlanId?: string | null;
+  }) {
     return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: '1h' });
   }
 
@@ -2080,6 +2089,212 @@ async function main() {
     '/complete (4b): Archivo en removed responde 400 UPLOAD_NOT_ACTIVE'
   );
 
+  // ---------------------------------------------------------------------------
+  // 21. USUARIO CON selectedPlanId = null RESUELVE PLAN PUBLICADO (NO DRAFT)
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 21. Resolución fallback de biblioteca para selectedPlanId = null sin elegir draft');
+
+  const instLibId = '77777777-1111-4777-8777-111111111111';
+  const facLibId = '77777777-2222-4777-8777-111111111111';
+  const careerDraftLibId = '77777777-3333-4777-8777-111111111111';
+  const careerPubLibId = '77777777-4444-4777-8777-111111111111';
+  const careerOtherLibId = '77777777-5555-4777-8777-111111111111';
+  const planDraftLibId = '88888888-1111-4888-8888-111111111111';
+  const planPubLibId = '88888888-2222-4888-8888-111111111111';
+  const planOtherLibId = '88888888-3333-4888-8888-111111111111';
+
+  catalogStore.institutions.push({ id: instLibId, name: 'UTN', code: 'UTN' });
+  catalogStore.faculties.push({ id: facLibId, institutionId: instLibId, name: 'FRC', code: 'FRC' });
+  catalogStore.careers.push(
+    { id: careerDraftLibId, facultyId: facLibId, name: 'Carrera Borrador', code: 'BORR', status: 'published' },
+    { id: careerPubLibId, facultyId: facLibId, name: 'Ingeniería en Sistemas', code: 'ISI', status: 'published' },
+    { id: careerOtherLibId, facultyId: facLibId, name: 'Ingeniería Industrial', code: 'IND', status: 'published' }
+  );
+  // Plan draft sembrado PRIMERO e isActive: true
+  catalogStore.plans.push(
+    {
+      id: planDraftLibId,
+      careerId: careerDraftLibId,
+      name: 'Plan Borrador',
+      year: 2026,
+      status: 'draft',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-01-01T00:00:00Z'),
+      updatedAt: new Date('2024-01-01T00:00:00Z'),
+    },
+    {
+      id: planPubLibId,
+      careerId: careerPubLibId,
+      name: 'Plan 2023',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-02-01T00:00:00Z'),
+      updatedAt: new Date('2024-02-01T00:00:00Z'),
+    },
+    {
+      id: planOtherLibId,
+      careerId: careerOtherLibId,
+      name: 'Plan 2024',
+      year: 2024,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-03-01T00:00:00Z'),
+      updatedAt: new Date('2024-03-01T00:00:00Z'),
+    }
+  );
+
+  const subDraftLibId = 'aaaaaaaa-1111-4aaa-8aaa-111111111111';
+  const subPubLibId = 'aaaaaaaa-2222-4aaa-8aaa-111111111111';
+  const subOtherLibId = 'aaaaaaaa-3333-4aaa-8aaa-111111111111';
+  libraryStore.seedSubject({
+    id: subDraftLibId,
+    name: 'Materia Draft Exclusiva',
+    codeInPlan: 901,
+    level: 1,
+    planId: planDraftLibId,
+    sharedSubjectId: 'bbbbbbbb-1111-4bbb-8bbb-111111111111',
+  });
+  libraryStore.seedSubject({
+    id: subPubLibId,
+    name: 'Materia Publicada ISI',
+    codeInPlan: 902,
+    level: 1,
+    planId: planPubLibId,
+    sharedSubjectId: 'bbbbbbbb-2222-4bbb-8bbb-111111111111',
+  });
+  libraryStore.seedSubject({
+    id: subOtherLibId,
+    name: 'Materia Otra Carrera',
+    codeInPlan: 903,
+    level: 1,
+    planId: planOtherLibId,
+    sharedSubjectId: 'bbbbbbbb-3333-4bbb-8bbb-111111111111',
+  });
+
+  const fDraftLib = 'cccccccc-1111-4ccc-8ccc-111111111111';
+  const fPubLib = 'cccccccc-2222-4ccc-8ccc-111111111111';
+  const fOtherLib = 'cccccccc-3333-4ccc-8ccc-111111111111';
+  for (const [fid, sid, pid, title] of [
+    [fDraftLib, subDraftLibId, planDraftLibId, 'Apunte Draft'],
+    [fPubLib, subPubLibId, planPubLibId, 'Apunte Publicado ISI'],
+    [fOtherLib, subOtherLibId, planOtherLibId, 'Apunte Otra Carrera'],
+  ] as const) {
+    libraryStore.files.set(fid, {
+      id: fid,
+      uploaderUserId: student1Id,
+      subjectId: sid,
+      sharedSubjectId: null,
+      sourcePlanId: pid,
+      kind: 'apunte',
+      title,
+      description: null,
+      academicYear: 2026,
+      term: '1C',
+      examInstance: null,
+      professorText: null,
+      hasSolution: false,
+      originalFilename: `${fid}.pdf`,
+      storageKey: `library/${fid}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: 1024,
+      status: 'approved',
+      rejectionReason: null,
+      downloadCount: 0,
+      helpfulCount: 0,
+      reportsCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    } as any);
+  }
+
+  const nullLibUserId = '55555555-5555-4555-8555-555555555555';
+  libraryStore.seedUser({
+    id: nullLibUserId,
+    email: 'sin.plan.lib@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  (libraryStore.users.get(nullLibUserId) as any).selectedPlanId = null;
+  const nullLibToken = signToken({
+    id: nullLibUserId,
+    email: 'sin.plan.lib@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    selectedPlanId: null,
+  });
+
+  const libSubsRes = await api('GET', '/api/library/subjects', nullLibToken);
+  const libSubIds = (libSubsRes.data?.data || []).map((s: any) => s.id);
+  const libFilesRes = await api('GET', '/api/library/files', nullLibToken);
+  const libFileIds = (libFilesRes.data?.data?.items || []).map((f: any) => f.id);
+  assert(
+    libSubsRes.status === 200 &&
+      libSubIds.length === 1 &&
+      libSubIds[0] === subPubLibId &&
+      libFilesRes.status === 200 &&
+      libFileIds.length === 1 &&
+      libFileIds[0] === fPubLib,
+    'Library (/subjects y /files) para usuario con selectedPlanId = null acota al plan publicado por defecto y excluye planes draft/ajenos',
+    `subIds=${JSON.stringify(libSubIds)}, fileIds=${JSON.stringify(libFileIds)}`
+  );
+
+  const draftDetailBlocked = await api('GET', `/api/library/files/${fDraftLib}`, nullLibToken);
+  const draftSubFilesBlocked = await api(
+    'GET',
+    `/api/library/subjects/${subDraftLibId}/files`,
+    nullLibToken
+  );
+  const draftDownloadBlocked = await api(
+    'GET',
+    `/api/library/files/${fDraftLib}/download`,
+    nullLibToken
+  );
+  const draftHelpfulBlocked = await api(
+    'POST',
+    `/api/library/files/${fDraftLib}/helpful`,
+    nullLibToken
+  );
+  const draftReportBlocked = await api(
+    'POST',
+    `/api/library/files/${fDraftLib}/report`,
+    nullLibToken,
+    { reason: 'spam' }
+  );
+  const draftUploadBlocked = await api(
+    'POST',
+    '/api/library/uploads/init',
+    nullLibToken,
+    {
+      subjectId: subDraftLibId,
+      kind: 'apunte',
+      title: 'No debería poder subir a draft',
+      originalFilename: 'x.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 512,
+      acceptTerms: true,
+    }
+  );
+  const pubDetailAllowed = await api('GET', `/api/library/files/${fPubLib}`, nullLibToken);
+  const adminGlobalDetail = await api('GET', `/api/library/files/${fDraftLib}`, adminToken);
+  assert(
+    draftDetailBlocked.status === 404 &&
+      draftSubFilesBlocked.status === 404 &&
+      draftDownloadBlocked.status === 404 &&
+      draftHelpfulBlocked.status === 404 &&
+      draftReportBlocked.status === 404 &&
+      draftUploadBlocked.status === 404 &&
+      pubDetailAllowed.status === 200 &&
+      adminGlobalDetail.status === 200,
+    'selectedPlanId = null bloquea acceso al plan draft en detalle/listado/descarga/voto/reporte/upload (404), habilita el plan publicado (200) y conserva alcance global de admin (200)',
+    `statuses=${draftDetailBlocked.status}/${draftSubFilesBlocked.status}/${draftDownloadBlocked.status}/${draftHelpfulBlocked.status}/${draftReportBlocked.status}/${draftUploadBlocked.status}/${pubDetailAllowed.status}/${adminGlobalDetail.status}`
+  );
+
+  setCatalogStoreForTesting(null);
   server.close();
 
   console.log('\n======================================================================');

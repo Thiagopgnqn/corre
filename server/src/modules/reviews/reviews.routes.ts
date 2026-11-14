@@ -83,6 +83,7 @@ export function createReviewsRouter(service: ReviewsService): Router {
       try {
         const data = await service.updateReview({
           userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
           reviewId: String(req.params.id),
           ...req.body,
         });
@@ -101,6 +102,7 @@ export function createReviewsRouter(service: ReviewsService): Router {
       try {
         const data = await service.deleteReview({
           userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
           reviewId: String(req.params.id),
         });
         res.json({ success: true, data });
@@ -118,6 +120,7 @@ export function createReviewsRouter(service: ReviewsService): Router {
       try {
         const data = await service.toggleHelpful({
           userId: req.user!.id,
+          planId: req.user?.selectedPlanId,
           reviewId: String(req.params.id),
         });
         res.json({ success: true, data });
@@ -136,6 +139,7 @@ export function createReviewsRouter(service: ReviewsService): Router {
       try {
         const data = await service.reportReview({
           reporterUserId: req.user!.id,
+          planId: req.user?.selectedPlanId,
           reviewId: String(req.params.id),
           reason: req.body.reason,
           note: req.body.note,

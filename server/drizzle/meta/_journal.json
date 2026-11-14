@@ -57,6 +57,48 @@
       "when": 1793670000000,
       "tag": "0007_enrollment_status_and_exam_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793680000000,
+      "tag": "0008_multicarrera_and_shared_subjects",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793690000000,
+      "tag": "0009_isi_plan_pps_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793700000000,
+      "tag": "0010_isi_plan_short_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793710000000,
+      "tag": "0011_isi_plan_integrator_subjects",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793720000000,
+      "tag": "0012_isi_plan_special_rules_descriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793730000000,
+      "tag": "0013_isi_plan_intermediate_and_pps_copy",
+      "breakpoints": true
     }
   ]
 }

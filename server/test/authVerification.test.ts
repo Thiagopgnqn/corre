@@ -1,11 +1,5 @@
 // Configurar entorno aislado en memoria ANTES de importar módulos del servidor
-process.env.NODE_ENV = 'test';
-process.env.JWT_SECRET =
-  process.env.JWT_SECRET || 'test_jwt_secret_super_seguro_de_al_menos_32_caracteres_2026';
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
-process.env.VERIFICATION_CODE_PEPPER =
-  process.env.VERIFICATION_CODE_PEPPER || 'test_pepper_secret_super_seguro_min_16_caracteres';
+import './setupTestEnv.js';
 
 import http from 'http';
 import crypto from 'crypto';
@@ -15,6 +9,15 @@ async function main() {
   const { env } = await import('../src/config/env.js');
   const { createApp } = await import('../src/app.js');
   const { InMemoryReviewsStore } = await import('../src/modules/reviews/reviews.store.js');
+  const { setLiveUserResolverForTesting } = await import('../src/middlewares/auth.middleware.js');
+  const {
+    InMemoryCatalogStore,
+    setCatalogStoreForTesting,
+  } = await import('../src/modules/catalog/catalog.store.js');
+  const {
+    InMemoryAuthStore,
+    setAuthStoreForTesting,
+  } = await import('../src/modules/auth/auth.store.js');
   const {
     computeCanonicalEmail,
     hashVerificationCode,
@@ -123,7 +126,8 @@ async function main() {
         id: user.id,
         email: user.email,
         role: user.role,
-        selectedPlanId: user.selectedPlanId ?? store.defaultPlanId,
+        selectedPlanId:
+          'selectedPlanId' in user ? user.selectedPlanId : store.defaultPlanId,
         emailVerified: user.emailVerified,
       },
       env.JWT_SECRET,
@@ -136,11 +140,13 @@ async function main() {
     endpoint: string,
     token?: string,
     body?: any,
-    includeCsrf: boolean = true
+    includeCsrf: boolean = true,
+    extraCookie?: string
   ) {
     const headers: Record<string, string> = {};
     if (includeCsrf) headers['X-Requested-With'] = 'XMLHttpRequest';
-    if (token) headers['Cookie'] = `accessToken=${token}`;
+    const cookieParts = [token ? `accessToken=${token}` : '', extraCookie || ''].filter(Boolean);
+    if (cookieParts.length > 0) headers['Cookie'] = cookieParts.join('; ');
 
     const fetchOptions: RequestInit = {
       method,
@@ -158,7 +164,13 @@ async function main() {
     } catch {
       // Ignorar si no es json
     }
-    return { status: res.status, data };
+    const setCookies: string[] =
+      typeof (res.headers as any).getSetCookie === 'function'
+        ? (res.headers as any).getSetCookie()
+        : res.headers.get('set-cookie')
+          ? [res.headers.get('set-cookie')!]
+          : [];
+    return { status: res.status, data, setCookies };
   }
 
   const unverifiedUser = {
@@ -853,7 +865,342 @@ async function main() {
     'Registro con contraseña de email que usa Google sugiere iniciar con Google sin revelar más datos'
   );
 
-  // Restaurar verificador mock
+  // Verificar que en producción env.ts sigue negándose a arrancar si falta una variable obligatoria
+  const { spawnSync } = await import('child_process');
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const serverRootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const prodBootCheck = spawnSync(
+    process.execPath,
+    [
+      ...process.execArgv,
+      '--input-type=module',
+      '-e',
+      "import('./src/config/env.js').catch((err) => { console.error(err); process.exit(2); });",
+    ],
+    {
+      cwd: serverRootDir,
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH || '',
+        SystemRoot: process.env.SystemRoot || '',
+        NODE_ENV: 'production',
+        DATABASE_URL: '',
+        JWT_SECRET: '',
+        REFRESH_SECRET: '',
+      },
+    }
+  );
+  assert(
+    prodBootCheck.status === 1 &&
+      (prodBootCheck.stderr || '').includes('Error de validación en variables de entorno'),
+    'En NODE_ENV=production el servidor se niega a arrancar (exit 1) si falta una variable obligatoria',
+    `status=${prodBootCheck.status}, stderr=${(prodBootCheck.stderr || '').slice(0, 300)}`
+  );
+
+  // ---------------------------------------------------------------------------
+  // 6. PRESERVACIÓN Y FALLBACK DE selectedPlanId EN /api/auth/* (SIN ELEGIR DRAFT)
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 6. Auth (/google Caso B, /verify-email, /refresh): selectedPlanId y exclusión de draft');
+
+  const authStore = new InMemoryAuthStore();
+  const catalogStore = new InMemoryCatalogStore();
+  setAuthStoreForTesting(authStore);
+  setCatalogStoreForTesting(catalogStore);
+
+  const instAuthId = crypto.randomUUID();
+  const facAuthId = crypto.randomUUID();
+  const careerDraftId = crypto.randomUUID();
+  const careerIsiId = crypto.randomUUID();
+  const careerIndId = crypto.randomUUID();
+  const planDraftId = crypto.randomUUID();
+  const planPubDefaultId = crypto.randomUUID();
+  const planPubAltId = crypto.randomUUID();
+
+  catalogStore.institutions.push({ id: instAuthId, name: 'UTN', code: 'UTN' });
+  catalogStore.faculties.push({ id: facAuthId, institutionId: instAuthId, name: 'FRC', code: 'FRC' });
+  catalogStore.careers.push(
+    { id: careerDraftId, facultyId: facAuthId, name: 'Carrera Borrador', code: 'DRAFT', status: 'published' },
+    { id: careerIsiId, facultyId: facAuthId, name: 'Ingeniería en Sistemas', code: 'ISI', status: 'published' },
+    { id: careerIndId, facultyId: facAuthId, name: 'Ingeniería Industrial', code: 'IND', status: 'published' }
+  );
+  // Sembrar draft (isActive: true) ANTES del plan publicado por defecto para validar exclusión real
+  catalogStore.plans.push(
+    {
+      id: planDraftId,
+      careerId: careerDraftId,
+      name: 'Plan Borrador',
+      year: 2026,
+      status: 'draft',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-01-01T00:00:00Z'),
+      updatedAt: new Date('2024-01-01T00:00:00Z'),
+    },
+    {
+      id: planPubDefaultId,
+      careerId: careerIsiId,
+      name: 'Plan 2023',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-02-01T00:00:00Z'),
+      updatedAt: new Date('2024-02-01T00:00:00Z'),
+    },
+    {
+      id: planPubAltId,
+      careerId: careerIndId,
+      name: 'Plan 2024',
+      year: 2024,
+      status: 'published',
+      isActive: true,
+      config: {},
+      createdAt: new Date('2024-03-01T00:00:00Z'),
+      updatedAt: new Date('2024-03-01T00:00:00Z'),
+    }
+  );
+
+  setLiveUserResolverForTesting(async (uid: string) => {
+    const u = authStore.users.get(uid);
+    if (!u) return null;
+    return {
+      id: u.id,
+      email: u.email,
+      role: u.role,
+      status: u.status,
+      emailVerified: Boolean(u.emailVerifiedAt),
+      selectedPlanId: u.selectedPlanId,
+    };
+  });
+
+  function extractCookieValue(setCookies: string[], cookieName: string): string | null {
+    for (const raw of setCookies) {
+      const m = new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`).exec(raw);
+      if (m) return decodeURIComponent(m[1]);
+    }
+    return null;
+  }
+
+  // 6a) POST /api/auth/refresh con liveUser conectado: preserva plan del usuario y backfillea si es null
+  const refreshKeepUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'refresh.keep@frc.utn.edu.ar',
+    selectedPlanId: planPubAltId,
+    emailVerifiedAt: new Date(),
+  });
+  const rawKeepRefresh = 'raw_refresh_keep_' + crypto.randomUUID();
+  await authStore.insertRefreshToken({
+    userId: refreshKeepUser.id,
+    tokenHash: crypto.createHash('sha256').update(rawKeepRefresh).digest('hex'),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+
+  const resRefreshKeep = await api(
+    'POST',
+    '/api/auth/refresh',
+    undefined,
+    undefined,
+    true,
+    `refreshToken=${rawKeepRefresh}`
+  );
+  const accessKeepJwt = extractCookieValue(resRefreshKeep.setCookies, 'accessToken');
+  const decodedKeep: any = accessKeepJwt ? jwt.verify(accessKeepJwt, env.JWT_SECRET) : null;
+  assert(
+    resRefreshKeep.status === 200 &&
+      resRefreshKeep.data?.user?.selectedPlanId === planPubAltId &&
+      decodedKeep?.selectedPlanId === planPubAltId,
+    'POST /api/auth/refresh con getUserLiveStatus activo conserva el selectedPlanId real en respuesta y JWT',
+    `status=${resRefreshKeep.status}, userPlan=${resRefreshKeep.data?.user?.selectedPlanId}, jwtPlan=${decodedKeep?.selectedPlanId}`
+  );
+
+  const refreshNullUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'refresh.null@frc.utn.edu.ar',
+    selectedPlanId: null,
+    emailVerifiedAt: new Date(),
+  });
+  const rawNullRefresh = 'raw_refresh_null_' + crypto.randomUUID();
+  await authStore.insertRefreshToken({
+    userId: refreshNullUser.id,
+    tokenHash: crypto.createHash('sha256').update(rawNullRefresh).digest('hex'),
+    expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  });
+
+  const resRefreshNull = await api(
+    'POST',
+    '/api/auth/refresh',
+    undefined,
+    undefined,
+    true,
+    `refreshToken=${rawNullRefresh}`
+  );
+  const accessNullJwt = extractCookieValue(resRefreshNull.setCookies, 'accessToken');
+  const decodedNull: any = accessNullJwt ? jwt.verify(accessNullJwt, env.JWT_SECRET) : null;
+  assert(
+    resRefreshNull.status === 200 &&
+      resRefreshNull.data?.user?.selectedPlanId === planPubDefaultId &&
+      decodedNull?.selectedPlanId === planPubDefaultId &&
+      authStore.users.get(refreshNullUser.id)?.selectedPlanId === planPubDefaultId,
+    'POST /api/auth/refresh para usuario con selectedPlanId = null asigna el plan publicado por defecto (nunca draft) y lo persiste',
+    `status=${resRefreshNull.status}, userPlan=${resRefreshNull.data?.user?.selectedPlanId}, jwtPlan=${decodedNull?.selectedPlanId}`
+  );
+
+  // 6b) Ventana de gracia de refresh (20s): también backfillea selectedPlanId si seguía null
+  const graceNullUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'grace.null@frc.utn.edu.ar',
+    selectedPlanId: null,
+    emailVerifiedAt: new Date(),
+  });
+  const graceOldRaw = 'raw_grace_old_' + crypto.randomUUID();
+  const graceNewHash = crypto.createHash('sha256').update('raw_grace_new_' + crypto.randomUUID()).digest('hex');
+  authStore.refreshTokens.push(
+    {
+      id: crypto.randomUUID(),
+      userId: graceNullUser.id,
+      tokenHash: crypto.createHash('sha256').update(graceOldRaw).digest('hex'),
+      revokedAt: new Date(Date.now() - 2000),
+      replacedByHash: graceNewHash,
+      expiresAt: new Date(Date.now() + 60_000),
+    },
+    {
+      id: crypto.randomUUID(),
+      userId: graceNullUser.id,
+      tokenHash: graceNewHash,
+      revokedAt: null,
+      replacedByHash: null,
+      expiresAt: new Date(Date.now() + 60_000),
+    }
+  );
+  const graceRes = await AuthService.refresh(graceOldRaw);
+  const decodedGrace: any = jwt.verify(graceRes.accessToken, env.JWT_SECRET);
+  assert(
+    graceRes.user.selectedPlanId === planPubDefaultId &&
+      decodedGrace?.selectedPlanId === planPubDefaultId &&
+      authStore.users.get(graceNullUser.id)?.selectedPlanId === planPubDefaultId,
+    'AuthService.refresh en ventana de gracia resuelve el plan publicado por defecto (nunca draft) cuando era null'
+  );
+
+  // 6c) POST /api/auth/google Caso B: cuenta verificada existente con selectedPlanId = null vs con plan asignado
+  const googleCaseBNullUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'caso.b.null@gmail.com',
+    canonicalEmail: 'casobnull@gmail.com',
+    passwordHash: 'argon2_existing',
+    selectedPlanId: null,
+    emailVerifiedAt: new Date(),
+  });
+  const googleCaseBKeepUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'caso.b.keep@gmail.com',
+    canonicalEmail: 'casobkeep@gmail.com',
+    passwordHash: 'argon2_existing',
+    selectedPlanId: planPubAltId,
+    emailVerifiedAt: new Date(),
+  });
+
+  setGoogleVerifierForTesting(async (credential: string) => {
+    if (credential === 'google_case_b_null') {
+      return { email: 'caso.b.null@gmail.com', emailVerified: true, sub: 'sub-case-b-null' };
+    }
+    if (credential === 'google_case_b_keep') {
+      return { email: 'caso.b.keep@gmail.com', emailVerified: true, sub: 'sub-case-b-keep' };
+    }
+    throw new Error('Token de Google inválido');
+  });
+
+  const resGoogleBNull = await api('POST', '/api/auth/google', undefined, {
+    credential: 'google_case_b_null',
+  });
+  const jwtGoogleBNull = extractCookieValue(resGoogleBNull.setCookies, 'accessToken');
+  const decodedGoogleBNull: any = jwtGoogleBNull ? jwt.verify(jwtGoogleBNull, env.JWT_SECRET) : null;
+  assert(
+    resGoogleBNull.status === 200 &&
+      resGoogleBNull.data?.user?.selectedPlanId === planPubDefaultId &&
+      decodedGoogleBNull?.selectedPlanId === planPubDefaultId &&
+      authStore.users.get(googleCaseBNullUser.id)?.selectedPlanId === planPubDefaultId,
+    'POST /api/auth/google Caso B (cuenta verificada con selectedPlanId = null) asigna plan publicado por defecto (no draft) en cookie JWT y DB',
+    `status=${resGoogleBNull.status}, userPlan=${resGoogleBNull.data?.user?.selectedPlanId}`
+  );
+
+  const resGoogleBKeep = await api('POST', '/api/auth/google', undefined, {
+    credential: 'google_case_b_keep',
+  });
+  const jwtGoogleBKeep = extractCookieValue(resGoogleBKeep.setCookies, 'accessToken');
+  const decodedGoogleBKeep: any = jwtGoogleBKeep ? jwt.verify(jwtGoogleBKeep, env.JWT_SECRET) : null;
+  assert(
+    resGoogleBKeep.status === 200 &&
+      resGoogleBKeep.data?.user?.selectedPlanId === planPubAltId &&
+      decodedGoogleBKeep?.selectedPlanId === planPubAltId,
+    'POST /api/auth/google Caso B (cuenta verificada con plan propio) conserva su selectedPlanId original'
+  );
+
+  // 6d) POST /api/auth/verify-email con selectedPlanId = null (flujo normal + rama idempotente ya verificada)
+  const verifyNullUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'verify.null@frc.utn.edu.ar',
+    selectedPlanId: null,
+    emailVerifiedAt: null,
+  });
+  await authStore.createVerificationCode({
+    userId: verifyNullUser.id,
+    codeHash: hashVerificationCode('654321', env.VERIFICATION_CODE_PEPPER),
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+  });
+  const verifyNullToken = createTestToken({
+    id: verifyNullUser.id,
+    email: verifyNullUser.email,
+    role: 'user',
+    emailVerified: false,
+    selectedPlanId: null,
+  });
+  const resVerifyNull = await api('POST', '/api/auth/verify-email', verifyNullToken, {
+    code: '654321',
+  });
+  const jwtVerifyNull = extractCookieValue(resVerifyNull.setCookies, 'accessToken');
+  const decodedVerifyNull: any = jwtVerifyNull ? jwt.verify(jwtVerifyNull, env.JWT_SECRET) : null;
+  assert(
+    resVerifyNull.status === 200 &&
+      resVerifyNull.data?.user?.selectedPlanId === planPubDefaultId &&
+      decodedVerifyNull?.selectedPlanId === planPubDefaultId &&
+      authStore.users.get(verifyNullUser.id)?.selectedPlanId === planPubDefaultId,
+    'POST /api/auth/verify-email con selectedPlanId = null resuelve y persiste el plan publicado por defecto (nunca draft)',
+    `status=${resVerifyNull.status}, userPlan=${resVerifyNull.data?.user?.selectedPlanId}`
+  );
+
+  const alreadyVerifiedNullUser = authStore.seedUser({
+    id: crypto.randomUUID(),
+    email: 'already.verified.null@frc.utn.edu.ar',
+    selectedPlanId: null,
+    emailVerifiedAt: new Date(),
+  });
+  const alreadyVerifiedToken = createTestToken({
+    id: alreadyVerifiedNullUser.id,
+    email: alreadyVerifiedNullUser.email,
+    role: 'user',
+    emailVerified: true,
+    selectedPlanId: null,
+  });
+  const resAlreadyVerifiedNull = await api('POST', '/api/auth/verify-email', alreadyVerifiedToken, {
+    code: '000000',
+  });
+  const jwtAlreadyVerifiedNull = extractCookieValue(resAlreadyVerifiedNull.setCookies, 'accessToken');
+  const decodedAlreadyVerifiedNull: any = jwtAlreadyVerifiedNull
+    ? jwt.verify(jwtAlreadyVerifiedNull, env.JWT_SECRET)
+    : null;
+  assert(
+    resAlreadyVerifiedNull.status === 200 &&
+      resAlreadyVerifiedNull.data?.user?.selectedPlanId === planPubDefaultId &&
+      decodedAlreadyVerifiedNull?.selectedPlanId === planPubDefaultId &&
+      authStore.users.get(alreadyVerifiedNullUser.id)?.selectedPlanId === planPubDefaultId,
+    'POST /api/auth/verify-email en rama ya-verificada con selectedPlanId = null resuelve y persiste el plan publicado por defecto'
+  );
+
+  // Restaurar stores y verificadores mock
+  setLiveUserResolverForTesting(null);
+  setAuthStoreForTesting(null);
+  setCatalogStoreForTesting(null);
   setGoogleVerifierForTesting(null);
   await new Promise<void>((resolve) => server.close(() => resolve()));
 

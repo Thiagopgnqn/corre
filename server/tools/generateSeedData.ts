@@ -6,9 +6,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Importar datos actuales del frontend (fuera del backend)
-import { CORE_SUBJECTS } from '../../src/data/plan2023.js';
-import { ELECTIVES } from '../../src/data/electives.js';
-import { ACRONYM_TO_ID } from '../../src/data/acronyms.js';
+import { CORE_SUBJECTS } from '../../test/fixtures/plan2023.js';
+import { ELECTIVES } from '../../test/fixtures/electives.js';
+import { ACRONYM_TO_ID } from '../../test/fixtures/acronyms.js';
 
 const targetDir = path.resolve(__dirname, '../seed-data');
 if (!fs.existsSync(targetDir)) {
@@ -36,10 +36,22 @@ const catalog = {
     config: {
       requiredElectiveCredits: 20,
       defaultMinPassingGrade: 4,
+      electiveSlotsEquivalent: 7,
+      totalLevels: 5,
+      levelLabel: 'Año',
+      shortTag: 'ISI · Plan 2023',
+      finalDegreeTitle: 'Ingeniero/a',
+      ppsRequirement: {
+        referenceSubjectCode: 36,
+        label: 'Habilitación PPS',
+        description: 'Cumplís los requisitos para cursar la Práctica Profesional',
+      },
       intermediateDegrees: [
         {
           key: 'analista',
-          name: 'Analista Universitario en Sistemas',
+          name: 'Analista Universitario de Sistemas de Información',
+          shortLabel: 'Analista',
+          shortTitle: 'Analista Universitario',
           requiredElectiveCredits: 4,
           specialRuleSubjectCode: 99,
         },
@@ -51,13 +63,13 @@ const catalog = {
       subjectCode: 99, // Seminario Integrador
       ruleType: 'approved_range',
       params: { fromCode: 1, toCode: 23 },
-      description: 'Requiere tener aprobadas todas las materias del ciclo básico y nivel 2 (códigos 1 al 23).',
+      description: 'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.',
     },
     {
       subjectCode: 36, // Proyecto Final
       ruleType: 'all_previous_core_approved',
       params: { excludeTrackKeys: ['analista'] },
-      description: 'Requiere tener aprobadas todas las materias obligatorias previas del plan (excluye Seminario si no se optó por Analista).',
+      description: 'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).',
     },
   ],
   acronyms: Object.entries(ACRONYM_TO_ID).map(([acronym, subjectCode]) => ({
@@ -77,6 +89,7 @@ const catalog = {
       credits: null,
       isOptionalTrack: s.id === 99,
       trackKey: s.id === 99 ? 'analista' : null,
+      isIntegrator: Boolean(s.isIntegrator),
       regularPrereqs: s.regularPrereqs,
       approvedPrereqs: s.approvedPrereqs,
     })),
@@ -92,6 +105,7 @@ const catalog = {
       credits: e.credits,
       isOptionalTrack: false,
       trackKey: null,
+      isIntegrator: false,
       regularPrereqs: e.regularPrereqs,
       approvedPrereqs: e.approvedPrereqs,
     })),
