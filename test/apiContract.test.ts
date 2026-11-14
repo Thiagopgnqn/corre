@@ -154,5 +154,43 @@ describe('API Contract Integrity: Frontend apiFetch vs Express Routes', () => {
     const hasFakeUserState = allServerRoutes.some(r => r.path.startsWith('/api/user-state'));
     assert.equal(hasFakeUserState, false, 'No debe existir prefijo apócrifo /api/user-state en el servidor');
   });
+
+  it('Rutas Admin de importación de planes están registradas en orden correcto y sin stubs legados', () => {
+    const requiredRoutes: Array<{ method: string; path: string }> = [
+      { method: 'GET', path: '/api/admin/plans' },
+      { method: 'GET', path: '/api/admin/plans/template' },
+      { method: 'POST', path: '/api/admin/plans/preview' },
+      { method: 'POST', path: '/api/admin/plans/import' },
+      { method: 'GET', path: '/api/admin/plans/:id' },
+      { method: 'DELETE', path: '/api/admin/plans/:id' },
+    ];
+
+    for (const reqRoute of requiredRoutes) {
+      assert.ok(
+        allServerRoutes.some((r) => r.method === reqRoute.method && r.path === reqRoute.path),
+        `Falta ruta admin requerida: ${reqRoute.method} ${reqRoute.path}`
+      );
+    }
+
+    const templateIdx = allServerRoutes.findIndex(
+      (r) => r.method === 'GET' && r.path === '/api/admin/plans/template'
+    );
+    const detailIdx = allServerRoutes.findIndex(
+      (r) => r.method === 'GET' && r.path === '/api/admin/plans/:id'
+    );
+    assert.ok(
+      templateIdx >= 0 && detailIdx > templateIdx,
+      'GET /api/admin/plans/template debe registrarse antes que GET /api/admin/plans/:id'
+    );
+
+    const hasLegacyCreateCareer = allServerRoutes.some(
+      (r) => r.method === 'POST' && r.path === '/api/admin/careers'
+    );
+    const hasLegacyCreatePlan = allServerRoutes.some(
+      (r) => r.method === 'POST' && r.path === '/api/admin/plans'
+    );
+    assert.equal(hasLegacyCreateCareer, false, 'El stub roto POST /api/admin/careers debe haberse eliminado');
+    assert.equal(hasLegacyCreatePlan, false, 'El stub roto POST /api/admin/plans debe haberse eliminado');
+  });
 });
 

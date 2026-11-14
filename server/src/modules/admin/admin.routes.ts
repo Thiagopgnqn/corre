@@ -36,8 +36,11 @@ import {
   suspendReviewAuthor,
   listAuditLogs,
   getAdminPlans,
-  createCareer,
-  createPlan,
+  downloadPlanTemplate,
+  previewPlanImportHandler,
+  confirmPlanImportHandler,
+  getAdminPlanDetailHandler,
+  deleteDraftPlanHandler,
   createSchedule,
 } from './admin.controller.js';
 import {
@@ -111,10 +114,13 @@ router.post('/reviews/:id/suspend-author', csrfProtection, requireRecentReauth, 
 // 6. Auditoría
 router.get('/audit-logs', listAuditLogs);
 
-// 7. Rutas base de catálogo preexistentes
+// 7. Gestión e importación de planes de estudio (Etapa 2) + horarios base
 router.get('/plans', getAdminPlans);
-router.post('/careers', csrfProtection, createCareer);
-router.post('/plans', csrfProtection, createPlan);
+router.get('/plans/template', downloadPlanTemplate);
+router.post('/plans/preview', csrfProtection, previewPlanImportHandler);
+router.post('/plans/import', csrfProtection, requireRecentReauth, confirmPlanImportHandler);
+router.get('/plans/:id', getAdminPlanDetailHandler);
+router.delete('/plans/:id', csrfProtection, requireRecentReauth, deleteDraftPlanHandler);
 router.post('/schedules', csrfProtection, createSchedule);
 
 // 8. Moderación y Gestión de la Biblioteca de Material de Estudio

@@ -1,3 +1,4 @@
+import os from 'os';
 import path from 'path';
 import { Worker } from 'node:worker_threads';
 import {
@@ -93,14 +94,14 @@ export interface ParsePlanWorkbookOptions {
   artificialWorkerDelayMs?: number;
 }
 
-function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[] } {
+function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[]; isTsRuntime: boolean } {
   const isTsRuntime = import.meta.url.endsWith('.ts');
   const workerUrl = new URL(
     isTsRuntime ? './planImport.worker.ts' : './planImport.worker.js',
     import.meta.url
   );
   if (!isTsRuntime) {
-    return { workerUrl, execArgv: [] };
+    return { workerUrl, execArgv: [], isTsRuntime: false };
   }
 
   // When running under tsx, preserve preflight/import flags while stripping inline --eval/-e flags if any.
@@ -116,7 +117,7 @@ function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[] } {
     }
     filteredExecArgv.push(arg);
   }
-  return { workerUrl, execArgv: filteredExecArgv };
+  return { workerUrl, execArgv: filteredExecArgv, isTsRuntime: true };
 }
 
 function executeInIsolatedWorker(
@@ -125,13 +126,20 @@ function executeInIsolatedWorker(
   artificialDelayMs?: number
 ): Promise<ParsePlanWorkbookResult> {
   return new Promise((resolve, reject) => {
-    const { workerUrl, execArgv } = resolveWorkerSpec();
+    const { workerUrl, execArgv, isTsRuntime } = resolveWorkerSpec();
     const worker = new Worker(workerUrl, {
       workerData: {
         fileBytes: new Uint8Array(buffer),
         ...(artificialDelayMs ? { artificialDelayMs } : {}),
       },
-      env: {}, // Isolate worker completely from process secrets (DATABASE_URL, JWT_SECRET, etc.)
+      env: isTsRuntime
+        ? {
+            TMPDIR: os.tmpdir(),
+            TEMP: os.tmpdir(),
+            TMP: os.tmpdir(),
+            TSX_DISABLE_CACHE: '1',
+          }
+        : {}, // Isolate worker completely from process secrets (DATABASE_URL, JWT_SECRET, etc.)
       execArgv,
       resourceLimits: {
         maxOldGenerationSizeMb: 128,
