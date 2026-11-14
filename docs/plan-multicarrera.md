@@ -1,8 +1,8 @@
 # Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría y Etapa 1A)
 
-> **Estado:** Etapa 1A completada en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales; **FRENADO** esperando aprobación para probar `0008` en Neon / commit de deps / pasar a Etapa 1B).  
+> **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. Actualmente en **Etapa 1B – Parte 1B-1** en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> nueva migración aditiva idempotente `0008_multicarrera_and_shared_subjects.sql` (pendiente de prueba del usuario en rama de Neon).
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos de `ppsRequirement` para ISI 2023).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -86,8 +86,8 @@ Sin embargo, faltan piezas clave para soportar múltiples carreras y carga desde
      - `electiveSlotsEquivalent`: peso/equivalencia de electivas en estadísticas generales (ej. `7` en Sistemas, `0` si no aplica bloque equivalente).
      - `totalLevels` / `levelLabel` (ej. `5` y `"año"`, soportando carreras de 3, 4, 5 o 6 años/niveles).
      - `defaultMinPassingGrade`: nota mínima aprobatoria (ej. `4` o `6`).
-     - `intermediateDegree` (opcional, `null` si la carrera no tiene título intermedio): `{ trackKey, label, shortLabel, toggleLabel, capstoneSubjectCode, minApprovedCore, requiredElectiveCredits, countsSubjectsRange }`. El interruptor en Navbar y tarjeta de título intermedio en Estadísticas **solo** se renderizan si el plan define título intermedio.
-     - `ppsRequirement` (opcional): regla/etiqueta configurable para habilitación de prácticas supervisadas si existe en el plan (no asumir ID `36`).
+     - `intermediateDegrees` (opcional, `[]` si la carrera no tiene título intermedio): arreglo de `{ key, name, requiredElectiveCredits?, specialRuleSubjectCode? }`. El interruptor y las tarjetas de título intermedio **solo** aplican cuando el plan define al menos un título intermedio y la regla especial asociada.
+     - `ppsRequirement` (única fuente de verdad para PPS, `null` si el plan no tiene PPS): `{ referenceSubjectCode: number } | null`. No se usa un segundo campo paralelo (`ppsSubjectCode` eliminado de `schema.ts` y payloads). El motor evalúa `checkEligibility` sobre la materia referenciada del plan activo; si `ppsRequirement` es `null` o no está definido, el plan no tiene PPS (`isPPSEligible = false` y la UI oculta la tarjeta).
      - `shortTag` / etiqueta para exportaciones (reemplazando `"UTN ISI (Plan 2023)"`).
 3. **Reglas especiales genéricas (`plan_special_rules`):**
    - Deben parametrizar completamente reglas por códigos del plan (`codeInPlan` / `subjectId`), por ejemplo:
@@ -221,7 +221,11 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
   10. `test/apiContract.test.ts`: ✅ **`2` pasaron, `0` fallaron**.
   11. `test/scheduleAvailability.test.ts`: ✅ **`13` pasaron, `0` fallaron**.
   12. `test/tutorialLayout.test.ts`: ✅ **`12` pasaron, `0` fallaron**.
-- **Resumen frontend actual:** **12 / 12 archivos en verde** (`134` casos contabilizados explícitamente en runners estructurados + `6` secciones admin + `284` aserciones en los 4 runners simples, **0 fallos**).
+- **Resumen frontend al cierre de Etapa 1A:** **12 / 12 archivos en verde**.
+- **Línea base actualizada al inicio de Etapa 1B (Parte 1B-1, commits `1825d4e` y `53b8db1`):**
+  - **Frontend (`npm test`):** **13 / 13 archivos en verde** (agregando `test/plan2023Oracle.test.ts`: `15` aserciones en `1825d4e`, ampliado a **`23` aserciones sobre `20` escenarios congelados** en `53b8db1` cubriendo correlativas, electivas, promedio, Seminario 99 bordes, Proyecto Final 36, Analista, PPS habilitado/bloqueado y ruta crítica).
+  - **Backend (`npm --prefix server test`):** **`346` pasaron, `0` fallaron**.
+  - **Builds:** **`npm run build` OK** (`tsc -b && vite build`) y **`npm --prefix server run build` OK** (`tsc`).
 
 #### D. Auditoría de dependencias (`xlsx`, `drizzle-orm`, `zod`) y decisión aprobada para Etapa 2
 - **Versión instalada en Etapa 1A (sin modificar `package.json` de dependencias):** `xlsx@0.18.5`, `drizzle-orm@0.40.1` (`^0.40.0`), `drizzle-kit@0.30.6` (`^0.30.4`), `zod@3.25.76` (`^3.24.2`).
@@ -459,7 +463,7 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
 > - **Cobertura actual de tests:** todos los tests de aislamiento de Etapa 1A en `server/test/multicarreraIsolation.test.ts` cubren **exclusivamente** `InMemoryUserStateStore` y `userState.helpers.ts`; **NO cubren `DrizzleUserStateStore` contra PostgreSQL**.
 > - **Plan obligatorio antes de habilitar un segundo plan `status = 'published'`:**
 >   1. **Código (`DrizzleUserStateStore`):** migrar `getUserSettings`/`upsertUserSettings`, `getScheduleSelection`/`upsertScheduleSelection` e `importPlanBundle` para operar en filas separadas por `(user_id, plan_id)` y `(user_id, plan_id, schedule_term_id)` con `onConflictDoUpdate` (y backfill de `extraSettings.perPlan` / `selectionsByPlan` si existiera).
->   2. **Migración propia (`0009_*` o posterior)** una vez verificado en Neon que `0` filas tienen `plan_id IS NULL`:
+>   2. **Migración propia posterior (`0010_*` o posterior)** una vez verificado en Neon que `0` filas tienen `plan_id IS NULL`:
 >      ```sql
 >      -- Solo cuando ya existan 0 filas con plan_id IS NULL y DrizzleUserStateStore haya pasado a múltiples filas por plan:
 >      ALTER TABLE "user_settings" ALTER COLUMN "plan_id" SET NOT NULL;
@@ -476,3 +480,21 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
 > En `server/src/db/schema.ts`, `library_files.subject_id` es `NOT NULL` con `ON DELETE CASCADE` apuntando a `subjects(id)`. Si en Etapa 2 un administrador elimina un plan o una materia (`subjects`) vinculada por `shared_subject_id` a otros planes, PostgreSQL borrará en cascada archivos compartidos por otras carreras y dejará objetos huérfanos en R2. Antes de habilitar borrado de planes o materias en Etapa 2 se debe **prohibir el borrado cuando existan archivos en `library_files`** o **reasignar transaccionalmente `library_files.subject_id`** a otra materia vinculada al mismo `shared_subject_id` (y gestionar R2 si no queda ninguna) antes del `DELETE`.
 
 - **Dependencias (`drizzle-orm`, `drizzle-kit`, `zod`):** su actualización NO forma parte de Etapa 1A ni de Etapa 1B; queda explícitamente diferida para un cambio separado **DESPUÉS de desplegar** multicarrera, con verificación específica de compatibilidad del journal de migraciones en rama de Neon.
+
+---
+
+## 8. Decisiones cerradas y preguntas abiertas de Etapa 1B-1
+
+### 8.1 Regla de PPS (`ppsRequirement`) y migración `0009`
+- **Fuente única de verdad en `study_plans.config`:** `ppsRequirement: { referenceSubjectCode: number } | null`. Se elimina `ppsSubjectCode` de `schema.ts` y de los payloads para evitar dos fuentes de verdad.
+- El motor genérico evalúa `checkEligibility(referenceSubject, userState)` sobre la materia referenciada del plan activo (reproduciendo exactamente `isPPSEligible` actual). Cuando `ppsRequirement` es `null` o ausente, el plan no define PPS (`isPPSEligible: false` y la UI no muestra la tarjeta).
+- **Migración `0009_isi_plan_pps_config.sql` (solo datos, aditiva e idempotente):** completa únicamente `ppsRequirement: { referenceSubjectCode: 36 }` para `ISI Plan 2023` sin pisar claves existentes.
+- **Defaults neutros en backend (`normalizePlanConfig`):** `requiredElectiveCredits: 0`, `defaultMinPassingGrade: 4`, `electiveSlotsEquivalent: 0`, `totalLevels`: máximo nivel presente en las materias del plan (mínimo `1`), `levelLabel: 'Año'`, `intermediateDegrees: []`, `ppsRequirement: null`, sin valores hardcoded de Sistemas.
+
+### 8.2 Auditoría de `seed.ts`, migraciones y Render (solo lectura)
+- `server/src/scripts/seed.ts` **NO se ejecuta** ni en el build de Render (`render.yaml`: `buildCommand: npm install && npm run build && npm run db:migrate`) ni en el arranque (`startCommand: npm run start` -> `node dist/app.js`; tampoco aparece en `server/src/app.ts`). Solo se invoca manualmente mediante `npm --prefix server run seed`.
+- **Advertencia si se corre manualmente `seed.ts`:** líneas `144–148` hacen `.set({ config: catalog.studyPlan.config, ... })` (reemplazo completo de `config`, no merge SQL). Por eso `server/seed-data/plan2023-catalog.json` debe mantenerse alineado con `0008`/`0009`, o en el futuro convertir el upsert manual de `seed.ts` en merge no destructivo.
+- **Migraciones en Render / arranque:** `db:migrate` se ejecuta **tanto** en el `buildCommand` de `render.yaml` como de forma no bloqueante al iniciar `server/src/app.ts` cuando `process.env.NODE_ENV !== 'test'`.
+
+### 8.3 Pregunta abierta de producto para el dueño del proyecto *(no implementar en 1B-1)*
+- **Tarjeta `"Habilitación PPS"` en `StatsDashboard` (`36` vs `514`):** hoy `StatsDashboard` renderiza la tarjeta `"Habilitación PPS"` leyendo `computedProgress.isPPSEligible`, el cual evalúa las correlativas de cursado de la materia **`36` (*Proyecto Final*)** (`regularPrereqs: [25, 26, 30]`, `approvedPrereqs: [12, 20, 23]`) y **NO** las de la electiva **`514` (*Práctica Profesional Supervisada*)** (`regularPrereqs: [30]`, `approvedPrereqs: [20, 19]`). En Etapa 1B se mantiene **exactamente** el comportamiento actual mediante `ppsRequirement: { referenceSubjectCode: 36 }`. Queda pendiente confirmar con el dueño del proyecto si corresponde seguir apuntando a `36` o migrarlo en el futuro a `514` (o a una regla distinta).
