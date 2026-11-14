@@ -80,8 +80,10 @@ export const studyPlans = pgTable(
         totalLevels?: number;
         levelLabel?: string;
         shortTag?: string;
+        finalDegreeTitle?: string;
         ppsRequirement?: {
           referenceSubjectCode: number;
+          label?: string;
         } | null;
         intermediateDegrees?: Array<{
           key: string;

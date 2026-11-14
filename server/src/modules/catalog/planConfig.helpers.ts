@@ -7,6 +7,7 @@ export interface NormalizedIntermediateDegree {
 
 export interface PpsRequirementConfig {
   referenceSubjectCode: number;
+  label?: string;
 }
 
 export interface NormalizedPlanConfig {
@@ -16,6 +17,7 @@ export interface NormalizedPlanConfig {
   totalLevels: number;
   levelLabel: string;
   shortTag: string;
+  finalDegreeTitle?: string;
   intermediateDegrees: NormalizedIntermediateDegree[];
   ppsRequirement: PpsRequirementConfig | null;
   [key: string]: unknown;
@@ -81,8 +83,16 @@ function normalizeIntermediateDegrees(raw: unknown): NormalizedIntermediateDegre
 
 export function normalizePpsRequirement(raw: unknown): PpsRequirementConfig | null {
   if (!raw || typeof raw !== 'object') return null;
-  const refCode = parsePositiveInt((raw as Record<string, unknown>).referenceSubjectCode);
-  return refCode !== null ? { referenceSubjectCode: refCode } : null;
+  const obj = raw as Record<string, unknown>;
+  const refCode = parsePositiveInt(obj.referenceSubjectCode);
+  if (refCode === null) return null;
+  const label =
+    typeof obj.label === 'string' && obj.label.trim().length > 0
+      ? obj.label.trim()
+      : undefined;
+  return label !== undefined
+    ? { referenceSubjectCode: refCode, label }
+    : { referenceSubjectCode: refCode };
 }
 
 /**
@@ -95,6 +105,12 @@ export function sanitizeSummaryPlanConfig(
   const source: Record<string, unknown> =
     rawConfig && typeof rawConfig === 'object' ? { ...rawConfig } : {};
   delete source.ppsSubjectCode;
+
+  const finalDegreeTitle =
+    typeof source.finalDegreeTitle === 'string' && source.finalDegreeTitle.trim().length > 0
+      ? source.finalDegreeTitle.trim()
+      : undefined;
+  delete source.finalDegreeTitle;
 
   const fallbackTag = [context?.careerCode, context?.planName]
     .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
@@ -113,6 +129,7 @@ export function sanitizeSummaryPlanConfig(
       typeof source.shortTag === 'string' && source.shortTag.trim().length > 0
         ? source.shortTag.trim()
         : fallbackTag || 'Plan',
+    ...(finalDegreeTitle !== undefined ? { finalDegreeTitle } : {}),
     intermediateDegrees: normalizeIntermediateDegrees(source.intermediateDegrees),
     ppsRequirement: normalizePpsRequirement(source.ppsRequirement),
   };

@@ -41,18 +41,23 @@ async function main() {
 
   assert(
     !/\b(DROP|DELETE|ALTER|CREATE|TRUNCATE)\b/i.test(sql) &&
-      /^\s*WITH\s+upd\s+AS\s*\(/i.test(sql) &&
+      /\bWITH\s+upd\s+AS\s*\(/i.test(sql) &&
       /\bUPDATE\s+"study_plans"/i.test(sql) &&
       /\bRETURNING\s+sp\."id"/i.test(sql),
     '0009 usa una única sentencia CTE aditiva (WITH upd AS ... UPDATE study_plans RETURNING sp.id)'
   );
   assert(
-    sql.includes(`'{"ppsRequirement":{"referenceSubjectCode":36}}'::jsonb || COALESCE(sp."config", '{}'::jsonb)`),
-    '0009 realiza merge no destructivo a izquierda sin pisar claves existentes'
+    sql.includes(`'{"finalDegreeTitle":"Ingeniero/a"}'::jsonb`) &&
+      sql.includes(`COALESCE(sp."config", '{}'::jsonb)`) &&
+      sql.includes(`'{"referenceSubjectCode":36,"label":"Habilitación PPS"}'::jsonb`),
+    '0009 realiza merge no destructivo a izquierda (nivel raíz y dentro de ppsRequirement) sin pisar claves existentes'
   );
   assert(
-    sql.includes(`NOT (COALESCE(sp."config", '{}'::jsonb) ? 'ppsRequirement')`),
-    '0009 es idempotente mediante verificación de clave ppsRequirement ausente'
+    sql.includes(`NOT (COALESCE(sp."config", '{}'::jsonb) ? 'finalDegreeTitle')`) &&
+      sql.includes(`IS DISTINCT FROM 'object'`) &&
+      sql.includes(`? 'referenceSubjectCode'`) &&
+      sql.includes(`? 'label'`),
+    '0009 es idempotente verificando ausencia de cualquiera de las claves requeridas (finalDegreeTitle, referenceSubjectCode, label)'
   );
   assert(
     sql.includes(`c."code" = 'ISI'`) && sql.includes('sp."year" = 2023') && !sql.includes('ppsSubjectCode'),
@@ -67,7 +72,7 @@ async function main() {
     '0009 crea idempotentemente "default" y actualiza catalog_versions con formato bumpCatalogVersion() solo si EXISTS (SELECT 1 FROM upd)'
   );
 
-  // Simulación funcional de dos corridas de la CTE de 0009 (con y sin fila 'default')
+  // Simulación funcional de dos corridas de la CTE de 0009 (con/sin fila 'default' y con ppsRequirement parcial previo)
   const simulate0009Run = (
     plans: Array<{ id: string; careerCode: string; year: number; config: Record<string, unknown> }>,
     versions: Map<string, string>,
@@ -76,8 +81,26 @@ async function main() {
   ) => {
     const updIds: string[] = [];
     for (const sp of plans) {
-      if (sp.careerCode === 'ISI' && sp.year === 2023 && !('ppsRequirement' in sp.config)) {
-        sp.config = { ppsRequirement: { referenceSubjectCode: 36 }, ...sp.config };
+      const cfg = sp.config || {};
+      const rawPps = cfg.ppsRequirement;
+      const ppsIsObject = rawPps !== null && typeof rawPps === 'object' && !Array.isArray(rawPps);
+      const ppsObj = ppsIsObject ? (rawPps as Record<string, unknown>) : {};
+      const missingKey =
+        !Object.prototype.hasOwnProperty.call(cfg, 'finalDegreeTitle') ||
+        !ppsIsObject ||
+        !Object.prototype.hasOwnProperty.call(ppsObj, 'referenceSubjectCode') ||
+        !Object.prototype.hasOwnProperty.call(ppsObj, 'label');
+
+      if (sp.careerCode === 'ISI' && sp.year === 2023 && missingKey) {
+        sp.config = {
+          finalDegreeTitle: 'Ingeniero/a',
+          ...cfg,
+          ppsRequirement: {
+            referenceSubjectCode: 36,
+            label: 'Habilitación PPS',
+            ...ppsObj,
+          },
+        };
         updIds.push(sp.id);
       }
     }
@@ -85,8 +108,7 @@ async function main() {
     if (updIds.length > 0) {
       if (!versions.has('default')) {
         versions.set('default', generatedVer);
-      }
-      if (versions.has('default')) {
+      } else {
         versions.set('default', generatedVer);
       }
     }
@@ -98,21 +120,33 @@ async function main() {
   const run1NoRow = simulate0009Run(simPlansNoRow, simVersionsEmpty, 1700000000123, 'a1b2c3');
   const run2NoRow = simulate0009Run(simPlansNoRow, simVersionsEmpty, 1700000000999, 'ffffff');
 
-  const simPlansWithRow = [{ id: 'p-isi', careerCode: 'ISI', year: 2023, config: {} }];
+  const simPlansPartialPps = [
+    {
+      id: 'p-isi-partial',
+      careerCode: 'ISI',
+      year: 2023,
+      config: { ppsRequirement: { referenceSubjectCode: 99 } } as Record<string, unknown>,
+    },
+  ];
   const simVersionsExisting = new Map<string, string>([['default', 'v-1600000000000-000000']]);
-  const run1WithRow = simulate0009Run(simPlansWithRow, simVersionsExisting, 1700000000456, '09ef12');
-  const run2WithRow = simulate0009Run(simPlansWithRow, simVersionsExisting, 1700000000888, 'eeeeee');
+  const run1Partial = simulate0009Run(simPlansPartialPps, simVersionsExisting, 1700000000456, '09ef12');
+  const run2Partial = simulate0009Run(simPlansPartialPps, simVersionsExisting, 1700000000888, 'eeeeee');
 
+  const partialPpsAfter = simPlansPartialPps[0].config.ppsRequirement as Record<string, unknown>;
   assert(
     run1NoRow.updatedRows === 1 &&
       /^v-\d+-[0-9a-f]{6}$/.test(run1NoRow.version || '') &&
+      (simPlansNoRow[0].config as Record<string, unknown>).finalDegreeTitle === 'Ingeniero/a' &&
       run2NoRow.updatedRows === 0 &&
       run2NoRow.version === run1NoRow.version &&
-      run1WithRow.updatedRows === 1 &&
-      run1WithRow.version === 'v-1700000000456-09ef12' &&
-      run2WithRow.updatedRows === 0 &&
-      run2WithRow.version === run1WithRow.version,
-    '0009 actualiza catalog_versions solo en la primera corrida (con o sin fila previa) y es no-op en la segunda'
+      run1Partial.updatedRows === 1 &&
+      run1Partial.version === 'v-1700000000456-09ef12' &&
+      simPlansPartialPps[0].config.finalDegreeTitle === 'Ingeniero/a' &&
+      partialPpsAfter.referenceSubjectCode === 99 &&
+      partialPpsAfter.label === 'Habilitación PPS' &&
+      run2Partial.updatedRows === 0 &&
+      run2Partial.version === run1Partial.version,
+    '0009 completa finalDegreeTitle y ppsRequirement.label preservando claves existentes, incrementa catalog_versions solo en corrida 1 y es no-op en corrida 2'
   );
 
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
@@ -135,10 +169,27 @@ async function main() {
       neutralCfg.totalLevels === 3 &&
       neutralCfg.levelLabel === 'Año' &&
       neutralCfg.shortTag === 'MEC · Plan 2025' &&
+      neutralCfg.finalDegreeTitle === undefined &&
       Array.isArray(neutralCfg.intermediateDegrees) &&
       neutralCfg.intermediateDegrees.length === 0 &&
       neutralCfg.ppsRequirement === null,
-    'Normalizador neutro devuelve 0 créditos/slots, nivel máximo derivado (3), Año, [] y ppsRequirement null'
+    'Normalizador neutro devuelve 0 créditos/slots, nivel máximo derivado (3), Año, [], finalDegreeTitle undefined y ppsRequirement null'
+  );
+
+  const partialLabelCfg = normalizePlanConfig(
+    {
+      finalDegreeTitle: 'Ingeniero/a Mecánico/a',
+      ppsRequirement: { referenceSubjectCode: 40 },
+    },
+    [{ level: 5 }],
+    { careerCode: 'MEC', planName: 'Plan 2025' }
+  );
+  assert(
+    partialLabelCfg.finalDegreeTitle === 'Ingeniero/a Mecánico/a' &&
+      partialLabelCfg.ppsRequirement?.referenceSubjectCode === 40 &&
+      partialLabelCfg.ppsRequirement?.label === undefined &&
+      Object.keys(partialLabelCfg.ppsRequirement || {}).length === 1,
+    'Normalizador preserva finalDegreeTitle y deja ppsRequirement.label undefined si no está en DB (sin otros campos)'
   );
 
   const legacyStrippedCfg = normalizePlanConfig(
@@ -213,13 +264,16 @@ async function main() {
     assert(
       d.plan.id === publishedIsi.planId &&
         d.career?.code === 'ISI' &&
+        d.plan.config.finalDegreeTitle === 'Ingeniero/a' &&
         d.plan.config.ppsRequirement?.referenceSubjectCode === 36 &&
+        d.plan.config.ppsRequirement?.label === 'Habilitación PPS' &&
+        Object.keys(d.plan.config.ppsRequirement || {}).length === 2 &&
         !('ppsSubjectCode' in d.plan.config) &&
         d.plan.config.electiveSlotsEquivalent === 7 &&
         d.plan.config.totalLevels === 5 &&
         d.plan.config.levelLabel === 'Año' &&
         d.plan.config.shortTag === 'ISI · Plan 2023',
-      'Payload incluye career, ppsRequirement {36}, config completa de ISI y excluye ppsSubjectCode'
+      'Payload incluye career, finalDegreeTitle, ppsRequirement {36, "Habilitación PPS"}, config completa de ISI y excluye ppsSubjectCode'
     );
     assert(
       d.subjects.length === 60 &&

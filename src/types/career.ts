@@ -33,6 +33,7 @@ export interface Subject {
 
 export interface PlanPpsRequirement {
   referenceSubjectCode: number;
+  label?: string;
 }
 
 export interface PlanIntermediateDegree {
@@ -49,6 +50,7 @@ export interface PlanConfig {
   totalLevels: number;
   levelLabel: string;
   shortTag: string;
+  finalDegreeTitle?: string;
   intermediateDegrees: PlanIntermediateDegree[];
   ppsRequirement: PlanPpsRequirement | null;
   [key: string]: unknown;

@@ -22,8 +22,10 @@
       "totalLevels": 5,
       "levelLabel": "Año",
       "shortTag": "ISI · Plan 2023",
+      "finalDegreeTitle": "Ingeniero/a",
       "ppsRequirement": {
-        "referenceSubjectCode": 36
+        "referenceSubjectCode": 36,
+        "label": "Habilitación PPS"
       },
       "intermediateDegrees": [
         {
