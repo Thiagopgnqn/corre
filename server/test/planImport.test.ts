@@ -86,7 +86,7 @@ function makeValidNeutralSheets(): Record<string, unknown[][]> {
     ],
     [PLAN_TEMPLATE_SHEETS.RULES]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-      [3, 'approved_range', '{"fromCode":1,"toCode":2}', 'Aprobadas 1 a 2 requeridas.'],
+      [3, 'approved_range', 1, 2, '', 'Aprobadas 1 a 2 requeridas.'],
     ],
     [PLAN_TEMPLATE_SHEETS.ACRONYMS]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
@@ -118,6 +118,37 @@ async function runTests(): Promise<void> {
       JSON.stringify(rawTemplateWb.SheetNames) === JSON.stringify(expectedSheetNames) &&
       allHeadersMatch,
     'buildPlanImportTemplateBuffer() incluye las 6 hojas y encabezados exactos esperados'
+  );
+
+  const instRows = XLSX.utils.sheet_to_json(
+    rawTemplateWb.Sheets[PLAN_TEMPLATE_SHEETS.INSTRUCTIONS],
+    { header: 1 }
+  ) as unknown[][];
+  const instMap = new Map<string, string>();
+  for (const r of instRows.slice(1)) {
+    const sh = String(r[0] || '').trim();
+    const col = String(r[1] || '').trim();
+    const example = String(r[4] || '').trim();
+    if (sh && col) instMap.set(`${sh}:${col}`, example);
+  }
+  const missingExamples: string[] = [];
+  for (const sheetName of [
+    PLAN_TEMPLATE_SHEETS.PLAN,
+    PLAN_TEMPLATE_SHEETS.SUBJECTS,
+    PLAN_TEMPLATE_SHEETS.PREREQUISITES,
+    PLAN_TEMPLATE_SHEETS.RULES,
+    PLAN_TEMPLATE_SHEETS.ACRONYMS,
+  ]) {
+    for (const col of PLAN_TEMPLATE_HEADERS[sheetName]) {
+      if (!instMap.get(`${sheetName}:${col}`)) {
+        missingExamples.push(`${sheetName}:${col}`);
+      }
+    }
+  }
+  assert(
+    missingExamples.length === 0,
+    'Instrucciones documenta con un Ejemplo concreto cada columna de todas las hojas de la plantilla',
+    missingExamples.join(', ')
   );
 
   const parsedTemplate = await parsePlanWorkbookBuffer({
@@ -264,7 +295,7 @@ async function runTests(): Promise<void> {
   const minCreditsSheets = makeValidNeutralSheets();
   minCreditsSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
     [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-    [3, 'min_credits', '{"minCredits":10}', 'No soportado'],
+    [3, 'min_credits', 10, '', '', 'No soportado'],
   ];
   const minCreditsRes = await parsePlanWorkbookBuffer({
     fileName: 'mincredits.xlsx',
@@ -279,23 +310,88 @@ async function runTests(): Promise<void> {
     'Rechaza min_credits y cualquier regla no implementada en src/utils/correlativas.ts'
   );
 
-  // Reject invalid approved_range (fromCode > toCode)
+  // Reject invalid approved_range (Desde > Hasta)
   const badRangeSheets = makeValidNeutralSheets();
   badRangeSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
     [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-    [3, 'approved_range', '{"fromCode":2,"toCode":1}', 'Rango invertido'],
+    [3, 'approved_range', 2, 1, '', 'Rango invertido'],
   ];
   const badRangeRes = await parsePlanWorkbookBuffer({
     fileName: 'badrange.xlsx',
     buffer: buildWorkbookBuffer(badRangeSheets),
   });
-  assert(!badRangeRes.valid && badRangeRes.errors.some((e) => e.message.includes('mayor a toCode')), 'Valida rango inválido en approved_range');
+  assert(!badRangeRes.valid && badRangeRes.errors.some((e) => e.message.includes('mayor a "Hasta código"')), 'Valida rango inválido en approved_range');
 
-  // Prototype pollution attempt in JSON params
+  // Optional description generates clear default + comma-separated excludeTrackKeys validation
+  const trackRuleSheets = makeValidNeutralSheets();
+  trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][11] = 'SI';
+  trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][12] = 'tr_a';
+  trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][2][11] = 'SI';
+  trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][2][12] = 'tr_b';
+  trackRuleSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
+    [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
+    [3, 'all_previous_core_approved', '', '', 'tr_a, tr_b', ''],
+  ];
+  const trackRuleRes = await parsePlanWorkbookBuffer({
+    fileName: 'trackrule.xlsx',
+    buffer: buildWorkbookBuffer(trackRuleSheets),
+  });
+  const badTrackRuleSheets = makeValidNeutralSheets();
+  badTrackRuleSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
+    [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
+    [3, 'all_previous_core_approved', 1, '', 'inexistente', ''],
+  ];
+  const badTrackRuleRes = await parsePlanWorkbookBuffer({
+    fileName: 'badtrackrule.xlsx',
+    buffer: buildWorkbookBuffer(badTrackRuleSheets),
+  });
+  assert(
+    trackRuleRes.valid === true &&
+      JSON.stringify(trackRuleRes.data?.specialRules[0]?.params) ===
+        JSON.stringify({ excludeTrackKeys: ['tr_a', 'tr_b'] }) &&
+      (trackRuleRes.data?.specialRules[0]?.description || '').includes('tr_a, tr_b') &&
+      !badTrackRuleRes.valid,
+    'Reglas acepta columnas simples (Trayectos excluidos separados por coma) y descripción por defecto'
+  );
+
+  // Coherencia entre Modalidad y Contra-cuatrimestral
+  const badCcConflict1 = makeValidNeutralSheets();
+  badCcConflict1[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][5] = '1C';
+  badCcConflict1[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][6] = 'SI';
+  const badCcConflict2 = makeValidNeutralSheets();
+  badCcConflict2[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][5] = '1C-CC';
+  badCcConflict2[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][6] = 'NO';
+  const blankCcDerivesTrue = makeValidNeutralSheets();
+  blankCcDerivesTrue[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][5] = '2C-CC';
+  blankCcDerivesTrue[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][6] = '';
+
+  const ccRes1 = await parsePlanWorkbookBuffer({
+    fileName: 'cc1.xlsx',
+    buffer: buildWorkbookBuffer(badCcConflict1),
+  });
+  const ccRes2 = await parsePlanWorkbookBuffer({
+    fileName: 'cc2.xlsx',
+    buffer: buildWorkbookBuffer(badCcConflict2),
+  });
+  const ccResOk = await parsePlanWorkbookBuffer({
+    fileName: 'cc3.xlsx',
+    buffer: buildWorkbookBuffer(blankCcDerivesTrue),
+  });
+  assert(
+    !ccRes1.valid &&
+      ccRes1.errors.some((e) => e.message.includes('Contradicción')) &&
+      !ccRes2.valid &&
+      ccRes2.errors.some((e) => e.message.includes('Contradicción')) &&
+      ccResOk.valid &&
+      ccResOk.data?.subjects[0].contraCuatrimestral === true,
+    'Rechaza contradicciones entre Modalidad y Contra-cuatrimestral y deduce true en 1C-CC/2C-CC vacío'
+  );
+
+  // Prototype pollution attempt in Trayectos excluidos (plus existing header/cell checks below)
   const protoSheets = makeValidNeutralSheets();
   protoSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
     [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-    [3, 'approved_range', '{"fromCode":1,"toCode":2,"__proto__":{"polluted":true}}', 'Prototipo'],
+    [3, 'all_previous_core_approved', '', '', '__proto__, constructor', 'Prototipo'],
   ];
   const protoRes = await parsePlanWorkbookBuffer({
     fileName: 'proto.xlsx',
@@ -908,7 +1004,7 @@ async function runTests(): Promise<void> {
     ];
     reuploadSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-      [4, 'approved_range', '{"fromCode":1,"toCode":2}', 'Requiere 1 y 2 aprobadas.'],
+      [4, 'approved_range', 1, 2, '', 'Requiere 1 y 2 aprobadas.'],
     ];
     reuploadSheets[PLAN_TEMPLATE_SHEETS.ACRONYMS] = [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
@@ -933,12 +1029,22 @@ async function runTests(): Promise<void> {
       token: adminToken,
       body: reuploadInput,
     });
+    const reuploadSugg1 = reuploadPreview.data?.data?.sharedSubjectSuggestions?.find(
+      (s: any) => s.subjectCode === 1
+    );
+    const reuploadSugg2 = reuploadPreview.data?.data?.sharedSubjectSuggestions?.find(
+      (s: any) => s.subjectCode === 2
+    );
     assert(
       reuploadPreview.status === 200 &&
         JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toCreateCodes) === '[4]' &&
         JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toUpdateCodes) === '[1,2]' &&
-        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toRemoveCodes) === '[3]',
-      'Preview sobre existing_draft_plan calcula diff exacto (crear 4, actualizar 1-2, quitar 3)'
+        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toRemoveCodes) === '[3]' &&
+        reuploadSugg1?.selectedDecision?.action === 'link_existing' &&
+        reuploadSugg1?.selectedDecision?.sharedSubjectId === sharedDibujoId &&
+        reuploadSugg1?.candidates?.some((c: any) => c.sharedSubjectId === sharedDibujoId) &&
+        reuploadSugg2?.selectedDecision === null,
+      'Preview sobre existing_draft_plan calcula diff exacto (crear 4, actualizar 1-2, quitar 3) y preselecciona vínculos cruzados guardados'
     );
 
     const reuploadConfirm = await apiRequest({

@@ -9,7 +9,8 @@ import {
   PLAN_TEMPLATE_HEADERS,
   PLAN_TEMPLATE_SHEETS,
   deriveShortSubjectName,
-  validateSpecialRuleParams,
+  validateModalityAndContraCuatrimestral,
+  validateSpecialRuleColumns,
   type AllowedPrereqType,
   type AllowedSubjectKind,
   type AllowedSubjectModality,
@@ -665,13 +666,16 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
     }
     const modality = rawModality as AllowedSubjectModality;
 
-    const ccRes = parseStrictBoolean(rec['Contra-cuatrimestral']);
-    if (!ccRes.ok) {
+    const ccValidation = validateModalityAndContraCuatrimestral(
+      modality,
+      rec['Contra-cuatrimestral']
+    );
+    if (!ccValidation.ok) {
       errors.push({
         sheet: PLAN_TEMPLATE_SHEETS.SUBJECTS,
         row: rowObj.rowNumber,
         field: 'Contra-cuatrimestral',
-        message: 'Contra-cuatrimestral debe ser SI o NO.',
+        message: ccValidation.error,
       });
       continue;
     }
@@ -782,7 +786,7 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
       shortName,
       level,
       modality,
-      contraCuatrimestral: ccRes.value,
+      contraCuatrimestral: ccValidation.contraCuatrimestral,
       weeklyHours,
       kind,
       credits,
@@ -972,9 +976,13 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
     }
 
     const ruleType = rec['Tipo regla'].trim();
-    const paramValidation = validateSpecialRuleParams(
+    const paramValidation = validateSpecialRuleColumns(
       ruleType,
-      rec['Parámetros JSON'],
+      {
+        fromCodeRaw: rec['Desde código'],
+        toCodeRaw: rec['Hasta código'],
+        excludeTrackKeysRaw: rec['Trayectos excluidos'],
+      },
       knownSubjectCodes,
       coreSubjectCodes,
       knownTrackKeys
@@ -1000,16 +1008,17 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
     }
     seenRulePairs.add(pairKey);
 
-    const description = rec['Descripción'].trim();
-    if (!description || description.length > 500) {
+    const rawDesc = rec['Descripción'].trim();
+    if (rawDesc.length > 500) {
       errors.push({
         sheet: PLAN_TEMPLATE_SHEETS.RULES,
         row: rowObj.rowNumber,
         field: 'Descripción',
-        message: 'La descripción de la regla es obligatoria (1 a 500 caracteres).',
+        message: 'La descripción de la regla no puede superar 500 caracteres.',
       });
       continue;
     }
+    const description = rawDesc || paramValidation.defaultDescription;
 
     parsedRules.push({
       subjectCode,

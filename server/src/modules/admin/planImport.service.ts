@@ -330,6 +330,9 @@ export interface PlanImportStore {
     name: string
   ): Promise<PlanImportPlanRecord | null>;
   listSubjectsByPlan(planId: string): Promise<PlanImportSubjectRecord[]>;
+  listDraftCrossPlanSharedLinks(
+    planId: string
+  ): Promise<Map<number, SharedSubjectCandidateDTO>>;
   findSharedSubjectSuggestions(
     facultyId: string,
     normalizedNames: string[]
@@ -769,6 +772,69 @@ export class DrizzlePlanImportStore implements PlanImportStore {
     return new DrizzlePlanImportTxContext(db).listSubjectsByPlan(planId);
   }
 
+  async listDraftCrossPlanSharedLinks(
+    planId: string
+  ): Promise<Map<number, SharedSubjectCandidateDTO>> {
+    const result = new Map<number, SharedSubjectCandidateDTO>();
+    const planSubs = await db
+      .select({
+        codeInPlan: subjects.codeInPlan,
+        sharedSubjectId: subjects.sharedSubjectId,
+      })
+      .from(subjects)
+      .where(eq(subjects.planId, planId));
+
+    const sharedIds = Array.from(
+      new Set(planSubs.map((s) => s.sharedSubjectId).filter((id): id is string => Boolean(id)))
+    );
+    if (sharedIds.length === 0) return result;
+
+    const [sharedRows, linkedRows] = await Promise.all([
+      db.select().from(sharedSubjects).where(inArray(sharedSubjects.id, sharedIds)),
+      db
+        .select({
+          sharedSubjectId: subjects.sharedSubjectId,
+          planId: subjects.planId,
+          careerCode: careers.code,
+          planName: studyPlans.name,
+        })
+        .from(subjects)
+        .innerJoin(studyPlans, eq(studyPlans.id, subjects.planId))
+        .innerJoin(careers, eq(careers.id, studyPlans.careerId))
+        .where(inArray(subjects.sharedSubjectId, sharedIds)),
+    ]);
+
+    const sharedById = new Map(sharedRows.map((sh) => [sh.id, sh]));
+    const labelsByShared = new Map<string, string[]>();
+    const hasOtherPlan = new Set<string>();
+
+    for (const r of linkedRows) {
+      if (!r.sharedSubjectId) continue;
+      if (r.planId !== planId) {
+        hasOtherPlan.add(r.sharedSubjectId);
+      }
+      const label = `${r.careerCode} · ${r.planName}`;
+      const list = labelsByShared.get(r.sharedSubjectId) || [];
+      if (!list.includes(label)) list.push(label);
+      labelsByShared.set(r.sharedSubjectId, list);
+    }
+
+    for (const ps of planSubs) {
+      if (!ps.sharedSubjectId || !hasOtherPlan.has(ps.sharedSubjectId)) continue;
+      const sh = sharedById.get(ps.sharedSubjectId);
+      if (!sh) continue;
+      result.set(ps.codeInPlan, {
+        sharedSubjectId: sh.id,
+        stableCode: sh.stableCode,
+        displayName: sh.displayName,
+        normalizedName: sh.normalizedName,
+        linkedPlanLabels: labelsByShared.get(sh.id) || [],
+      });
+    }
+
+    return result;
+  }
+
   async findSharedSubjectSuggestions(
     facultyId: string,
     normalizedNames: string[]
@@ -1033,6 +1099,37 @@ export class InMemoryPlanImportStore implements PlanImportStore {
 
   async listSubjectsByPlan(planId: string): Promise<PlanImportSubjectRecord[]> {
     return this.subjects.filter((s) => s.planId === planId);
+  }
+
+  async listDraftCrossPlanSharedLinks(
+    planId: string
+  ): Promise<Map<number, SharedSubjectCandidateDTO>> {
+    const result = new Map<number, SharedSubjectCandidateDTO>();
+    const planSubs = this.subjects.filter((s) => s.planId === planId && s.sharedSubjectId);
+    for (const ps of planSubs) {
+      if (!ps.sharedSubjectId) continue;
+      const sh = this.sharedSubjects.find((item) => item.id === ps.sharedSubjectId);
+      if (!sh) continue;
+      const allLinks = this.subjects.filter((s) => s.sharedSubjectId === sh.id);
+      if (!allLinks.some((s) => s.planId !== planId)) continue;
+      const linkedPlanLabels = Array.from(
+        new Set(
+          allLinks.map((s) => {
+            const plan = this.plans.find((p) => p.id === s.planId);
+            const career = plan ? this.careers.find((c) => c.id === plan.careerId) : undefined;
+            return `${career?.code || 'CAR'} · ${plan?.name || 'Plan'}`;
+          })
+        )
+      );
+      result.set(ps.codeInPlan, {
+        sharedSubjectId: sh.id,
+        stableCode: sh.stableCode,
+        displayName: sh.displayName,
+        normalizedName: sh.normalizedName,
+        linkedPlanLabels,
+      });
+    }
+    return result;
   }
 
   async findSharedSubjectSuggestions(
@@ -1661,17 +1758,34 @@ export async function previewPlanImport(
       errors
     );
 
-    // Suggestions lookup inside same faculty ONLY (never auto-linked)
+    // Suggestions lookup inside same faculty ONLY (never auto-linked on new imports;
+    // existing cross-plan links in a draft are surfaced as pre-selected unless overridden)
     const normalizedNames = parsedData.subjects.map((s) => normalizeSharedSubjectName(s.name));
-    const candidatesByNorm = await store.findSharedSubjectSuggestions(
-      input.facultyId,
-      normalizedNames
-    );
+    const [candidatesByNorm, existingDraftLinks] = await Promise.all([
+      store.findSharedSubjectSuggestions(input.facultyId, normalizedNames),
+      targetCtx.existingPlan
+        ? store.listDraftCrossPlanSharedLinks(targetCtx.existingPlan.id)
+        : Promise.resolve(new Map<number, SharedSubjectCandidateDTO>()),
+    ]);
 
     const sharedSubjectSuggestions = parsedData.subjects.map((sub) => {
       const normName = normalizeSharedSubjectName(sub.name);
-      const candidates = candidatesByNorm.get(normName) || [];
-      const explicitDecision = decisionByCode.get(sub.codeInPlan) ?? null;
+      const baseCandidates = candidatesByNorm.get(normName) || [];
+      const preservedLink = existingDraftLinks.get(sub.codeInPlan) ?? null;
+      const candidates =
+        preservedLink &&
+        !baseCandidates.some((c) => c.sharedSubjectId === preservedLink.sharedSubjectId)
+          ? [preservedLink, ...baseCandidates]
+          : [...baseCandidates];
+      const explicitDecision =
+        decisionByCode.get(sub.codeInPlan) ??
+        (preservedLink
+          ? {
+              subjectCode: sub.codeInPlan,
+              action: 'link_existing' as const,
+              sharedSubjectId: preservedLink.sharedSubjectId,
+            }
+          : null);
       return {
         subjectCode: sub.codeInPlan,
         displayCode: sub.displayCode,

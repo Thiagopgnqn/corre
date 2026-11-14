@@ -89,7 +89,9 @@ export const PLAN_TEMPLATE_HEADERS: Record<string, readonly string[]> = {
   [PLAN_TEMPLATE_SHEETS.RULES]: [
     'Código materia',
     'Tipo regla',
-    'Parámetros JSON',
+    'Desde código',
+    'Hasta código',
+    'Trayectos excluidos',
     'Descripción',
   ],
   [PLAN_TEMPLATE_SHEETS.ACRONYMS]: ['Sigla', 'Código materia'],
@@ -98,6 +100,7 @@ export const PLAN_TEMPLATE_HEADERS: Record<string, readonly string[]> = {
     'Columna / Regla',
     'Obligatoria',
     'Formato y valores permitidos',
+    'Ejemplo',
   ],
 };
 
@@ -124,23 +127,71 @@ export function deriveShortSubjectName(name: string, maxLen = 22): string {
   return clean.slice(0, maxLen).trim();
 }
 
-function isPlainSafeRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  for (const key of Object.keys(value)) {
-    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
-      return false;
-    }
-  }
-  return true;
+const RESERVED_PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function parsePositiveIntCell(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : null;
 }
 
-export function validateSpecialRuleParams(
+export interface SpecialRuleColumnsInput {
+  fromCodeRaw: string;
+  toCodeRaw: string;
+  excludeTrackKeysRaw: string;
+}
+
+export function validateModalityAndContraCuatrimestral(
+  modality: AllowedSubjectModality,
+  rawContraCuatrimestral: string
+): { ok: true; contraCuatrimestral: boolean } | { ok: false; error: string } {
+  const upper = rawContraCuatrimestral.trim().toUpperCase();
+  const isCcModality = modality === '1C-CC' || modality === '2C-CC';
+
+  if (upper === '') {
+    return { ok: true, contraCuatrimestral: isCcModality };
+  }
+
+  let explicitBool: boolean;
+  if (upper === 'SI' || upper === 'SÍ' || upper === 'TRUE' || upper === '1' || upper === 'S') {
+    explicitBool = true;
+  } else if (upper === 'NO' || upper === 'FALSE' || upper === '0' || upper === 'N') {
+    explicitBool = false;
+  } else {
+    return { ok: false, error: 'Contra-cuatrimestral debe ser SI, NO o dejarse vacío.' };
+  }
+
+  if (isCcModality && !explicitBool) {
+    return {
+      ok: false,
+      error: `Contradicción: la modalidad "${modality}" implica dictado contra-cuatrimestral y no admite Contra-cuatrimestral = NO.`,
+    };
+  }
+  if (!isCcModality && explicitBool) {
+    return {
+      ok: false,
+      error: `Contradicción: la modalidad "${modality}" no es contra-cuatrimestral; para dictado contra-cuatrimestral usá 1C-CC o 2C-CC.`,
+    };
+  }
+
+  return { ok: true, contraCuatrimestral: explicitBool };
+}
+
+export function validateSpecialRuleColumns(
   ruleType: string,
-  rawParams: unknown,
+  columns: SpecialRuleColumnsInput,
   knownSubjectCodes: Set<number>,
   coreSubjectCodes: Set<number>,
   knownTrackKeys: Set<string>
-): { ok: true; ruleType: SupportedSpecialRuleType; params: Record<string, unknown> } | { ok: false; error: string } {
+):
+  | {
+      ok: true;
+      ruleType: SupportedSpecialRuleType;
+      params: Record<string, unknown>;
+      defaultDescription: string;
+    }
+  | { ok: false; error: string } {
   if (!isSupportedSpecialRuleType(ruleType)) {
     return {
       ok: false,
@@ -148,63 +199,39 @@ export function validateSpecialRuleParams(
     };
   }
 
-  let parsedObj: unknown = rawParams;
-  if (typeof rawParams === 'string') {
-    const trimmed = rawParams.trim();
-    if (!trimmed) {
-      parsedObj = {};
-    } else {
-      try {
-        parsedObj = JSON.parse(trimmed);
-      } catch {
-        return { ok: false, error: 'Parámetros JSON inválidos (no se pudo parsear JSON).' };
-      }
-    }
-  } else if (parsedObj === undefined || parsedObj === null) {
-    parsedObj = {};
-  }
-
-  if (!isPlainSafeRecord(parsedObj)) {
-    return { ok: false, error: 'Parámetros JSON debe ser un objeto válido.' };
-  }
+  const fromTrim = columns.fromCodeRaw.trim();
+  const toTrim = columns.toCodeRaw.trim();
+  const excludeTrim = columns.excludeTrackKeysRaw.trim();
 
   if (ruleType === 'approved_range') {
-    const keys = Object.keys(parsedObj);
-    const invalidKeys = keys.filter((k) => k !== 'fromCode' && k !== 'toCode');
-    if (invalidKeys.length > 0) {
+    if (excludeTrim) {
       return {
         ok: false,
-        error: `Claves no permitidas en approved_range: ${invalidKeys.join(', ')} (solo fromCode y toCode).`,
+        error: 'La regla approved_range no utiliza "Trayectos excluidos" (dejalo vacío).',
       };
     }
 
-    const fromCode = parsedObj.fromCode;
-    const toCode = parsedObj.toCode;
-    if (
-      typeof fromCode !== 'number' ||
-      !Number.isInteger(fromCode) ||
-      fromCode < 1 ||
-      typeof toCode !== 'number' ||
-      !Number.isInteger(toCode) ||
-      toCode < 1
-    ) {
+    const fromCode = parsePositiveIntCell(fromTrim);
+    const toCode = parsePositiveIntCell(toTrim);
+    if (fromCode === null || toCode === null) {
       return {
         ok: false,
-        error: 'approved_range requiere fromCode y toCode enteros positivos.',
+        error: 'approved_range requiere "Desde código" y "Hasta código" como enteros positivos.',
       };
     }
     if (fromCode > toCode) {
       return {
         ok: false,
-        error: `approved_range inválido: fromCode (${fromCode}) no puede ser mayor a toCode (${toCode}).`,
+        error: `approved_range inválido: "Desde código" (${fromCode}) no puede ser mayor a "Hasta código" (${toCode}).`,
       };
     }
     if (!knownSubjectCodes.has(fromCode) || !knownSubjectCodes.has(toCode)) {
       return {
         ok: false,
-        error: `approved_range referencia códigos inexistentes en Materias (fromCode=${fromCode}, toCode=${toCode}).`,
+        error: `approved_range referencia códigos inexistentes en Materias (Desde=${fromCode}, Hasta=${toCode}).`,
       };
     }
+
     let hasCoreInRange = false;
     for (const c of coreSubjectCodes) {
       if (c >= fromCode && c <= toCode) {
@@ -219,46 +246,51 @@ export function validateSpecialRuleParams(
       };
     }
 
-    const cleanParams = Object.create(null) as Record<string, unknown>;
-    cleanParams.fromCode = fromCode;
-    cleanParams.toCode = toCode;
-    return { ok: true, ruleType, params: { fromCode: Number(fromCode), toCode: Number(toCode) } };
+    return {
+      ok: true,
+      ruleType,
+      params: { fromCode, toCode },
+      defaultDescription: `Requiere tener aprobadas todas las materias obligatorias de código ${fromCode} a ${toCode}.`,
+    };
   }
 
   // all_previous_core_approved
-  const keys = Object.keys(parsedObj);
-  const invalidKeys = keys.filter((k) => k !== 'excludeTrackKeys');
-  if (invalidKeys.length > 0) {
+  if (fromTrim || toTrim) {
     return {
       ok: false,
-      error: `Claves no permitidas en all_previous_core_approved: ${invalidKeys.join(', ')} (solo excludeTrackKeys).`,
+      error: 'La regla all_previous_core_approved no utiliza "Desde código" ni "Hasta código".',
     };
   }
 
-  if (parsedObj.excludeTrackKeys === undefined) {
-    return { ok: true, ruleType, params: {} };
-  }
-
-  if (!Array.isArray(parsedObj.excludeTrackKeys)) {
+  if (!excludeTrim) {
     return {
-      ok: false,
-      error: 'all_previous_core_approved.excludeTrackKeys debe ser un arreglo de strings.',
+      ok: true,
+      ruleType,
+      params: {},
+      defaultDescription: 'Requiere tener aprobadas todas las materias obligatorias previas.',
     };
   }
 
+  const rawParts = excludeTrim.split(',');
   const normalizedKeys: string[] = [];
-  for (const item of parsedObj.excludeTrackKeys) {
-    if (typeof item !== 'string' || !item.trim()) {
+  for (const part of rawParts) {
+    const cleanKey = part.trim().toLowerCase();
+    if (!cleanKey) {
       return {
         ok: false,
-        error: 'excludeTrackKeys no puede contener valores vacíos ni no-string.',
+        error: 'Trayectos excluidos tiene una coma sobrante o un valor vacío.',
       };
     }
-    const cleanKey = item.trim();
+    if (RESERVED_PROTOTYPE_KEYS.has(cleanKey)) {
+      return {
+        ok: false,
+        error: `Clave reservada "${cleanKey}" no permitida en Trayectos excluidos.`,
+      };
+    }
     if (!knownTrackKeys.has(cleanKey)) {
       return {
         ok: false,
-        error: `excludeTrackKeys referencia clave de trayecto "${cleanKey}" inexistente en Materias.`,
+        error: `Trayectos excluidos referencia la clave "${cleanKey}", que no existe en "Clave trayecto" de Materias.`,
       };
     }
     if (!normalizedKeys.includes(cleanKey)) {
@@ -269,6 +301,7 @@ export function validateSpecialRuleParams(
   return {
     ok: true,
     ruleType,
-    params: normalizedKeys.length > 0 ? { excludeTrackKeys: normalizedKeys } : {},
+    params: { excludeTrackKeys: normalizedKeys },
+    defaultDescription: `Requiere tener aprobadas todas las materias obligatorias previas (excepto trayectos: ${normalizedKeys.join(', ')}).`,
   };
 }
