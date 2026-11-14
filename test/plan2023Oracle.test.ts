@@ -339,11 +339,8 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
     assert.equal(seedOrderPlan.subjects.length, 60);
     assert.equal(fixtureSubjects.length, 60);
 
-    // Excepciones explícitas de claves del fixture que no llegan idénticas en payload.subjects:
-    const FIXTURE_TO_PAYLOAD_KEY_EXCEPTIONS: Record<string, string> = {
-      specialRule:
-        'En DB/payload las reglas especiales viven en plan.rules[] (plan_special_rules) y no en cada objeto Subject; pendiente de definición antes de 1B-2 porque SubjectDrawer.tsx (L508, 518) y QuickStatusModal.tsx (L361, 383, 385) aún leen subject.specialRule',
-    };
+    // Excepciones explícitas de claves del fixture que no llegan idénticas en payload.subjects (ninguna):
+    const FIXTURE_TO_PAYLOAD_KEY_EXCEPTIONS: Record<string, string> = {};
 
     // Excepciones explícitas de claves adicionales emitidas por el payload que los fixtures estáticos no tenían:
     const PAYLOAD_ONLY_KEY_EXCEPTIONS: Record<string, string> = {
@@ -413,9 +410,21 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
       if (fixtureSubj.id === 99) {
         assert.equal(payloadSubj.isOptionalTrack, true);
         assert.equal(payloadSubj.trackKey, 'analista');
+        assert.equal(
+          payloadSubj.specialRule,
+          'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.'
+        );
+      } else if (fixtureSubj.id === 36) {
+        assert.equal(payloadSubj.isOptionalTrack, false);
+        assert.equal(payloadSubj.trackKey, undefined);
+        assert.equal(
+          payloadSubj.specialRule,
+          'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).'
+        );
       } else {
         assert.equal(payloadSubj.isOptionalTrack, false);
         assert.equal(payloadSubj.trackKey, undefined);
+        assert.equal('specialRule' in payloadSubj, false);
       }
     }
   });

@@ -45,7 +45,7 @@
         "fromCode": 1,
         "toCode": 23
       },
-      "description": "Requiere tener aprobadas todas las materias del ciclo básico y nivel 2 (códigos 1 al 23)."
+      "description": "Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23."
     },
     {
       "subjectCode": 36,
@@ -55,7 +55,7 @@
           "analista"
         ]
       },
-      "description": "Requiere tener aprobadas todas las materias obligatorias previas del plan (excluye Seminario si no se optó por Analista)."
+      "description": "Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas)."
     }
   ],
   "acronyms": [

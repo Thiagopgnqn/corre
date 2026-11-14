@@ -364,10 +364,153 @@ async function main() {
     '0011 marca exactamente las 5 integradoras de ISI 2023 en corrida 1, respeta el resto/MEC y es no-op en corrida 2'
   );
 
+  const hasJournal0011 = journal.entries.some(
+    (e: any) => e?.idx === 11 && e?.tag === '0011_isi_plan_integrator_subjects'
+  );
+  assert(
+    hasJournal0011,
+    'meta/_journal.json registra 0011_isi_plan_integrator_subjects'
+  );
+
+  // 1d. Migración 0012 (plan_special_rules.description ISI 2023 = fixtures, dos corridas)
+  console.log('\n📌 1d. Migración 0012 (plan_special_rules.description ISI 2023, dos corridas)');
+  const sql0012Path = path.resolve(__dirname, '../drizzle/0012_isi_plan_special_rules_descriptions.sql');
+  const sql0012 = fs.readFileSync(sql0012Path, 'utf8');
+
+  assert(
+    sql0012.split('--> statement-breakpoint').filter((s) => s.trim()).length === 1 &&
+      !/\b(DROP|DELETE|TRUNCATE|ALTER TABLE)\b/i.test(sql0012) &&
+      /\bupd\s+AS\s*\(\s*UPDATE\s+"plan_special_rules"\s+psr\b/i.test(sql0012) &&
+      /\bRETURNING\s+psr\."id"/i.test(sql0012) &&
+      sql0012.includes(`c."code" = 'ISI'`) &&
+      sql0012.includes('sp."year" = 2023') &&
+      sql0012.includes(`psr."description" IS DISTINCT FROM td."description"`) &&
+      sql0012.includes(`INSERT INTO "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql0012),
+    '0012 usa CTE única idempotente sobre plan_special_rules RETURNING psr.id con IS DISTINCT FROM y bump condicional'
+  );
+
+  const expected0012Descriptions: Record<number, { ruleType: string; description: string }> = {
+    99: {
+      ruleType: 'approved_range',
+      description: 'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.',
+    },
+    36: {
+      ruleType: 'all_previous_core_approved',
+      description:
+        'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).',
+    },
+  };
+  for (const [codeStr, expected] of Object.entries(expected0012Descriptions)) {
+    assert(
+      sql0012.includes(`(${codeStr}, '${expected.ruleType}', '${expected.description}')`),
+      `0012 contiene descripción exacta de fixture para materia ${codeStr} (${expected.ruleType})`
+    );
+  }
+
+  const simulate0012Run = (
+    rows: Array<{
+      id: string;
+      careerCode: string;
+      year: number;
+      codeInPlan: number;
+      ruleType: string;
+      description: string;
+    }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    const updIds: string[] = [];
+    for (const r of rows) {
+      const target = expected0012Descriptions[r.codeInPlan];
+      if (
+        target &&
+        r.careerCode === 'ISI' &&
+        r.year === 2023 &&
+        r.ruleType === target.ruleType &&
+        r.description !== target.description
+      ) {
+        r.description = target.description;
+        updIds.push(r.id);
+      }
+    }
+    if (updIds.length > 0) {
+      versions.set('default', `v-${fakeTs}-${fakeHex}`);
+    }
+    return { updatedRows: updIds.length, version: versions.get('default') || null };
+  };
+
+  const sim0012Rules = [
+    {
+      id: 'rule-isi-99',
+      careerCode: 'ISI',
+      year: 2023,
+      codeInPlan: 99,
+      ruleType: 'approved_range',
+      description: 'Requiere tener aprobadas todas las materias del ciclo básico y nivel 2 (códigos 1 al 23).',
+    },
+    {
+      id: 'rule-isi-36',
+      careerCode: 'ISI',
+      year: 2023,
+      codeInPlan: 36,
+      ruleType: 'all_previous_core_approved',
+      description:
+        'Requiere tener aprobadas todas las materias obligatorias previas del plan (excluye Seminario si no se optó por Analista).',
+    },
+    // Otra carrera con mismo codeInPlan 36: NO debe tocarse
+    {
+      id: 'rule-mec-36',
+      careerCode: 'MEC',
+      year: 2025,
+      codeInPlan: 36,
+      ruleType: 'all_previous_core_approved',
+      description: 'Regla propia de Mecánica.',
+    },
+  ];
+  const sim0012Versions = new Map<string, string>([['default', 'v-1700000000000-000000']]);
+  const run0012First = simulate0012Run(sim0012Rules, sim0012Versions, 1700000500555, 'aa1122');
+  const run0012Second = simulate0012Run(sim0012Rules, sim0012Versions, 1700000600666, 'bb3344');
+
+  assert(
+    run0012First.updatedRows === 2 &&
+      run0012First.version === 'v-1700000500555-aa1122' &&
+      sim0012Rules[0].description === expected0012Descriptions[99].description &&
+      sim0012Rules[1].description === expected0012Descriptions[36].description &&
+      sim0012Rules[2].description === 'Regla propia de Mecánica.' &&
+      run0012Second.updatedRows === 0 &&
+      run0012Second.version === run0012First.version,
+    '0012 actualiza las 2 reglas de ISI 2023 en corrida 1, respeta otra carrera y es no-op en corrida 2'
+  );
+
+  // Corrida parcial (si una fila ya coincidía y faltaba otra): también actualiza solo la faltante
+  const sim0012Partial = [
+    { ...sim0012Rules[0] }, // ya actualizada
+    {
+      id: 'rule-isi-36',
+      careerCode: 'ISI',
+      year: 2023,
+      codeInPlan: 36,
+      ruleType: 'all_previous_core_approved',
+      description: 'Texto anterior distinto',
+    },
+  ];
+  const partialVersions = new Map<string, string>([['default', 'v-1700000700000-000000']]);
+  const run0012Partial = simulate0012Run(sim0012Partial, partialVersions, 1700000800777, 'cc5566');
+  const run0012PartialSecond = simulate0012Run(sim0012Partial, partialVersions, 1700000900888, 'dd7788');
+  assert(
+    run0012Partial.updatedRows === 1 &&
+      run0012Partial.version === 'v-1700000800777-cc5566' &&
+      run0012PartialSecond.updatedRows === 0 &&
+      run0012PartialSecond.version === run0012Partial.version,
+    '0012 funciona ante estado parcial actualizando solo la fila distinta y es no-op en corrida 2'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 11 && lastJournalEntry?.tag === '0011_isi_plan_integrator_subjects',
-    'meta/_journal.json registra 0011_isi_plan_integrator_subjects como última entrada'
+    lastJournalEntry?.idx === 12 && lastJournalEntry?.tag === '0012_isi_plan_special_rules_descriptions',
+    'meta/_journal.json registra 0012_isi_plan_special_rules_descriptions como última entrada'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
@@ -517,13 +660,18 @@ async function main() {
       subjById.get(1)?.code === '1' &&
         subjById.get(1)?.shortName === 'Análisis Mat. 1' &&
         subjById.get(1)?.isIntegrator === undefined &&
+        !('specialRule' in subjById.get(1)) &&
         subjById.get(16)?.isIntegrator === true &&
         subjById.get(23)?.isIntegrator === true &&
         subjById.get(30)?.isIntegrator === true &&
         subjById.get(36)?.isIntegrator === true &&
+        subjById.get(36)?.specialRule ===
+          'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).' &&
         subjById.get(99)?.code === '99' &&
         subjById.get(99)?.shortName === 'Seminario Integrador' &&
         subjById.get(99)?.isIntegrator === true &&
+        subjById.get(99)?.specialRule ===
+          'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.' &&
         subjById.get(301)?.code === 'E-301' &&
         subjById.get(301)?.shortName === 'Backend de Aplicaciones' &&
         subjById.get(301)?.isIntegrator === undefined &&
@@ -533,15 +681,27 @@ async function main() {
         subjById.get(408)?.shortName === 'Interfaces y UIX' &&
         subjById.get(514)?.code === 'X-514' &&
         subjById.get(514)?.shortName === 'PPS' &&
-        d.subjects.filter((s: any) => s.isIntegrator === true).length === 5,
-      'Payload expone subject.code ("1", "99", "E-301", "X-408"), shortName de 0010 e isIntegrator exacto en las 5 integradoras'
+        d.subjects.filter((s: any) => s.isIntegrator === true).length === 5 &&
+        d.subjects.filter((s: any) => typeof s.specialRule === 'string').length === 2,
+      'Payload expone subject.code ("1", "99", "E-301", "X-408"), shortName de 0010, isIntegrator (5) y specialRule (99 y 36)'
     );
     assert(
-      d.rules.some((r: any) => r.subjectCode === 99 && r.ruleType === 'approved_range') &&
-        d.rules.some((r: any) => r.subjectCode === 36 && r.ruleType === 'all_previous_core_approved') &&
+      d.rules.some(
+        (r: any) =>
+          r.subjectCode === 99 &&
+          r.ruleType === 'approved_range' &&
+          r.description === 'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.'
+      ) &&
+        d.rules.some(
+          (r: any) =>
+            r.subjectCode === 36 &&
+            r.ruleType === 'all_previous_core_approved' &&
+            r.description ===
+              'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).'
+        ) &&
         d.acronyms.DDS === 20 &&
         d.acronyms.AED === 6,
-      'Payload conserva rules (99 y 36) y mapa de siglas (DDS=20, AED=6)'
+      'Payload conserva rules (99 y 36 con descripciones exactas de fixtures) y mapa de siglas (DDS=20, AED=6)'
     );
 
     // 3b. ETag -> 304

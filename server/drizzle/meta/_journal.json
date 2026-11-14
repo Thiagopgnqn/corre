@@ -85,6 +85,13 @@
       "when": 1776729600000,
       "tag": "0011_isi_plan_integrator_subjects",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1776816000000,
+      "tag": "0012_isi_plan_special_rules_descriptions",
+      "breakpoints": true
     }
   ]
 }

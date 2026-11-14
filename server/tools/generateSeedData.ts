@@ -58,13 +58,13 @@ const catalog = {
       subjectCode: 99, // Seminario Integrador
       ruleType: 'approved_range',
       params: { fromCode: 1, toCode: 23 },
-      description: 'Requiere tener aprobadas todas las materias del ciclo básico y nivel 2 (códigos 1 al 23).',
+      description: 'Para RENDIRLO hay que tener aprobadas todas las materias de 1 a 23.',
     },
     {
       subjectCode: 36, // Proyecto Final
       ruleType: 'all_previous_core_approved',
       params: { excludeTrackKeys: ['analista'] },
-      description: 'Requiere tener aprobadas todas las materias obligatorias previas del plan (excluye Seminario si no se optó por Analista).',
+      description: 'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Seminario 99 + Electivas).',
     },
   ],
   acronyms: Object.entries(ACRONYM_TO_ID).map(([acronym, subjectCode]) => ({

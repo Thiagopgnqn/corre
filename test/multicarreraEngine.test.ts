@@ -509,13 +509,13 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     );
     assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
 
-    assert.equal(CATALOG_CACHE_SCHEMA, 5);
+    assert.equal(CATALOG_CACHE_SCHEMA, 6);
 
-    // Case B: cache with outdated schema number (specifically schema: 4)
+    // Case B: cache with outdated schema number (specifically schema: 5)
     mockStorage.setItem(
       getCatalogCacheKey('plan-schema-test'),
       JSON.stringify({
-        schema: 4,
+        schema: 5,
         planId: 'plan-schema-test',
         version: 'v1',
         cachedAt: '2026-01-01T00:00:00.000Z',
@@ -580,7 +580,7 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
           },
         },
         subjects: validCatalog.subjects.map((s, idx) =>
-          idx === 0 ? { ...s, isIntegrator: true } : s
+          idx === 0 ? { ...s, isIntegrator: true, specialRule: 'Regla especial de prueba.' } : s
         ),
       }),
       true
@@ -657,6 +657,15 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
           ...validCatalog,
           subjects: validCatalog.subjects.map((s, idx) =>
             idx === 0 ? { ...s, isIntegrator: 'true' } : s
+          ),
+        },
+      },
+      {
+        label: 'con subjects[].specialRule vacío',
+        payload: {
+          ...validCatalog,
+          subjects: validCatalog.subjects.map((s, idx) =>
+            idx === 0 ? { ...s, specialRule: '   ' } : s
           ),
         },
       },

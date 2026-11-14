@@ -257,25 +257,44 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
     if (code) acronymsMap[a.acronym] = code;
   });
 
-  const formattedSubjects = subjects.map((s) => ({
-    id: s.codeInPlan,
-    uuid: s.id,
-    code: formatSubjectDisplayCode(s),
-    shortName: s.shortName,
-    name: s.name,
-    level: s.level,
-    modality: s.modality,
-    contraCuatrimestral: s.contraCuatrimestral,
-    weeklyHours: Number(s.weeklyHours),
-    isElective: s.kind === 'electiva',
-    kind: s.kind === 'electiva' ? ('electiva' as const) : ('obligatoria' as const),
-    credits: s.credits ?? undefined,
-    isOptionalTrack: s.isOptionalTrack,
-    trackKey: s.trackKey ?? undefined,
-    ...(s.isIntegrator ? { isIntegrator: true } : {}),
-    regularPrereqs: regularMap.get(s.codeInPlan) || [],
-    approvedPrereqs: approvedMap.get(s.codeInPlan) || [],
-  }));
+  const specialRuleDescriptionsMap = new Map<number, string[]>();
+  rules.forEach((r) => {
+    const code = uuidToCode.get(r.subjectId);
+    const desc = typeof r.description === 'string' ? r.description.trim() : '';
+    if (!code || !desc) return;
+    const list = specialRuleDescriptionsMap.get(code) || [];
+    list.push(desc);
+    specialRuleDescriptionsMap.set(code, list);
+  });
+
+  const formattedSubjects = subjects.map((s) => {
+    const specialDescriptions = specialRuleDescriptionsMap.get(s.codeInPlan);
+    const specialRule =
+      specialDescriptions && specialDescriptions.length > 0
+        ? specialDescriptions.join(' / ')
+        : undefined;
+
+    return {
+      id: s.codeInPlan,
+      uuid: s.id,
+      code: formatSubjectDisplayCode(s),
+      shortName: s.shortName,
+      name: s.name,
+      level: s.level,
+      modality: s.modality,
+      contraCuatrimestral: s.contraCuatrimestral,
+      weeklyHours: Number(s.weeklyHours),
+      isElective: s.kind === 'electiva',
+      kind: s.kind === 'electiva' ? ('electiva' as const) : ('obligatoria' as const),
+      credits: s.credits ?? undefined,
+      isOptionalTrack: s.isOptionalTrack,
+      trackKey: s.trackKey ?? undefined,
+      ...(s.isIntegrator ? { isIntegrator: true } : {}),
+      ...(specialRule !== undefined ? { specialRule } : {}),
+      regularPrereqs: regularMap.get(s.codeInPlan) || [],
+      approvedPrereqs: approvedMap.get(s.codeInPlan) || [],
+    };
+  });
 
   const normalizedConfig = normalizePlanConfig(plan.config, formattedSubjects, {
     careerCode: career.code,
