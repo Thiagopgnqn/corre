@@ -793,7 +793,7 @@ export function importAllSchedules(dataDir = path.resolve('data-source')) {
   const validation = validateScheduleData(payload);
 
   // Write schedule.json
-  const outputPath = path.resolve('src/data/schedule.json');
+  const outputPath = path.resolve('server/seed-data/schedule.json');
   fs.writeFileSync(outputPath, JSON.stringify(payload, null, 2), 'utf-8');
   console.log(`\n Archivo generado con éxito: ${outputPath} (${finalSchedules.length} materias/términos, ${validation.commissionsCount} comisiones, ${uniqueReservedElectiveSlots.length} franjas reservadas de electiva)`);
 

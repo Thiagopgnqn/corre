@@ -28,12 +28,17 @@ import { ScheduleLeftPanel } from './ScheduleLeftPanel';
 import { ScheduleSummaryPanel } from './ScheduleSummaryPanel';
 import { ScheduleCombinationsModal } from './ScheduleCombinationsModal';
 import { ScheduleImportModal } from './ScheduleImportModal';
+import { ScheduleUnavailableNotice } from './ScheduleUnavailableNotice';
 import { ProfessorDetailModal } from '../professors/ProfessorDetailModal';
 import { ReviewFormModal } from '../professors/ReviewFormModal';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 
-export const ScheduleBuilder: React.FC = () => {
+export interface ScheduleBuilderProps {
+  onNavigateToMap?: () => void;
+}
+
+export const ScheduleBuilder: React.FC<ScheduleBuilderProps> = ({ onNavigateToMap }) => {
   const {
     activeState,
     settings,
@@ -42,6 +47,10 @@ export const ScheduleBuilder: React.FC = () => {
     activeSchedules,
     customSchedules,
     setCustomSchedules,
+    scheduleStatus,
+    scheduleError,
+    retryLoadSchedule,
+    currentPlanName,
     scheduleTerm,
     setScheduleTerm,
     scheduleSelections,
@@ -238,6 +247,53 @@ export const ScheduleBuilder: React.FC = () => {
   }, [selectedCommissionsMap]);
 
   const selectedCount = Object.keys(selectedCommissionsMap).length;
+
+  const handleNavigateToMap = () => {
+    if (onNavigateToMap) {
+      onNavigateToMap();
+    } else if (typeof window !== 'undefined') {
+      window.location.hash = 'graph';
+    }
+  };
+
+  if (activeSchedules.length === 0) {
+    if (scheduleStatus === 'loading') {
+      return (
+        <div className="flex-1 w-full max-w-lg mx-auto px-4 py-12 flex flex-col items-center justify-center text-center gap-3">
+          <div className="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin" />
+          <p className="text-sm text-slate-300 font-medium">
+            Cargando oferta horaria del plan...
+          </p>
+        </div>
+      );
+    }
+
+    const noticeReason = scheduleStatus === 'error' ? 'backend-error' : 'no-schedule';
+    return (
+      <>
+        <ScheduleUnavailableNotice
+          availability={noticeReason}
+          errorDetail={scheduleError}
+          planName={currentPlanName}
+          onRetry={scheduleStatus === 'error' ? () => void retryLoadSchedule() : undefined}
+          onNavigateToMap={handleNavigateToMap}
+          onImportJson={() => setImportModalOpen(true)}
+        />
+        <ScheduleImportModal
+          isOpen={importModalOpen}
+          onClose={() => setImportModalOpen(false)}
+          onImportValidSchedules={(newScheds) => {
+            setCustomSchedules(newScheds);
+          }}
+          onResetDefault={() => {
+            setCustomSchedules(null);
+          }}
+          hasCustomSchedules={Boolean(customSchedules && customSchedules.length > 0)}
+          knownSubjectIds={knownSubjectIds}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="w-full max-w-[1920px] mx-auto px-2 sm:px-4 py-2 sm:py-3 flex-1 flex flex-col gap-2 min-h-0 h-full overflow-hidden lg:h-auto lg:overflow-visible lg:gap-3">

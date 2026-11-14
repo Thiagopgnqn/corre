@@ -89,7 +89,10 @@ export function migrateLegacyLocalStorageToPlan(
   }
 
   const doneKey = getPlanStorageKey(STORAGE_KEY_LEGACY_MIGRATED_PREFIX, planId);
-  if (storage.getItem(doneKey) === 'true') {
+  if (
+    storage.getItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX) !== null ||
+    storage.getItem(doneKey) === 'true'
+  ) {
     return { migrated: false, copiedKeys: [] };
   }
 
@@ -105,6 +108,7 @@ export function migrateLegacyLocalStorageToPlan(
   }
 
   storage.setItem(doneKey, 'true');
+  storage.setItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX, planId);
   return {
     migrated: copiedKeys.length > 0,
     copiedKeys,

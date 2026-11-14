@@ -24,7 +24,7 @@ import {
   resetTutorialState,
 } from '../src/utils/storage';
 import { TUTORIAL_STEPS } from '../src/data/tutorialSteps';
-import { SAMPLE_SCHEDULES } from '../src/data/schedule';
+import { SAMPLE_SCHEDULES } from './fixtures/schedule';
 import {
   timeToMinutes,
   minutesToTime,

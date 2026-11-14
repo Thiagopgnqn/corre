@@ -30,6 +30,7 @@ import {
   writeCachedCatalog,
   loadPlanCatalogSmart,
 } from '../src/api/catalog.api';
+import { getScheduleUnavailableMessage } from '../src/utils/scheduleAvailability';
 import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -300,10 +301,14 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
       JSON.stringify({ 1: { status: 'aprobada', grade: 9 } })
     );
 
-    // Idempotent second run copies nothing
+    // Idempotent second run copies nothing (even when switching to another plan later)
     const secondPass = migrateLegacyLocalStorageToPlan('plan-isi-2023', mockStorage);
     assert.equal(secondPass.migrated, false);
     assert.deepStrictEqual(secondPass.copiedKeys, []);
+
+    const otherPlanPass = migrateLegacyLocalStorageToPlan('plan-other', mockStorage);
+    assert.equal(otherPlanPass.migrated, false);
+    assert.deepStrictEqual(otherPlanPass.copiedKeys, []);
 
     withMockLocalStorage(mockStorage, () => {
       saveUserState({ 1: { status: 'aprobada', grade: 10 } }, 'plan-a');
@@ -602,10 +607,46 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     assert.equal(preservedCache.version, 'v1');
   });
 
-  it('contains zero imports from static Sistemas data modules or test/fixtures inside src/', () => {
+  it('builds explicit schedule unavailable messages for backend errors and empty plans without static fallback', () => {
+    const errorFallback = getScheduleUnavailableMessage('backend-error');
+    assert.match(errorFallback, /servidor/i);
+    assert.match(errorFallback, /intentá/i);
+
+    const errorCustom = getScheduleUnavailableMessage('backend-error', {
+      errorDetail: 'Timeout al consultar horarios',
+    });
+    assert.equal(errorCustom, 'Timeout al consultar horarios');
+
+    const noScheduleMsg = getScheduleUnavailableMessage('no-schedule', {
+      planName: 'Plan 2026',
+    });
+    assert.match(noScheduleMsg, /Plan 2026/);
+    assert.match(noScheduleMsg, /horarios/i);
+
+    const noticeSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/components/schedule/ScheduleUnavailableNotice.tsx'),
+      'utf8'
+    );
+    assert.match(noticeSrc, /Reintentar/, 'Notice debe incluir botón Reintentar ante error de servidor');
+    assert.match(noticeSrc, /no-schedule/, 'Notice debe soportar estado sin oferta horaria cargada');
+  });
+
+  it('contains zero static Sistemas/schedule data modules or ISI career fallbacks inside src/', () => {
+    assert.equal(
+      fs.existsSync(path.resolve(rootDir, 'src/data/schedule.ts')),
+      false,
+      'src/data/schedule.ts debe haberse eliminado'
+    );
+    assert.equal(
+      fs.existsSync(path.resolve(rootDir, 'src/data/schedule.json')),
+      false,
+      'src/data/schedule.json debe haberse eliminado'
+    );
+
     const srcDir = path.resolve(rootDir, 'src');
-    const forbiddenPattern =
-      /from\s+['"][^'"]*(?:data\/plan2023|data\/electives|data\/acronyms|data\/subjectAliases|test\/fixtures)/;
+    const forbiddenModulePattern =
+      /from\s+['"][^'"]*(?:data\/plan2023|data\/electives|data\/acronyms|data\/subjectAliases|data\/schedule|test\/fixtures)/;
+    const forbiddenIsiGuardPattern = /career\??\.code\s*===\s*['"]ISI['"]|\bisIsi2023\b/;
     const violations: string[] = [];
 
     function walk(dir: string) {
@@ -615,7 +656,7 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
           walk(fullPath);
         } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
           const content = fs.readFileSync(fullPath, 'utf8');
-          if (forbiddenPattern.test(content)) {
+          if (forbiddenModulePattern.test(content) || forbiddenIsiGuardPattern.test(content)) {
             violations.push(path.relative(rootDir, fullPath));
           }
         }
@@ -626,7 +667,7 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     assert.deepStrictEqual(
       violations,
       [],
-      `Found forbidden static Sistemas imports in src/: ${violations.join(', ')}`
+      `Found forbidden static Sistemas/schedule imports or ISI guards in src/: ${violations.join(', ')}`
     );
   });
 });

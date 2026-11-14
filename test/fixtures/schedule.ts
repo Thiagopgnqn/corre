@@ -1,30 +1,7 @@
-import type { SubjectSchedule, ReservedElectiveSlot } from '../types/schedule';
-import importedData from './schedule.json';
-
-const rawScheduleList = Array.isArray(importedData)
-  ? importedData
-  : (importedData as any).schedule || [];
+import type { SubjectSchedule } from '../../types/schedule';
 
 /**
- * Horarios oficiales importados desde data-source/ (schedule.json).
- */
-export const DEFAULT_SCHEDULES: SubjectSchedule[] = rawScheduleList as SubjectSchedule[];
-
-/**
- * Franjas reservadas de electivas genéricas leídas de las planillas.
- */
-export const DEFAULT_RESERVED_ELECTIVES: ReservedElectiveSlot[] = Array.isArray((importedData as any).reservedElectiveSlots)
-  ? (importedData as any).reservedElectiveSlots
-  : [];
-
-/**
- * ═══════════════════════════════════════════════════════════════════════════
- * DATOS DE HORARIOS Y COMISIONES (MUESTRA DE EJEMPLO PARA PRUEBAS)
- * ═══════════════════════════════════════════════════════════════════════════
- * NOTA: Los siguientes datos son de ejemplo para testeo de la interfaz,
- * detección de superposiciones y combinaciones. Podés reemplazarlos o
- * importar un archivo JSON con este mismo esquema desde el botón
- * "Importar horarios" de la app.
+ * Datos de horarios y comisiones de ejemplo exclusivamente para tests automatizados.
  */
 export const SAMPLE_SCHEDULES: SubjectSchedule[] = [
   // 1. Análisis Matemático I (ID 1, Nivel 1, 1C)

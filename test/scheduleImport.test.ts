@@ -278,7 +278,7 @@ assert(parsed2K1.find((s) => s.subjectId === 14)?.term === '2C', 'Paradigmas mus
 console.log('✓ Annual consolidation and cuatrimestral separation verified');
 
 // 13. Verify full schedule.json if present
-const scheduleJsonPath = path.resolve('src/data/schedule.json');
+const scheduleJsonPath = path.resolve('server/seed-data/schedule.json');
 if (fs.existsSync(scheduleJsonPath)) {
   const scheduleData = JSON.parse(fs.readFileSync(scheduleJsonPath, 'utf-8'));
   const validation = validateScheduleData(scheduleData);

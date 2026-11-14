@@ -261,7 +261,7 @@ const AppContent: React.FC = () => {
             )}
             {currentView === 'schedule' && (
               isScheduleAvailable ? (
-                <ScheduleBuilder />
+                <ScheduleBuilder onNavigateToMap={() => handleSetView('graph')} />
               ) : (
                 <ScheduleUnavailableNotice
                   availability={scheduleAvailability as 'wider-needed' | 'desktop-only'}

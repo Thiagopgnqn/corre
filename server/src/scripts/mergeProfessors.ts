@@ -232,7 +232,6 @@ export function loadOfflineProfessorSnapshots(): {
   const scheduleCandidates = [
     path.resolve(__dirname, '../../seed-data/schedule.json'),
     path.resolve(__dirname, '../seed-data/schedule.json'),
-    path.resolve(__dirname, '../../../src/data/schedule.json'),
     path.resolve(process.cwd(), 'seed-data/schedule.json'),
     path.resolve(process.cwd(), 'server/seed-data/schedule.json'),
   ];

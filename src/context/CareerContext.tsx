@@ -20,7 +20,6 @@ import type {
   SubjectEnrollment,
   UpsertEnrollmentInput,
 } from '../types/enrollment';
-import { DEFAULT_SCHEDULES, SAMPLE_SCHEDULES } from '../data/schedule';
 import { getAvailableTutorialSteps } from '../data/tutorialSteps';
 import { getScheduleAvailability } from '../utils/scheduleAvailability';
 import {
@@ -169,6 +168,9 @@ interface CareerContextType {
   customSchedules: SubjectSchedule[] | null;
   setCustomSchedules: (schedules: SubjectSchedule[] | null) => void;
   activeSchedules: SubjectSchedule[];
+  scheduleStatus: 'loading' | 'ready' | 'error';
+  scheduleError: string | null;
+  retryLoadSchedule: () => Promise<void>;
   scheduleTerm: '1C' | '2C';
   setScheduleTerm: (term: '1C' | '2C') => void;
   applyScheduleToEnrolled: () => { success: boolean; enrolledCount: number };
@@ -319,6 +321,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [scheduleSelections, setScheduleSelections] = useState<Record<number, string>>({});
   const [scheduleDrafts, setScheduleDrafts] = useState<ScheduleDraft[]>([]);
   const [customSchedules, setCustomSchedules] = useState<SubjectSchedule[] | null>(null);
+  const [serverSchedules, setServerSchedules] = useState<SubjectSchedule[] | null>(null);
+  const [scheduleStatus, setScheduleStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
   const [scheduleTerm, setScheduleTerm] = useState<'1C' | '2C'>('1C');
 
   // Enrollments & Recommendations state
@@ -400,9 +405,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCurrentPlanName(catalog.plan.name);
 
     const planId = catalog.plan.id;
-    if (catalog.career.code === 'ISI' && catalog.plan.year === 2023) {
-      migrateLegacyLocalStorageToPlan(planId);
-    }
+    migrateLegacyLocalStorageToPlan(planId);
 
     const planElectives = catalog.subjects.filter((s) => Boolean(s.isElective));
     const planTotalLevels = catalog.plan.config.totalLevels;
@@ -421,6 +424,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setScheduleSelections(loadScheduleSelections(planId));
     setScheduleDrafts(loadScheduleDrafts(planId));
     setCustomSchedules(loadCustomSchedules(planId));
+    setServerSchedules(null);
+    setScheduleStatus('loading');
+    setScheduleError(null);
     setScheduleTerm(loadScheduleTerm(planId));
     setEnrollments(loadEnrollments(planId));
     setExamAttempts(loadExamAttempts(planId));
@@ -430,6 +436,38 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const reloadSeqRef = useRef(0);
+  const scheduleSeqRef = useRef(0);
+
+  const loadPlanSchedule = useCallback(async (planId: string) => {
+    const schedSeq = ++scheduleSeqRef.current;
+    setScheduleStatus('loading');
+    setScheduleError(null);
+    try {
+      const schedRes = await catalogApi.getSchedule({ planId });
+      if (schedSeq !== scheduleSeqRef.current) return;
+      if (activePlanRef.current && activePlanRef.current.plan.id !== planId) return;
+      if (!schedRes?.success) {
+        throw new Error('No se pudo cargar la oferta horaria desde el servidor.');
+      }
+      const serverList = Array.isArray(schedRes.data?.schedule)
+        ? schedRes.data.schedule
+        : [];
+      setServerSchedules(serverList);
+      setScheduleStatus('ready');
+      setScheduleError(null);
+    } catch (schedErr) {
+      if (schedSeq !== scheduleSeqRef.current) return;
+      if (activePlanRef.current && activePlanRef.current.plan.id !== planId) return;
+      console.error('Error loading plan schedule:', schedErr);
+      setServerSchedules(null);
+      setScheduleStatus('error');
+      setScheduleError(
+        schedErr instanceof Error && schedErr.message
+          ? schedErr.message
+          : 'No se pudo cargar la oferta horaria desde el servidor. Verificá tu conexión e intentá nuevamente.'
+      );
+    }
+  }, []);
 
   // Load server catalog + state when authenticated
   const reloadServerState = useCallback(
@@ -482,6 +520,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             : 'No se pudo cargar tu plan de estudio. Verificá tu conexión e intentá nuevamente.'
         );
         setCatalogStatus('error');
+        setServerSchedules(null);
+        setScheduleStatus('error');
+        setScheduleError('No se pudo cargar la oferta horaria porque falló la carga del plan.');
         setSyncStatus('offline');
         return;
       }
@@ -539,40 +580,58 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           setIsTutorialOpen(true);
         }
 
-        // 3. Cargar oferta de horarios del plan activo
-        const schedRes = await catalogApi.getSchedule({ planId }).catch(() => null);
+        // 3. Cargar oferta de horarios del plan activo desde el backend (sin fallback estático)
+        await loadPlanSchedule(planId);
         if (seq !== reloadSeqRef.current) return;
-        if (schedRes?.success && schedRes.data?.schedule && schedRes.data.schedule.length > 0) {
-          setCustomSchedules(schedRes.data.schedule);
-        } else {
-          setCustomSchedules(null);
-        }
 
         // 4. Cargar resumen de recomendaciones de reseñas
         await refreshReviewableSummary();
       } catch (e) {
         if (seq !== reloadSeqRef.current) return;
         console.error('Error hydrating from server:', e);
+        setServerSchedules(null);
+        setScheduleStatus('error');
+        setScheduleError(
+          (prev) =>
+            prev ||
+            'No se pudo cargar la oferta horaria desde el servidor. Verificá tu conexión e intentá nuevamente.'
+        );
         setSyncStatus('offline');
       }
     },
-    [isAuthenticated, user?.selectedPlanId, applyLoadedCatalogToState, refreshReviewableSummary]
+    [
+      isAuthenticated,
+      user?.selectedPlanId,
+      applyLoadedCatalogToState,
+      loadPlanSchedule,
+      refreshReviewableSummary,
+    ]
   );
 
   const retryLoadCatalog = useCallback(async () => {
     await reloadServerState();
   }, [reloadServerState]);
 
+  const retryLoadSchedule = useCallback(async () => {
+    const planId = activePlanRef.current?.plan.id;
+    if (!planId || !isAuthenticated) return;
+    await loadPlanSchedule(planId);
+  }, [isAuthenticated, loadPlanSchedule]);
+
   useEffect(() => {
     if (isAuthenticated) {
       reloadServerState();
     } else {
+      scheduleSeqRef.current += 1;
       hasHydratedRef.current = false;
       hydratedStoragePlanIdRef.current = null;
       activePlanRef.current = null;
       setActivePlan(null);
       setCatalogStatus('loading');
       setCatalogError(null);
+      setServerSchedules(null);
+      setScheduleStatus('loading');
+      setScheduleError(null);
       setUnseenRecommendationsCount(0);
     }
   }, [isAuthenticated, reloadServerState]);
@@ -581,13 +640,8 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     if (customSchedules && customSchedules.length > 0) {
       return customSchedules;
     }
-    const isIsi2023 =
-      activePlan?.career?.code === 'ISI' && activePlan?.plan?.year === 2023;
-    if (!isIsi2023) {
-      return [];
-    }
-    return DEFAULT_SCHEDULES.length > 0 ? DEFAULT_SCHEDULES : SAMPLE_SCHEDULES;
-  }, [customSchedules, activePlan]);
+    return serverSchedules && serverSchedules.length > 0 ? serverSchedules : [];
+  }, [customSchedules, serverSchedules]);
 
   // Tutorial state & sandbox snapshot
   const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
@@ -1676,6 +1730,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         customSchedules,
         setCustomSchedules,
         activeSchedules,
+        scheduleStatus,
+        scheduleError,
+        retryLoadSchedule,
         scheduleTerm,
         setScheduleTerm,
         applyScheduleToEnrolled,
