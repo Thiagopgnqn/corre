@@ -33,17 +33,32 @@ VERIFICATION_CODE_PEPPER=dev_local_pepper_secret_minimo_16_chars
 CONTACT_EMAIL=contacto@stack.local
 ```
 
-### Por qué funciona sin Brevo, Resend, Google ni R2 reales
-- En `server/src/config/env.ts`, cuando `NODE_ENV=development`, las variables `BREVO_API_KEY`, `RESEND_API_KEY`, `GOOGLE_CLIENT_ID`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` y `R2_BUCKET` **son opcionales**.
-- La **Biblioteca** usa automáticamente el simulador en memoria **`MemoryMockR2Service`**, sin conectarse a Cloudflare R2.
-- Para cuentas de prueba registradas localmente con email y contraseña (ya que no habrá envío real de mails): verificá el usuario desde terminal sin tocar Brevo/Resend:
-  ```bash
-  npm --prefix server run verify-user -- --email tu-usuario-de-prueba@ejemplo.com
-  ```
-- Si querés probar vistas de administrador (`/#admin`):
-  ```bash
-  npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
-  ```
+### Por qué funciona sin Brevo, Resend, Google ni R2 reales — y qué pasa con ramas de Neon que contienen usuarios reales
+
+> [!CAUTION]
+> **NO configures credenciales reales ni copies tu `.env` de producción en `server/.env`.**
+> - **NO definas** `EMAIL_PROVIDER`, `BREVO_API_KEY`, `RESEND_API_KEY` ni `ADMIN_NOTIFICATION_EMAIL`.
+> - **NO definas** `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` ni `R2_BUCKET`.
+> - Si `server/.env` incluyera por error `EMAIL_PROVIDER` + `BREVO_API_KEY`/`RESEND_API_KEY`, las tareas de arranque de `server/src/app.ts` enviarían correos reales a usuarios y administradores presentes en la rama temporal de Neon. Si incluyera `R2_*`, las limpiezas o subidas operarían sobre tu bucket real.
+
+Con `NODE_ENV=development` y las variables opcionales **omitidas** (tal como figuran en el bloque anterior):
+1. **Envío de correos totalmente desactivado en red (`MailerService` — `server/src/modules/mailer/mailer.service.ts`):**
+   - `initAdapter()` solo instancia `ResendAdapter` o `BrevoAdapter` cuando se configuran `EMAIL_PROVIDER` y su API key; al omitirlas deja `this.adapter = null`.
+   - En ese estado y con `NODE_ENV !== 'production'`, tanto `sendVerificationCode()` como `sendEmail()` imprimen el mensaje localmente en consola (`📧 [DEV EMAIL CONSOLE] ...`) y retornan `{ success: true, provider: 'dev-console' }` sin realizar ninguna llamada HTTP externa ni enviar mails reales a los usuarios copiados en la rama de Neon.
+2. **Almacenamiento en memoria (`getR2Service()` — `server/src/services/r2.service.ts`):**
+   - Sin credenciales `R2_*`, la Biblioteca utiliza automáticamente **`MemoryMockR2Service`**, sin conectarse a Cloudflare R2.
+3. **Qué tareas de arranque SÍ corren contra la rama temporal de Neon (`server/src/app.ts`, líneas 190–225):**
+   - Al ejecutar `npm --prefix server run dev`, `app.ts` lanza en segundo plano: `runMigrations()`, `AuthService.cleanupUnverifiedAccounts(7)`, `libraryService.cleanupAbandonedUploads()` (repetidas cada `12h`), `getAdminNotificationRecipients()`, `processPendingAdminNotifications({ force: true })` y `processPendingUploaderNotifications({ force: true })`.
+   - Todo impacto en base de datos ocurre **exclusivamente dentro de tu rama temporal de Neon** (nunca en `main`), y con el mailer simulado en `dev-console` (`result.success === true`), `processPendingAdminNotifications` y `processPendingUploaderNotifications` solo imprimirán en tu terminal local y marcarán esos avisos como notificados (`markAdminNotified` / `markUploaderNotified`) dentro de dicha rama descartable.
+4. **Cuentas de prueba locales (sin envío real de mails):**
+   - Verificá usuarios de prueba desde terminal sin tocar Brevo/Resend:
+     ```bash
+     npm --prefix server run verify-user -- --email tu-usuario-de-prueba@ejemplo.com
+     ```
+   - Si querés probar vistas de administrador (`/#admin`):
+     ```bash
+     npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
+     ```
 
 ---
 

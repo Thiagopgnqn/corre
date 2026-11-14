@@ -537,3 +537,102 @@ Tras instalar dependencias del backend con `npm --prefix server ci` (`203 packag
    - `getSubjectShortName(id, fullName, shortNameFromCatalog?)` prioriza `subject.shortName` proveniente del catálogo activo, conservando `SUBJECT_SHORT_NAMES` solo como fallback/compatibilidad con `test/scheduleImport.test.ts` y truncando `fullName` a 22 caracteres si faltara.
 4. **Verificación mobile:**
    - Mantener intactos los 5 destinos de `mobilePrimaryNav`, breakpoints, `BottomSheet` y `ScheduleUnavailableNotice`; verificar con `test/mobileFrontend.test.ts` (`37`), `test/scheduleAvailability.test.ts` (`13`), `test/tutorialLayout.test.ts` (`12`), `test/scheduleLayout.test.ts` (`6`) y cobertura adicional en `test/multicarreraEngine.test.ts`.
+
+---
+
+## 9. Prerrequisitos y verificaciones previas a PARTE 1B-2 (Puntos A–E)
+
+### 9.1 Convención de versión del catálogo en migraciones SQL (Punto A)
+- **Regla obligatoria para toda migración futura que cambie datos de catálogo** (`study_plans`, `subjects`, `plan_special_rules`, `subject_correlatives`, `subject_acronyms`, etc.):
+  1. Incrementar `catalog_versions` (`id = 'default'`) **en la misma sentencia SQL** mediante un CTE (`WITH upd AS (...) ... WHERE EXISTS (SELECT 1 FROM upd)`), de modo que la segunda ejecución (sin filas afectadas) sea un **no-op puro** tanto en las tablas de catálogo como en `catalog_versions`.
+  2. Insertar la fila `'default'` de forma idempotente (`INSERT ... ON CONFLICT ("id") DO NOTHING`) cuando `EXISTS (SELECT 1 FROM upd)` por si una base nueva aún no ejecutó `bumpCatalogVersion()`.
+  3. Mantener exactamente el mismo formato de versión generado por `bumpCatalogVersion()`: `'v-' || <epoch_ms> || '-' || <6_hex>` (`'v-' || (FLOOR(EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::bigint)::text || '-' || SUBSTRING(md5(random()::text || clock_timestamp()::text) FROM 1 FOR 6)`).
+  4. **No** usar `MAX(updated_at)` ni inferencias implícitas dentro de `getCatalogVersion()`.
+- `server/drizzle/0009_isi_plan_pps_config.sql` quedó actualizada (`450fb25`) con esta convención y cubierta en `server/test/catalogConfigAndSecurity.test.ts` (simulando 2 corridas con fila `'default'` existente y sin fila previa).
+
+### 9.2 Validación estricta de forma del catálogo (Punto B)
+- En `src/api/catalog.api.ts` (`e52ed94`), `isValidPlanCatalogShape` verifica el contrato completo antes de usar o cachear cualquier respuesta (y al leer del caché): `career` (`id`, `name`, `code`, `facultyId`), `plan` (`config.totalLevels >= 1`, `config.levelLabel`, `defaultMinPassingGrade`, `requiredElectiveCredits`, `electiveSlotsEquivalent`, `intermediateDegrees`, `ppsRequirement`), cada elemento de `subjects` (con `shortName` no vacío y listas de correlativas), `rules` y `acronyms`.
+- Ante un payload malformado o incompleto (ej. backend sin desplegar aún), `loadPlanCatalogSmart` lanza `CatalogShapeError` (*"El servidor está desactualizado o devolvió un plan de estudios incompleto..."*), no reintenta como error transitorio ni pisa caché previo válido, y `CareerContext` limpia `activePlan` para renderizar exclusivamente la pantalla de error con `"Reintentar"`.
+
+### 9.3 Eliminación de horarios estáticos y estados de error/vacío (Punto C)
+- Se eliminaron `src/data/schedule.ts` y `src/data/schedule.json` del bundle de producción (`a095583`).
+- `SAMPLE_SCHEDULES` se trasladó exclusivamente a `test/fixtures/schedule.ts` (usado por `test/correlativas.test.ts`).
+- `test/scheduleImport.test.ts`, `scripts/importSchedule.ts`, `server/src/scripts/importScheduleDb.ts`, `server/src/scripts/mergeProfessors.ts` y `server/src/scripts/migrateProfessors.ts` apuntan ahora a `server/seed-data/schedule.json` como fuente única.
+- **Origen y vigencia de `server/seed-data/schedule.json`:** fue generado por `scripts/importSchedule.ts` (commit `13f4393`, `29/10/2026`) a partir de `data-source/*.xlsx` y contiene **337 comisiones**, **29 franjas reservadas de electivas** y **71 grupos materia/término** (`term`: `A`, `1C`, `2C`). Las planillas de origen y el JSON **no incluyen año calendario**; al ejecutarse `server/src/scripts/importScheduleDb.ts` sin flags, su default es `academicYear = 2026`, `term = '1C'`.
+- **Runtime multi-carrera (`CareerContext`, `ScheduleBuilder`, `ScheduleUnavailableNotice`):**
+  - Se eliminaron todos los guards `career.code === 'ISI' && year === 2023` en `src/`. `migrateLegacyLocalStorageToPlan` controla una clave global `STORAGE_KEY_LEGACY_MIGRATED_PREFIX` para copiar las claves pre-multicarrera una única vez al primer plan cargado y nunca en planes posteriores.
+  - `CareerContext` separa `serverSchedules` de `customSchedules` (importados manualmente por JSON) y expone `scheduleStatus`, `scheduleError` y `retryLoadSchedule`.
+  - Si falla `/api/catalog/schedule`, `ScheduleBuilder` renderiza `ScheduleUnavailableNotice` con motivo `'backend-error'` y botón **`Reintentar`**; si el servidor responde éxito con lista vacía (plan sin cuatrimestre publicado aún), renderiza `'no-schedule'` informándolo con acceso a `"Volver al mapa"` e importación local JSON.
+  - `test/multicarreraEngine.test.ts` verifica la ausencia de `src/data/schedule.{ts,json}` y prohíbe imports estáticos (`data/schedule`, `data/plan2023`, etc.) o checks `career.code === 'ISI'` / `isIsi2023` en `src/`.
+
+### 9.4 Auditoría previa a PARTE 1B-2 (Puntos D1–D4, solo diseño — pendiente de ejecución)
+
+#### D1. Plan de helpers puros de textos, oráculo baseline ISI 2023 y textos NO derivables del payload actual
+- **Estrategia propuesta para 1B-2:**
+  1. Antes de editar componentes de texto, crear un módulo puro (ej. `src/utils/planText.ts`) con helpers sin efectos secundarios que reciban `activePlan` (`career`, `plan`, `config`, `rules`, `subjectsById`) y generen encabezados, subtítulos, etiquetas de niveles, títulos intermedios y textos de reglas especiales.
+  2. Agregar un snapshot / oráculo de textos para **ISI Plan 2023** que congele carácter a carácter los strings actuales antes de refactorizar componentes, garantizando cero regresión visual ni de copy para Sistemas.
+- **Textos actuales en `src/` que NO pueden derivarse al 100% del catálogo actual (`GET /api/catalog/plans/:planId`) sin fallback neutro o ampliación futura de `config`:**
+  1. `"Graduación (Título Ingeniero/a)"` / `"Requisitos para el Título de Ingeniero/a"` (`StatsDashboard.tsx:141, 540`) y `"Para el título de Ingeniero/a..."` (`tutorialSteps.ts:117`): el payload actual no incluye un campo `finalDegreeTitle` (para otras carreras podría ser Licenciatura, Tecnicatura, Ingeniería, etc.; en 1B-2 requiere copy neutro genérico si la carrera/plan no corresponde o incorporar `finalDegreeTitle` opcional más adelante).
+  2. Sigla institucional `"UTN"` / `"UTN FRC"` / `"UTN ISI (Plan 2023)"` en `ScheduleSummaryPanel.tsx:65` (encabezado copiado al portapapeles), `ScheduleSummaryPanel.tsx:170` (`horarios-utn-YYYY-MM-DD.ics`), `ElectivesPicker.tsx:179` (`"...sugerencias académicas de la UTN"`) y `ScheduleWeeklyGrid.tsx:129` (`Recreos estándar UTN`): el payload de `/api/catalog/plans/:planId` expone `career` y `plan.config.shortTag` (`"ISI · Plan 2023"`), pero **no** expone `institution.code` ni `faculty.code`. En 1B-2 pueden derivarse desde `planConfig.shortTag` / `activeCareer.name` (con slug neutro para `.ics`), salvo que se agregue `institution`/`faculty` al endpoint en Etapa 2.
+  3. `"Cargar demo (3er año)"` / `"Cargar demo: Alumno de 3er año"` (`Navbar.tsx:474, 840`, `OnboardingModal.tsx:135`): la referencia específica a `"3er año"` viene del algoritmo de muestra en `getSampleStudentForPlan` (`storage.ts`), que hoy genera un demo dinámico según `totalLevels` pero su etiqueta UI sigue fija en `"3er año"`.
+  4. Etiquetas combinadas de reglas en `StatsDashboard.tsx:153, 658` (`"Materias 1 a 23 + Seminario Integrador 99 + 4 créditos de electivas"` y contador fijo `{23 - missing}`): hoy asumen que el título intermedio exige exactamente materias `1..23`; derivarlo al 100% requiere leer `rule.params.fromCode..toCode` (si la regla en otro plan es `approved_range`) o bien usar `rule.description` de `planRules` para otros tipos de reglas.
+  5. Título `"Habilitación PPS"` (`StatsDashboard.tsx:163`): `ppsRequirement` hoy solo contiene `{ referenceSubjectCode }`, sin campo `label`/`description`, por lo que el rótulo `"Habilitación PPS"` queda como convención fija mientras exista `ppsRequirement`.
+  6. Textos de `tutorialSteps.ts` (`L35`, `L117`, `L130`) y `SubjectDrawer.tsx` (`L516-531`): los nombres de materia (`"Proyecto Final"`, `"Seminario Integrador"`) sí se derivan por `rule.subjectCode` -> `subjectsById.get(code)?.name`, pero las explicaciones académicas contextuales solo son derivables si se interpola `totalLevels`, `levelLabel`, `requiredElectiveCredits`, `intermediateDegrees[0]` y `rule.description`.
+
+#### D2. Comparación `SUBJECT_SHORT_NAMES` vs `shortName` del catálogo de Sistemas (43 diferencias sobre 60 materias)
+El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUBJECT_SHORT_NAMES` (`src/components/schedule/ScheduleWeeklyGrid.tsx`) tiene `59` entradas (`301` ausente). Se detectaron **43 diferencias** (entre abreviaturas de grilla vs nombres completos, más desalineaciones de ID en electivas `401–408` y `501–514`):
+
+| ID | `SUBJECT_SHORT_NAMES` (grilla actual) | `shortName` en catálogo (`plan2023-catalog.json`) |
+|---|---|---|
+| `1` | `Análisis Mat. 1` | `Análisis Matemático 1` |
+| `2` | `Álgebra y Geom.` | `Álgebra y Geometría Analítica` |
+| `5` | `Lógica y Estruct.` | `Lógica y Estructuras Discretas` |
+| `6` | `Algoritmos (AED)` | `Algoritmos y Estructuras de Datos` |
+| `7` | `Arquitectura (ACO)` | `Arquitectura de Computadoras` |
+| `8` | `Sist. y Procesos (SPN)` | `Sistemas y Procesos de Negocio` |
+| `9` | `Análisis Mat. 2` | `Análisis Matemático 2` |
+| `11` | `Ing. y Sociedad` | `Ingeniería y Sociedad` |
+| `13` | `Sintaxis (SSL)` | `Sintaxis y Semántica de los Lenguajes` |
+| `14` | `Paradigmas (PPR)` | `Paradigmas de Programación` |
+| `16` | `Análisis de Sistemas` | `Análisis de Sistemas de Información` |
+| `17` | `Probabilidad y Est.` | `Probabilidad y Estadísticas` |
+| `20` | `Desarrollo Software (DDS)` | `Desarrollo de Software` |
+| `21` | `Com. de Datos` | `Comunicación de Datos` |
+| `23` | `Diseño de Sist. (DSI)` | `Diseño de Sistemas de Información` |
+| `25` | `Calidad de Software` | `Ingeniería y Calidad de Software` |
+| `26` | `Redes de Datos (RDA)` | `Redes de Datos` |
+| `29` | `Automatización (TPA)` | `Tecnologías para la Automatización` |
+| `30` | `Admin. de Sistemas` | `Administración de Sistemas de Información` |
+| `35` | `Seguridad en Sistemas` | `Seguridad en los Sistemas de Información` |
+| `99` | `Seminario Integrador` | `Seminario Integrador (Analista)` |
+| `301` | *(no está)* | `Backend de Aplicaciones` |
+| `401` | `Gerenciamiento Proyectos` | `Green Software` |
+| `402` | `Arquitectura Software` | `Gestión Industrial de la Producción` |
+| `403` | `Testing de Software` | `Gestión de la Mejora de los Procesos` |
+| `404` | `Seguridad en Redes` | `Desarrollo y Operaciones DevOps` |
+| `405` | `Aplic. con Objetos (DAO)` | `Desarrollo de Aplicaciones con Objetos` |
+| `406` | `Gobierno de TI` | `Comunicación Multimedial en el Desarrollo de Sistemas de Información` |
+| `407` | `Bioinformática` | `Arquitectura de Software` |
+| `408` | `Interfaces y UIX` | `Experiencia e Interfaces de Usuario (UI/UX)` |
+| `501` | `Criptografía Aplicada` | `Desarrollo de Tecnologías Blockchain` |
+| `502` | `Auditoría de Sistemas` | `Creatividad e Innovación en Ingeniería` |
+| `503` | `Cloud Computing` | `Auditoría de SI/TI` |
+| `504` | `DevOps & CI/CD` | `Gerenciamiento Estratégico` |
+| `505` | `Arquitecturas Cloud Nativas` | `Consultoría en Negocios Digitales` |
+| `506` | `Deep Learning` | `Emprendimientos Tecnológicos` |
+| `507` | `Decisiones (DEC)` | `Decisiones en Escenarios Complejos` |
+| `508` | `Procesamiento Lenguaje Natural` | `Testing de Software` |
+| `509` | `Seguridad SW (SDS)` | `Seguridad en el Desarrollo de Software` |
+| `510` | `Big Data` | `Integración de Aplicaciones en Entorno Web` |
+| `511` | `Software Libre (ISFA)` | `Ingeniería de Software de fuentes abiertas/libres` |
+| `513` | `Entornos Virtuales` | `Creatividad y Desarrollo de Entornos Virtuales` |
+| `514` | `PPS` | `Práctica Profesional Supervisada` |
+
+- **Regla para 1B-2:** en `ScheduleWeeklyGrid`, `getSubjectShortName` **no** debe caer a un diccionario hardcoded por ID (que mostraría nombres de Sistemas si otra carrera comparte códigos `1..N` o `401..514`): debe leer `subject.shortName` del catálogo activo y, si faltara o superara el límite visual, truncar exclusivamente el `fullName` de la materia del catálogo activo (`SUBJECT_SHORT_NAMES` puede conservarse solo como fixture/compatibilidad en `test/scheduleImport.test.ts` o actualizarse tras decisión del dueño del proyecto).
+
+#### D3. Biblioteca (`LibraryHome` y `LibraryTermsPage`) y revisión legal
+- Verificado que el nombre exacto en `server/seed-data/plan2023-catalog.json` (`L11`) y `server/tools/generateSeedData.ts` (`L29`) es **`"Ingeniería en Sistemas de Información"`**, idéntico carácter por carácter al texto de `LibraryHome.tsx:287` y `LibraryTermsPage.tsx:62`.
+- En `LibraryTermsPage.tsx` (`L62`), cualquier generalización multi-carrera del texto de Términos y Condiciones queda sujeta a **revisión legal pendiente** antes de aplicarse en producción.
+
+#### D4. `vite.config.ts` (`server.proxy`)
+- Confirmado que `vite.config.ts` (`L1-8`) solo configura `plugins: [react(), tailwindcss()]`. El bloque `server.proxy` (`/api -> http://localhost:4000`) que se agregará en 1B-2 aplica únicamente al servidor de desarrollo de Vite (`npm run dev`); `vite build` y el despliegue productivo en Vercel (que usa `vercel.json`) no se ven afectados.
