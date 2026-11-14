@@ -262,10 +262,112 @@ async function main() {
     '0010 actualiza materias ISI 2023 donde short_name=name en corrida 1, respeta custom/301/401/MEC y es no-op en corrida 2'
   );
 
+  const hasJournal0010 = journal.entries.some(
+    (e: any) => e?.idx === 10 && e?.tag === '0010_isi_plan_short_names'
+  );
+  assert(
+    hasJournal0010,
+    'meta/_journal.json registra 0010_isi_plan_short_names'
+  );
+
+  // 1c. Migración 0011 (subjects.is_integrator, 5 integradoras ISI 2023, dos corridas)
+  console.log('\n📌 1c. Migración 0011 (subjects.is_integrator, dos corridas)');
+  const sql0011Path = path.resolve(__dirname, '../drizzle/0011_isi_plan_integrator_subjects.sql');
+  const sql0011 = fs.readFileSync(sql0011Path, 'utf8');
+  const sql0011Statements = sql0011
+    .split('--> statement-breakpoint')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  assert(
+    sql0011Statements.length === 2 &&
+      !/\b(DROP|DELETE|TRUNCATE)\b/i.test(sql0011) &&
+      /ALTER TABLE "subjects" ADD COLUMN IF NOT EXISTS "is_integrator" boolean DEFAULT false NOT NULL;/i.test(
+        sql0011Statements[0]
+      ) &&
+      /\bupd\s+AS\s*\(\s*UPDATE\s+"subjects"\s+s\b/i.test(sql0011Statements[1]) &&
+      /\bRETURNING\s+s\."id"/i.test(sql0011Statements[1]),
+    '0011 separa ALTER COLUMN IF NOT EXISTS y la CTE UPDATE sobre subjects RETURNING s.id'
+  );
+  assert(
+    sql0011Statements[1].includes(`c."code" = 'ISI'`) &&
+      sql0011Statements[1].includes('sp."year" = 2023') &&
+      sql0011Statements[1].includes(`s."is_integrator" = false`) &&
+      sql0011Statements[1].includes(`INSERT INTO "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(
+        sql0011Statements[1]
+      ),
+    '0011 apunta a ISI 2023 con WHERE is_integrator = false y sube catalog_versions solo si EXISTS upd'
+  );
+
+  const inClauseMatch = sql0011Statements[1].match(/s\."code_in_plan"\s+IN\s*\(([^)]+)\)/i);
+  const parsed0011Codes = (inClauseMatch?.[1] || '')
+    .split(',')
+    .map((x) => Number(x.trim()))
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+  assert(
+    JSON.stringify(parsed0011Codes) === JSON.stringify([16, 23, 30, 36, 99]),
+    '0011 marca exactamente las 5 integradoras del fixture: [16, 23, 30, 36, 99]'
+  );
+
+  const simulate0011Run = (
+    rows: Array<{ id: string; careerCode: string; year: number; codeInPlan: number; isIntegrator: boolean }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    const integratorSet = new Set(parsed0011Codes);
+    const updIds: string[] = [];
+    for (const s of rows) {
+      if (
+        s.careerCode === 'ISI' &&
+        s.year === 2023 &&
+        integratorSet.has(s.codeInPlan) &&
+        s.isIntegrator === false
+      ) {
+        s.isIntegrator = true;
+        updIds.push(s.id);
+      }
+    }
+    if (updIds.length > 0) {
+      versions.set('default', `v-${fakeTs}-${fakeHex}`);
+    }
+    return { updatedRows: updIds.length, version: versions.get('default') || null };
+  };
+
+  const sim0011Subjects = [
+    ...[1, 16, 23, 30, 36, 99, 301].map((code) => ({
+      id: `isi-${code}`,
+      careerCode: 'ISI',
+      year: 2023,
+      codeInPlan: code,
+      isIntegrator: false,
+    })),
+    // Otra carrera con mismo codeInPlan 16: NO debe tocarse
+    { id: 'mec-16', careerCode: 'MEC', year: 2025, codeInPlan: 16, isIntegrator: false },
+  ];
+  const sim0011Versions = new Map<string, string>([['default', 'v-1700000000000-000000']]);
+
+  const run0011First = simulate0011Run(sim0011Subjects, sim0011Versions, 1700000300333, '112233');
+  const run0011Second = simulate0011Run(sim0011Subjects, sim0011Versions, 1700000400444, '445566');
+
+  assert(
+    run0011First.updatedRows === 5 &&
+      run0011First.version === 'v-1700000300333-112233' &&
+      [16, 23, 30, 36, 99].every((c) => sim0011Subjects.find((s) => s.id === `isi-${c}`)?.isIntegrator === true) &&
+      sim0011Subjects.find((s) => s.id === 'isi-1')?.isIntegrator === false &&
+      sim0011Subjects.find((s) => s.id === 'isi-301')?.isIntegrator === false &&
+      sim0011Subjects.find((s) => s.id === 'mec-16')?.isIntegrator === false &&
+      run0011Second.updatedRows === 0 &&
+      run0011Second.version === run0011First.version,
+    '0011 marca exactamente las 5 integradoras de ISI 2023 en corrida 1, respeta el resto/MEC y es no-op en corrida 2'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 10 && lastJournalEntry?.tag === '0010_isi_plan_short_names',
-    'meta/_journal.json registra 0010_isi_plan_short_names como última entrada'
+    lastJournalEntry?.idx === 11 && lastJournalEntry?.tag === '0011_isi_plan_integrator_subjects',
+    'meta/_journal.json registra 0011_isi_plan_integrator_subjects como última entrada'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
@@ -414,17 +516,25 @@ async function main() {
     assert(
       subjById.get(1)?.code === '1' &&
         subjById.get(1)?.shortName === 'Análisis Mat. 1' &&
+        subjById.get(1)?.isIntegrator === undefined &&
+        subjById.get(16)?.isIntegrator === true &&
+        subjById.get(23)?.isIntegrator === true &&
+        subjById.get(30)?.isIntegrator === true &&
+        subjById.get(36)?.isIntegrator === true &&
         subjById.get(99)?.code === '99' &&
         subjById.get(99)?.shortName === 'Seminario Integrador' &&
+        subjById.get(99)?.isIntegrator === true &&
         subjById.get(301)?.code === 'E-301' &&
         subjById.get(301)?.shortName === 'Backend de Aplicaciones' &&
+        subjById.get(301)?.isIntegrator === undefined &&
         subjById.get(405)?.code === 'E-405' &&
         subjById.get(501)?.code === 'E-501' &&
         subjById.get(408)?.code === 'X-408' &&
         subjById.get(408)?.shortName === 'Interfaces y UIX' &&
         subjById.get(514)?.code === 'X-514' &&
-        subjById.get(514)?.shortName === 'PPS',
-      'Payload expone subject.code con formato exacto ("1", "99", "E-301", "X-408") y shortName actualizado por 0010'
+        subjById.get(514)?.shortName === 'PPS' &&
+        d.subjects.filter((s: any) => s.isIntegrator === true).length === 5,
+      'Payload expone subject.code ("1", "99", "E-301", "X-408"), shortName de 0010 e isIntegrator exacto en las 5 integradoras'
     );
     assert(
       d.rules.some((r: any) => r.subjectCode === 99 && r.ruleType === 'approved_range') &&

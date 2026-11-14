@@ -141,6 +141,7 @@ export const subjects = pgTable(
     credits: integer('credits'),
     isOptionalTrack: boolean('is_optional_track').default(false).notNull(),
     trackKey: text('track_key'), // ej. 'analista'
+    isIntegrator: boolean('is_integrator').default(false).notNull(),
     ...timestamps,
   },
   (table) => [

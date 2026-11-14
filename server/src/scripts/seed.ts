@@ -202,6 +202,7 @@ async function runSeed() {
             credits: sub.credits,
             isOptionalTrack: sub.isOptionalTrack,
             trackKey: sub.trackKey,
+            isIntegrator: Boolean(sub.isIntegrator),
           })
           .returning();
       } else {
@@ -219,6 +220,7 @@ async function runSeed() {
             credits: sub.credits,
             isOptionalTrack: sub.isOptionalTrack,
             trackKey: sub.trackKey,
+            isIntegrator: Boolean(sub.isIntegrator),
             updatedAt: new Date(),
           })
           .where(eq(subjects.id, existingSub.id));

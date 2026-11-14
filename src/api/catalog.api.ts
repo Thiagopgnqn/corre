@@ -74,7 +74,7 @@ export interface ScheduleResponse {
 
 export const CATALOG_CACHE_KEY_PREFIX = 'mi_carrera_catalog_cache_v1:';
 export const CATALOG_CURRENT_POINTER_KEY = 'mi_carrera_catalog_current_plan_id_v1';
-export const CATALOG_CACHE_SCHEMA = 4;
+export const CATALOG_CACHE_SCHEMA = 5;
 
 export class CatalogShapeError extends Error {
   constructor(
@@ -163,6 +163,13 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
       !Number.isFinite(subj.id) ||
       !isNonEmptyString(subj.name) ||
       !isNonEmptyString(subj.shortName)
+    ) {
+      return false;
+    }
+    if (
+      subj.isIntegrator !== undefined &&
+      subj.isIntegrator !== null &&
+      typeof subj.isIntegrator !== 'boolean'
     ) {
       return false;
     }

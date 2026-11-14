@@ -78,6 +78,13 @@
       "when": 1793700000000,
       "tag": "0010_isi_plan_short_names",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1776729600000,
+      "tag": "0011_isi_plan_integrator_subjects",
+      "breakpoints": true
     }
   ]
 }

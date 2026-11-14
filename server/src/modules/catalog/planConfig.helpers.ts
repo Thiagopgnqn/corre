@@ -36,6 +36,7 @@ export interface CatalogSubjectInput {
   credits: number | null;
   isOptionalTrack: boolean;
   trackKey: string | null;
+  isIntegrator?: boolean;
 }
 
 export interface CatalogRuleInput {
@@ -271,6 +272,7 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
     credits: s.credits ?? undefined,
     isOptionalTrack: s.isOptionalTrack,
     trackKey: s.trackKey ?? undefined,
+    ...(s.isIntegrator ? { isIntegrator: true } : {}),
     regularPrereqs: regularMap.get(s.codeInPlan) || [],
     approvedPrereqs: approvedMap.get(s.codeInPlan) || [],
   }));

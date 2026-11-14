@@ -178,6 +178,7 @@ export class InMemoryCatalogStore implements CatalogStore {
         credits?: number | null;
         isOptionalTrack?: boolean;
         trackKey?: string | null;
+        isIntegrator?: boolean;
         regularPrereqs?: number[];
         approvedPrereqs?: number[];
       }>;
@@ -255,6 +256,7 @@ export class InMemoryCatalogStore implements CatalogStore {
         credits: s.credits ?? null,
         isOptionalTrack: Boolean(s.isOptionalTrack),
         trackKey: s.trackKey ?? null,
+        isIntegrator: Boolean(s.isIntegrator),
       };
     });
 

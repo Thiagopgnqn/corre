@@ -75,6 +75,7 @@ interface RawSeedCatalog {
     credits?: number | null;
     isOptionalTrack?: boolean;
     trackKey?: string | null;
+    isIntegrator?: boolean;
     regularPrereqs?: number[];
     approvedPrereqs?: number[];
   }>;
@@ -119,6 +120,7 @@ function buildPlanFromSeedCatalog(sortDbOrder: boolean): ActivePlanCatalog {
       credits: s.credits ?? null,
       isOptionalTrack: Boolean(s.isOptionalTrack),
       trackKey: s.trackKey ?? null,
+      isIntegrator: Boolean(s.isIntegrator),
     };
   });
 
@@ -330,12 +332,29 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
     assert.deepStrictEqual(sampleBlockedTrue.expected, sampleNoBlocked.expected);
   });
 
-  it('builds the 60 UI Subject models from formatted catalog payload matching fixtures field by field', () => {
+  it('builds the 60 UI Subject models from formatted catalog payload matching all fixture keys', () => {
     const fixtureSubjects = [...CORE_SUBJECTS, ...ELECTIVES];
     const seedById = new Map(seedRaw.subjects.map((s) => [s.codeInPlan, s]));
 
     assert.equal(seedOrderPlan.subjects.length, 60);
     assert.equal(fixtureSubjects.length, 60);
+
+    // Excepciones explícitas de claves del fixture que no llegan idénticas en payload.subjects:
+    const FIXTURE_TO_PAYLOAD_KEY_EXCEPTIONS: Record<string, string> = {
+      specialRule:
+        'En DB/payload las reglas especiales viven en plan.rules[] (plan_special_rules) y no en cada objeto Subject; pendiente de definición antes de 1B-2 porque SubjectDrawer.tsx (L508, 518) y QuickStatusModal.tsx (L361, 383, 385) aún leen subject.specialRule',
+    };
+
+    // Excepciones explícitas de claves adicionales emitidas por el payload que los fixtures estáticos no tenían:
+    const PAYLOAD_ONLY_KEY_EXCEPTIONS: Record<string, string> = {
+      uuid: 'UUID de fila en la base de datos generado en DB (el fixture estático no tiene IDs UUID)',
+      shortName: 'Nombre abreviado para grilla horaria agregado en DB/seed (short_name)',
+      contraCuatrimestral: 'Flag derivado de modalidad en DB (los fixtures codifican *-CC en modality)',
+      kind: 'Discriminador explícito obligatoria|electiva de DB (los fixtures distinguían por archivo)',
+      isElective: 'El fixture de CORE_SUBJECTS omite isElective cuando es false; el payload lo emite siempre como booleano',
+      isOptionalTrack: 'Flag explícito de trayecto opcional agregado en DB (el fixture marcaba la 99 implícitamente)',
+      trackKey: 'Identificador de trayecto opcional agregado en DB (en Sistemas es "analista" solo en la 99)',
+    };
 
     const payloadById = new Map(seedOrderPlan.subjects.map((s) => [s.id, s]));
 
@@ -346,30 +365,41 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
       const seedEntry = seedById.get(fixtureSubj.id);
       assert.ok(seedEntry, `Falta la materia #${fixtureSubj.id} en plan2023-catalog.json`);
 
-      assert.equal(payloadSubj.id, fixtureSubj.id, `id de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.code, fixtureSubj.code, `code de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.name, fixtureSubj.name, `name de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.level, fixtureSubj.level, `level de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.modality, fixtureSubj.modality, `modality de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.weeklyHours, fixtureSubj.weeklyHours, `weeklyHours de #${fixtureSubj.id}`);
-      assert.equal(payloadSubj.credits, fixtureSubj.credits, `credits de #${fixtureSubj.id}`);
-      assert.equal(
-        Boolean(payloadSubj.isElective),
-        Boolean(fixtureSubj.isElective),
-        `isElective de #${fixtureSubj.id}`
-      );
-      assert.deepStrictEqual(
-        [...payloadSubj.regularPrereqs].sort((a, b) => a - b),
-        [...fixtureSubj.regularPrereqs].sort((a, b) => a - b),
-        `regularPrereqs de #${fixtureSubj.id}`
-      );
-      assert.deepStrictEqual(
-        [...payloadSubj.approvedPrereqs].sort((a, b) => a - b),
-        [...fixtureSubj.approvedPrereqs].sort((a, b) => a - b),
-        `approvedPrereqs de #${fixtureSubj.id}`
-      );
+      const fixtureRecord = fixtureSubj as unknown as Record<string, unknown>;
+      const payloadRecord = payloadSubj as unknown as Record<string, unknown>;
 
-      // isOptionalTrack / trackKey vienen del seed y corresponden exclusivamente a Analista (99)
+      for (const key of Object.keys(fixtureRecord)) {
+        if (key in FIXTURE_TO_PAYLOAD_KEY_EXCEPTIONS) continue;
+
+        assert.ok(
+          key in payloadRecord && payloadRecord[key] !== undefined,
+          `Falta la clave "${key}" en el payload de la materia #${fixtureSubj.id} (${fixtureSubj.name})`
+        );
+
+        if (key === 'regularPrereqs' || key === 'approvedPrereqs') {
+          const actualArr = [...((payloadRecord[key] as number[]) || [])].sort((a, b) => a - b);
+          const expectedArr = [...((fixtureRecord[key] as number[]) || [])].sort((a, b) => a - b);
+          assert.deepStrictEqual(actualArr, expectedArr, `${key} de #${fixtureSubj.id}`);
+        } else {
+          assert.deepStrictEqual(
+            payloadRecord[key],
+            fixtureRecord[key],
+            `Diferencia en clave "${key}" de #${fixtureSubj.id}`
+          );
+        }
+      }
+
+      for (const key of Object.keys(payloadRecord)) {
+        if (payloadRecord[key] === undefined) continue;
+        if (!(key in fixtureRecord)) {
+          assert.ok(
+            key in PAYLOAD_ONLY_KEY_EXCEPTIONS,
+            `Clave inesperada "${key}" presente solo en el payload de #${fixtureSubj.id} sin excepción documentada`
+          );
+        }
+      }
+
+      // Verificaciones adicionales de trayecto opcional contra seed y materia 99
       assert.equal(
         Boolean(payloadSubj.isOptionalTrack),
         Boolean(seedEntry.isOptionalTrack),
@@ -386,12 +416,6 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
       } else {
         assert.equal(payloadSubj.isOptionalTrack, false);
         assert.equal(payloadSubj.trackKey, undefined);
-      }
-      if (fixtureSubj.isOptionalTrack !== undefined) {
-        assert.equal(payloadSubj.isOptionalTrack, fixtureSubj.isOptionalTrack);
-      }
-      if (fixtureSubj.trackKey !== undefined) {
-        assert.equal(payloadSubj.trackKey, fixtureSubj.trackKey);
       }
     }
   });
