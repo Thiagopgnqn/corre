@@ -41,7 +41,7 @@
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.13.3",
     "typescript": "^5.7.3",
-    "xlsx": "^0.18.5",
+    "xlsx": "file:vendor/xlsx-0.20.3.tgz",
     "zod": "^3.24.2"
   },
   "devDependencies": {
