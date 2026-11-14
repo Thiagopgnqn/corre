@@ -275,12 +275,19 @@ function evaluatePlan2023WithCurrentEngine(
 }
 
 describe('Plan 2023 Frozen Regression Oracle', () => {
-  it('contains expected oracle scenarios including explicit PPS enabled & blocked cases', () => {
-    assert.ok(oracle.scenarios.length >= 13);
+  it('contains expected oracle scenarios including explicit PPS, Seminario and settings boundary cases', () => {
+    assert.ok(oracle.scenarios.length >= 20);
     const ids = new Set(oracle.scenarios.map((s) => s.id));
     assert.ok(ids.has('05-pps-blocked-approved-prereqs-only-regular'));
     assert.ok(ids.has('06-pps-blocked-missing-one-regular-with-514-approved'));
     assert.ok(ids.has('07-pps-enabled-minimal'));
+    assert.ok(ids.has('14-seminario-edge-only-subject-1'));
+    assert.ok(ids.has('15-seminario-edge-missing-23-with-24'));
+    assert.ok(ids.has('16-seminario-edge-missing-1-with-24'));
+    assert.ok(ids.has('17-seminario-edge-exact-1-to-23'));
+    assert.ok(ids.has('18-seminario-edge-1-to-23-plus-24'));
+    assert.ok(ids.has('19-include-promotions-in-gpa-false'));
+    assert.ok(ids.has('20-allow-blocked-electives-planning-true'));
   });
 
   for (const scenario of oracle.scenarios) {
@@ -327,5 +334,38 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
     assert.deepStrictEqual(enabledMin.expected.pps.missingRegular, []);
     assert.deepStrictEqual(enabledMin.expected.pps.missingApproved, []);
     assert.equal(enabledMin.expected.progress.isPPSEligible, true);
+  });
+
+  it('explicitly freezes Seminario (99) boundaries and settings edge cases from current behavior', () => {
+    const emptyAnalista = oracle.scenarios.find((s) => s.id === '02-empty-with-analista')!;
+    assert.equal(emptyAnalista.expected.seminario.canRender, false);
+    assert.equal(emptyAnalista.expected.seminario.missingIds.length, 23);
+
+    const onlySubj1 = oracle.scenarios.find((s) => s.id === '14-seminario-edge-only-subject-1')!;
+    assert.equal(onlySubj1.expected.seminario.canRender, false);
+    assert.equal(onlySubj1.expected.seminario.missingIds.length, 22);
+
+    const missing23 = oracle.scenarios.find((s) => s.id === '15-seminario-edge-missing-23-with-24')!;
+    assert.equal(missing23.expected.seminario.canRender, false);
+    assert.deepStrictEqual(missing23.expected.seminario.missingIds, [23]);
+
+    const missing1 = oracle.scenarios.find((s) => s.id === '16-seminario-edge-missing-1-with-24')!;
+    assert.equal(missing1.expected.seminario.canRender, false);
+    assert.deepStrictEqual(missing1.expected.seminario.missingIds, [1]);
+
+    const exact23 = oracle.scenarios.find((s) => s.id === '17-seminario-edge-exact-1-to-23')!;
+    assert.equal(exact23.expected.seminario.canRender, true);
+    assert.deepStrictEqual(exact23.expected.seminario.missingIds, []);
+
+    const plus24 = oracle.scenarios.find((s) => s.id === '18-seminario-edge-1-to-23-plus-24')!;
+    assert.equal(plus24.expected.seminario.canRender, true);
+    assert.deepStrictEqual(plus24.expected.seminario.missingIds, []);
+
+    const promoFalse = oracle.scenarios.find((s) => s.id === '19-include-promotions-in-gpa-false')!;
+    assert.equal(promoFalse.expected.progress.averageGrade, 8.5);
+
+    const sampleNoBlocked = oracle.scenarios.find((s) => s.id === '03-sample-3rd-year-no-fails-in-gpa')!;
+    const sampleBlockedTrue = oracle.scenarios.find((s) => s.id === '20-allow-blocked-electives-planning-true')!;
+    assert.deepStrictEqual(sampleBlockedTrue.expected, sampleNoBlocked.expected);
   });
 });
