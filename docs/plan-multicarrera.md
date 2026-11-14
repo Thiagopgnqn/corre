@@ -1,8 +1,8 @@
 # Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría y Etapa 1A)
 
-> **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. **Parte 1B-1**, correcciones (`code`/`0010`/`0011`/`0012`/`specialRule`), `SubjectDrawer` por `ruleType` y **Parte 1B-2 Grupo 1** (helpers puros de textos + oráculo carácter a carácter) completados en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales, esperando OK para **Grupo 2** visual).  
+> **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. **Parte 1B-1**, correcciones (`code`/`0010`/`0011`/`0012`/`specialRule`), **Parte 1B-2 Grupo 1** (helpers puros + oráculo), **Migración `0013`** y **Parte 1B-2 Grupo 2 — Tanda 2a** (`StatsDashboard`, `Navbar`, `UserMenu`, `tutorialSteps`, `TutorialSpotlight`, más `SubjectDrawer` y `QuickStatusModal`) completados en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales, **detenido tras Tanda 2a** antes de Tanda 2b/2c).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` -> `0010_isi_plan_short_names.sql` -> `0011_isi_plan_integrator_subjects.sql` -> `0012_isi_plan_special_rules_descriptions.sql` (0009–0012 pendientes de despliegue en Neon producción; idempotentes y con bump condicional de `catalog_versions` via CTE).
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` -> `0010_isi_plan_short_names.sql` -> `0011_isi_plan_integrator_subjects.sql` -> `0012_isi_plan_special_rules_descriptions.sql` -> `0013_isi_plan_intermediate_and_pps_copy.sql` (0009–0013 pendientes de despliegue en Neon producción; idempotentes y con bump condicional de `catalog_versions` via CTE).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -730,3 +730,28 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
 5. **Línea base verificada tras Parte 1B-2 Grupo 1:**
    - **Backend (`npm --prefix server test`):** **`389` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 41`) + `npm --prefix server run build` OK (`tsc`).
    - **Frontend (`npm test`):** **`15 / 15` archivos en verde** (`plan2023Oracle 24/0` con `0` excepciones de claves, `multicarreraEngine 13/0`, `planText 4/0`) + `npm run build` OK (`tsc -b && vite build`, `2603` módulos).
+
+---
+
+### 9.9 Migración 0013 y PARTE 1B-2 — Grupo 2 (Tanda 2a)
+
+1. **Decisiones cerradas aplicadas en Grupo 2 / Migración `0013`:**
+   - **1) Título intermedio (`0013`):** verificado mediante búsqueda completa en el repositorio que `intermediateDegrees[0].name` no es leído en paneles admin, envíos de mail ni endpoints distintos al catálogo normalizado. La migración `0013_isi_plan_intermediate_and_pps_copy.sql` hace merge a izquierda en `intermediateDegrees[0]` incorporando `"shortLabel": "Analista"` y `"shortTitle": "Analista Universitario"`, actualiza `"Analista Universitario en Sistemas"` -> `"Analista Universitario de Sistemas"` (preservando nombres custom editados desde admin) y conserva cualquier elemento `[1..]`. Fallbacks neutros en `planText.ts`: `shortLabel` usa la primera palabra de `name`; `shortTitle` usa `name`.
+   - **2) Descripción PPS (`0013`):** `0013` agrega `"description": "Cumplís los requisitos para cursar la Práctica Profesional"` en `ppsRequirement` mediante merge a izquierda sin pisar claves existentes; el fallback neutro en `planText.ts` es `"Cumplís los requisitos académicos exigidos por el plan"`.
+   - **3) Artículo femenino en `ElectivesPicker`:** queda registrada la limitación conocida de `"de la ${institutionCode}"` (`"de la UTN"`), adecuada para instituciones con artículo femenino; si en el futuro se incorpora una institución de artículo masculino (ej. `"ITBA"`), requerirá campo/convención de artículo antes de publicarla.
+   - **4) `RECREOS` en `ScheduleWeeklyGrid.tsx`:** queda anotado explícitamente para **Etapa 3** (plantilla horaria por facultad, junto con el esquema de turnos de UTN FRC) ya que los recreos estándar UTN forman parte de la grilla horaria institucional y no del catálogo mínimo actual.
+   - **5) Exclusión de electivas en `careerPercentageByHours` (`evaluatePlanProgress`):** verificado por diseño en `src/utils/correlativas.ts` (`totalWeeklyHours` y `approvedWeeklyHours` suman únicamente sobre `activeCoreSubjects`, mientras `electives` solo acumulan créditos en su propio bucle aun si alguna electiva tiene `weeklyHours > 0`). En `StatsDashboard.tsx` la nota al pie se condicionó a `electives.length > 0` (`getWeeklyHoursElectiveFootnote(electives.length)`), con test unitario explícito en `test/multicarreraEngine.test.ts`.
+   - **6) `LibraryTermsPage.tsx`:** queda anotada para revisión explícita de copy legal antes de introducir cualquier sustitución de carrera en Tanda 2b/2c.
+
+2. **Tanda 2a completada (sin alterar textos ni diseño en ISI Plan 2023):**
+   - `src/components/stats/StatsDashboard.tsx`: iteración dinámica por `getLevelNumbers(planConfig)`, tarjeta y hito de título intermedio condicionados a `primaryIntermediateDegree && settings.includeAnalistaTrack`, tarjeta PPS vía `ppsRequirement`, créditos electivos protegidos contra división por cero y todos los textos vía `planText.ts`.
+   - `src/components/common/Navbar.tsx`: los 3 toggles del título intermedio condicionados a `primaryIntermediateDegree`, etiqueta del demo calculada desde `allSubjects` y textos vía `planText.ts`.
+   - `src/components/common/UserMenu.tsx`: eliminación del default `'Plan 2023'` y fallback neutro `'Plan de estudio'` desde `useCareer()`.
+   - `src/data/tutorialSteps.ts`, `src/components/tutorial/TutorialSpotlight.tsx` y `src/context/CareerContext.tsx`: textos neutros en `TUTORIAL_STEPS` derivados dinámicamente mediante `buildPlanTutorialSteps(getAvailableTutorialSteps(...), activePlan)` (manteniendo las 17 entradas en la definición base y sincronizando el conteo en `nextTutorialStep` y `goToTutorialStep`).
+   - Confirmado que `src/components/graph/SubjectDrawer.tsx` y `src/components/common/QuickStatusModal.tsx` ya operaban por `ruleType`/`subject.specialRule` vía `resolveSpecialRuleView`.
+   - Agregado en `test/planText.test.ts` el chequeo estático sobre los 7 archivos de Tanda 2a garantizando `0` textos fijos de Sistemas y `0` códigos de materia `99`/`36` (fuera de los literales CSS/SVG/RGB documentados).
+
+3. **Línea base verificada tras Migración 0013 (commit `49432f9`) y Tanda 2a:**
+   - **Backend (`npm --prefix server test`):** **`393` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 45`) + `npm --prefix server run build` OK (`tsc`).
+   - **Frontend (`npm test`):** **`15 / 15` archivos en verde** (`plan2023Oracle 24/0`, `multicarreraEngine 13/0`, `planText 5/0`) + `npm run build` OK (`tsc -b && vite build`, `2603` módulos).
+   - **Estado:** detenido tras **Tanda 2a**, antes de **Tanda 2b** y **Tanda 2c**.

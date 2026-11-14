@@ -369,9 +369,23 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(getLibraryHeroDescription(ISI_PLAN.career), ISI_2023_FROZEN_UI_TEXTS.library.homeHeroDesc);
     assert.equal(getLibraryTermsIntroParagraph(ISI_PLAN.career), ISI_2023_FROZEN_UI_TEXTS.library.termsIntro);
 
-    // Tutorial steps match both the frozen constants AND current TUTORIAL_STEPS verbatim
+    // Raw TUTORIAL_STEPS are neutral (no Sistemas/ISI literals) and buildPlanTutorialSteps recovers ISI 2023 texts verbatim
+    assert.equal(TUTORIAL_STEPS.length, 17);
+    const rawTutorialText = TUTORIAL_STEPS.map((s) => `${s.title}\n${s.description}`).join('\n');
+    for (const forbidden of ['99', 'Analista Universitario', 'Ingeniero/a', '5 columnas', '20 cr']) {
+      assert.equal(
+        rawTutorialText.includes(forbidden),
+        false,
+        `TUTORIAL_STEPS neutro no debe contener "${forbidden}"`
+      );
+    }
+
     const derivedSteps = buildPlanTutorialSteps(TUTORIAL_STEPS, ISI_PLAN);
     assert.equal(derivedSteps.length, TUTORIAL_STEPS.length);
+    assert.deepEqual(
+      derivedSteps.map((s) => ({ id: s.id, targetSelector: s.targetSelector, targetView: s.targetView })),
+      TUTORIAL_STEPS.map((s) => ({ id: s.id, targetSelector: s.targetSelector, targetView: s.targetView }))
+    );
     const graphStep = derivedSteps.find((s) => s.id === 'graph-overview')!;
     const electivesStep = derivedSteps.find((s) => s.id === 'electives-tour')!;
     const analistaStep = derivedSteps.find((s) => s.id === 'analista-switch')!;
@@ -380,7 +394,12 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(electivesStep.description, ISI_2023_FROZEN_UI_TEXTS.tutorial.electivesDesc);
     assert.equal(analistaStep.title, ISI_2023_FROZEN_UI_TEXTS.tutorial.analistaTitle);
     assert.equal(analistaStep.description, ISI_2023_FROZEN_UI_TEXTS.tutorial.analistaDesc);
-    assert.deepEqual(derivedSteps, TUTORIAL_STEPS);
+    const overriddenIds = new Set(['graph-overview', 'electives-tour', 'analista-switch']);
+    for (let i = 0; i < derivedSteps.length; i++) {
+      if (!overriddenIds.has(derivedSteps[i].id)) {
+        assert.deepEqual(derivedSteps[i], TUTORIAL_STEPS[i]);
+      }
+    }
   });
 
   it('resolves ScheduleWeeklyGrid short names solely from catalog shortName or <= 22 char name truncation without any ID map', () => {
@@ -573,5 +592,62 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
 
     assert.equal(formatSpanishOrdinal(1), '1er');
     assert.equal(formatSpanishOrdinal(4), '4to');
+  });
+
+  it('contains zero fixed Sistemas strings or standalone 99/36 academic references in Tanda 2a components and tutorialSteps.ts', () => {
+    const repoRoot = path.resolve(currentDir, '..');
+    const tanda2aFiles = [
+      'src/components/stats/StatsDashboard.tsx',
+      'src/components/graph/SubjectDrawer.tsx',
+      'src/components/common/QuickStatusModal.tsx',
+      'src/components/common/Navbar.tsx',
+      'src/components/common/UserMenu.tsx',
+      'src/data/tutorialSteps.ts',
+      'src/components/tutorial/TutorialSpotlight.tsx',
+    ];
+    const forbiddenStrings = [
+      'UTN',
+      'Plan 2023',
+      'plan 2023',
+      'Analista (99)',
+      'Seminario Integrador',
+      'Ingeniería en Sistemas',
+      'Ingeniero/a',
+      'Analista Universitario',
+      'Práctica Profesional',
+      '3er año',
+    ];
+    // Documented non-academic literals containing 99 or 36 (Tailwind heights, SVG math, hex/rgba colors, layout comments/sentinels)
+    const allowedTechnicalLiterals = [
+      'min-h-[36px]',
+      '#34d399',
+      '163.36',
+      'rgba(99,102,241,0.2)',
+      '640x360',
+      '-9999',
+      'rgba(251,191,36,0.4)',
+    ];
+
+    for (const relPath of tanda2aFiles) {
+      const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
+      for (const forbidden of forbiddenStrings) {
+        assert.equal(
+          content.includes(forbidden),
+          false,
+          `${relPath} no debe contener el texto fijo "${forbidden}"`
+        );
+      }
+
+      let scrubbed = content;
+      for (const literal of allowedTechnicalLiterals) {
+        scrubbed = scrubbed.split(literal).join('');
+      }
+      const codeMatches = scrubbed.match(/\b(?:99|36)\b/g);
+      assert.equal(
+        codeMatches,
+        null,
+        `${relPath} no debe contener códigos de materia fijos 99/36 (hallados: ${codeMatches?.join(', ')})`
+      );
+    }
   });
 });

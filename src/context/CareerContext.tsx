@@ -21,6 +21,7 @@ import type {
   UpsertEnrollmentInput,
 } from '../types/enrollment';
 import { getAvailableTutorialSteps } from '../data/tutorialSteps';
+import { buildPlanTutorialSteps } from '../utils/planText';
 import { getScheduleAvailability } from '../utils/scheduleAvailability';
 import {
   buildSubjectsMap,
@@ -1650,7 +1651,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const isSchedAvail = typeof window !== 'undefined'
         ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
         : true;
-      const steps = getAvailableTutorialSteps(isSchedAvail);
+      const steps = buildPlanTutorialSteps(getAvailableTutorialSteps(isSchedAvail), activePlan);
       if (prev < steps.length - 1) {
         soundManager.playClick();
         return prev + 1;
@@ -1658,7 +1659,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       closeTutorial();
       return prev;
     });
-  }, [closeTutorial]);
+  }, [closeTutorial, activePlan]);
 
   const prevTutorialStep = useCallback(() => {
     setCurrentTutorialStep((prev) => {
@@ -1671,10 +1672,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const isSchedAvail = typeof window !== 'undefined'
       ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
       : true;
-    const steps = getAvailableTutorialSteps(isSchedAvail);
+    const steps = buildPlanTutorialSteps(getAvailableTutorialSteps(isSchedAvail), activePlan);
     setCurrentTutorialStep(Math.max(0, Math.min(steps.length - 1, step)));
     soundManager.playClick();
-  }, []);
+  }, [activePlan]);
 
   // Keyboard shortcut for Ctrl+K / Cmd+K search
   useEffect(() => {
