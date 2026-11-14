@@ -64,6 +64,13 @@
       "when": 1793680000000,
       "tag": "0008_multicarrera_and_shared_subjects",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793690000000,
+      "tag": "0009_isi_plan_pps_config",
+      "breakpoints": true
     }
   ]
 }

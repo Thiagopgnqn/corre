@@ -3,14 +3,7 @@ import crypto from 'crypto';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
-  institutions,
-  faculties,
-  careers,
-  studyPlans,
   subjects,
-  subjectPrerequisites,
-  planSpecialRules,
-  acronyms,
   scheduleTerms,
   courseGroups,
   commissions,
@@ -27,6 +20,11 @@ import {
   findDefaultPublishedPlan,
   findPublishedPlanById,
 } from './catalog.helpers.js';
+import { getCatalogStore } from './catalog.store.js';
+import {
+  formatPlanCatalogPayload,
+  sanitizeSummaryPlanConfig,
+} from './planConfig.helpers.js';
 
 const DAY_REVERSE: Record<number, 'LUN' | 'MAR' | 'MIE' | 'JUE' | 'VIE' | 'SAB'> = {
   1: 'LUN',
@@ -45,16 +43,13 @@ const TURNO_REVERSE: Record<string, 'mañana' | 'tarde' | 'noche'> = {
 
 export async function getCareers(req: Request, res: Response): Promise<void> {
   try {
-    const allInstitutions = await db.select().from(institutions);
-    const allFaculties = await db.select().from(faculties);
-    const publishedCareers = await db
-      .select()
-      .from(careers)
-      .where(eq(careers.status, 'published'));
-    const activePlans = await db
-      .select()
-      .from(studyPlans)
-      .where(and(eq(studyPlans.isActive, true), eq(studyPlans.status, 'published')));
+    const store = getCatalogStore();
+    const {
+      institutions: allInstitutions,
+      faculties: allFaculties,
+      careers: publishedCareers,
+      plans: activePlans,
+    } = await store.getPublishedTreeSources();
 
     const tree = allInstitutions
       .map((inst) => ({
@@ -79,7 +74,10 @@ export async function getCareers(req: Request, res: Response): Promise<void> {
                     id: p.id,
                     name: p.name,
                     year: p.year,
-                    config: p.config,
+                    config: sanitizeSummaryPlanConfig(p.config, {
+                      careerCode: car.code,
+                      planName: p.name,
+                    }),
                   })),
               }))
               .filter((car) => car.plans.length > 0),
@@ -102,110 +100,27 @@ export async function getPlan(req: Request, res: Response): Promise<void> {
   const planId = String(req.params.planId);
 
   try {
-    const resolved =
-      planId === 'current' || planId === 'default'
-        ? await findDefaultPublishedPlan()
-        : await findPublishedPlanById(planId);
+    const store = getCatalogStore();
+    const resolved = await store.resolvePublishedPlan(planId);
 
-    const plan = resolved?.plan;
-    if (!plan) {
+    if (!resolved) {
       res.status(404).json({ success: false, error: 'Plan de estudio no encontrado' });
       return;
     }
 
-    // Obtener materias
-    const planSubjects = await db
-      .select()
-      .from(subjects)
-      .where(eq(subjects.planId, plan.id));
-
-    // Mapa subjectId (UUID) -> codeInPlan
-    const uuidToCode = new Map<string, number>();
-    planSubjects.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
-
-    // Obtener solo correlativas del plan activo
-    const subIds = planSubjects.map((s) => s.id);
-    let allPrereqs: Array<{ subjectId: string; requiresSubjectId: string; type: string }> = [];
-    if (subIds.length > 0) {
-      allPrereqs = await db
-        .select({
-          subjectId: subjectPrerequisites.subjectId,
-          requiresSubjectId: subjectPrerequisites.requiresSubjectId,
-          type: subjectPrerequisites.type,
-        })
-        .from(subjectPrerequisites)
-        .where(inArray(subjectPrerequisites.subjectId, subIds));
-    }
-
-    // Agrupar correlativas por subject
-    const regularMap = new Map<number, number[]>();
-    const approvedMap = new Map<number, number[]>();
-
-    allPrereqs.forEach((p) => {
-      const subjectCode = uuidToCode.get(p.subjectId);
-      const reqCode = uuidToCode.get(p.requiresSubjectId);
-      if (subjectCode && reqCode) {
-        if (p.type === 'regular') {
-          const list = regularMap.get(subjectCode) || [];
-          list.push(reqCode);
-          regularMap.set(subjectCode, list);
-        } else {
-          const list = approvedMap.get(subjectCode) || [];
-          list.push(reqCode);
-          approvedMap.set(subjectCode, list);
-        }
-      }
+    const { plan, career } = resolved;
+    const artifacts = await store.getPlanArtifacts(plan.id);
+    const responseData = formatPlanCatalogPayload({
+      plan,
+      career,
+      subjects: artifacts.subjects,
+      prerequisites: artifacts.prerequisites,
+      rules: artifacts.rules,
+      acronyms: artifacts.acronyms,
     });
-
-    // Obtener reglas especiales y siglas
-    const rules = await db.select().from(planSpecialRules).where(eq(planSpecialRules.planId, plan.id));
-    const acronymList = await db.select().from(acronyms).where(eq(acronyms.planId, plan.id));
-
-    const acronymsMap: Record<string, number> = {};
-    acronymList.forEach((a) => {
-      const c = uuidToCode.get(a.subjectId);
-      if (c) acronymsMap[a.acronym] = c;
-    });
-
-    // Armar subjects formateados
-    const formattedSubjects = planSubjects.map((s) => ({
-      id: s.codeInPlan,
-      uuid: s.id,
-      code: s.shortName,
-      name: s.name,
-      level: s.level,
-      modality: s.modality,
-      contraCuatrimestral: s.contraCuatrimestral,
-      weeklyHours: Number(s.weeklyHours),
-      isElective: s.kind === 'electiva',
-      credits: s.credits ?? undefined,
-      isOptionalTrack: s.isOptionalTrack,
-      trackKey: s.trackKey ?? undefined,
-      regularPrereqs: regularMap.get(s.codeInPlan) || [],
-      approvedPrereqs: approvedMap.get(s.codeInPlan) || [],
-    }));
-
-    const responseData = {
-      plan: {
-        id: plan.id,
-        name: plan.name,
-        year: plan.year,
-        config: plan.config,
-        updatedAt: plan.updatedAt,
-      },
-      subjects: formattedSubjects,
-      rules: rules.map((r) => ({
-        id: r.id,
-        subjectCode: uuidToCode.get(r.subjectId),
-        ruleType: r.ruleType,
-        params: r.params,
-        description: r.description,
-      })),
-      acronyms: acronymsMap,
-    };
 
     // Soporte para ETag y caché HTTP dependiente de catalog_versions (Ajuste 10)
-    const catalogVer = await getCatalogVersion();
+    const catalogVer = await store.getCatalogVersion();
     const hash = crypto
       .createHash('sha256')
       .update(catalogVer + ':' + JSON.stringify(responseData))
@@ -586,7 +501,7 @@ export async function getSchedule(req: Request, res: Response): Promise<void> {
 }
 
 export async function getCatalogVersionHandler(_req: Request, res: Response): Promise<void> {
-  const version = await getCatalogVersion();
+  const version = await getCatalogStore().getCatalogVersion();
   res.json({ success: true, version });
 }
 

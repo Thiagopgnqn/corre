@@ -36,6 +36,13 @@ const catalog = {
     config: {
       requiredElectiveCredits: 20,
       defaultMinPassingGrade: 4,
+      electiveSlotsEquivalent: 7,
+      totalLevels: 5,
+      levelLabel: 'Año',
+      shortTag: 'ISI · Plan 2023',
+      ppsRequirement: {
+        referenceSubjectCode: 36,
+      },
       intermediateDegrees: [
         {
           key: 'analista',

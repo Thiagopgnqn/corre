@@ -79,8 +79,10 @@ export const studyPlans = pgTable(
         electiveSlotsEquivalent?: number;
         totalLevels?: number;
         levelLabel?: string;
-        ppsSubjectCode?: number;
         shortTag?: string;
+        ppsRequirement?: {
+          referenceSubjectCode: number;
+        } | null;
         intermediateDegrees?: Array<{
           key: string;
           name: string;
