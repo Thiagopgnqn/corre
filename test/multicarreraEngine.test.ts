@@ -15,7 +15,9 @@ import {
   STORAGE_KEY_STATE,
   STORAGE_KEY_BASKET,
   STORAGE_KEY_SETTINGS,
+  STORAGE_KEY_LEGACY_PLAN_ID,
   getPlanStorageKey,
+  hasUnmigratedLegacyLocalStorage,
   migrateLegacyLocalStorageToPlan,
   loadUserState,
   saveUserState,
@@ -277,8 +279,52 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     );
   });
 
-  it('performs idempotent copy-not-delete legacy localStorage migration and isolates plans', () => {
+  it('usuario con plan distinto de Sistemas y claves legadas no recibe migración automática ciega y delega al modal', () => {
+    const legacySystemsState = { 1: { status: 'aprobada', grade: 9 }, 6: { status: 'cursando' } };
     const mockStorage = createMockStorage({
+      [STORAGE_KEY_STATE]: JSON.stringify(legacySystemsState),
+      [STORAGE_KEY_BASKET]: JSON.stringify([2, 6]),
+      [STORAGE_KEY_SETTINGS]: JSON.stringify({ minPassingGrade: 6 }),
+    });
+
+    // Sin STORAGE_KEY_LEGACY_PLAN_ID no se sabe a qué plan pertenecen las claves legadas: NO migrar automáticamente
+    const blockedAuto = migrateLegacyLocalStorageToPlan('plan-quimica-2023', mockStorage);
+    assert.equal(blockedAuto.migrated, false);
+    assert.deepStrictEqual(blockedAuto.copiedKeys, []);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), true);
+    assert.equal(
+      mockStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, 'plan-quimica-2023')),
+      null
+    );
+
+    withMockLocalStorage(mockStorage, () => {
+      assert.deepStrictEqual(loadUserState('plan-quimica-2023'), {});
+    });
+
+    // Incluso si tiene marcado explícitamente que era de Sistemas, otro plan tampoco lo auto-importa
+    mockStorage.setItem(STORAGE_KEY_LEGACY_PLAN_ID, 'plan-isi-2023');
+    const mismatchedPlanAuto = migrateLegacyLocalStorageToPlan('plan-quimica-2023', mockStorage);
+    assert.equal(mismatchedPlanAuto.migrated, false);
+    assert.deepStrictEqual(mismatchedPlanAuto.copiedKeys, []);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), true);
+
+    withMockLocalStorage(mockStorage, () => {
+      assert.deepStrictEqual(loadUserState('plan-quimica-2023'), {});
+    });
+
+    // Cuando el usuario confirma explícitamente desde el modal (force: true) sí copia al plan destino
+    const forcedResult = migrateLegacyLocalStorageToPlan('plan-isi-2023', mockStorage, { force: true });
+    assert.equal(forcedResult.migrated, true);
+    assert.equal(hasUnmigratedLegacyLocalStorage(mockStorage), false);
+    assert.equal(
+      mockStorage.getItem(getPlanStorageKey(STORAGE_KEY_STATE, 'plan-isi-2023')),
+      JSON.stringify(legacySystemsState)
+    );
+  });
+
+  it('performs idempotent copy-not-delete legacy localStorage migration when plan matches and isolates plans', () => {
+    const mockStorage = createMockStorage({
+      [STORAGE_KEY_LEGACY_PLAN_ID]: 'plan-isi-2023',
       [STORAGE_KEY_STATE]: JSON.stringify({ 1: { status: 'aprobada', grade: 9 } }),
       [STORAGE_KEY_BASKET]: JSON.stringify([2, 6]),
       [STORAGE_KEY_SETTINGS]: JSON.stringify({ minPassingGrade: 6 }),

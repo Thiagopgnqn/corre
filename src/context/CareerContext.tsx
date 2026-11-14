@@ -53,6 +53,7 @@ import {
   exportCareerToJson,
   importCareerFromJson,
   getSampleStudentForPlan,
+  hasUnmigratedLegacyLocalStorage,
   migrateLegacyLocalStorageToPlan,
   shouldAutoStartTutorial,
   loadScheduleSelections,
@@ -566,9 +567,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setExamAttempts(d.examAttempts);
           }
 
-          // Si la cuenta en la nube es virgen pero el navegador tiene datos locales de este plan
+          // Si la cuenta en la nube es virgen para este plan pero hay datos locales (scoped o legados sin migrar)
           const localState = loadUserState(planId);
-          if (!d.hasSavedData && Object.keys(localState).length > 0) {
+          if (!d.hasSavedData && (Object.keys(localState).length > 0 || hasUnmigratedLegacyLocalStorage())) {
             setShowMigrationModal(true);
           }
 

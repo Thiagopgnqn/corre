@@ -21,6 +21,7 @@ export const STORAGE_KEY_SCHEDULE_TERM = 'mi_carrera_schedule_term_v1';
 export const STORAGE_KEY_ENROLLMENTS = 'mi_carrera_enrollments_v1';
 export const STORAGE_KEY_EXAM_ATTEMPTS = 'mi_carrera_exam_attempts_v1';
 export const STORAGE_KEY_LEGACY_MIGRATED_PREFIX = 'mi_carrera_legacy_migrated_v1';
+export const STORAGE_KEY_LEGACY_PLAN_ID = 'mi_carrera_legacy_plan_id_v1';
 
 const PLAN_SCOPED_LEGACY_KEYS = [
   STORAGE_KEY_STATE,
@@ -74,15 +75,62 @@ export function buildEmptyAssignedElectives(totalLevels: number = 5): AssignedEl
 
 export const INITIAL_ASSIGNED_ELECTIVES: AssignedElectivesByYear = buildEmptyAssignedElectives(5);
 
+function hasNonEmptyParsedValue(raw: string | null): boolean {
+  if (!raw) return false;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.length > 0;
+    if (parsed && typeof parsed === 'object') {
+      return Object.values(parsed as Record<string, unknown>).some((v) =>
+        Array.isArray(v) ? v.length > 0 : v !== null && v !== undefined
+      );
+    }
+    return Boolean(parsed);
+  } catch {
+    return raw.trim().length > 0;
+  }
+}
+
+/**
+ * Returns true if unscoped legacy localStorage keys contain saved data that has not been
+ * migrated into a plan-scoped namespace yet.
+ */
+export function hasUnmigratedLegacyLocalStorage(
+  storage: Pick<Storage, 'getItem'> | undefined = typeof localStorage !== 'undefined'
+    ? localStorage
+    : undefined
+): boolean {
+  if (!storage) return false;
+  if (storage.getItem(STORAGE_KEY_LEGACY_MIGRATED_PREFIX) !== null) {
+    return false;
+  }
+
+  return [
+    STORAGE_KEY_STATE,
+    STORAGE_KEY_ASSIGNED_ELECTIVES,
+    STORAGE_KEY_BASKET,
+    STORAGE_KEY_SCHEDULE_SELECTIONS,
+    STORAGE_KEY_SCHEDULE_DRAFTS,
+    STORAGE_KEY_CUSTOM_SCHEDULES,
+    STORAGE_KEY_ENROLLMENTS,
+    STORAGE_KEY_EXAM_ATTEMPTS,
+  ].some((key) => hasNonEmptyParsedValue(storage.getItem(key)));
+}
+
 /**
  * Idempotent copy-not-delete migration of legacy pre-multicarrera localStorage keys
  * into plan-scoped keys for the given `planId`. Never deletes the original legacy keys.
+ *
+ * Automatic migration (`!options?.force`) is ONLY safe when `STORAGE_KEY_LEGACY_PLAN_ID`
+ * explicitly proves the unscoped keys belong to `planId`. Otherwise it returns `migrated: false`
+ * without copying so unscoped data (e.g. Sistemas) is never blindly injected into another plan.
  */
 export function migrateLegacyLocalStorageToPlan(
   planId: string,
   storage: Pick<Storage, 'getItem' | 'setItem'> | undefined = typeof localStorage !== 'undefined'
     ? localStorage
-    : undefined
+    : undefined,
+  options?: { force?: boolean }
 ): { migrated: boolean; copiedKeys: string[] } {
   if (!storage || !planId || planId === 'current') {
     return { migrated: false, copiedKeys: [] };
@@ -94,6 +142,13 @@ export function migrateLegacyLocalStorageToPlan(
     storage.getItem(doneKey) === 'true'
   ) {
     return { migrated: false, copiedKeys: [] };
+  }
+
+  if (!options?.force) {
+    const recordedLegacyPlanId = storage.getItem(STORAGE_KEY_LEGACY_PLAN_ID);
+    if (!recordedLegacyPlanId || recordedLegacyPlanId !== planId) {
+      return { migrated: false, copiedKeys: [] };
+    }
   }
 
   const copiedKeys: string[] = [];

@@ -6,9 +6,11 @@ import {
   loadAssignedElectives,
   loadScheduleDrafts,
   loadScheduleSelections,
+  migrateLegacyLocalStorageToPlan,
   clearCareerData,
 } from '../../utils/storage';
 import { userStateApi } from '../../api/userState.api';
+import { useCareer } from '../../context/CareerContext';
 import { CloudUpload, CheckCircle2, AlertTriangle, Loader2, Trash2, ArrowRight } from 'lucide-react';
 
 interface LocalStorageMigrationModalProps {
@@ -20,17 +22,34 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
   onSuccess,
   onDismiss,
 }) => {
+  const { activePlan, activeCareer, currentPlanName } = useCareer();
   const [isImporting, setIsImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCleanupPrompt, setShowCleanupPrompt] = useState(false);
 
-  // Analizar datos presentes en localStorage
-  const localUserState = loadUserState();
-  const localSettings = loadSettings();
-  const localBasket = loadBasket();
-  const localAssignedElectives = loadAssignedElectives(localUserState);
-  const localDrafts = loadScheduleDrafts();
-  const localSelections = loadScheduleSelections();
+  const planId = activePlan?.plan.id;
+  const planElectives = activePlan?.subjects.filter((s) => Boolean(s.isElective));
+  const planTotalLevels = activePlan?.plan.config.totalLevels;
+
+  // Priorizar datos locales con alcance de este plan; si no hay, leer claves legadas sin prefijo
+  const scopedUserState = planId ? loadUserState(planId) : {};
+  const usingLegacyUnscoped = !planId || Object.keys(scopedUserState).length === 0;
+  const sourcePlanKey = usingLegacyUnscoped ? undefined : planId;
+
+  const localUserState = usingLegacyUnscoped ? loadUserState() : scopedUserState;
+  const localSettings = loadSettings(sourcePlanKey);
+  const localBasket = loadBasket(sourcePlanKey);
+  const localAssignedElectives = loadAssignedElectives(localUserState, {
+    electives: planElectives,
+    totalLevels: planTotalLevels,
+    planId: sourcePlanKey,
+  });
+  const localDrafts = loadScheduleDrafts(sourcePlanKey);
+  const localSelections = loadScheduleSelections(sourcePlanKey);
+
+  const targetPlanLabel = activeCareer?.name
+    ? `${activeCareer.name} — ${currentPlanName || activePlan?.plan.name || 'Plan activo'}`
+    : currentPlanName || activePlan?.plan.name || 'tu plan activo';
 
   const subjectsCount = Object.keys(localUserState).length;
   const approvedCount = Object.values(localUserState).filter(
@@ -58,6 +77,9 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
 
       const res = await userStateApi.importLegacyData(payload);
       if (res.success) {
+        if (planId && usingLegacyUnscoped) {
+          migrateLegacyLocalStorageToPlan(planId, undefined, { force: true });
+        }
         setShowCleanupPrompt(true);
       } else {
         setError('No se pudieron importar los datos.');
@@ -71,7 +93,12 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
 
   const handleFinish = (clearLocal: boolean) => {
     if (clearLocal) {
-      clearCareerData();
+      if (planId) {
+        clearCareerData(planId);
+      }
+      if (usingLegacyUnscoped) {
+        clearCareerData();
+      }
     }
     onSuccess();
   };
@@ -93,14 +120,23 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
                   Datos encontrados en este navegador
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Detectamos tu progreso anterior guardado localmente
+                  Detectamos progreso anterior guardado localmente
                 </p>
               </div>
             </div>
 
-            <p className="text-sm text-slate-300 mb-4 leading-relaxed">
-              Tu cuenta en la nube está vacía. ¿Querés importar automáticamente las materias, notas, electivas y horarios que tenías configurados en este dispositivo?
+            <p className="text-sm text-slate-300 mb-3 leading-relaxed">
+              Tu cuenta en la nube está vacía para el plan{' '}
+              <strong className="text-white">{targetPlanLabel}</strong>. ¿Querés importar
+              automáticamente las materias, notas, electivas y horarios encontrados en este dispositivo a ese plan?
             </p>
+
+            {usingLegacyUnscoped && (
+              <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-xl px-3 py-2 mb-4 leading-relaxed">
+                Estos datos locales fueron guardados antes del soporte multicarrera. Confirmá que corresponden a{' '}
+                <strong className="text-amber-200">{targetPlanLabel}</strong> antes de importarlos.
+              </p>
+            )}
 
             {/* Preview cards */}
             <div className="grid grid-cols-3 gap-2.5 mb-5 p-3.5 bg-slate-950/60 rounded-xl border border-slate-800 text-center">
@@ -165,7 +201,7 @@ export const LocalStorageMigrationModal: React.FC<LocalStorageMigrationModalProp
                   ¡Importación exitosa!
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Tus datos ya están sincronizados en tu cuenta
+                  Tus datos ya están sincronizados en {targetPlanLabel}
                 </p>
               </div>
             </div>

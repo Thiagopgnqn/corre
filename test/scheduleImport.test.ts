@@ -3,6 +3,9 @@ import path from 'path';
 import * as xlsxModule from 'xlsx';
 import {
   parseCourseSheet,
+  importAllSchedules,
+  DEFAULT_GENERATED_SCHEDULE_OUTPUT,
+  SEED_SCHEDULE_OUTPUT,
   formatTime,
   normalizeDay,
   areSlotsEqual,
@@ -301,5 +304,24 @@ Object.keys(SUBJECT_SHORT_NAMES).forEach((idStr) => {
 });
 assert(getSubjectShortName(22, 'Análisis Numérico') === 'Análisis Numérico', 'getSubjectShortName for 22 should return Análisis Numérico');
 console.log('✓ SUBJECT_SHORT_NAMES Plan 2023 alignment tests passed');
+
+// 15. Verify importAllSchedules runs cleanly after src/data/schedule.json removal and does NOT overwrite seed by default
+assert(
+  DEFAULT_GENERATED_SCHEDULE_OUTPUT !== SEED_SCHEDULE_OUTPUT &&
+    DEFAULT_GENERATED_SCHEDULE_OUTPUT.endsWith(path.join('artifacts', 'schedule.generated.json')),
+  'Default schedule importer output must point to artifacts/schedule.generated.json and never overwrite server/seed-data/schedule.json'
+);
+const seedMtimeBefore = fs.existsSync(SEED_SCHEDULE_OUTPUT) ? fs.statSync(SEED_SCHEDULE_OUTPUT).mtimeMs : null;
+const fullImportPreview = importAllSchedules({ writeOutput: false });
+assert(fullImportPreview.validation.valid, 'importAllSchedules({ writeOutput: false }) must pass validation');
+assert(fullImportPreview.finalSchedules.length > 0, 'importAllSchedules({ writeOutput: false }) must return schedules');
+assert(fullImportPreview.outputPath === DEFAULT_GENERATED_SCHEDULE_OUTPUT, 'Default resolved outputPath must be artifacts/schedule.generated.json');
+if (seedMtimeBefore !== null) {
+  assert(
+    fs.statSync(SEED_SCHEDULE_OUTPUT).mtimeMs === seedMtimeBefore,
+    'importAllSchedules must not modify server/seed-data/schedule.json unless writeSeed is explicitly true'
+  );
+}
+console.log('✓ importAllSchedules end-to-end execution and seed protection verified');
 
 console.log('\nALL SCHEDULE IMPORT TESTS PASSED SUCCESSFULLY!\n');
