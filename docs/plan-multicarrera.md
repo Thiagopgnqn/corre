@@ -1,8 +1,8 @@
 # Plan Maestro Multi-Carrera / Multi-Plan — Stack (Auditoría y Etapa 1A)
 
-> **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. Actualmente en **Etapa 1B – Parte 1B-1** en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales).  
+> **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. **Parte 1B-1** + paquete de correcciones previo a 1B-2 completados en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales, esperando OK para 1B-2).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos idempotentes de `finalDegreeTitle` + `ppsRequirement` con `label` y bump de `catalog_versions` via CTE para ISI 2023; aún pendiente de despliegue).
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos idempotentes de `finalDegreeTitle` + `ppsRequirement` con `label` y bump de `catalog_versions` via CTE para ISI 2023; pendiente de despliegue) -> `0010_isi_plan_short_names.sql` (solo datos idempotentes de `short_name` en las 28 materias alineadas de ISI 2023 y bump de `catalog_versions` via CTE; pendiente de despliegue).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -660,6 +660,31 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
 5. **Protección de `server/seed-data/schedule.json` en `scripts/importSchedule.ts` (Punto 5):**
    - `npm run import:schedule` (`scripts/importSchedule.ts`) sigue operativo tras la eliminación de `src/data/schedule.json`, pero por defecto escribe en `artifacts/schedule.generated.json` (y reporte en `artifacts/import-report.generated.md`, dentro de `artifacts/` ignorado por git). Solo sobrescribe `server/seed-data/schedule.json` cuando se pasa explícitamente `--write-seed` (o `writeSeed: true`). `test/scheduleImport.test.ts` valida ahora `importAllSchedules({ writeOutput: false })` de punta a punta y la protección del seed.
 
-6. **Línea base verificada tras Puntos 1–6 (sin empezar 1B-2):**
+6. **Línea base verificada tras Puntos 1–6 (antes del paquete de correcciones):**
    - **Backend (`npm --prefix server test`):** `370/0` (`reviews 85`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 24`) + `tsc` OK.
    - **Frontend (`npm test`):** `14/14` archivos en verde (`plan2023Oracle 23`, `multicarreraEngine 9`, `scheduleImport` end-to-end) + `tsc -b && vite build` (`2601` módulos) OK.
+
+### 9.6 Paquete de correcciones previo a PARTE 1B-2 (5 commits, sin cambios visuales ni de copy)
+
+1. **Campo `code` del payload (`formatSubjectDisplayCode`) + filtro `ProfessorsDirectory` + `CATALOG_CACHE_SCHEMA = 4` (commit `3c4fcab`):**
+   - `formatPlanCatalogPayload` (`server/src/modules/catalog/planConfig.helpers.ts`) ahora formatea `code` con la regla exacta de los fixtures (`test/fixtures/plan2023.ts` y `test/fixtures/electives.ts`): obligatorias (`kind !== 'electiva'`) -> `String(codeInPlan)`, electivas nuevas `[408, 512, 513, 514]` -> `'X-' + codeInPlan`, resto de electivas (`301`, `401..407`, `501..511`) -> `'E-' + codeInPlan`.
+   - `src/components/professors/ProfessorsDirectory.tsx` (desktop `L607` y mobile `L814`) envía `String(sub.id)` en vez de `String(sub.code)` para no romper el filtro `subjectId` de electivas en `GET /api/professors`.
+   - `src/api/catalog.api.ts` eleva `CATALOG_CACHE_SCHEMA = 4` para invalidar caches locales que guardaron `code = shortName`.
+   - `test/plan2023Oracle.test.ts` reconstruye las `60` materias UI desde el payload real formateado y compara campo por campo contra los fixtures; `server/test/reviews.test.ts` (sección `11.10`) cubre `subjectId` numérico, electiva (`301`), UUID y `'E-301'`.
+
+2. **Auditoría de `subjects.short_name` y migración `0010_isi_plan_short_names.sql` (commit `b710567`):**
+   - Verificado que en backend/API/UI ninguna pantalla de reseñas o inscripciones renderiza `shortName` / `subjectShortName`; el único consumidor visual futuro será `ScheduleWeeklyGrid.tsx`.
+   - Nueva migración idempotente solo de datos `server/drizzle/0010_isi_plan_short_names.sql` (actualiza las `28` materias alineadas donde `short_name = name` con los valores de `SUBJECT_SHORT_NAMES`, deja intactas las `14` electivas desfasadas y la `301`, e incrementa `catalog_versions` via CTE solo si `UPDATE` tocó filas), junto con actualización equivalente en `server/seed-data/plan2023-catalog.json` y prueba de doble corrida + conservación de ediciones manuales en `server/test/catalogConfigAndSecurity.test.ts`.
+
+3. **Proxy de desarrollo en `vite.config.ts` (commit `3aecbd3`):**
+   - Agregado `server.proxy['/api'] -> http://localhost:4000` (`changeOrigin: true`) únicamente para desarrollo local; confirmado `npm run build` sin alteraciones de producción.
+
+4. **Protección contra sobreescritura en hidratación (`src/utils/careerHydrationGuard.ts`, commit `5cb3f8e`):**
+   - Extraído coordinador puro e integrado en `CareerContext.tsx` (incluyendo guardia `canSyncServerState` también en `applySimulation` y `canPersistScopedStorage` en efectos locales).
+   - `test/multicarreraEngine.test.ts` prueba `(a)` cero auto-sync antes de hidratar `userStateApi.getState()`, `(b)` bloqueo sin sobreescritura vacía cuando falla el catálogo o `getState()`, y `(c)` reseteo sincrónico y descarte de respuestas tardías al cambiar Plan A -> Plan B o cerrar sesión.
+
+5. **Documentación (`docs/prueba-manual-multicarrera.md` y `docs/plan-multicarrera.md`):**
+   - `docs/prueba-manual-multicarrera.md` actualizado con chequeo obligatorio anti-producción del host de `DATABASE_URL`, migración `0010`, proxy ya configurado en `vite.config.ts`, `schema: 4`, prueba con cuenta local paralela, verificación desktop/mobile, badges `#1`/`#E-301`/`#X-408`, filtro de profesores y limpieza obligatoria (`server/.env` + rama Neon).
+   - **Línea base actual verificada tras el paquete de correcciones (sin empezar 1B-2):**
+     - **Backend (`npm --prefix server test`):** **`378` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 30`) + `npm --prefix server run build` OK (`tsc`).
+     - **Frontend (`npm test`):** **`14 / 14` archivos en verde** (`plan2023Oracle 24`, `multicarreraEngine 13`, `scheduleImport` end-to-end, etc.) + `npm run build` OK (`tsc -b && vite build`, `2602` módulos).

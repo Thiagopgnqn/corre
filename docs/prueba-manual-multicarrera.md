@@ -62,7 +62,14 @@ Con `NODE_ENV=development` y las variables opcionales **omitidas** (tal como fig
 
 ---
 
-## 3. Aplicar migraciones `0008` y `0009` en la rama temporal y levantar el backend
+## 3. Verificación anti-producción, migraciones (`0008`–`0010`) y arranque del backend
+
+> [!CAUTION]
+> **PASO OBLIGATORIO ANTES DE EJECUTAR MIGRACIONES O LEVANTAR EL BACKEND:**
+> 1. Compará manualmente el **host** de `DATABASE_URL` y `DIRECT_URL` en `server/.env` contra el host de tu base de **producción** en Neon (ej. verificá que el endpoint `ep-...` pertenece a la rama temporal y **NO** al endpoint de `main`).
+> 2. **Si el host coincide con producción o tenés cualquier duda, ABORTÁ de inmediato** y regenerá `server/.env` con la cadena de tu rama temporal.
+> 3. Confirmá además que `server/.env` no copia secretos ni variables de producción (`EMAIL_PROVIDER`, `BREVO_API_KEY`, `RESEND_API_KEY`, `R2_*`, `NODE_ENV=production`).
+
 En la raíz del repo (`correlativas/`):
 
 ```bash
@@ -74,51 +81,43 @@ npm --prefix server run dev
 Verificaciones rápidas antes de abrir el navegador (por ejemplo con `curl` o en otra pestaña del navegador):
 1. `GET http://localhost:4000/api/health` -> debe responder `200 OK`.
 2. `GET http://localhost:4000/api/catalog/plans/current` -> confirmá en el JSON:
-   - `data.plan.config.ppsRequirement` vale `{"referenceSubjectCode":36}`
+   - `data.plan.config.ppsRequirement` vale `{"referenceSubjectCode":36,"label":"Habilitación PPS"}` y `data.plan.config.finalDegreeTitle` vale `"Ingeniero/a"`
    - **No existe** el campo `ppsSubjectCode` en `data.plan.config`
-   - `data.subjects` contiene las `60` materias (`37` obligatorias + `23` electivas) con `shortName` y `kind`
+   - `data.subjects` contiene las `60` materias (`37` obligatorias + `23` electivas) con `code` en formato fixture (`"1".."36"`, `"99"`, `"E-301"`, `"X-408"`...) y `shortName` actualizado por la migración `0010` en las 28 materias alineadas
    - `data.rules` contiene las reglas `99` (`approved_range` 1..23) y `36` (`all_previous_core_approved` excluyendo track `analista`)
 3. `GET http://localhost:4000/api/catalog/version` -> debe devolver `{"success":true,"version":"..."}`.
 
 ---
 
 ## 4. Levantar el frontend local contra `http://localhost:4000`
-En producción, `vercel.json` redirige `/api/:path*` al backend. En desarrollo local con Vite (`http://localhost:5173`), `src/api/client.ts` hace fetch relativo a `/api/...`, por lo que `vite.config.ts` necesita el proxy hacia `http://localhost:4000`.
+En producción, `vercel.json` redirige `/api/:path*` al backend. En desarrollo local (`http://localhost:5173`), `src/api/client.ts` hace fetch relativo a `/api/...`, y el proxy de desarrollo (`/api` -> `http://localhost:4000`) **ya está configurado de forma permanente en `vite.config.ts`** (solo aplica a `vite` / `npm run dev`, sin alterar `npm run build`).
 
-- En **PARTE 1B-2** ese proxy queda configurado de forma permanente en `vite.config.ts`.
-- Si corrés esta prueba antes de aplicar 1B-2, podés agregar temporalmente en `vite.config.ts` (y revertirlo con `git checkout -- vite.config.ts` al terminar):
-
-```ts
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  server: {
-    proxy: {
-      '/api': {
-        target: 'http://localhost:4000',
-        changeOrigin: true,
-      },
-    },
-  },
-})
-```
-
-Luego en otra terminal (raíz del repo):
+En otra terminal (raíz del repo):
 
 ```bash
 npm run dev
 ```
 
-Abrí **`http://localhost:5173`** en el navegador, registrate o iniciá sesión con un usuario de prueba verificado (paso 2) y ejecutá el checklist de comparación.
+Abrí **`http://localhost:5173`** en el navegador, registrate o iniciá sesión con tu **cuenta de prueba local verificada** (paso 2) y ejecutá el checklist de comparación.
 
 ---
 
 ## 5. Checklist de comparación en navegador (Sistemas Plan 2023 vs Producción)
+
+### Preparación para comparar progreso de forma segura
+- En el entorno local (`http://localhost:5173`), creá y verificá una **cuenta de prueba local** nueva (nunca alteres ni dependas de modificar tu progreso real de producción en una rama descartable, salvo lectura comparativa).
+- Repetí en la cuenta local las mismas acciones/escenarios clave en paralelo con tu cuenta real de producción:
+  - Cargá ~`10` materias en estados variados (`aprobada` con nota, `promocionada`, `regularizada`, `cursando`, `libre`).
+  - Asigná electivas en distintos años y verificá créditos totales y bloqueo de duplicados.
+  - Alterná **Analista (99)** `ON` / `OFF` y confirmá que el avance, denominadores, habilitación PPS y camino crítico coinciden exactamente con producción.
+- Ejecutá el checklist tanto en **escritorio (desktop)** como en **mobile** (modo dispositivo de DevTools / viewport angosto).
 
 Compará lado a lado (o pestaña a pestaña) con la versión actual en producción:
 
 1. **Mapa de Correlativas (`CorrelativeGraph`) y Vista Lista (`SubjectListView`):**
    - Deben verse **5 columnas** (`1° Año` a `5° Año`) y exactamente **36 materias obligatorias** con Analista desactivado.
    - Activá el interruptor **Analista (99)**: debe aparecer **Seminario Integrador (99)** en **3° Año** (total **37** obligatorias) y actualizarse inmediatamente el avance y camino crítico.
+   - Comprobá en badges, nodos, drawer, buscador y listas que los códigos muestran **`#1`, `#2`, ..., `#36`, `#99`, `#E-301`, `#X-408`** (y **NO** `#Análisis Matemático 1` ni el nombre completo de la materia).
 2. **Cajón de Detalle (`SubjectDrawer`):**
    - Abrí **`99` (Seminario Integrador)**: debe mostrar la tarjeta especial verificando materias **1 a 23 aprobadas**.
    - Abrí **`36` (Proyecto Final)**: debe validar todas las obligatorias previas aprobadas; con Analista **OFF** no debe exigir la `99`, y con Analista **ON** sí debe exigirla.
@@ -132,17 +131,16 @@ Compará lado a lado (o pestaña a pestaña) con la versión actual en producci�
    - Con Analista ON: debe verse el seguimiento de **Analista Universitario** (`23` materias + `99` aprobada + `4` cr. de electivas).
    - Confirmá el cálculo del **Camino Crítico**.
 6. **Armador de Horarios, Profesores y Biblioteca:**
-   - **Armador (`ScheduleBuilder` / `ScheduleWeeklyGrid`):** grilla semanal con nombres cortos, detección de conflictos y sugeridor de combinaciones sin choques.
-   - **Profesores (`ProfessorsDirectory`):** listado de docentes y reseñas funcionando normalmente.
+   - **Armador (`ScheduleBuilder` / `ScheduleWeeklyGrid`):** las etiquetas de la grilla semanal muestran nombres cortos claros (migración `0010` y configuración actual), detección de conflictos y sugeridor de combinaciones sin choques.
+   - **Profesores (`ProfessorsDirectory`):** al filtrar por materia (troncal y electiva como `301`/`E-301`, tanto en desktop como en mobile), devuelve docentes/reseñas correspondientes sin fallar por formato de código.
    - **Biblioteca (`LibraryHome` / `SubjectLibraryView`):** listado de materias/archivos y flujo de subida usando el simulador en memoria (`MemoryMockR2Service`, sin errores de R2).
 7. **DevTools -> `Application` -> `Local Storage` (`http://localhost:5173`):**
-   - Verificá que exista la clave `mi_carrera_catalog_cache_v1:<planId>` conteniendo `"schema": 2` y `"version"`.
+   - Verificá que exista la clave `mi_carrera_catalog_cache_v1:<planId>` conteniendo `"schema": 4` y `"version"`.
    - Verificá que las claves de progreso locales se guarden bajo `mi_carrera_*::plan:<planId>`.
-   - Si cargaste claves legadas previas (`mi_carrera_user_state_v1`, etc.) antes de iniciar, comprobá que `migrateLegacyLocalStorageToPlan` las copió a `::plan:<planId>` **sin borrar las claves originales**.
+   - Si cargaste claves legadas previas (`mi_carrera_user_state_v1`, etc.) antes de iniciar, comprobá que `migrateLegacyLocalStorageToPlan` las copió a `::plan:<planId>` **sin borrar las claves originales** (o que el modal pide confirmación cuando falta `STORAGE_KEY_LEGACY_PLAN_ID`).
 
 ---
 
-## 6. Limpieza al terminar
-1. Borrá o revertí cualquier cambio temporal en `vite.config.ts` (`git checkout -- vite.config.ts`).
-2. Eliminá la rama temporal creada en la consola de Neon.
-3. Si querés, borrá `server/.env` local (o verificá con `git status` que no haya secretos sin ignorar).
+## 6. Limpieza obligatoria al terminar
+1. **Eliminá `server/.env` local** al finalizar la prueba y confirmá con `git status` que no quedan archivos de entorno ni secretos locales sin ignorar.
+2. **Eliminá la rama temporal en la consola de Neon** (`test-multicarrera-...`).
