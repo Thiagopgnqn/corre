@@ -22,6 +22,7 @@ scratch/
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
+.VSCodeCounter/
 .idea
 .DS_Store
 *.suo

@@ -62,7 +62,7 @@ Con `NODE_ENV=development` y las variables opcionales **omitidas** (tal como fig
 
 ---
 
-## 3. Verificación anti-producción, migraciones (`0008`–`0010`) y arranque del backend
+## 3. Verificación anti-producción, migraciones (`0008`–`0011`) y arranque del backend
 
 > [!CAUTION]
 > **PASO OBLIGATORIO ANTES DE EJECUTAR MIGRACIONES O LEVANTAR EL BACKEND:**
@@ -83,7 +83,7 @@ Verificaciones rápidas antes de abrir el navegador (por ejemplo con `curl` o en
 2. `GET http://localhost:4000/api/catalog/plans/current` -> confirmá en el JSON:
    - `data.plan.config.ppsRequirement` vale `{"referenceSubjectCode":36,"label":"Habilitación PPS"}` y `data.plan.config.finalDegreeTitle` vale `"Ingeniero/a"`
    - **No existe** el campo `ppsSubjectCode` en `data.plan.config`
-   - `data.subjects` contiene las `60` materias (`37` obligatorias + `23` electivas) con `code` en formato fixture (`"1".."36"`, `"99"`, `"E-301"`, `"X-408"`...) y `shortName` actualizado por la migración `0010` en las 28 materias alineadas
+   - `data.subjects` contiene las `60` materias (`37` obligatorias + `23` electivas) con `code` en formato fixture (`"1".."36"`, `"99"`, `"E-301"`, `"X-408"`...), `shortName` actualizado por la migración `0010` en las 28 materias alineadas, e `"isIntegrator": true` en las 5 integradoras (`16`, `23`, `30`, `36`, `99`)
    - `data.rules` contiene las reglas `99` (`approved_range` 1..23) y `36` (`all_previous_core_approved` excluyendo track `analista`)
 3. `GET http://localhost:4000/api/catalog/version` -> debe devolver `{"success":true,"version":"..."}`.
 
@@ -117,6 +117,7 @@ Compará lado a lado (o pestaña a pestaña) con la versión actual en producci�
 1. **Mapa de Correlativas (`CorrelativeGraph`) y Vista Lista (`SubjectListView`):**
    - Deben verse **5 columnas** (`1° Año` a `5° Año`) y exactamente **36 materias obligatorias** con Analista desactivado.
    - Activá el interruptor **Analista (99)**: debe aparecer **Seminario Integrador (99)** en **3° Año** (total **37** obligatorias) y actualizarse inmediatamente el avance y camino crítico.
+   - Verificá que **el ícono `INT` violeta de las 5 materias integradoras (`16`, `23`, `99`, `30`, `36`) se ve igual que en producción**.
    - Comprobá en badges, nodos, drawer, buscador y listas que los códigos muestran **`#1`, `#2`, ..., `#36`, `#99`, `#E-301`, `#X-408`** (y **NO** `#Análisis Matemático 1` ni el nombre completo de la materia).
 2. **Cajón de Detalle (`SubjectDrawer`):**
    - Abrí **`99` (Seminario Integrador)**: debe mostrar la tarjeta especial verificando materias **1 a 23 aprobadas**.
@@ -135,7 +136,8 @@ Compará lado a lado (o pestaña a pestaña) con la versión actual en producci�
    - **Profesores (`ProfessorsDirectory`):** al filtrar por materia (troncal y electiva como `301`/`E-301`, tanto en desktop como en mobile), devuelve docentes/reseñas correspondientes sin fallar por formato de código.
    - **Biblioteca (`LibraryHome` / `SubjectLibraryView`):** listado de materias/archivos y flujo de subida usando el simulador en memoria (`MemoryMockR2Service`, sin errores de R2).
 7. **DevTools -> `Application` -> `Local Storage` (`http://localhost:5173`):**
-   - Verificá que exista la clave `mi_carrera_catalog_cache_v1:<planId>` conteniendo `"schema": 4` y `"version"`.
+   - **Nota sobre aislamiento por origen:** el `localStorage` de `http://localhost:5173` y el de producción son completamente distintos e independientes entre sí (aislados por origen en el navegador); probar en local no lee ni modifica el `localStorage` de producción.
+   - Verificá que exista la clave `mi_carrera_catalog_cache_v1:<planId>` conteniendo `"schema": 5` y `"version"`.
    - Verificá que las claves de progreso locales se guarden bajo `mi_carrera_*::plan:<planId>`.
    - Si cargaste claves legadas previas (`mi_carrera_user_state_v1`, etc.) antes de iniciar, comprobá que `migrateLegacyLocalStorageToPlan` las copió a `::plan:<planId>` **sin borrar las claves originales** (o que el modal pide confirmación cuando falta `STORAGE_KEY_LEGACY_PLAN_ID`).
 

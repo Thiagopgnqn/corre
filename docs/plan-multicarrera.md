@@ -2,7 +2,7 @@
 
 > **Estado:** Etapa 1A completada y migración `0008` validada por el usuario en rama de Neon con datos reales. **Parte 1B-1** + paquete de correcciones previo a 1B-2 completados en rama local `multicarrera` (sin push, sin tocar Neon ni R2 reales, esperando OK para 1B-2).  
 > **Rama verificada:** `multicarrera` (creada desde `master` en commit `bbbf257`; Biblioteca ya integrada en esa base mediante `0dbc5c1` y soporte de libres/intentos en `c126d81`).  
-> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos idempotentes de `finalDegreeTitle` + `ppsRequirement` con `label` y bump de `catalog_versions` via CTE para ISI 2023; pendiente de despliegue) -> `0010_isi_plan_short_names.sql` (solo datos idempotentes de `short_name` en las 28 materias alineadas de ISI 2023 y bump de `catalog_versions` via CTE; pendiente de despliegue).
+> **Migraciones SQL:** base `0007_enrollment_status_and_exam_attempts.sql` -> `0008_multicarrera_and_shared_subjects.sql` (validada en Neon) -> `0009_isi_plan_pps_config.sql` (solo datos idempotentes de `finalDegreeTitle` + `ppsRequirement` con `label` y bump de `catalog_versions` via CTE para ISI 2023; pendiente de despliegue) -> `0010_isi_plan_short_names.sql` (solo datos idempotentes de `short_name` en las 28 materias alineadas de ISI 2023 y bump de `catalog_versions` via CTE; pendiente de despliegue) -> `0011_isi_plan_integrator_subjects.sql` (columna `is_integrator` + backfill idempotente en las 5 integradoras de ISI 2023 y bump de `catalog_versions` via CTE; pendiente de despliegue).
 
 Este documento funciona como memoria compartida de arquitectura, auditoría técnica, decisiones de diseño y plan por etapas (1 a 5) para transformar **Stack** de una aplicación acoplada a **Ing. en Sistemas de Información – Plan 2023 (UTN FRC)** en una plataforma multi-carrera y multi-plan administrable desde `/#admin`, sin pérdida de datos para usuarios actuales ni mutaciones sobre datos reales en entorno de prueba.
 
@@ -688,3 +688,16 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
    - **Línea base actual verificada tras el paquete de correcciones (sin empezar 1B-2):**
      - **Backend (`npm --prefix server test`):** **`378` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 30`) + `npm --prefix server run build` OK (`tsc`).
      - **Frontend (`npm test`):** **`14 / 14` archivos en verde** (`plan2023Oracle 24`, `multicarreraEngine 13`, `scheduleImport` end-to-end, etc.) + `npm run build` OK (`tsc -b && vite build`, `2602` módulos).
+
+### 9.7 Auditoría completa de claves de `Subject`, migración `0011` (`is_integrator`) y freno previo a PARTE 1B-2
+
+1. **Test por `Object.keys` sobre las 60 materias (`test/plan2023Oracle.test.ts`):**
+   - Detectó dos claves presentes en `test/fixtures/plan2023.ts` que faltaban en el payload: `isIntegrator` (materias `16, 23, 99, 30, 36`) y `specialRule` (materias `99, 36`).
+2. **Corrección de `isIntegrator` (`63fe84b`):**
+   - Columna `is_integrator boolean NOT NULL DEFAULT false` agregada en `server/src/db/schema.ts`, migración aditiva e idempotente `server/drizzle/0011_isi_plan_integrator_subjects.sql` (sentencia separada `ADD COLUMN IF NOT EXISTS` + CTE para marcar `[16, 23, 30, 36, 99]` de ISI 2023 con `WHERE is_integrator = false` + bump condicional de `catalog_versions`), actualización de `plan2023-catalog.json`, `generateSeedData.ts`, `seed.ts`, `catalog.store.ts`, `formatPlanCatalogPayload` (campo aditivo opcional `isIntegrator: true`) y `CATALOG_CACHE_SCHEMA = 5` validando `isIntegrator` booleano opcional en `src/api/catalog.api.ts`.
+3. **Freno en la condición para seguir (hallazgo `specialRule`):**
+   - `SubjectDrawer.tsx` (`L508, L518`) y `QuickStatusModal.tsx` (`L361, L383, L385`) hoy leen `subject.specialRule` para mostrar las tarjetas/avisos de regla especial en `99` y `36`.
+   - En el catálogo actual del backend (`formatPlanCatalogPayload`), `subject.specialRule` no existe (las reglas vienen en `plan.rules[]` y con redacción distinta a la de los fixtures), por lo que en el entorno local esa sección no se renderiza. Se frena antes de iniciar 1B-2 para definir si se deriva en frontend desde `plan.rules[]` / config o si se proyecta/alinea en payload.
+4. **Línea base verificada tras `0011` (`63fe84b`):**
+   - **Backend (`npm --prefix server test`):** **`383` pasaron, `0` fallaron** (`reviews 87`, `authVerification 52`, `admin 37`, `library 147`, `multicarreraIsolation 25`, `catalogConfigAndSecurity 35`) + `tsc` OK.
+   - **Frontend (`npm test`):** **`14 / 14` archivos en verde** (`plan2023Oracle 24`, `multicarreraEngine 13`) + `tsc -b && vite build` OK.
