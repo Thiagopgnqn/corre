@@ -38,6 +38,7 @@ import {
 import { logAdminAction } from './admin.audit.js';
 import {
   PLAN_IMPORT_MAX_BYTES,
+  classifySharedSubjectMatch,
   normalizeSharedSubjectName,
 } from './planImport.rules.js';
 import {
@@ -194,6 +195,51 @@ export interface SharedSubjectCandidateDTO {
   displayName: string;
   normalizedName: string;
   linkedPlanLabels: string[];
+  matchType?: 'exact' | 'similar';
+  confidence?: 'high' | 'low';
+}
+
+function buildSharedSubjectSuggestionMap(
+  incomingNorms: string[],
+  facultyShared: Array<{
+    id: string;
+    stableCode: string;
+    displayName: string;
+    normalizedName: string;
+  }>,
+  plansByShared: Map<string, string[]>
+): Map<string, SharedSubjectCandidateDTO[]> {
+  const result = new Map<string, SharedSubjectCandidateDTO[]>();
+  const uniqueNorms = Array.from(new Set(incomingNorms.filter(Boolean)));
+  for (const incomingNorm of uniqueNorms) {
+    const matched: SharedSubjectCandidateDTO[] = [];
+    for (const sh of facultyShared) {
+      const classification = classifySharedSubjectMatch(
+        incomingNorm,
+        sh.displayName || sh.normalizedName
+      );
+      if (!classification) continue;
+      matched.push({
+        sharedSubjectId: sh.id,
+        stableCode: sh.stableCode,
+        displayName: sh.displayName,
+        normalizedName: sh.normalizedName,
+        linkedPlanLabels: plansByShared.get(sh.id) || [],
+        matchType: classification.matchType,
+        confidence: classification.confidence,
+      });
+    }
+    if (matched.length > 0) {
+      matched.sort((a, b) => {
+        if (a.matchType !== b.matchType) {
+          return a.matchType === 'exact' ? -1 : 1;
+        }
+        return a.displayName.localeCompare(b.displayName, 'es');
+      });
+      result.set(incomingNorm, matched);
+    }
+  }
+  return result;
 }
 
 export interface AdminPlanAuditSummaryEntry {
@@ -839,21 +885,20 @@ export class DrizzlePlanImportStore implements PlanImportStore {
     facultyId: string,
     normalizedNames: string[]
   ): Promise<Map<string, SharedSubjectCandidateDTO[]>> {
-    const result = new Map<string, SharedSubjectCandidateDTO[]>();
     const uniqueNorms = Array.from(new Set(normalizedNames.filter(Boolean)));
-    if (uniqueNorms.length === 0) return result;
+    if (uniqueNorms.length === 0) return new Map();
 
-    const matchedShared = await db
+    const facultyShared = await db
       .select()
       .from(sharedSubjects)
-      .where(
-        and(
-          eq(sharedSubjects.facultyId, facultyId),
-          inArray(sharedSubjects.normalizedName, uniqueNorms)
-        )
-      );
+      .where(eq(sharedSubjects.facultyId, facultyId));
 
-    if (matchedShared.length === 0) return result;
+    const matchedShared = facultyShared.filter((sh) =>
+      uniqueNorms.some(
+        (norm) => classifySharedSubjectMatch(norm, sh.displayName || sh.normalizedName) !== null
+      )
+    );
+    if (matchedShared.length === 0) return new Map();
 
     const sharedIds = matchedShared.map((s) => s.id);
     const linkedRows = await db
@@ -876,19 +921,7 @@ export class DrizzlePlanImportStore implements PlanImportStore {
       plansByShared.set(r.sharedSubjectId, list);
     }
 
-    for (const sh of matchedShared) {
-      const list = result.get(sh.normalizedName) || [];
-      list.push({
-        sharedSubjectId: sh.id,
-        stableCode: sh.stableCode,
-        displayName: sh.displayName,
-        normalizedName: sh.normalizedName,
-        linkedPlanLabels: plansByShared.get(sh.id) || [],
-      });
-      result.set(sh.normalizedName, list);
-    }
-
-    return result;
+    return buildSharedSubjectSuggestionMap(uniqueNorms, matchedShared, plansByShared);
   }
 
   async findSharedSubjectById(sharedSubjectId: string): Promise<SharedSubjectRecord | null> {
@@ -1136,27 +1169,29 @@ export class InMemoryPlanImportStore implements PlanImportStore {
     facultyId: string,
     normalizedNames: string[]
   ): Promise<Map<string, SharedSubjectCandidateDTO[]>> {
-    const normSet = new Set(normalizedNames);
-    const map = new Map<string, SharedSubjectCandidateDTO[]>();
-    for (const sh of this.sharedSubjects) {
-      if (sh.facultyId !== facultyId || !normSet.has(sh.normalizedName)) continue;
+    const uniqueNorms = Array.from(new Set(normalizedNames.filter(Boolean)));
+    if (uniqueNorms.length === 0) return new Map();
+
+    const facultyShared = this.sharedSubjects.filter((sh) => sh.facultyId === facultyId);
+    const matchedShared = facultyShared.filter((sh) =>
+      uniqueNorms.some(
+        (norm) => classifySharedSubjectMatch(norm, sh.displayName || sh.normalizedName) !== null
+      )
+    );
+    if (matchedShared.length === 0) return new Map();
+
+    const plansByShared = new Map<string, string[]>();
+    for (const sh of matchedShared) {
       const linkedSubjects = this.subjects.filter((s) => s.sharedSubjectId === sh.id);
       const linkedPlanLabels = linkedSubjects.map((s) => {
         const plan = this.plans.find((p) => p.id === s.planId);
         const career = plan ? this.careers.find((c) => c.id === plan.careerId) : undefined;
         return `${career?.code || 'CAR'} · ${plan?.name || 'Plan'}`;
       });
-      const list = map.get(sh.normalizedName) || [];
-      list.push({
-        sharedSubjectId: sh.id,
-        stableCode: sh.stableCode,
-        displayName: sh.displayName,
-        normalizedName: sh.normalizedName,
-        linkedPlanLabels: Array.from(new Set(linkedPlanLabels)),
-      });
-      map.set(sh.normalizedName, list);
+      plansByShared.set(sh.id, Array.from(new Set(linkedPlanLabels)));
     }
-    return map;
+
+    return buildSharedSubjectSuggestionMap(uniqueNorms, matchedShared, plansByShared);
   }
 
   async findSharedSubjectById(sharedSubjectId: string): Promise<SharedSubjectRecord | null> {

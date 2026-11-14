@@ -108,17 +108,163 @@ export function isSupportedSpecialRuleType(value: string): value is SupportedSpe
   return (SUPPORTED_SPECIAL_RULE_TYPES as readonly string[]).includes(value);
 }
 
+const ROMAN_NUMERAL_TO_ARABIC: Record<string, string> = {
+  i: '1',
+  ii: '2',
+  iii: '3',
+  iv: '4',
+  v: '5',
+  vi: '6',
+  vii: '7',
+  viii: '8',
+  ix: '9',
+  x: '10',
+  xi: '11',
+  xii: '12',
+  xiii: '13',
+  xiv: '14',
+  xv: '15',
+  xvi: '16',
+  xvii: '17',
+  xviii: '18',
+  xix: '19',
+  xx: '20',
+};
+
+const SHARED_SUBJECT_STOPWORDS = new Set([
+  'a',
+  'al',
+  'con',
+  'de',
+  'del',
+  'e',
+  'el',
+  'en',
+  'la',
+  'las',
+  'los',
+  'para',
+  'por',
+  'y',
+]);
+
+const CONSONANTS_BEFORE_ES_PLURAL = new Set(['d', 'l', 'n', 'r', 'z']);
+
+export interface SharedSubjectMatchResult {
+  matchType: 'exact' | 'similar';
+  confidence: 'high' | 'low';
+}
+
 /**
  * Normalizes a subject name for shared-subject suggestion matching within a faculty.
- * Matches `seed.ts` normalization (NFD accent removal + lowercase + alphanumeric tokens).
+ * Removes NFD accents, lowercases, normalizes punctuation to spaces, and canonicalizes
+ * standalone Roman numeral level tokens (`I`..`XX`) to Arabic numerals (`1`..`20`).
  */
 export function normalizeSharedSubjectName(name: string): string {
-  return name
+  const base = name
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+  if (!base) return '';
+  return base
+    .split(/\s+/)
+    .map((token) => ROMAN_NUMERAL_TO_ARABIC[token] ?? token)
+    .join(' ');
+}
+
+function stemSpanishSubjectToken(token: string): string {
+  if (/^\d+$/.test(token) || token.length <= 3) return token;
+  if (token.endsWith('ces') && token.length > 4) {
+    return `${token.slice(0, -3)}z`;
+  }
+  if (
+    token.endsWith('es') &&
+    token.length > 4 &&
+    CONSONANTS_BEFORE_ES_PLURAL.has(token[token.length - 3] ?? '')
+  ) {
+    return token.slice(0, -2);
+  }
+  if (token.endsWith('s') && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function boundedLevenshtein(a: string, b: string, maxDist = 2): number {
+  if (Math.abs(a.length - b.length) > maxDist) return maxDist + 1;
+  const prev = Array.from({ length: b.length + 1 }, (_, idx) => idx);
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i];
+    let rowMin = curr[0];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      const dist = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+      curr.push(dist);
+      if (dist < rowMin) rowMin = dist;
+    }
+    if (rowMin > maxDist) return maxDist + 1;
+    for (let j = 0; j < curr.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+}
+
+/**
+ * Classifies how closely an incoming subject matches an existing shared subject in the
+ * same faculty. Different level/number tokens (e.g. "Física 1" vs "Física 2") never match.
+ */
+export function classifySharedSubjectMatch(
+  incomingNameOrNorm: string,
+  candidateNameOrNorm: string
+): SharedSubjectMatchResult | null {
+  const aNorm = normalizeSharedSubjectName(incomingNameOrNorm);
+  const bNorm = normalizeSharedSubjectName(candidateNameOrNorm);
+  if (!aNorm || !bNorm) return null;
+  if (aNorm === bNorm) {
+    return { matchType: 'exact', confidence: 'high' };
+  }
+
+  const aTokens = aNorm.split(' ');
+  const bTokens = bNorm.split(' ');
+  const aNums = aTokens.filter((t) => /^\d+$/.test(t));
+  const bNums = bTokens.filter((t) => /^\d+$/.test(t));
+  if (aNums.join(',') !== bNums.join(',')) {
+    return null;
+  }
+
+  const aContent = aTokens
+    .filter((t) => !/^\d+$/.test(t) && !SHARED_SUBJECT_STOPWORDS.has(t))
+    .map(stemSpanishSubjectToken);
+  const bContent = bTokens
+    .filter((t) => !/^\d+$/.test(t) && !SHARED_SUBJECT_STOPWORDS.has(t))
+    .map(stemSpanishSubjectToken);
+
+  if (aContent.length === 0 || bContent.length === 0) {
+    return null;
+  }
+
+  if (aContent.join(' ') === bContent.join(' ')) {
+    return { matchType: 'similar', confidence: 'low' };
+  }
+
+  const minLen = Math.min(aNorm.length, bNorm.length);
+  if (minLen >= 7 && boundedLevenshtein(aNorm, bNorm, 2) <= 2) {
+    return { matchType: 'similar', confidence: 'low' };
+  }
+
+  const aSet = new Set(aContent);
+  const bSet = new Set(bContent);
+  let sharedCount = 0;
+  for (const tok of aSet) {
+    if (bSet.has(tok)) sharedCount += 1;
+  }
+  const unionSize = new Set([...aSet, ...bSet]).size;
+  if (sharedCount >= 1 && unionSize > 0 && sharedCount / unionSize >= 0.6) {
+    return { matchType: 'similar', confidence: 'low' };
+  }
+
+  return null;
 }
 
 export function deriveShortSubjectName(name: string, maxLen = 22): string {

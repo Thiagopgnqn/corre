@@ -14,7 +14,9 @@ import {
   PLAN_TEMPLATE_HEADERS,
   PLAN_TEMPLATE_SHEETS,
   SUPPORTED_SPECIAL_RULE_TYPES,
+  classifySharedSubjectMatch,
   isSupportedSpecialRuleType,
+  normalizeSharedSubjectName,
 } from '../src/modules/admin/planImport.rules.js';
 import { buildPlanImportTemplateBuffer } from '../src/modules/admin/planImport.template.js';
 import {
@@ -1295,6 +1297,110 @@ async function runTests(): Promise<void> {
         concurrentHttpRes.data?.code === 'PLAN_IMPORT_IN_PROGRESS' &&
         !isPlanImportLocked(),
       'Concurrencia HTTP simultánea en /api/admin/plans/preview responde 409 PLAN_IMPORT_IN_PROGRESS y libera lock'
+    );
+
+    // g) Normalización romano-arábiga y sugerencias "similar" de baja confianza sin auto-vincular
+    assert(
+      normalizeSharedSubjectName('Análisis Matemático I') === 'analisis matematico 1' &&
+        normalizeSharedSubjectName('Análisis Matemático 1') === 'analisis matematico 1' &&
+        classifySharedSubjectMatch('Análisis Matemático 1', 'Análisis Matemático I')?.matchType ===
+          'exact' &&
+        classifySharedSubjectMatch('Análisis Matemático 1', 'Análisis Matemático I')
+          ?.confidence === 'high' &&
+        classifySharedSubjectMatch('Probabilidad y Estadísticas', 'Probabilidad y Estadística')
+          ?.matchType === 'similar' &&
+        classifySharedSubjectMatch('Probabilidad y Estadísticas', 'Probabilidad y Estadística')
+          ?.confidence === 'low' &&
+        classifySharedSubjectMatch('Física 2', 'Física 1') === null &&
+        classifySharedSubjectMatch('Física II', 'Física I') === null,
+      'classifySharedSubjectMatch distingue romano-arábigo (exact/high), plurales (similar/low) y no mezcla niveles (Física 1 vs 2)'
+    );
+
+    store.sharedSubjects.push(
+      {
+        id: '77777777-7777-4777-8777-777777777701',
+        facultyId: facId,
+        stableCode: 'FRC-AM1-01',
+        displayName: 'Análisis Matemático I',
+        normalizedName: 'analisis matematico i', // formato legado sin convertir romano -> debe matchear igual
+      },
+      {
+        id: '77777777-7777-4777-8777-777777777702',
+        facultyId: facId,
+        stableCode: 'FRC-PYE-01',
+        displayName: 'Probabilidad y Estadística',
+        normalizedName: 'probabilidad y estadistica',
+      },
+      {
+        id: '77777777-7777-4777-8777-777777777703',
+        facultyId: facId,
+        stableCode: 'FRC-FIS1-01',
+        displayName: 'Física 1',
+        normalizedName: 'fisica 1',
+      }
+    );
+
+    const similaritySheets: Record<string, unknown[][]> = {
+      [PLAN_TEMPLATE_SHEETS.PLAN]: [
+        [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PLAN]],
+        ['Plan Prueba Matching 2026', 2026, 'Año', 1, 0, 0, 6, 'Graduado/a', 'MATCH · 2026'],
+      ],
+      [PLAN_TEMPLATE_SHEETS.SUBJECTS]: [
+        [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.SUBJECTS]],
+        [1, 'MAT-1', 'Análisis Matemático 1', 'AM 1', 1, 'A', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
+        [2, 'MAT-2', 'Probabilidad y Estadísticas', 'Prob. y Est.', 1, '1C', 'NO', 4, 'obligatoria', '', 'NO', 'NO', ''],
+        [3, 'MAT-3', 'Física 2', 'Física 2', 1, '2C', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
+      ],
+      [PLAN_TEMPLATE_SHEETS.PREREQUISITES]: [
+        [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PREREQUISITES]],
+      ],
+      [PLAN_TEMPLATE_SHEETS.RULES]: [
+        [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
+      ],
+      [PLAN_TEMPLATE_SHEETS.ACRONYMS]: [
+        [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
+      ],
+    };
+
+    const similarityPreview = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Licenciatura Ficticia en Matemática',
+        careerCode: 'LFMA',
+        fileName: 'matching.xlsx',
+        fileBase64: buildWorkbookBuffer(similaritySheets).toString('base64'),
+      },
+    });
+
+    const simSuggestions = similarityPreview.data?.data?.sharedSubjectSuggestions || [];
+    const amSugg = simSuggestions.find((s: any) => s.subjectCode === 1);
+    const pyeSugg = simSuggestions.find((s: any) => s.subjectCode === 2);
+    const fisSugg = simSuggestions.find((s: any) => s.subjectCode === 3);
+
+    assert(
+      similarityPreview.status === 200 &&
+        amSugg?.candidates?.length === 1 &&
+        amSugg.candidates[0].displayName === 'Análisis Matemático I' &&
+        amSugg.candidates[0].matchType === 'exact' &&
+        amSugg.candidates[0].confidence === 'high' &&
+        amSugg.selectedDecision === null &&
+        pyeSugg?.candidates?.length === 1 &&
+        pyeSugg.candidates[0].displayName === 'Probabilidad y Estadística' &&
+        pyeSugg.candidates[0].matchType === 'similar' &&
+        pyeSugg.candidates[0].confidence === 'low' &&
+        pyeSugg.selectedDecision === null &&
+        fisSugg?.candidates?.length === 0 &&
+        fisSugg.selectedDecision === null,
+      'Preview sugiere "Análisis Matemático I" como exact/high, "Probabilidad y Estadística" como similar/low, no sugiere "Física 1" para "Física 2" y nunca auto-vincula',
+      JSON.stringify({
+        status: similarityPreview.status,
+        errors: similarityPreview.data?.data?.errors,
+        suggestions: simSuggestions,
+      })
     );
   } finally {
     setPlanImportStoreForTesting(null);
