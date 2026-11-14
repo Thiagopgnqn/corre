@@ -24,6 +24,17 @@ import {
   exportCareerToJson,
 } from '../src/utils/storage';
 import {
+  type CareerHydrationState,
+  applyCatalogSnapshot,
+  beginServerReload,
+  canPersistScopedStorage,
+  canSyncServerState,
+  completeServerStateHydration,
+  createCareerHydrationState,
+  executeServerReloadCycle,
+  resetHydrationOnLogout,
+} from '../src/utils/careerHydrationGuard';
+import {
   CATALOG_CACHE_SCHEMA,
   CatalogShapeError,
   getCatalogCacheKey,
@@ -787,5 +798,323 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
       false,
       'ProfessorsDirectory no debe enviar sub.code ("E-301", "X-408") al endpoint subjectId del backend'
     );
+  });
+});
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe('Career hydration guard (data-overwrite protection)', () => {
+  const __dirnameLocal = path.dirname(fileURLToPath(import.meta.url));
+  const rootDir = path.resolve(__dirnameLocal, '..');
+
+  it('(a) blocks all server auto-sync calls until userStateApi.getState completes for the active plan', async () => {
+    let hydration = createCareerHydrationState();
+    const serverWrites: Array<{ planId: string; op: string }> = [];
+
+    const attemptServerSync = (op: string, targetPlanId: string | null) => {
+      if (canSyncServerState(true, hydration, targetPlanId)) {
+        serverWrites.push({ planId: targetPlanId ?? 'unknown', op });
+      }
+    };
+
+    // Unauthenticated or pre-reload mutations never touch server
+    assert.equal(canSyncServerState(false, hydration), false);
+    assert.equal(canSyncServerState(true, hydration), false);
+    attemptServerSync('updateProgress', 'plan-a');
+    assert.equal(serverWrites.length, 0);
+
+    const pendingState = createDeferred<{
+      success: boolean;
+      data: { progress: Record<number, { status: string }> };
+    }>();
+    const uiApplied: string[] = [];
+
+    const cyclePromise = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: async ({ onImmediateCache }) => {
+        const cached = { plan: { id: 'plan-a', name: 'Plan A' } };
+        onImmediateCache(cached);
+        return { catalog: cached };
+      },
+      applyCatalogToUi: (cat) => {
+        uiApplied.push(`catalog:${cat.plan.id}`);
+      },
+      fetchServerState: () => pendingState.promise,
+      applyServerStateToUi: (_data, cat) => {
+        uiApplied.push(`server:${cat.plan.id}`);
+      },
+    });
+
+    // Wait microtasks so loadCatalog resolves and fetchServerState is in-flight
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Catalog is already displayed and scoped localStorage is ready, BUT server hydration has not finished yet
+    assert.equal(hydration.hydratedStoragePlanId, 'plan-a');
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedServerPlanId, null);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), true);
+    assert.equal(canSyncServerState(true, hydration), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+
+    // Simulated progress/settings/basket/simulation actions while server state is loading send 0 server writes
+    attemptServerSync('updateProgress', 'plan-a');
+    attemptServerSync('updateSettings', 'plan-a');
+    attemptServerSync('updateElectives', 'plan-a');
+    attemptServerSync('updateBasket', 'plan-a');
+    attemptServerSync('applySimulation', 'plan-a');
+    assert.equal(serverWrites.length, 0);
+
+    // Once userStateApi.getState resolves cleanly, server sync unlocks for plan-a
+    pendingState.resolve({
+      success: true,
+      data: { progress: { 1: { status: 'aprobada' } } },
+    });
+    const outcome = await cyclePromise;
+    assert.equal(outcome.status, 'hydrated');
+    assert.equal(hydration.hasHydrated, true);
+    assert.equal(hydration.hydratedServerPlanId, 'plan-a');
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), true);
+
+    attemptServerSync('updateProgress', 'plan-a');
+    assert.deepEqual(serverWrites, [{ planId: 'plan-a', op: 'updateProgress' }]);
+    assert.deepEqual(uiApplied, ['catalog:plan-a', 'server:plan-a']);
+  });
+
+  it('(b) keeps server sync locked and never syncs empty defaults when catalog load or getState fails', async () => {
+    // b1: catalog fetch rejects
+    {
+      let hydration: CareerHydrationState = completeServerStateHydration(
+        beginServerReload(createCareerHydrationState()).state,
+        1,
+        'plan-a'
+      );
+      let catalogErrorCalled = false;
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => {
+          throw new Error('503 Service Unavailable');
+        },
+        applyCatalogToUi: () => {
+          throw new Error('should not apply catalog on failure');
+        },
+        fetchServerState: async () => {
+          throw new Error('should not fetch userState after catalog failure');
+        },
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state on failure');
+        },
+        onCatalogError: () => {
+          catalogErrorCalled = true;
+        },
+      });
+
+      assert.equal(outcome.status, 'catalog_error');
+      assert.equal(catalogErrorCalled, true);
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedStoragePlanId, null);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration), false);
+      assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+      if (canSyncServerState(true, hydration)) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b2: catalog succeeds, fetchServerState throws network/500 error
+    {
+      let hydration = createCareerHydrationState();
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => ({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } }),
+        applyCatalogToUi: () => {},
+        fetchServerState: async () => {
+          throw new Error('Failed to fetch user state');
+        },
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state');
+        },
+      });
+
+      assert.equal(outcome.status, 'state_error');
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+      if (canSyncServerState(true, hydration, 'plan-a')) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b3: catalog succeeds, fetchServerState returns { success: false, data: null }
+    {
+      let hydration = createCareerHydrationState();
+      const serverWrites: string[] = [];
+
+      const outcome = await executeServerReloadCycle({
+        getState: () => hydration,
+        setState: (next) => {
+          hydration = next;
+        },
+        loadCatalog: async () => ({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } }),
+        applyCatalogToUi: () => {},
+        fetchServerState: async () => ({ success: false, data: null }),
+        applyServerStateToUi: () => {
+          throw new Error('should not apply state when unavailable');
+        },
+      });
+
+      assert.equal(outcome.status, 'state_unavailable');
+      assert.equal(hydration.hasHydrated, false);
+      assert.equal(hydration.hydratedServerPlanId, null);
+      assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+      if (canSyncServerState(true, hydration, 'plan-a')) serverWrites.push('empty-overwrite');
+      assert.equal(serverWrites.length, 0);
+    }
+
+    // b4: CareerContext actually wires executeServerReloadCycle, canSyncServerState, canPersistScopedStorage & applySimulation guard
+    const contextSrc = fs.readFileSync(
+      path.resolve(rootDir, 'src/context/CareerContext.tsx'),
+      'utf8'
+    );
+    assert.ok(contextSrc.includes('executeServerReloadCycle'));
+    assert.ok(contextSrc.includes('canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)'));
+    assert.ok(contextSrc.includes('resetHydrationOnLogout(hydrationStateRef.current)'));
+    assert.match(
+      contextSrc,
+      /const applySimulation = useCallback[\s\S]*?canSyncServerState\(isAuthenticated,\s*hydrationStateRef\.current/
+    );
+  });
+
+  it('(c) resets hydration synchronously on Plan A -> Plan B switch and drops late Plan A responses without cross-plan leaks', async () => {
+    // 1. Start fully hydrated on Plan A
+    let hydration = completeServerStateHydration(
+      applyCatalogSnapshot(beginServerReload(createCareerHydrationState()).state, 1, 'plan-a'),
+      1,
+      'plan-a'
+    );
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), true);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), false);
+
+    // 2. User switches to Plan B while Plan A's background reload & Plan B's slow load race
+    const planACatalogDef = createDeferred<{ catalog: { plan: { id: string; name: string } } }>();
+    const planBCatalogDef = createDeferred<{ catalog: { plan: { id: string; name: string } } }>();
+    const planBStateDef = createDeferred<{
+      success: boolean;
+      data: { marker: string };
+    }>();
+
+    const appliedCatalogs: string[] = [];
+    const appliedStates: Array<{ planId: string; marker: string }> = [];
+    const serverWrites: Array<{ planId: string; marker: string }> = [];
+
+    // Start reload for Plan A (will lag)
+    const planAReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: () => planACatalogDef.promise,
+      applyCatalogToUi: (cat) => appliedCatalogs.push(cat.plan.id),
+      fetchServerState: async () => ({ success: true, data: { marker: 'A-stale' } }),
+      applyServerStateToUi: (d, cat) => appliedStates.push({ planId: cat.plan.id, marker: d.marker }),
+    });
+
+    // Synchronously verify reload start already invalidated previous Plan A hydration
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedStoragePlanId, null);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+
+    // Now switch immediately to Plan B BEFORE Plan A resolves
+    const planBReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: () => planBCatalogDef.promise,
+      applyCatalogToUi: (cat) => appliedCatalogs.push(cat.plan.id),
+      fetchServerState: () => planBStateDef.promise,
+      applyServerStateToUi: (d, cat) => appliedStates.push({ planId: cat.plan.id, marker: d.marker }),
+    });
+
+    // While Plan B is loading, NEITHER Plan A nor Plan B may sync or persist storage
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(hydration.hydratedStoragePlanId, null);
+    assert.equal(hydration.hydratedServerPlanId, null);
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), false);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+    assert.equal(canPersistScopedStorage('plan-b', hydration), false);
+
+    // Resolve Plan B completely first
+    planBCatalogDef.resolve({ catalog: { plan: { id: 'plan-b', name: 'Plan B' } } });
+    planBStateDef.resolve({ success: true, data: { marker: 'B-fresh' } });
+    const planBOutcome = await planBReload;
+    assert.equal(planBOutcome.status, 'hydrated');
+    assert.equal(hydration.hydratedServerPlanId, 'plan-b');
+    assert.equal(hydration.hydratedStoragePlanId, 'plan-b');
+
+    // Now resolve the stale Plan A promise AFTER Plan B is active & hydrated
+    planACatalogDef.resolve({ catalog: { plan: { id: 'plan-a', name: 'Plan A' } } });
+    const planAOutcome = await planAReload;
+    assert.equal(planAOutcome.status, 'aborted');
+
+    // Plan A must NEVER overwrite Plan B's catalog, UI state, storage scope, or server hydration target
+    assert.deepEqual(appliedCatalogs, ['plan-b']);
+    assert.deepEqual(appliedStates, [{ planId: 'plan-b', marker: 'B-fresh' }]);
+    assert.equal(hydration.hasHydrated, true);
+    assert.equal(hydration.hydratedServerPlanId, 'plan-b');
+    assert.equal(canSyncServerState(true, hydration, 'plan-a'), false);
+    assert.equal(canSyncServerState(true, hydration, 'plan-b'), true);
+    assert.equal(canPersistScopedStorage('plan-a', hydration), false);
+    assert.equal(canPersistScopedStorage('plan-b', hydration), true);
+
+    if (canSyncServerState(true, hydration, 'plan-a')) {
+      serverWrites.push({ planId: 'plan-a', marker: 'leak' });
+    }
+    if (canSyncServerState(true, hydration, 'plan-b')) {
+      serverWrites.push({ planId: 'plan-b', marker: 'B-fresh' });
+    }
+    assert.deepEqual(serverWrites, [{ planId: 'plan-b', marker: 'B-fresh' }]);
+
+    // Logout while a Plan C reload is in-flight also aborts stale completion
+    const planCStateDef = createDeferred<{ success: boolean; data: { marker: string } }>();
+    const planCReload = executeServerReloadCycle({
+      getState: () => hydration,
+      setState: (next) => {
+        hydration = next;
+      },
+      loadCatalog: async () => ({ catalog: { plan: { id: 'plan-c', name: 'Plan C' } } }),
+      applyCatalogToUi: () => {},
+      fetchServerState: () => planCStateDef.promise,
+      applyServerStateToUi: () => {
+        throw new Error('must not hydrate after logout');
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    hydration = resetHydrationOnLogout(hydration);
+    planCStateDef.resolve({ success: true, data: { marker: 'C-after-logout' } });
+    const planCOutcome = await planCReload;
+    assert.equal(planCOutcome.status, 'aborted');
+    assert.equal(hydration.hasHydrated, false);
+    assert.equal(canSyncServerState(false, hydration), false);
   });
 });

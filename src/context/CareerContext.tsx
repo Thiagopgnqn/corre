@@ -71,11 +71,19 @@ import {
   saveExamAttempts,
 } from '../utils/storage';
 import { useAuth } from './AuthContext';
-import { userStateApi } from '../api/userState.api';
+import { userStateApi, type ConsolidatedUserState } from '../api/userState.api';
 import { catalogApi, loadPlanCatalogSmart } from '../api/catalog.api';
 import { enrollmentsApi } from '../api/enrollments.api';
 import { professorsApi } from '../api/professors.api';
 import type { SyncStatus } from '../components/common/SyncStatusBadge';
+import {
+  type CareerHydrationState,
+  canPersistScopedStorage,
+  canSyncServerState,
+  createCareerHydrationState,
+  executeServerReloadCycle,
+  resetHydrationOnLogout,
+} from '../utils/careerHydrationGuard';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -348,7 +356,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currentPlanName, setCurrentPlanName] = useState<string>('Plan de estudio');
 
   const activePlanRef = useRef<ActivePlanCatalog | null>(null);
-  const hydratedStoragePlanIdRef = useRef<string | null>(null);
+  const hydrationStateRef = useRef<CareerHydrationState>(createCareerHydrationState());
   const hasHydratedRef = useRef(false);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -433,11 +441,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setExamAttempts(loadExamAttempts(planId));
     setSimulationState(null);
     setSelectedSubjectId(null);
-    hydratedStoragePlanIdRef.current = planId;
   }, []);
 
-  const reloadSeqRef = useRef(0);
   const scheduleSeqRef = useRef(0);
+
+  const syncHydrationState = useCallback((next: CareerHydrationState) => {
+    hydrationStateRef.current = next;
+    hasHydratedRef.current = next.hasHydrated;
+  }, []);
 
   const loadPlanSchedule = useCallback(async (planId: string) => {
     const schedSeq = ++scheduleSeqRef.current;
@@ -475,10 +486,6 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     async (overridePlanId?: string) => {
       if (!isAuthenticated) return;
 
-      const seq = ++reloadSeqRef.current;
-      hydratedStoragePlanIdRef.current = null;
-      hasHydratedRef.current = false;
-
       const isPlanSwitch =
         typeof overridePlanId === 'string' || activePlanRef.current !== null;
       const requestedPlanId =
@@ -487,65 +494,39 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setCatalogStatus('loading');
       setCatalogError(null);
 
-      let loadedCatalog: ActivePlanCatalog;
-      let immediateAppliedId: string | null = null;
-      try {
-        const result = await loadPlanCatalogSmart({
-          planId: requestedPlanId,
-          forceRefresh: isPlanSwitch && !overridePlanId,
-          onWakingChange: setIsWakingCatalogServer,
-          onImmediateCache: (cachedCatalog) => {
-            if (seq !== reloadSeqRef.current) return;
-            immediateAppliedId = cachedCatalog.plan.id;
-            applyLoadedCatalogToState(cachedCatalog);
-          },
-        });
-        if (seq !== reloadSeqRef.current) return;
-        loadedCatalog = result.catalog;
+      let effectiveStateForTutorial: UserCareerState = {};
+      let effectiveSettingsForTutorial = DEFAULT_SETTINGS;
 
-        if (immediateAppliedId !== loadedCatalog.plan.id) {
-          applyLoadedCatalogToState(loadedCatalog);
-        } else {
-          activePlanRef.current = loadedCatalog;
-          setActivePlan(loadedCatalog);
-          setCurrentPlanName(loadedCatalog.plan.name);
-        }
-      } catch (e) {
-        if (seq !== reloadSeqRef.current) return;
-        console.error('Error loading active plan catalog:', e);
-        activePlanRef.current = null;
-        setActivePlan(null);
-        setCatalogError(
-          e instanceof Error && e.message
-            ? e.message
-            : 'No se pudo cargar tu plan de estudio. Verificá tu conexión e intentá nuevamente.'
-        );
-        setCatalogStatus('error');
-        setServerSchedules(null);
-        setScheduleStatus('error');
-        setScheduleError('No se pudo cargar la oferta horaria porque falló la carga del plan.');
-        setSyncStatus('offline');
-        return;
-      }
-
-      const planId = loadedCatalog.plan.id;
-      const planElectiveIds = new Set(
-        loadedCatalog.subjects.filter((s) => Boolean(s.isElective)).map((s) => s.id)
-      );
-      const planTotalLevels = loadedCatalog.plan.config.totalLevels;
-
-      try {
-        setSyncStatus('saving');
-
-        // 2. Cargar estado de usuario para el plan activo
-        const stateRes = await userStateApi.getState();
-        if (seq !== reloadSeqRef.current) return;
-
-        let effectiveStateForTutorial = loadUserState(planId);
-        let effectiveSettingsForTutorial = loadSettings(planId);
-
-        if (stateRes.success && stateRes.data) {
-          const d = stateRes.data;
+      const outcome = await executeServerReloadCycle<ActivePlanCatalog, ConsolidatedUserState>({
+        getState: () => hydrationStateRef.current,
+        setState: syncHydrationState,
+        loadCatalog: ({ onImmediateCache }) =>
+          loadPlanCatalogSmart({
+            planId: requestedPlanId,
+            forceRefresh: isPlanSwitch && !overridePlanId,
+            onWakingChange: setIsWakingCatalogServer,
+            onImmediateCache,
+          }),
+        applyCatalogToUi: (catalog) => {
+          applyLoadedCatalogToState(catalog);
+          effectiveStateForTutorial = loadUserState(catalog.plan.id);
+          effectiveSettingsForTutorial = loadSettings(catalog.plan.id);
+        },
+        refreshCatalogInPlace: (catalog) => {
+          activePlanRef.current = catalog;
+          setActivePlan(catalog);
+          setCurrentPlanName(catalog.plan.name);
+        },
+        fetchServerState: () => {
+          setSyncStatus('saving');
+          return userStateApi.getState();
+        },
+        applyServerStateToUi: (d, catalog) => {
+          const planId = catalog.plan.id;
+          const planElectiveIds = new Set(
+            catalog.subjects.filter((s) => Boolean(s.isElective)).map((s) => s.id)
+          );
+          const planTotalLevels = catalog.plan.config.totalLevels;
           const nextState = d.progress || {};
           effectiveStateForTutorial = nextState;
           effectiveSettingsForTutorial = d.settings || DEFAULT_SETTINGS;
@@ -573,22 +554,57 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             setShowMigrationModal(true);
           }
 
-          hasHydratedRef.current = true;
           setSyncStatus('saved');
-        }
+        },
+        onCatalogError: (e) => {
+          console.error('Error loading active plan catalog:', e);
+          activePlanRef.current = null;
+          setActivePlan(null);
+          setCatalogError(
+            e instanceof Error && e.message
+              ? e.message
+              : 'No se pudo cargar tu plan de estudio. Verificá tu conexión e intentá nuevamente.'
+          );
+          setCatalogStatus('error');
+          setServerSchedules(null);
+          setScheduleStatus('error');
+          setScheduleError('No se pudo cargar la oferta horaria porque falló la carga del plan.');
+          setSyncStatus('offline');
+        },
+      });
 
+      if (outcome.status === 'aborted' || outcome.status === 'catalog_error') {
+        return;
+      }
+
+      if (outcome.status === 'state_error') {
+        console.error('Error hydrating from server:', outcome.error);
+        setServerSchedules(null);
+        setScheduleStatus('error');
+        setScheduleError(
+          (prev) =>
+            prev ||
+            'No se pudo cargar la oferta horaria desde el servidor. Verificá tu conexión e intentá nuevamente.'
+        );
+        setSyncStatus('offline');
+        return;
+      }
+
+      const { planId, seq } = outcome;
+
+      try {
         if (!effectiveSettingsForTutorial.tutorialCompleted && shouldAutoStartTutorial(effectiveStateForTutorial, planId)) {
           setIsTutorialOpen(true);
         }
 
         // 3. Cargar oferta de horarios del plan activo desde el backend (sin fallback estático)
         await loadPlanSchedule(planId);
-        if (seq !== reloadSeqRef.current) return;
+        if (seq !== hydrationStateRef.current.reloadSeq) return;
 
         // 4. Cargar resumen de recomendaciones de reseñas
         await refreshReviewableSummary();
       } catch (e) {
-        if (seq !== reloadSeqRef.current) return;
+        if (seq !== hydrationStateRef.current.reloadSeq) return;
         console.error('Error hydrating from server:', e);
         setServerSchedules(null);
         setScheduleStatus('error');
@@ -604,6 +620,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       isAuthenticated,
       user?.selectedPlanId,
       applyLoadedCatalogToState,
+      syncHydrationState,
       loadPlanSchedule,
       refreshReviewableSummary,
     ]
@@ -624,8 +641,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       reloadServerState();
     } else {
       scheduleSeqRef.current += 1;
-      hasHydratedRef.current = false;
-      hydratedStoragePlanIdRef.current = null;
+      syncHydrationState(resetHydrationOnLogout(hydrationStateRef.current));
       activePlanRef.current = null;
       setActivePlan(null);
       setCatalogStatus('loading');
@@ -635,7 +651,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setScheduleError(null);
       setUnseenRecommendationsCount(0);
     }
-  }, [isAuthenticated, reloadServerState]);
+  }, [isAuthenticated, reloadServerState, syncHydrationState]);
 
   const activeSchedules = useMemo(() => {
     if (customSchedules && customSchedules.length > 0) {
@@ -659,37 +675,37 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const scopedPlanId = activePlan?.plan.id ?? null;
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveUserState(userState, scopedPlanId);
   }, [userState, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveAssignedElectives(assignedElectives, { validElectiveIds, totalLevels, planId: scopedPlanId });
   }, [assignedElectives, scopedPlanId, validElectiveIds, totalLevels]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveSettings(settings, scopedPlanId);
   }, [settings, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveBasket(semesterBasket, scopedPlanId);
   }, [semesterBasket, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveScheduleSelections(scheduleSelections, scopedPlanId);
   }, [scheduleSelections, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveScheduleDrafts(scheduleDrafts, scopedPlanId);
   }, [scheduleDrafts, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     if (customSchedules) {
       saveCustomSchedules(customSchedules, scopedPlanId);
     } else {
@@ -698,17 +714,17 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [customSchedules, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveScheduleTerm(scheduleTerm, scopedPlanId);
   }, [scheduleTerm, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveEnrollments(enrollments, scopedPlanId);
   }, [enrollments, scopedPlanId]);
 
   useEffect(() => {
-    if (!scopedPlanId || hydratedStoragePlanIdRef.current !== scopedPlanId) return;
+    if (!scopedPlanId || !canPersistScopedStorage(scopedPlanId, hydrationStateRef.current)) return;
     saveExamAttempts(examAttempts, scopedPlanId);
   }, [examAttempts, scopedPlanId]);
 
@@ -949,7 +965,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       fireConfetti();
 
       // Sincronizar simulación confirmada a la nube
-      if (isAuthenticated) {
+      if (canSyncServerState(isAuthenticated, hydrationStateRef.current, activePlanRef.current?.plan.id ?? null)) {
         setSyncStatus('saving');
         userStateApi
           .importLegacyData({ userState: simulationState })
