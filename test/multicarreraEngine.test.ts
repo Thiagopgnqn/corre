@@ -47,6 +47,8 @@ import {
   loadPlanCatalogSmart,
 } from '../src/api/catalog.api';
 import { getScheduleUnavailableMessage } from '../src/utils/scheduleAvailability';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
+import { ELECTIVES } from './fixtures/electives';
 import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -1529,5 +1531,152 @@ describe('Ingeniería Ficticia 5-level engine evaluation', () => {
     assert.equal(eval5.progress.careerPercentageBySubjects, 100);
     assert.equal(eval5.progress.percentageApproved, 100);
     assert.equal(eval5.progress.isDegreeEligible, true);
+  });
+});
+
+describe('Migration 0014 displayCode character-by-character parity', () => {
+  it('reproduces exact fixture codes for all 60 ISI subjects after 0014 SQL backfill and respects custom displayCode values', () => {
+    const sql0014Path = path.resolve(rootDir, 'server/drizzle/0014_subject_display_code.sql');
+    const sql0014 = fs.readFileSync(sql0014Path, 'utf8');
+    assert.match(sql0014, /c\."code"\s*=\s*'ISI'\s+AND\s+sp\."year"\s*=\s*2023\s+AND\s+s\."kind"\s*=\s*'electiva'/i);
+    assert.match(sql0014, /\(408,\s*512,\s*513,\s*514\)/);
+    assert.match(sql0014, /s\."display_code"\s+IS\s+NULL/i);
+
+    const catalogJsonPath = path.resolve(rootDir, 'server/seed-data/plan2023-catalog.json');
+    const rawCatalog = JSON.parse(fs.readFileSync(catalogJsonPath, 'utf8')) as {
+      career: { name: string; code: string };
+      studyPlan: { name: string; year: number; config: Record<string, unknown> };
+      subjects: Array<{
+        codeInPlan: number;
+        displayCode?: string | null;
+        name: string;
+        shortName?: string;
+        level: number;
+        modality: string;
+        contraCuatrimestral?: boolean;
+        weeklyHours: number;
+        kind: string;
+        credits?: number | null;
+        isOptionalTrack?: boolean;
+        trackKey?: string | null;
+        isIntegrator?: boolean;
+      }>;
+    };
+
+    assert.equal(rawCatalog.subjects.length, 60);
+
+    // Simula el UPDATE de 0014 sobre las 60 materias con display_code inicialmente NULL
+    const apply0014SqlRule = (row: {
+      careerCode: string;
+      year: number;
+      kind: string;
+      codeInPlan: number;
+      displayCode: string | null;
+    }): string | null => {
+      if (row.displayCode !== null) return row.displayCode;
+      if (row.careerCode === 'ISI' && row.year === 2023 && row.kind === 'electiva') {
+        return [408, 512, 513, 514].includes(row.codeInPlan)
+          ? `X-${row.codeInPlan}`
+          : `E-${row.codeInPlan}`;
+      }
+      return String(row.codeInPlan);
+    };
+
+    const post0014Subjects = rawCatalog.subjects.map((s) => ({
+      id: `isi-sub-${s.codeInPlan}`,
+      codeInPlan: s.codeInPlan,
+      displayCode: apply0014SqlRule({
+        careerCode: rawCatalog.career.code,
+        year: rawCatalog.studyPlan.year,
+        kind: s.kind,
+        codeInPlan: s.codeInPlan,
+        displayCode: null,
+      }),
+      name: s.name,
+      shortName: s.shortName,
+      level: s.level,
+      modality: s.modality,
+      contraCuatrimestral: Boolean(s.contraCuatrimestral),
+      weeklyHours: s.weeklyHours,
+      kind: s.kind,
+      credits: s.credits ?? null,
+      isOptionalTrack: Boolean(s.isOptionalTrack),
+      trackKey: s.trackKey ?? null,
+      isIntegrator: Boolean(s.isIntegrator),
+    }));
+
+    const formatted = formatPlanCatalogPayload({
+      plan: {
+        id: 'plan-isi-2023-0014',
+        name: rawCatalog.studyPlan.name,
+        year: rawCatalog.studyPlan.year,
+        config: rawCatalog.studyPlan.config,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      career: {
+        id: 'career-isi-0014',
+        name: rawCatalog.career.name,
+        code: rawCatalog.career.code,
+        facultyId: 'fac-frc',
+      },
+      subjects: post0014Subjects,
+      prerequisites: [],
+      rules: [],
+      acronyms: [],
+    });
+
+    const expectedCodeById = new Map<number, string>();
+    for (const core of CORE_SUBJECTS) {
+      expectedCodeById.set(core.id, core.code);
+    }
+    for (const elec of ELECTIVES) {
+      expectedCodeById.set(elec.id, elec.code);
+    }
+    assert.equal(expectedCodeById.size, 60);
+    assert.equal(formatted.subjects.length, 60);
+
+    for (const sub of formatted.subjects) {
+      const expectedCode = expectedCodeById.get(sub.id);
+      assert.notEqual(expectedCode, undefined, `Materia inesperada ${sub.id} en catálogo`);
+      assert.strictEqual(
+        sub.code,
+        expectedCode,
+        `Mismatch de código visible para materia ${sub.id}: esperado "${expectedCode}", recibido "${sub.code}"`
+      );
+    }
+
+    // Incluso si alguna materia ya tenía displayCode distinto (WHERE display_code IS NULL no la pisa),
+    // formatPlanCatalogPayload devuelve ese valor personalizado carácter por carácter.
+    const customSubjects = post0014Subjects.map((s) => {
+      if (s.codeInPlan === 1) {
+        return { ...s, displayCode: apply0014SqlRule({ careerCode: 'ISI', year: 2023, kind: s.kind, codeInPlan: 1, displayCode: 'ALT-01' }) };
+      }
+      if (s.codeInPlan === 301) {
+        return { ...s, displayCode: apply0014SqlRule({ careerCode: 'ISI', year: 2023, kind: s.kind, codeInPlan: 301, displayCode: 'CUSTOM-301' }) };
+      }
+      return s;
+    });
+    const formattedCustom = formatPlanCatalogPayload({
+      plan: {
+        id: 'plan-isi-2023-0014-custom',
+        name: rawCatalog.studyPlan.name,
+        year: rawCatalog.studyPlan.year,
+        config: rawCatalog.studyPlan.config,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+      career: {
+        id: 'career-isi-0014',
+        name: rawCatalog.career.name,
+        code: rawCatalog.career.code,
+        facultyId: 'fac-frc',
+      },
+      subjects: customSubjects,
+      prerequisites: [],
+      rules: [],
+      acronyms: [],
+    });
+    const customById = new Map(formattedCustom.subjects.map((s) => [s.id, s.code]));
+    assert.strictEqual(customById.get(1), 'ALT-01');
+    assert.strictEqual(customById.get(301), 'CUSTOM-301');
   });
 });
