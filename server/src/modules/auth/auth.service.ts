@@ -7,7 +7,6 @@ import {
   users,
   refreshTokens,
   userSettings,
-  studyPlans,
   userIdentities,
   emailVerificationCodes,
   subjectProgress,
@@ -23,11 +22,12 @@ import { isDisposableEmail } from '../../config/disposableDomains.js';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { verifyGoogleCredential } from './googleAuth.service.js';
 import { logAdminAction } from '../admin/admin.audit.js';
-import { getUserLiveStatus } from '../../middlewares/auth.middleware.js';
 import {
-  findDefaultPublishedPlan,
-  findPublishedPlanById,
-} from '../catalog/catalog.helpers.js';
+  getUserLiveStatus,
+  invalidateUserStatusCache,
+} from '../../middlewares/auth.middleware.js';
+import { getCatalogStore } from '../catalog/catalog.store.js';
+import { getAuthStore } from './auth.store.js';
 import type {
   RegisterInput,
   LoginInput,
@@ -49,8 +49,9 @@ const ARGON2_OPTIONS = {
 async function resolvePublishedOrDefaultPlanId(
   requestedPlanId?: string | null
 ): Promise<string | null> {
+  const catalog = getCatalogStore();
   if (requestedPlanId) {
-    const found = await findPublishedPlanById(requestedPlanId);
+    const found = await catalog.resolvePublishedPlan(requestedPlanId);
     if (!found) {
       const err = new Error('El plan de estudio seleccionado no existe o no está publicado');
       (err as any).status = 404;
@@ -58,8 +59,24 @@ async function resolvePublishedOrDefaultPlanId(
     }
     return found.plan.id;
   }
-  const defaultFound = await findDefaultPublishedPlan();
+  const defaultFound = await catalog.resolvePublishedPlan('current');
   return defaultFound?.plan.id || null;
+}
+
+async function ensureUserSelectedPlanId(
+  userId: string,
+  currentSelectedPlanId: string | null | undefined,
+  preResolvedPlanId?: string | null
+): Promise<string | null> {
+  if (currentSelectedPlanId) {
+    return currentSelectedPlanId;
+  }
+  const fallbackPlanId = preResolvedPlanId ?? (await resolvePublishedOrDefaultPlanId(null));
+  if (fallbackPlanId) {
+    await getAuthStore().updateUserFields(userId, { selectedPlanId: fallbackPlanId });
+    invalidateUserStatusCache(userId);
+  }
+  return fallbackPlanId;
 }
 
 function hashToken(rawToken: string): string {
@@ -362,30 +379,15 @@ export class AuthService {
    * Inicio de sesión y registro con Google Identity Services
    */
   static async googleAuth(input: GoogleLoginInput) {
+    const store = getAuthStore();
     const googleUser = await verifyGoogleCredential(input.credential);
     const canonicalEmail = computeCanonicalEmail(googleUser.email);
 
     // 1. Buscar si la identidad de Google (por sub) ya existe
-    const [existingIdentity] = await db
-      .select({
-        id: userIdentities.id,
-        userId: userIdentities.userId,
-      })
-      .from(userIdentities)
-      .where(
-        and(
-          eq(userIdentities.provider, 'google'),
-          eq(userIdentities.providerUserId, googleUser.sub)
-        )
-      )
-      .limit(1);
+    const existingIdentity = await store.findGoogleIdentityByProviderUserId(googleUser.sub);
 
     if (existingIdentity) {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, existingIdentity.userId))
-        .limit(1);
+      const user = await store.findUserById(existingIdentity.userId);
 
       if (user) {
         if (user.status === 'suspended') {
@@ -397,32 +399,20 @@ export class AuthService {
 
         // Asegurar que el email quede marcado como verificado
         if (!user.emailVerifiedAt) {
-          await db
-            .update(users)
-            .set({ emailVerifiedAt: new Date(), updatedAt: new Date() })
-            .where(eq(users.id, user.id));
+          await store.updateUserFields(user.id, { emailVerifiedAt: new Date() });
         }
 
-        let planId = user.selectedPlanId;
-        if (!planId) {
-          planId = await resolvePublishedOrDefaultPlanId(null);
-          if (planId) {
-            await db
-              .update(users)
-              .set({ selectedPlanId: planId, updatedAt: new Date() })
-              .where(eq(users.id, user.id));
-          }
-        }
+        const planId = await ensureUserSelectedPlanId(user.id, user.selectedPlanId);
 
         const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
           id: user.id,
           email: user.email,
-          role: user.role as 'user' | 'admin',
+          role: user.role,
           selectedPlanId: planId,
           emailVerified: true,
         });
 
-        await db.insert(refreshTokens).values({
+        await store.insertRefreshToken({
           userId: user.id,
           tokenHash,
           expiresAt,
@@ -454,16 +444,10 @@ export class AuthService {
     }
 
     // 2. Si no existía la identidad de Google, buscar cuenta por email
-    const [existingUser] = await db
-      .select()
-      .from(users)
-      .where(
-        or(
-          eq(users.canonicalEmail, canonicalEmail),
-          eq(users.email, googleUser.email.trim().toLowerCase())
-        )
-      )
-      .limit(1);
+    const existingUser = await store.findUserByCanonicalOrEmail(
+      canonicalEmail,
+      googleUser.email.trim().toLowerCase()
+    );
 
     if (existingUser && existingUser.status === 'suspended') {
       const err = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
@@ -477,107 +461,45 @@ export class AuthService {
 
     // Caso A: No existe ninguna cuenta con ese email -> crear cuenta verificada
     if (!existingUser) {
-      const result = await db.transaction(async (tx) => {
-        const [newUser] = await tx
-          .insert(users)
-          .values({
-            email: googleUser.email,
-            canonicalEmail,
-            passwordHash: null,
-            role: 'user',
-            selectedPlanId: planId,
-            emailVerifiedAt: new Date(),
-            lastLoginAt: new Date(),
-          })
-          .returning({
-            id: users.id,
-            email: users.email,
-            role: users.role,
-            selectedPlanId: users.selectedPlanId,
-          });
-
-        await tx.insert(userSettings).values({
-          userId: newUser.id,
-          planId,
-          includePromotionsInGPA: true,
-          minPassingGrade: 4,
-          includeAnalistaTrack: false,
-          allowBlockedElectivesPlanning: false,
-          includeElectivesInProgress: true,
-          soundEnabled: true,
-          tutorialCompleted: false,
-        });
-
-        await tx.insert(userIdentities).values({
-          userId: newUser.id,
-          provider: 'google',
-          providerUserId: googleUser.sub,
-        });
-
-        const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
-          id: newUser.id,
-          email: newUser.email,
-          role: newUser.role as 'user' | 'admin',
-          selectedPlanId: newUser.selectedPlanId,
-          emailVerified: true,
-        });
-
-        await tx.insert(refreshTokens).values({
-          userId: newUser.id,
-          tokenHash,
-          expiresAt,
-        });
-
-        return {
-          user: {
+      return await store.createGoogleUserWithRefreshToken({
+        email: googleUser.email,
+        canonicalEmail,
+        selectedPlanId: planId,
+        providerUserId: googleUser.sub,
+        generateSession: (newUser) =>
+          generateTokens({
             ...newUser,
             emailVerified: true,
-          },
-          accessToken,
-          refreshToken: rawRefreshToken,
-        };
+          }),
       });
-
-      return result;
     }
 
     // Caso B: Existe una cuenta con ese email y YA está verificada -> vincular Google
     if (existingUser.emailVerifiedAt !== null) {
-      const [existingGoogleIdent] = await db
-        .select({ id: userIdentities.id })
-        .from(userIdentities)
-        .where(
-          and(
-            eq(userIdentities.userId, existingUser.id),
-            eq(userIdentities.provider, 'google')
-          )
-        )
-        .limit(1);
+      const existingGoogleIdent = await store.findUserGoogleIdentity(existingUser.id);
 
       if (!existingGoogleIdent) {
-        await db.insert(userIdentities).values({
-          userId: existingUser.id,
-          provider: 'google',
-          providerUserId: googleUser.sub,
-        });
+        await store.insertGoogleIdentity(existingUser.id, googleUser.sub);
       }
 
+      const effectivePlanId = await ensureUserSelectedPlanId(
+        existingUser.id,
+        existingUser.selectedPlanId,
+        planId
+      );
       if (!existingUser.canonicalEmail) {
-        await db
-          .update(users)
-          .set({ canonicalEmail, updatedAt: new Date() })
-          .where(eq(users.id, existingUser.id));
+        await store.updateUserFields(existingUser.id, { canonicalEmail });
       }
 
       const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
         id: existingUser.id,
         email: existingUser.email,
-        role: existingUser.role as 'user' | 'admin',
-        selectedPlanId: existingUser.selectedPlanId,
+        role: existingUser.role,
+        selectedPlanId: effectivePlanId,
         emailVerified: true,
       });
 
-      await db.insert(refreshTokens).values({
+      await store.insertRefreshToken({
         userId: existingUser.id,
         tokenHash,
         expiresAt,
@@ -588,7 +510,7 @@ export class AuthService {
           id: existingUser.id,
           email: existingUser.email,
           role: existingUser.role,
-          selectedPlanId: existingUser.selectedPlanId,
+          selectedPlanId: effectivePlanId,
           emailVerified: true,
         },
         accessToken,
@@ -605,189 +527,48 @@ export class AuthService {
     const shouldPreserveAccount = isPreMigration0003 || hasData;
 
     if (shouldPreserveAccount) {
-      const result = await db.transaction(async (tx) => {
-        const effectivePlanId = existingUser.selectedPlanId || planId;
-
-        // 1. Borrar password_hash y marcar email_verified_at y canonical_email
-        await tx
-          .update(users)
-          .set({
-            passwordHash: null,
-            emailVerifiedAt: new Date(),
-            canonicalEmail,
-            selectedPlanId: effectivePlanId,
-            lastLoginAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, existingUser.id));
-
-        // 2. Revocar todos sus refresh tokens y sesiones previas
-        await tx
-          .update(refreshTokens)
-          .set({
-            revokedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(refreshTokens.userId, existingUser.id));
-
-        // 3. Invalidar cualquier código de verificación previo
-        await tx
-          .update(emailVerificationCodes)
-          .set({
-            consumedAt: new Date(),
-          })
-          .where(eq(emailVerificationCodes.userId, existingUser.id));
-
-        // 4. Vincular identidad de Google si aún no existe
-        const [existingGoogleIdent] = await tx
-          .select({ id: userIdentities.id })
-          .from(userIdentities)
-          .where(
-            and(
-              eq(userIdentities.userId, existingUser.id),
-              eq(userIdentities.provider, 'google')
-            )
-          )
-          .limit(1);
-
-        if (!existingGoogleIdent) {
-          await tx.insert(userIdentities).values({
-            userId: existingUser.id,
-            provider: 'google',
-            providerUserId: googleUser.sub,
-          });
-        }
-
-        // 5. Asegurar settings por defecto si no existieran
-        const [settings] = await tx
-          .select({ userId: userSettings.userId })
-          .from(userSettings)
-          .where(eq(userSettings.userId, existingUser.id))
-          .limit(1);
-
-        if (!settings) {
-          await tx.insert(userSettings).values({
-            userId: existingUser.id,
-            includePromotionsInGPA: true,
-            minPassingGrade: 4,
-            includeAnalistaTrack: false,
-            allowBlockedElectivesPlanning: false,
-            includeElectivesInProgress: true,
-            soundEnabled: true,
-            tutorialCompleted: false,
-          });
-        }
-
-        // 6. Emitir nueva sesión verificada para esta cuenta
-        const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
-          id: existingUser.id,
-          email: existingUser.email,
-          role: existingUser.role as 'user' | 'admin',
-          selectedPlanId: effectivePlanId,
-          emailVerified: true,
-        });
-
-        await tx.insert(refreshTokens).values({
-          userId: existingUser.id,
-          tokenHash,
-          expiresAt,
-        });
-
-        return {
-          user: {
-            id: existingUser.id,
-            email: existingUser.email,
-            role: existingUser.role,
-            selectedPlanId: effectivePlanId,
+      const effectivePlanId = existingUser.selectedPlanId || planId;
+      const result = await store.preserveUnverifiedUserWithGoogle({
+        userId: existingUser.id,
+        canonicalEmail,
+        selectedPlanId: effectivePlanId,
+        providerUserId: googleUser.sub,
+        generateSession: (u) =>
+          generateTokens({
+            ...u,
             emailVerified: true,
-          },
-          accessToken,
-          refreshToken: rawRefreshToken,
-        };
+          }),
       });
-
+      if (!existingUser.selectedPlanId && effectivePlanId) {
+        invalidateUserStatusCache(existingUser.id);
+      }
       return result;
     }
 
     // Subcaso C.2: Cuenta creada después de migración 0003, sin verificar y SIN ningún dato asociado.
     // Solo se elimina la cuenta sin verificar si no tiene ningún dato asociado.
-    await db.delete(users).where(eq(users.id, existingUser.id));
-
-    const result = await db.transaction(async (tx) => {
-      const [newUser] = await tx
-        .insert(users)
-        .values({
-          email: googleUser.email,
-          canonicalEmail,
-          passwordHash: null,
-          role: 'user',
-          selectedPlanId: planId,
-          emailVerifiedAt: new Date(),
-          lastLoginAt: new Date(),
-        })
-        .returning({
-          id: users.id,
-          email: users.email,
-          role: users.role,
-          selectedPlanId: users.selectedPlanId,
-        });
-
-      await tx.insert(userSettings).values({
-        userId: newUser.id,
-        planId,
-        includePromotionsInGPA: true,
-        minPassingGrade: 4,
-        includeAnalistaTrack: false,
-        allowBlockedElectivesPlanning: false,
-        includeElectivesInProgress: true,
-        soundEnabled: true,
-        tutorialCompleted: false,
-      });
-
-      await tx.insert(userIdentities).values({
-        userId: newUser.id,
-        provider: 'google',
-        providerUserId: googleUser.sub,
-      });
-
-      const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
-        id: newUser.id,
-        email: newUser.email,
-        role: newUser.role as 'user' | 'admin',
-        selectedPlanId: newUser.selectedPlanId,
-        emailVerified: true,
-      });
-
-      await tx.insert(refreshTokens).values({
-        userId: newUser.id,
-        tokenHash,
-        expiresAt,
-      });
-
-      return {
-        user: {
+    return await store.createGoogleUserWithRefreshToken({
+      replaceExistingUserId: existingUser.id,
+      email: googleUser.email,
+      canonicalEmail,
+      selectedPlanId: planId,
+      providerUserId: googleUser.sub,
+      generateSession: (newUser) =>
+        generateTokens({
           ...newUser,
           emailVerified: true,
-        },
-        accessToken,
-        refreshToken: rawRefreshToken,
-      };
+        }),
     });
-
-    return result;
   }
 
   /**
    * Inicia sesión validando credenciales y emite nuevos tokens
    */
   static async login(input: LoginInput) {
+    const store = getAuthStore();
     const canonicalEmail = computeCanonicalEmail(input.email);
 
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.canonicalEmail, canonicalEmail))
-      .limit(1);
+    const user = await store.findUserByCanonicalEmail(canonicalEmail);
 
     const genericError = new Error('Email o contraseña incorrectos');
     (genericError as any).status = 401;
@@ -824,38 +605,25 @@ export class AuthService {
     const isVerified = Boolean(user.emailVerifiedAt);
 
     // Actualizar last_login_at
-    await db
-      .update(users)
-      .set({
-        selectedPlanId: planId,
-        lastLoginAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+    await store.updateUserFields(user.id, {
+      selectedPlanId: planId,
+      lastLoginAt: new Date(),
+    });
+    if (!user.selectedPlanId && planId) {
+      invalidateUserStatusCache(user.id);
+    }
 
     // Si la cuenta no está verificada, comprobar si ya tiene un código activo o generar uno
     if (!isVerified) {
-      const [activeCode] = await db
-        .select()
-        .from(emailVerificationCodes)
-        .where(
-          and(
-            eq(emailVerificationCodes.userId, user.id),
-            isNull(emailVerificationCodes.consumedAt),
-            gte(emailVerificationCodes.expiresAt, new Date())
-          )
-        )
-        .orderBy(desc(emailVerificationCodes.createdAt))
-        .limit(1);
+      const activeCode = await store.findLatestVerificationCode(user.id, true);
 
       if (!activeCode) {
         const rawCode = crypto.randomInt(100000, 1000000).toString();
         const codeHash = hashVerificationCode(rawCode, env.VERIFICATION_CODE_PEPPER);
-        await db.insert(emailVerificationCodes).values({
+        await store.createVerificationCode({
           userId: user.id,
           codeHash,
           expiresAt: new Date(Date.now() + 10 * 60 * 1000),
-          attempts: 0,
         });
         defaultMailer
           .sendVerificationCode({ to: user.email, code: rawCode })
@@ -866,12 +634,12 @@ export class AuthService {
     const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
       id: user.id,
       email: user.email,
-      role: user.role as 'user' | 'admin',
+      role: user.role,
       selectedPlanId: planId,
       emailVerified: isVerified,
     });
 
-    await db.insert(refreshTokens).values({
+    await store.insertRefreshToken({
       userId: user.id,
       tokenHash,
       expiresAt,
@@ -905,11 +673,8 @@ export class AuthService {
    * Valida el código de verificación de 6 dígitos ingresado por el usuario
    */
   static async verifyEmail(userId: string, inputCode: string) {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    const store = getAuthStore();
+    const user = await store.findUserById(userId);
 
     if (!user) {
       const err = new Error('Usuario no encontrado');
@@ -919,15 +684,16 @@ export class AuthService {
 
     if (user.emailVerifiedAt !== null) {
       // Ya verificado
+      const effectivePlanId = await ensureUserSelectedPlanId(user.id, user.selectedPlanId);
       const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
         id: user.id,
         email: user.email,
-        role: user.role as 'user' | 'admin',
-        selectedPlanId: user.selectedPlanId,
+        role: user.role,
+        selectedPlanId: effectivePlanId,
         emailVerified: true,
       });
 
-      await db.insert(refreshTokens).values({
+      await store.insertRefreshToken({
         userId: user.id,
         tokenHash,
         expiresAt,
@@ -938,7 +704,7 @@ export class AuthService {
           id: user.id,
           email: user.email,
           role: user.role,
-          selectedPlanId: user.selectedPlanId,
+          selectedPlanId: effectivePlanId,
           emailVerified: true,
         },
         accessToken,
@@ -947,17 +713,7 @@ export class AuthService {
     }
 
     // Buscar el código activo más reciente
-    const [activeCode] = await db
-      .select()
-      .from(emailVerificationCodes)
-      .where(
-        and(
-          eq(emailVerificationCodes.userId, userId),
-          isNull(emailVerificationCodes.consumedAt)
-        )
-      )
-      .orderBy(desc(emailVerificationCodes.createdAt))
-      .limit(1);
+    const activeCode = await store.findLatestVerificationCode(userId, false);
 
     if (!activeCode) {
       const err = new Error(
@@ -969,10 +725,7 @@ export class AuthService {
 
     // Comprobar expiración
     if (activeCode.expiresAt.getTime() < Date.now()) {
-      await db
-        .update(emailVerificationCodes)
-        .set({ consumedAt: new Date() })
-        .where(eq(emailVerificationCodes.id, activeCode.id));
+      await store.consumeVerificationCode(activeCode.id);
 
       const err = new Error(
         'El código de verificación ha expirado. Por favor solicitá uno nuevo.'
@@ -983,10 +736,7 @@ export class AuthService {
 
     // Comprobar intentos fallidos
     if (activeCode.attempts >= 5) {
-      await db
-        .update(emailVerificationCodes)
-        .set({ consumedAt: new Date() })
-        .where(eq(emailVerificationCodes.id, activeCode.id));
+      await store.consumeVerificationCode(activeCode.id);
 
       const err = new Error(
         'Se superó el límite de 5 intentos fallidos para este código. Por favor solicitá uno nuevo.'
@@ -1000,13 +750,11 @@ export class AuthService {
 
     if (!isMatch) {
       const nextAttempts = activeCode.attempts + 1;
-      await db
-        .update(emailVerificationCodes)
-        .set({
-          attempts: nextAttempts,
-          consumedAt: nextAttempts >= 5 ? new Date() : null,
-        })
-        .where(eq(emailVerificationCodes.id, activeCode.id));
+      await store.incrementVerificationAttempts(
+        activeCode.id,
+        nextAttempts,
+        nextAttempts >= 5 ? new Date() : null
+      );
 
       if (nextAttempts >= 5) {
         const err = new Error(
@@ -1025,31 +773,26 @@ export class AuthService {
     }
 
     // Código correcto: marcar como consumido y verificar usuario
-    await db.transaction(async (tx) => {
-      await tx
-        .update(emailVerificationCodes)
-        .set({ consumedAt: new Date() })
-        .where(eq(emailVerificationCodes.id, activeCode.id));
-
-      await tx
-        .update(users)
-        .set({
-          emailVerifiedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId));
+    const effectivePlanId = user.selectedPlanId || (await resolvePublishedOrDefaultPlanId(null));
+    await store.completeEmailVerification({
+      codeId: activeCode.id,
+      userId,
+      selectedPlanId: !user.selectedPlanId && effectivePlanId ? effectivePlanId : undefined,
     });
+    if (!user.selectedPlanId && effectivePlanId) {
+      invalidateUserStatusCache(user.id);
+    }
 
     // Reemitir tokens con claim emailVerified: true
     const { accessToken, rawRefreshToken, tokenHash, expiresAt } = generateTokens({
       id: user.id,
       email: user.email,
-      role: user.role as 'user' | 'admin',
-      selectedPlanId: user.selectedPlanId,
+      role: user.role,
+      selectedPlanId: effectivePlanId,
       emailVerified: true,
     });
 
-    await db.insert(refreshTokens).values({
+    await store.insertRefreshToken({
       userId: user.id,
       tokenHash,
       expiresAt,
@@ -1060,7 +803,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         role: user.role,
-        selectedPlanId: user.selectedPlanId,
+        selectedPlanId: effectivePlanId,
         emailVerified: true,
       },
       accessToken,
@@ -1225,13 +968,9 @@ export class AuthService {
       throw err;
     }
 
+    const store = getAuthStore();
     const incomingHash = hashToken(rawRefreshToken);
-
-    const [tokenRecord] = await db
-      .select()
-      .from(refreshTokens)
-      .where(eq(refreshTokens.tokenHash, incomingHash))
-      .limit(1);
+    const tokenRecord = await store.findRefreshTokenByHash(incomingHash);
 
     if (!tokenRecord) {
       const err = new Error('Sesión inválida');
@@ -1246,27 +985,20 @@ export class AuthService {
       const elapsed = now - revokedTime;
 
       if (elapsed <= REFRESH_GRACE_WINDOW_MS && tokenRecord.replacedByHash) {
-        const [replacement] = await db
-          .select()
-          .from(refreshTokens)
-          .where(eq(refreshTokens.tokenHash, tokenRecord.replacedByHash))
-          .limit(1);
+        const replacement = await store.findRefreshTokenByHash(tokenRecord.replacedByHash);
 
         if (replacement && !replacement.revokedAt && replacement.expiresAt.getTime() > now) {
-          const [user] = await db
-            .select()
-            .from(users)
-            .where(eq(users.id, tokenRecord.userId))
-            .limit(1);
+          const user = await store.findUserById(tokenRecord.userId);
 
           if (user) {
+            const effectivePlanId = await ensureUserSelectedPlanId(user.id, user.selectedPlanId);
             const isVerified = Boolean(user.emailVerifiedAt);
             const accessToken = jwt.sign(
               {
                 id: user.id,
                 email: user.email,
                 role: user.role,
-                selectedPlanId: user.selectedPlanId,
+                selectedPlanId: effectivePlanId,
                 emailVerified: isVerified,
               },
               env.JWT_SECRET,
@@ -1278,7 +1010,7 @@ export class AuthService {
                 id: user.id,
                 email: user.email,
                 role: user.role,
-                selectedPlanId: user.selectedPlanId,
+                selectedPlanId: effectivePlanId,
                 emailVerified: isVerified,
               },
               accessToken,
@@ -1288,10 +1020,7 @@ export class AuthService {
         }
       }
 
-      await db
-        .update(refreshTokens)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(eq(refreshTokens.userId, tokenRecord.userId));
+      await store.revokeAllUserRefreshTokens(tokenRecord.userId);
 
       console.warn(
         `🚨 ALERTA DE SEGURIDAD: Reutilización de refresh token detectada para user_id: ${tokenRecord.userId}.`
@@ -1303,10 +1032,7 @@ export class AuthService {
     }
 
     if (tokenRecord.expiresAt.getTime() < now) {
-      await db
-        .update(refreshTokens)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(eq(refreshTokens.id, tokenRecord.id));
+      await store.revokeRefreshToken(tokenRecord.id);
 
       const err = new Error('Sesión expirada');
       (err as any).status = 401;
@@ -1314,32 +1040,23 @@ export class AuthService {
     }
 
     const liveUser = await getUserLiveStatus(tokenRecord.userId);
-    let user = liveUser
+    const dbUser =
+      !liveUser || liveUser.selectedPlanId === undefined
+        ? await store.findUserById(tokenRecord.userId)
+        : null;
+    const user = liveUser
       ? {
           id: liveUser.id,
           email: liveUser.email,
           role: liveUser.role,
           status: liveUser.status,
           emailVerifiedAt: liveUser.emailVerified ? new Date() : null,
-          selectedPlanId: null as string | null,
+          selectedPlanId:
+            liveUser.selectedPlanId !== undefined
+              ? liveUser.selectedPlanId
+              : (dbUser?.selectedPlanId ?? null),
         }
-      : null;
-
-    if (!user) {
-      const [dbUser] = await db
-        .select()
-        .from(users)
-        .where(eq(users.id, tokenRecord.userId))
-        .limit(1);
-      user = dbUser ? {
-        id: dbUser.id,
-        email: dbUser.email,
-        role: dbUser.role as 'user' | 'admin',
-        status: dbUser.status as 'active' | 'suspended',
-        emailVerifiedAt: dbUser.emailVerifiedAt,
-        selectedPlanId: dbUser.selectedPlanId,
-      } : null;
-    }
+      : dbUser;
 
     if (!user) {
       const err = new Error('Usuario no encontrado');
@@ -1348,10 +1065,7 @@ export class AuthService {
     }
 
     if (user.status === 'suspended') {
-      await db
-        .update(refreshTokens)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(eq(refreshTokens.userId, user.id));
+      await store.revokeAllUserRefreshTokens(user.id);
       const err = new Error('Tu cuenta ha sido suspendida. Si creés que se trata de un error, contactá a soporte.');
       (err as any).status = 403;
       (err as any).code = 'ACCOUNT_SUSPENDED';
@@ -1359,6 +1073,7 @@ export class AuthService {
     }
 
     const isVerified = Boolean(user.emailVerifiedAt);
+    const effectivePlanId = await ensureUserSelectedPlanId(user.id, user.selectedPlanId);
 
     const {
       accessToken,
@@ -1368,26 +1083,16 @@ export class AuthService {
     } = generateTokens({
       id: user.id,
       email: user.email,
-      role: user.role as 'user' | 'admin',
-      selectedPlanId: user.selectedPlanId,
+      role: user.role,
+      selectedPlanId: effectivePlanId,
       emailVerified: isVerified,
     });
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(refreshTokens)
-        .set({
-          revokedAt: new Date(),
-          replacedByHash: newHash,
-          updatedAt: new Date(),
-        })
-        .where(eq(refreshTokens.id, tokenRecord.id));
-
-      await tx.insert(refreshTokens).values({
-        userId: user.id,
-        tokenHash: newHash,
-        expiresAt,
-      });
+    await store.rotateRefreshToken({
+      oldTokenId: tokenRecord.id,
+      userId: user.id,
+      newHash,
+      expiresAt,
     });
 
     return {
@@ -1395,7 +1100,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         role: user.role,
-        selectedPlanId: user.selectedPlanId,
+        selectedPlanId: effectivePlanId,
         emailVerified: isVerified,
       },
       accessToken,
@@ -1409,10 +1114,7 @@ export class AuthService {
   static async logout(rawRefreshToken?: string) {
     if (rawRefreshToken) {
       const tokenHash = hashToken(rawRefreshToken);
-      await db
-        .update(refreshTokens)
-        .set({ revokedAt: new Date(), updatedAt: new Date() })
-        .where(eq(refreshTokens.tokenHash, tokenHash));
+      await getAuthStore().logoutByTokenHash(tokenHash);
     }
     return { success: true };
   }
@@ -1421,20 +1123,8 @@ export class AuthService {
    * Obtiene datos del usuario autenticado con estado de verificación e identidades
    */
   static async getMe(userId: string) {
-    const [user] = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        role: users.role,
-        selectedPlanId: users.selectedPlanId,
-        emailVerifiedAt: users.emailVerifiedAt,
-        passwordHash: users.passwordHash,
-        lastLoginAt: users.lastLoginAt,
-        createdAt: users.createdAt,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    const store = getAuthStore();
+    const user = await store.findUserById(userId);
 
     if (!user) {
       const err = new Error('Usuario no encontrado');
@@ -1442,26 +1132,14 @@ export class AuthService {
       throw err;
     }
 
-    let selectedPlanId = user.selectedPlanId;
-    if (!selectedPlanId) {
-      selectedPlanId = await resolvePublishedOrDefaultPlanId(null);
-      if (selectedPlanId) {
-        await db
-          .update(users)
-          .set({ selectedPlanId, updatedAt: new Date() })
-          .where(eq(users.id, user.id));
-      }
-    }
+    const selectedPlanId = await ensureUserSelectedPlanId(user.id, user.selectedPlanId);
 
     // Identidades vinculadas (ej. Google)
-    const identities = await db
-      .select({ provider: userIdentities.provider })
-      .from(userIdentities)
-      .where(eq(userIdentities.userId, user.id));
+    const identityProviders = await store.listUserIdentityProviders(user.id);
 
     const authProviders = Array.from(
       new Set([
-        ...identities.map((i) => i.provider),
+        ...identityProviders,
         ...(user.passwordHash ? ['password'] : []),
       ])
     );
