@@ -303,6 +303,7 @@ function buildNormalizedIsiCatalogFromSeed(): ActivePlanCatalog {
     return {
       id,
       codeInPlan: s.codeInPlan,
+      displayCode: (s as { displayCode?: string | null }).displayCode ?? null,
       name: s.name,
       shortName: s.shortName,
       level: s.level,

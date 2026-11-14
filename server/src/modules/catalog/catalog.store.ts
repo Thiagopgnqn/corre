@@ -168,6 +168,7 @@ export class InMemoryCatalogStore implements CatalogStore {
       acronyms?: Array<{ acronym: string; subjectCode: number }>;
       subjects: Array<{
         codeInPlan: number;
+        displayCode?: string | null;
         name: string;
         shortName: string;
         level: number;
@@ -246,6 +247,7 @@ export class InMemoryCatalogStore implements CatalogStore {
       return {
         id: uuid,
         codeInPlan: s.codeInPlan,
+        displayCode: s.displayCode ?? null,
         name: s.name,
         shortName: s.shortName,
         level: s.level,

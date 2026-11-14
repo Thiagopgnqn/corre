@@ -774,10 +774,92 @@ async function main() {
     '0013 maneja estado parcial sin pisar shortLabel/claves custom existentes y respeta custom name/description'
   );
 
+  const hasJournal0013 = journal.entries.some(
+    (e: any) => e?.idx === 13 && e?.tag === '0013_isi_plan_intermediate_and_pps_copy'
+  );
+  assert(
+    hasJournal0013,
+    'meta/_journal.json registra 0013_isi_plan_intermediate_and_pps_copy'
+  );
+
+  // 1e-bis. Migración 0014 (subjects.display_code, dos corridas y desacoplamiento E-/X-)
+  console.log('\n📌 1e-bis. Migración 0014 (subjects.display_code, dos corridas y desacoplamiento E-/X-)');
+  const sql0014Path = path.resolve(__dirname, '../drizzle/0014_subject_display_code.sql');
+  const sql0014 = fs.readFileSync(sql0014Path, 'utf8');
+
+  assert(
+    sql0014.split('--> statement-breakpoint').filter((s) => s.trim()).length === 2 &&
+      !/\b(DROP|DELETE|TRUNCATE)\b/i.test(sql0014) &&
+      /ALTER TABLE "subjects"\s+ADD COLUMN IF NOT EXISTS "display_code"\s+varchar\(32\)/i.test(sql0014) &&
+      /\bWITH\s+upd\s+AS\s*\(\s*UPDATE\s+"subjects"\s+s\b/i.test(sql0014) &&
+      /\bs\."display_code"\s+IS\s+NULL\b/i.test(sql0014) &&
+      sql0014.includes(`c."code" = 'ISI'`) &&
+      sql0014.includes(`'X-' || s."code_in_plan"::text`) &&
+      sql0014.includes(`'E-' || s."code_in_plan"::text`) &&
+      sql0014.includes(`ELSE s."code_in_plan"::text`) &&
+      sql0014.includes(`INSERT INTO "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql0014),
+    '0014 usa ADD COLUMN IF NOT EXISTS y CTE única idempotente sobre display_code IS NULL con bump condicional'
+  );
+
+  const simulate0014Run = (
+    rows: Array<{
+      id: string;
+      careerCode: string;
+      year: number;
+      codeInPlan: number;
+      kind: string;
+      displayCode: string | null;
+    }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    let updatedRows = 0;
+    for (const s of rows) {
+      if (s.displayCode !== null) continue;
+      if (s.careerCode === 'ISI' && s.year === 2023 && s.kind === 'electiva') {
+        s.displayCode = [408, 512, 513, 514].includes(s.codeInPlan)
+          ? `X-${s.codeInPlan}`
+          : `E-${s.codeInPlan}`;
+      } else {
+        s.displayCode = String(s.codeInPlan);
+      }
+      updatedRows += 1;
+    }
+    if (updatedRows > 0) {
+      versions.set('default', `v-${fakeTs}-${fakeHex}`);
+    }
+    return { updatedRows, version: versions.get('default') || null };
+  };
+
+  const sim0014Rows = [
+    { id: 'isi-1', careerCode: 'ISI', year: 2023, codeInPlan: 1, kind: 'obligatoria', displayCode: null },
+    { id: 'isi-301', careerCode: 'ISI', year: 2023, codeInPlan: 301, kind: 'electiva', displayCode: null },
+    { id: 'isi-408', careerCode: 'ISI', year: 2023, codeInPlan: 408, kind: 'electiva', displayCode: null },
+    { id: 'isi-custom', careerCode: 'ISI', year: 2023, codeInPlan: 509, kind: 'electiva', displayCode: 'CUSTOM-509' },
+    { id: 'mec-301', careerCode: 'MEC', year: 2026, codeInPlan: 301, kind: 'electiva', displayCode: null },
+  ];
+  const sim0014Versions = new Map<string, string>([['default', 'v-1700001700000-000000']]);
+  const run0014First = simulate0014Run(sim0014Rows, sim0014Versions, 1700001800111, 'ee4455');
+  const run0014Second = simulate0014Run(sim0014Rows, sim0014Versions, 1700001900222, 'ff6677');
+  assert(
+    run0014First.updatedRows === 4 &&
+      run0014First.version === 'v-1700001800111-ee4455' &&
+      sim0014Rows[0].displayCode === '1' &&
+      sim0014Rows[1].displayCode === 'E-301' &&
+      sim0014Rows[2].displayCode === 'X-408' &&
+      sim0014Rows[3].displayCode === 'CUSTOM-509' &&
+      sim0014Rows[4].displayCode === '301' &&
+      run0014Second.updatedRows === 0 &&
+      run0014Second.version === run0014First.version,
+    '0014 backfillea ISI E-/X- y deja no-ISI sin prefijo E-/X-, respeta valores previos y es no-op en corrida 2'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 13 && lastJournalEntry?.tag === '0013_isi_plan_intermediate_and_pps_copy',
-    'meta/_journal.json registra 0013_isi_plan_intermediate_and_pps_copy como última entrada'
+    lastJournalEntry?.idx === 14 && lastJournalEntry?.tag === '0014_subject_display_code',
+    'meta/_journal.json registra 0014_subject_display_code como última entrada'
   );
 
   // 1f. Integridad global de _journal.json y simulación exacta de drizzle-orm migrate
@@ -853,7 +935,7 @@ async function main() {
     return pending;
   };
 
-  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0013 en orden
+  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0014 en orden
   const prod0007 = journalEntries.find((e) => e.idx === 7);
   const pendingFromProd = simulateDrizzlePending(
     journalEntries,
@@ -869,12 +951,13 @@ async function main() {
           '0011_isi_plan_integrator_subjects',
           '0012_isi_plan_special_rules_descriptions',
           '0013_isi_plan_intermediate_and_pps_copy',
+          '0014_subject_display_code',
         ]),
-    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0013 en orden',
+    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0014 en orden',
     `pendientes=${JSON.stringify(pendingFromProd)}`
   );
 
-  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0013 en orden
+  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0014 en orden
   const trial0010 = journalEntries.find((e) => e.idx === 10);
   const pendingFromTrial0010 = simulateDrizzlePending(
     journalEntries,
@@ -887,9 +970,23 @@ async function main() {
           '0011_isi_plan_integrator_subjects',
           '0012_isi_plan_special_rules_descriptions',
           '0013_isi_plan_intermediate_and_pps_copy',
+          '0014_subject_display_code',
         ]),
-    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0013 en orden',
+    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0014 en orden',
     `pendientes=${JSON.stringify(pendingFromTrial0010)}`
+  );
+
+  // (d2) Producción Etapa 1 en 0013 (when = 1793730000000) -> pendiente 0014 únicamente
+  const prod0013 = journalEntries.find((e) => e.idx === 13);
+  const pendingFromProd0013 = simulateDrizzlePending(
+    journalEntries,
+    prod0013 ? { created_at: prod0013.when } : { created_at: 1793730000000 }
+  );
+  assert(
+    prod0013?.when === 1793730000000 &&
+      JSON.stringify(pendingFromProd0013) === JSON.stringify(['0014_subject_display_code']),
+    '(d2) Simulación drizzle-orm desde 0013 (1793730000000) aplica únicamente 0014_subject_display_code',
+    `pendientes=${JSON.stringify(pendingFromProd0013)}`
   );
 
   // (e) Base vacía (sin filas en __drizzle_migrations) -> todas pendientes
@@ -897,7 +994,7 @@ async function main() {
   assert(
     pendingFromEmpty.length === journalEntries.length &&
       JSON.stringify(pendingFromEmpty) === JSON.stringify(journalEntries.map((e) => e.tag)),
-    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0013)',
+    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0014)',
     `pendientes=${JSON.stringify(pendingFromEmpty)}`
   );
 
@@ -1042,13 +1139,14 @@ async function main() {
     '(f6) Base vacía (dbRows = []) detecta todas las migraciones faltantes y falla'
   );
 
-  // (g) Demo rojo-verde: _journal.json pre-fix (c5d321f) vs corregido (c04fbb9)
+  // (g) Demo rojo-verde: _journal.json pre-fix (c5d321f) vs corregido (c04fbb9) sobre corte histórico 0000..0013
+  const historical0013Entries = localEntries.slice(0, 14);
   const brokenTimestamps = new Map<number, number>([
     [11, 1776729600000],
     [12, 1776816000000],
     [13, 1776902400000],
   ]);
-  const c5d321fEntries = localEntries.map((e) => ({
+  const c5d321fEntries = historical0013Entries.map((e) => ({
     ...e,
     when: brokenTimestamps.get(e.idx) ?? e.when,
   }));
@@ -1086,8 +1184,8 @@ async function main() {
     postMigrateGuardError = (err as Error).message;
   }
 
-  // Verde: c04fbb9 (HEAD) aplica 0011..0013 desde 0010 y pasa pre-check + verifyMigrationState
-  const c04fbb9AppliedTags = simulateDrizzlePending(localEntries, { created_at: 1793700000000 });
+  // Verde: corte 0013 (c04fbb9) aplica 0011..0013 desde 0010 y el journal actual completo pasa pre-check + verifyMigrationState
+  const c04fbb9AppliedTags = simulateDrizzlePending(historical0013Entries, { created_at: 1793700000000 });
   let greenError: Error | null = null;
   try {
     assertJournalStrictlyIncreasing(localEntries);
@@ -1106,7 +1204,7 @@ async function main() {
       postMigrateGuardError.includes('0013_isi_plan_intermediate_and_pps_copy') &&
       c04fbb9AppliedTags.length === 3 &&
       greenError === null,
-    '(g) Demo rojo-verde: _journal.json pre-fix (c5d321f) frena el incidente 0011-0013 y c04fbb9 pasa'
+    '(g) Demo rojo-verde: _journal.json pre-fix (c5d321f) frena el incidente 0011-0013 y c04fbb9/HEAD pasa'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
@@ -1338,6 +1436,53 @@ async function main() {
         !('ppsSubjectCode' in exposedPlans[0].plan.config) &&
         exposedPlans[0].plan.config.ppsRequirement?.referenceSubjectCode === 36,
       'GET /api/catalog/careers expone únicamente planes publicados+activos en carreras publicadas sin ppsSubjectCode'
+    );
+
+    // 3d-bis. Electivas de otra carrera (no ISI 2023) nunca reciben prefijo E-/X- hardcoded
+    const indPlan = store.seedPlanFromCatalogJson(
+      {
+        ...catalogJson,
+        career: { name: 'Ingeniería Industrial', code: 'IND' },
+        studyPlan: { name: 'Plan 2025', year: 2025, isActive: true, config: { totalLevels: 5, levelLabel: 'Año' } },
+        subjects: [
+          {
+            codeInPlan: 301,
+            displayCode: null,
+            name: 'Electiva Sin Prefijo',
+            shortName: 'Elec. 301',
+            level: 3,
+            modality: '1C',
+            contraCuatrimestral: false,
+            weeklyHours: 4,
+            kind: 'electiva',
+            credits: 3,
+          },
+          {
+            codeInPlan: 408,
+            displayCode: 'OPT-408',
+            name: 'Electiva Display Explícito',
+            shortName: 'Opt. 408',
+            level: 4,
+            modality: '2C',
+            contraCuatrimestral: false,
+            weeklyHours: 4,
+            kind: 'electiva',
+            credits: 3,
+          },
+        ],
+        specialRules: [],
+        acronyms: [],
+      },
+      { careerStatus: 'published', planStatus: 'published', isActive: true }
+    );
+    const indRes = await fetch(`${baseUrl}/api/catalog/plans/${indPlan.planId}`);
+    const indBody = (await indRes.json()) as any;
+    const indSubjById = new Map<number, any>((indBody.data?.subjects || []).map((s: any) => [s.id, s]));
+    assert(
+      indRes.status === 200 &&
+        indSubjById.get(301)?.code === '301' &&
+        indSubjById.get(408)?.code === 'OPT-408',
+      'Electivas de planes no-ISI no reciben prefijo E-/X- hardcoded y respetan displayCode explícito'
     );
 
     // 3e. current cuando no hay ningún plan publicado -> 404

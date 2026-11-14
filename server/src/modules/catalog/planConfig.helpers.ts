@@ -29,6 +29,7 @@ export interface NormalizedPlanConfig {
 export interface CatalogSubjectInput {
   id: string;
   codeInPlan: number;
+  displayCode?: string | null;
   name: string;
   shortName: string;
   level: number;
@@ -234,17 +235,27 @@ export interface BuildPlanCatalogInput {
 const X_PREFIX_ELECTIVE_CODES = new Set([408, 512, 513, 514]);
 
 /**
- * Formats the display code for a subject badge (`#1`, `#E-301`, `#X-408`) matching legacy fixtures.
+ * Formats the display code for a subject badge (`#1`, `#E-301`, `#X-408`).
+ * Prefers persisted `subject.displayCode`; legacy `E-`/`X-` fallback is strictly scoped to ISI Plan 2023.
  */
-export function formatSubjectDisplayCode(subject: {
-  codeInPlan: number;
-  kind: string;
-}): string {
-  if (subject.kind !== 'electiva') {
-    return String(subject.codeInPlan);
+export function formatSubjectDisplayCode(
+  subject: {
+    codeInPlan: number;
+    kind: string;
+    displayCode?: string | null;
+  },
+  options?: { careerCode?: string | null; planYear?: number | null }
+): string {
+  if (typeof subject.displayCode === 'string' && subject.displayCode.trim().length > 0) {
+    return subject.displayCode.trim();
   }
-  const prefix = X_PREFIX_ELECTIVE_CODES.has(subject.codeInPlan) ? 'X-' : 'E-';
-  return `${prefix}${subject.codeInPlan}`;
+  const isLegacyIsi2023 =
+    options?.careerCode?.toUpperCase() === 'ISI' && options?.planYear === 2023;
+  if (isLegacyIsi2023 && subject.kind === 'electiva') {
+    const prefix = X_PREFIX_ELECTIVE_CODES.has(subject.codeInPlan) ? 'X-' : 'E-';
+    return `${prefix}${subject.codeInPlan}`;
+  }
+  return String(subject.codeInPlan);
 }
 
 export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
@@ -298,7 +309,10 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
     return {
       id: s.codeInPlan,
       uuid: s.id,
-      code: formatSubjectDisplayCode(s),
+      code: formatSubjectDisplayCode(s, {
+        careerCode: career?.code ?? null,
+        planYear: plan.year,
+      }),
       shortName: s.shortName,
       name: s.name,
       level: s.level,

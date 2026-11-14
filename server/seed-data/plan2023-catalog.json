@@ -110,6 +110,7 @@
   "subjects": [
     {
       "codeInPlan": 1,
+      "displayCode": "1",
       "name": "Análisis Matemático 1",
       "shortName": "Análisis Mat. 1",
       "level": 1,
@@ -126,6 +127,7 @@
     },
     {
       "codeInPlan": 2,
+      "displayCode": "2",
       "name": "Álgebra y Geometría Analítica",
       "shortName": "Álgebra y Geom.",
       "level": 1,
@@ -142,6 +144,7 @@
     },
     {
       "codeInPlan": 3,
+      "displayCode": "3",
       "name": "Física 1",
       "shortName": "Física 1",
       "level": 1,
@@ -158,6 +161,7 @@
     },
     {
       "codeInPlan": 4,
+      "displayCode": "4",
       "name": "Inglés 1",
       "shortName": "Inglés 1",
       "level": 1,
@@ -174,6 +178,7 @@
     },
     {
       "codeInPlan": 5,
+      "displayCode": "5",
       "name": "Lógica y Estructuras Discretas",
       "shortName": "Lógica y Estruct.",
       "level": 1,
@@ -190,6 +195,7 @@
     },
     {
       "codeInPlan": 6,
+      "displayCode": "6",
       "name": "Algoritmos y Estructuras de Datos",
       "shortName": "Algoritmos (AED)",
       "level": 1,
@@ -206,6 +212,7 @@
     },
     {
       "codeInPlan": 7,
+      "displayCode": "7",
       "name": "Arquitectura de Computadoras",
       "shortName": "Arquitectura (ACO)",
       "level": 1,
@@ -222,6 +229,7 @@
     },
     {
       "codeInPlan": 8,
+      "displayCode": "8",
       "name": "Sistemas y Procesos de Negocio",
       "shortName": "Sist. y Procesos (SPN)",
       "level": 1,
@@ -238,6 +246,7 @@
     },
     {
       "codeInPlan": 11,
+      "displayCode": "11",
       "name": "Ingeniería y Sociedad",
       "shortName": "Ing. y Sociedad",
       "level": 1,
@@ -254,6 +263,7 @@
     },
     {
       "codeInPlan": 9,
+      "displayCode": "9",
       "name": "Análisis Matemático 2",
       "shortName": "Análisis Mat. 2",
       "level": 2,
@@ -273,6 +283,7 @@
     },
     {
       "codeInPlan": 10,
+      "displayCode": "10",
       "name": "Física 2",
       "shortName": "Física 2",
       "level": 2,
@@ -292,6 +303,7 @@
     },
     {
       "codeInPlan": 12,
+      "displayCode": "12",
       "name": "Inglés 2",
       "shortName": "Inglés 2",
       "level": 2,
@@ -310,6 +322,7 @@
     },
     {
       "codeInPlan": 13,
+      "displayCode": "13",
       "name": "Sintaxis y Semántica de los Lenguajes",
       "shortName": "Sintaxis (SSL)",
       "level": 2,
@@ -329,6 +342,7 @@
     },
     {
       "codeInPlan": 14,
+      "displayCode": "14",
       "name": "Paradigmas de Programación",
       "shortName": "Paradigmas (PPR)",
       "level": 2,
@@ -348,6 +362,7 @@
     },
     {
       "codeInPlan": 15,
+      "displayCode": "15",
       "name": "Sistemas Operativos",
       "shortName": "Sistemas Operativos",
       "level": 2,
@@ -366,6 +381,7 @@
     },
     {
       "codeInPlan": 16,
+      "displayCode": "16",
       "name": "Análisis de Sistemas de Información",
       "shortName": "Análisis de Sistemas",
       "level": 2,
@@ -385,6 +401,7 @@
     },
     {
       "codeInPlan": 17,
+      "displayCode": "17",
       "name": "Probabilidad y Estadísticas",
       "shortName": "Probabilidad y Est.",
       "level": 2,
@@ -404,6 +421,7 @@
     },
     {
       "codeInPlan": 18,
+      "displayCode": "18",
       "name": "Economía",
       "shortName": "Economía",
       "level": 3,
@@ -423,6 +441,7 @@
     },
     {
       "codeInPlan": 19,
+      "displayCode": "19",
       "name": "Bases de Datos",
       "shortName": "Bases de Datos",
       "level": 3,
@@ -445,6 +464,7 @@
     },
     {
       "codeInPlan": 20,
+      "displayCode": "20",
       "name": "Desarrollo de Software",
       "shortName": "Desarrollo Software (DDS)",
       "level": 3,
@@ -467,6 +487,7 @@
     },
     {
       "codeInPlan": 21,
+      "displayCode": "21",
       "name": "Comunicación de Datos",
       "shortName": "Com. de Datos",
       "level": 3,
@@ -486,6 +507,7 @@
     },
     {
       "codeInPlan": 22,
+      "displayCode": "22",
       "name": "Análisis Numérico",
       "shortName": "Análisis Numérico",
       "level": 3,
@@ -507,6 +529,7 @@
     },
     {
       "codeInPlan": 23,
+      "displayCode": "23",
       "name": "Diseño de Sistemas de Información",
       "shortName": "Diseño de Sist. (DSI)",
       "level": 3,
@@ -530,6 +553,7 @@
     },
     {
       "codeInPlan": 99,
+      "displayCode": "99",
       "name": "Seminario Integrador (Analista)",
       "shortName": "Seminario Integrador",
       "level": 3,
@@ -553,6 +577,7 @@
     },
     {
       "codeInPlan": 24,
+      "displayCode": "24",
       "name": "Legislación",
       "shortName": "Legislación",
       "level": 4,
@@ -571,6 +596,7 @@
     },
     {
       "codeInPlan": 25,
+      "displayCode": "25",
       "name": "Ingeniería y Calidad de Software",
       "shortName": "Calidad de Software",
       "level": 4,
@@ -594,6 +620,7 @@
     },
     {
       "codeInPlan": 26,
+      "displayCode": "26",
       "name": "Redes de Datos",
       "shortName": "Redes de Datos (RDA)",
       "level": 4,
@@ -613,6 +640,7 @@
     },
     {
       "codeInPlan": 27,
+      "displayCode": "27",
       "name": "Investigación Operativa",
       "shortName": "Investigación Operativa",
       "level": 4,
@@ -632,6 +660,7 @@
     },
     {
       "codeInPlan": 28,
+      "displayCode": "28",
       "name": "Simulación",
       "shortName": "Simulación",
       "level": 4,
@@ -652,6 +681,7 @@
     },
     {
       "codeInPlan": 29,
+      "displayCode": "29",
       "name": "Tecnologías para la Automatización",
       "shortName": "Automatización (TPA)",
       "level": 4,
@@ -673,6 +703,7 @@
     },
     {
       "codeInPlan": 30,
+      "displayCode": "30",
       "name": "Administración de Sistemas de Información",
       "shortName": "Admin. de Sistemas",
       "level": 4,
@@ -694,6 +725,7 @@
     },
     {
       "codeInPlan": 31,
+      "displayCode": "31",
       "name": "Inteligencia Artificial",
       "shortName": "Inteligencia Artificial",
       "level": 5,
@@ -715,6 +747,7 @@
     },
     {
       "codeInPlan": 32,
+      "displayCode": "32",
       "name": "Ciencia de Datos",
       "shortName": "Ciencia de Datos",
       "level": 5,
@@ -736,6 +769,7 @@
     },
     {
       "codeInPlan": 33,
+      "displayCode": "33",
       "name": "Sistemas de Gestión",
       "shortName": "Sistemas de Gestión",
       "level": 5,
@@ -757,6 +791,7 @@
     },
     {
       "codeInPlan": 34,
+      "displayCode": "34",
       "name": "Gestión Gerencial",
       "shortName": "Gestión Gerencial",
       "level": 5,
@@ -778,6 +813,7 @@
     },
     {
       "codeInPlan": 35,
+      "displayCode": "35",
       "name": "Seguridad en los Sistemas de Información",
       "shortName": "Seguridad en Sistemas",
       "level": 5,
@@ -800,6 +836,7 @@
     },
     {
       "codeInPlan": 36,
+      "displayCode": "36",
       "name": "Proyecto Final",
       "shortName": "Proyecto Final",
       "level": 5,
@@ -824,6 +861,7 @@
     },
     {
       "codeInPlan": 301,
+      "displayCode": "E-301",
       "name": "Backend de Aplicaciones",
       "shortName": "Backend de Aplicaciones",
       "level": 3,
@@ -845,6 +883,7 @@
     },
     {
       "codeInPlan": 401,
+      "displayCode": "E-401",
       "name": "Green Software",
       "shortName": "Green Software",
       "level": 4,
@@ -867,6 +906,7 @@
     },
     {
       "codeInPlan": 402,
+      "displayCode": "E-402",
       "name": "Gestión Industrial de la Producción",
       "shortName": "Gestión Industrial de la Producción",
       "level": 4,
@@ -888,6 +928,7 @@
     },
     {
       "codeInPlan": 403,
+      "displayCode": "E-403",
       "name": "Gestión de la Mejora de los Procesos",
       "shortName": "Gestión de la Mejora de los Procesos",
       "level": 4,
@@ -909,6 +950,7 @@
     },
     {
       "codeInPlan": 404,
+      "displayCode": "E-404",
       "name": "Desarrollo y Operaciones DevOps",
       "shortName": "Desarrollo y Operaciones DevOps",
       "level": 4,
@@ -931,6 +973,7 @@
     },
     {
       "codeInPlan": 405,
+      "displayCode": "E-405",
       "name": "Desarrollo de Aplicaciones con Objetos",
       "shortName": "Aplic. con Objetos (DAO)",
       "level": 4,
@@ -951,6 +994,7 @@
     },
     {
       "codeInPlan": 406,
+      "displayCode": "E-406",
       "name": "Comunicación Multimedial en el Desarrollo de Sistemas de Información",
       "shortName": "Comunicación Multimedial en el Desarrollo de Sistemas de Información",
       "level": 4,
@@ -972,6 +1016,7 @@
     },
     {
       "codeInPlan": 407,
+      "displayCode": "E-407",
       "name": "Arquitectura de Software",
       "shortName": "Arquitectura de Software",
       "level": 4,
@@ -994,6 +1039,7 @@
     },
     {
       "codeInPlan": 501,
+      "displayCode": "E-501",
       "name": "Desarrollo de Tecnologías Blockchain",
       "shortName": "Desarrollo de Tecnologías Blockchain",
       "level": 5,
@@ -1016,6 +1062,7 @@
     },
     {
       "codeInPlan": 502,
+      "displayCode": "E-502",
       "name": "Creatividad e Innovación en Ingeniería",
       "shortName": "Creatividad e Innovación en Ingeniería",
       "level": 5,
@@ -1036,6 +1083,7 @@
     },
     {
       "codeInPlan": 503,
+      "displayCode": "E-503",
       "name": "Auditoría de SI/TI",
       "shortName": "Auditoría de SI/TI",
       "level": 5,
@@ -1056,6 +1104,7 @@
     },
     {
       "codeInPlan": 504,
+      "displayCode": "E-504",
       "name": "Gerenciamiento Estratégico",
       "shortName": "Gerenciamiento Estratégico",
       "level": 5,
@@ -1076,6 +1125,7 @@
     },
     {
       "codeInPlan": 505,
+      "displayCode": "E-505",
       "name": "Consultoría en Negocios Digitales",
       "shortName": "Consultoría en Negocios Digitales",
       "level": 5,
@@ -1096,6 +1146,7 @@
     },
     {
       "codeInPlan": 506,
+      "displayCode": "E-506",
       "name": "Emprendimientos Tecnológicos",
       "shortName": "Emprendimientos Tecnológicos",
       "level": 5,
@@ -1117,6 +1168,7 @@
     },
     {
       "codeInPlan": 507,
+      "displayCode": "E-507",
       "name": "Decisiones en Escenarios Complejos",
       "shortName": "Decisiones (DEC)",
       "level": 5,
@@ -1137,6 +1189,7 @@
     },
     {
       "codeInPlan": 508,
+      "displayCode": "E-508",
       "name": "Testing de Software",
       "shortName": "Testing de Software",
       "level": 5,
@@ -1158,6 +1211,7 @@
     },
     {
       "codeInPlan": 509,
+      "displayCode": "E-509",
       "name": "Seguridad en el Desarrollo de Software",
       "shortName": "Seguridad SW (SDS)",
       "level": 5,
@@ -1180,6 +1234,7 @@
     },
     {
       "codeInPlan": 510,
+      "displayCode": "E-510",
       "name": "Integración de Aplicaciones en Entorno Web",
       "shortName": "Integración de Aplicaciones en Entorno Web",
       "level": 5,
@@ -1202,6 +1257,7 @@
     },
     {
       "codeInPlan": 511,
+      "displayCode": "E-511",
       "name": "Ingeniería de Software de fuentes abiertas/libres",
       "shortName": "Software Libre (ISFA)",
       "level": 5,
@@ -1225,6 +1281,7 @@
     },
     {
       "codeInPlan": 408,
+      "displayCode": "X-408",
       "name": "Experiencia e Interfaces de Usuario (UI/UX)",
       "shortName": "Interfaces y UIX",
       "level": 4,
@@ -1245,6 +1302,7 @@
     },
     {
       "codeInPlan": 512,
+      "displayCode": "X-512",
       "name": "Habilidades Blandas",
       "shortName": "Habilidades Blandas",
       "level": 5,
@@ -1265,6 +1323,7 @@
     },
     {
       "codeInPlan": 513,
+      "displayCode": "X-513",
       "name": "Creatividad y Desarrollo de Entornos Virtuales",
       "shortName": "Entornos Virtuales",
       "level": 5,
@@ -1285,6 +1344,7 @@
     },
     {
       "codeInPlan": 514,
+      "displayCode": "X-514",
       "name": "Práctica Profesional Supervisada",
       "shortName": "PPS",
       "level": 5,
