@@ -12,8 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { getSubjectStatus } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
 import { useIsMobile, useDeviceCapabilities } from '../../hooks/useIsMobile';
 import type { SubjectStatus } from '../../types/career';
@@ -29,6 +28,7 @@ export const KanbanBoard: React.FC = () => {
     dismissKanbanEnrollmentHint,
     openEnrollmentModal,
     getSubjectEnrollments,
+    coreSubjects,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -39,10 +39,7 @@ export const KanbanBoard: React.FC = () => {
   const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus>('cursando');
   const [draggedSubjectId, setDraggedSubjectId] = useState<number | null>(null);
 
-  const subjects = (settings.includeAnalistaTrack
-    ? CORE_SUBJECTS
-    : CORE_SUBJECTS.filter((s) => s.id !== 99)
-  ).filter((s) => {
+  const subjects = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack).filter((s) => {
     if (levelFilter === 'all') return true;
     return s.level === levelFilter;
   });
@@ -380,12 +377,12 @@ export const KanbanBoard: React.FC = () => {
       {mode === 'levels' && (
         <div className="space-y-6">
           {[1, 2, 3, 4, 5].map((lvl) => {
-            const lvlSubjects = CORE_SUBJECTS.filter((s) => s.level === lvl);
+            const lvlSubjects = coreSubjects.filter((s) => s.level === lvl);
             const approvedLvlCount = lvlSubjects.filter((s) => {
               const st = getSubjectStatus(s, activeState);
               return st === 'aprobada' || st === 'promocionada';
             }).length;
-            const percent = Math.round((approvedLvlCount / lvlSubjects.length) * 100);
+            const percent = lvlSubjects.length > 0 ? Math.round((approvedLvlCount / lvlSubjects.length) * 100) : 0;
 
             return (
               <div

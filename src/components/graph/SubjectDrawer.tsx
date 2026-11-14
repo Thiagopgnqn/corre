@@ -21,7 +21,6 @@ import { useCareer } from '../../context/CareerContext';
 import {
   getSubjectStatus,
   getUnlockedBySubject,
-  ALL_SUBJECTS_MAP,
   isApprovedOrHigher,
   isRegularOrHigher,
   canRenderProyectoFinal,
@@ -49,6 +48,9 @@ export const SubjectDrawer: React.FC = () => {
     getSubjectExamAttempts,
     saveExamAttempt,
     deleteExamAttempt,
+    activePlan,
+    allSubjects,
+    subjectsById,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -88,7 +90,7 @@ export const SubjectDrawer: React.FC = () => {
 
   const status = getSubjectStatus(selectedSubject, activeState);
   const grade = activeState[selectedSubject.id]?.grade;
-  const unlocked = getUnlockedBySubject(selectedSubject.id);
+  const unlocked = getUnlockedBySubject(selectedSubject.id, allSubjects);
   const isInBasket = semesterBasket.includes(selectedSubject.id);
   const subjectEnrollments = getSubjectEnrollments(selectedSubject.id);
   const subjectExamAttempts = selectedSubject ? getSubjectExamAttempts(selectedSubject.id) : [];
@@ -515,9 +517,9 @@ export const SubjectDrawer: React.FC = () => {
             ? 'Para RENDIRLO hay que tener aprobadas todas las materias previas del plan (1 a 35 + Electivas).'
             : selectedSubject.specialRule}
         </p>
-        {selectedSubject.id === 36 && (
+        {selectedSubject.id === 36 && activePlan && (
           <div className="pt-1 text-[11px]">
-            {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).canRender ? (
+            {canRenderProyectoFinal(activeState, activePlan, settings.includeAnalistaTrack).canRender ? (
               <span className="text-emerald-400 font-semibold flex items-center gap-1">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>¡Cumplís todas las materias previas para rendir Proyecto Final!</span>
@@ -526,7 +528,7 @@ export const SubjectDrawer: React.FC = () => {
               <span className="text-rose-400 font-semibold flex items-center gap-1">
                 <Lock className="w-3.5 h-3.5" />
                 <span>
-                  Faltan aprobar {canRenderProyectoFinal(activeState, settings.includeAnalistaTrack).missingIds.length} materias previas
+                  Faltan aprobar {canRenderProyectoFinal(activeState, activePlan, settings.includeAnalistaTrack).missingIds.length} materias previas
                 </span>
               </span>
             )}
@@ -564,7 +566,7 @@ export const SubjectDrawer: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.regularPrereqs.map((reqId) => {
-                  const reqSub = ALL_SUBJECTS_MAP.get(reqId);
+                  const reqSub = subjectsById.get(reqId);
                   const met = isRegularOrHigher(activeState[reqId]);
                   return (
                     <div
@@ -601,7 +603,7 @@ export const SubjectDrawer: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.approvedPrereqs.map((reqId) => {
-                  const reqSub = ALL_SUBJECTS_MAP.get(reqId);
+                  const reqSub = subjectsById.get(reqId);
                   const met = isApprovedOrHigher(activeState[reqId]);
                   return (
                     <div

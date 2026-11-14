@@ -25,9 +25,7 @@ import {
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 import { SubjectNode } from './SubjectNode';
 import { SubjectDrawer } from './SubjectDrawer';
 import { SubjectListView } from './SubjectListView';
@@ -112,6 +110,10 @@ const CorrelativeGraphContent: React.FC = () => {
     settings,
     assignedElectives,
     isSimulationMode,
+    coreSubjects,
+    electives,
+    subjectsById,
+    totalLevels,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -153,20 +155,18 @@ const CorrelativeGraphContent: React.FC = () => {
 
   // Build the complete list of subjects to display
   const activeSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
     if (!showElectivesInGraph) {
       return core;
     }
 
     const yearByElective = new Map<number, number>();
-    for (let y = 1; y <= 5; y++) {
+    for (let y = 1; y <= totalLevels; y++) {
       (assignedElectives[y] || []).forEach((id) => yearByElective.set(id, y));
     }
 
-    const electivesWithAssignedYear: Subject[] = ELECTIVES.map((el) => {
+    const electivesWithAssignedYear: Subject[] = electives.map((el) => {
       const assignedYear = yearByElective.get(el.id);
       return {
         ...el,
@@ -175,7 +175,7 @@ const CorrelativeGraphContent: React.FC = () => {
     });
 
     return [...core, ...electivesWithAssignedYear];
-  }, [settings.includeAnalistaTrack, showElectivesInGraph, assignedElectives]);
+  }, [coreSubjects, electives, totalLevels, settings.includeAnalistaTrack, showElectivesInGraph, assignedElectives]);
 
   // Compute upstream (prerequisites) and downstream (unlocked) dependency sets
   const { upstreamSet, downstreamSet } = useMemo(() => {
@@ -506,7 +506,7 @@ const CorrelativeGraphContent: React.FC = () => {
     setHoveredNodeId(null);
   }, []);
 
-  const contextSubject = contextMenu ? ALL_SUBJECTS_MAP.get(contextMenu.subjectId) : null;
+  const contextSubject = contextMenu ? subjectsById.get(contextMenu.subjectId) : null;
 
   const handleContextQuickStatus = (status: SubjectStatus, needsGrade = false) => {
     if (!contextMenu) return;

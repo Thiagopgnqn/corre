@@ -12,9 +12,7 @@ import {
   Sliders,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, isApprovedOrHigher, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus, isApprovedOrHigher } from '../../utils/correlativas';
 import { soundManager } from '../../utils/audio';
 import { fireMilestoneConfetti } from '../../utils/confetti';
 
@@ -27,6 +25,10 @@ export const StatsDashboard: React.FC = () => {
     updateSettings,
     setSelectedSubjectId,
     examAttempts,
+    coreSubjects,
+    allSubjects,
+    subjectsById,
+    planConfig,
   } = useCareer();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'grades' | 'critical' | 'badges'>('overview');
@@ -35,7 +37,7 @@ export const StatsDashboard: React.FC = () => {
   const gradesData = useMemo(() => {
     const list: Array<{ id: number; name: string; level: number; grade: number; status: string }> = [];
 
-    [...CORE_SUBJECTS, ...ELECTIVES].forEach((s) => {
+    allSubjects.forEach((s) => {
       const st = activeState[s.id];
       if (st && st.grade !== undefined && isApprovedOrHigher(st)) {
         if (!settings.includePromotionsInGPA && st.status === 'promocionada') {
@@ -104,7 +106,7 @@ export const StatsDashboard: React.FC = () => {
       failsCount: failsList.length,
       totalGradesCount: list.length,
     };
-  }, [activeState, settings, examAttempts]);
+  }, [allSubjects, activeState, settings, examAttempts]);
 
   // Milestones verification
   const milestones = useMemo(() => {
@@ -155,23 +157,23 @@ export const StatsDashboard: React.FC = () => {
       });
     }
 
-    list.push({
-      id: 'pps',
-      title: 'Habilitación PPS',
-      desc: 'Cumplís los requisitos para cursar la Práctica Profesional',
-      unlocked: computedProgress.isPPSEligible,
-      icon: CheckCircle2,
-      color: 'from-cyan-500 to-blue-500',
-    });
+    if (planConfig?.ppsRequirement) {
+      list.push({
+        id: 'pps',
+        title: 'Habilitación PPS',
+        desc: 'Cumplís los requisitos para cursar la Práctica Profesional',
+        unlocked: computedProgress.isPPSEligible,
+        icon: CheckCircle2,
+        color: 'from-cyan-500 to-blue-500',
+      });
+    }
 
     return list;
-  }, [computedProgress, settings.includeAnalistaTrack]);
+  }, [computedProgress, settings.includeAnalistaTrack, planConfig]);
 
   // Level progress cards
   const levelProgressList = useMemo(() => {
-    const pool = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    const pool = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
     return [1, 2, 3, 4, 5].map((lvl) => {
       const lvlCore = pool.filter((s) => s.level === lvl);
@@ -184,7 +186,7 @@ export const StatsDashboard: React.FC = () => {
         percentage: pct,
       };
     });
-  }, [activeState, settings.includeAnalistaTrack]);
+  }, [coreSubjects, activeState, settings.includeAnalistaTrack]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 w-full overflow-hidden">
@@ -570,7 +572,7 @@ export const StatsDashboard: React.FC = () => {
                     </div>
                     <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
                       {computedProgress.missingCoreForDegree.map((id) => {
-                        const subj = ALL_SUBJECTS_MAP.get(id);
+                        const subj = subjectsById.get(id);
                         return (
                           <button
                             key={id}

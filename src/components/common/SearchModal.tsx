@@ -2,9 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Layers, Clock, ArrowRight } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 import { StatusBadge } from './StatusBadge';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import type { SubjectStatus } from '../../types/career';
@@ -17,6 +15,8 @@ export const SearchModal: React.FC = () => {
     setSelectedSubjectId,
     setStatusModalSubjectId,
     settings,
+    coreSubjects,
+    electives,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -48,11 +48,9 @@ export const SearchModal: React.FC = () => {
   }, [isSearchOpen, setIsSearchOpen]);
 
   const allSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    return [...core, ...ELECTIVES];
-  }, [settings.includeAnalistaTrack]);
+    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
+    return [...core, ...electives];
+  }, [coreSubjects, electives, settings.includeAnalistaTrack]);
 
   const filtered = useMemo(() => {
     return allSubjects.filter((subject) => {

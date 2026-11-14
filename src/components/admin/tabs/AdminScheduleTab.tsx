@@ -21,12 +21,12 @@ import {
   type ScheduleImportPreview,
 } from '../../../api/admin.api';
 import { AdminReauthModal } from '../AdminReauthModal';
-import { CORE_SUBJECTS } from '../../../data/plan2023';
+import { useCareer } from '../../../context/CareerContext';
 
 const DAYS_NAMES = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 
 export const AdminScheduleTab: React.FC = () => {
-  const subjects = CORE_SUBJECTS;
+  const { coreSubjects: subjects } = useCareer();
 
   // State: Terms
   const [terms, setTerms] = useState<AdminTerm[]>([]);

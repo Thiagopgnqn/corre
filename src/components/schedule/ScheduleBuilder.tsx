@@ -20,9 +20,7 @@ import {
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 import { detectAllConflicts } from '../../utils/scheduleLogic';
 import type { Commission, SubjectSchedule } from '../../types/schedule';
 import { ScheduleWeeklyGrid } from './ScheduleWeeklyGrid';
@@ -58,6 +56,9 @@ export const ScheduleBuilder: React.FC = () => {
     renameDraft,
     duplicateDraft,
     applyScheduleToEnrolled,
+    coreSubjects,
+    electives,
+    allSubjects: planAllSubjects,
   } = useCareer();
 
   const { getRatingForProfessor, reloadRatings } = useProfessorRatings(true);
@@ -128,17 +129,15 @@ export const ScheduleBuilder: React.FC = () => {
   // Subject names map
   const subjectNamesMap = useMemo(() => {
     const map = new Map<number, string>();
-    CORE_SUBJECTS.forEach((s) => map.set(s.id, s.name));
-    ELECTIVES.forEach((e) => map.set(e.id, e.name));
+    planAllSubjects.forEach((s) => map.set(s.id, s.name));
     return map;
-  }, []);
+  }, [planAllSubjects]);
 
   const knownSubjectIds = useMemo(() => {
     const set = new Set<number | string>();
-    CORE_SUBJECTS.forEach((s) => set.add(s.id));
-    ELECTIVES.forEach((e) => set.add(e.id));
+    planAllSubjects.forEach((s) => set.add(s.id));
     return set;
-  }, []);
+  }, [planAllSubjects]);
 
   // Schedules by subject map
   const schedulesMap = useMemo(() => {
@@ -149,15 +148,13 @@ export const ScheduleBuilder: React.FC = () => {
 
   // Available subjects pool based on career status
   const availableSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
+    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
     // Collect electives that user has planned/assigned
     const assignedElectiveIds = new Set(
       Object.values(assignedElectives).flat()
     );
-    const relevantElectives = ELECTIVES.filter((e) => assignedElectiveIds.has(e.id));
+    const relevantElectives = electives.filter((e) => assignedElectiveIds.has(e.id));
 
     const pool = [...core, ...relevantElectives];
 
@@ -165,15 +162,13 @@ export const ScheduleBuilder: React.FC = () => {
       const st = getSubjectStatus(s, activeState);
       return st === 'disponible' || st === 'cursando';
     });
-  }, [activeState, settings.includeAnalistaTrack, assignedElectives]);
+  }, [coreSubjects, electives, activeState, settings.includeAnalistaTrack, assignedElectives]);
 
   // Full pool of all subjects
   const allSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    return [...core, ...ELECTIVES];
-  }, [settings.includeAnalistaTrack]);
+    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
+    return [...core, ...electives];
+  }, [coreSubjects, electives, settings.includeAnalistaTrack]);
 
   // Selected commission objects map: subjectId -> Commission
   const selectedCommissionsMap = useMemo(() => {

@@ -14,9 +14,9 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { ELECTIVES, REQUIRED_ELECTIVE_CREDITS_TOTAL, type ElectiveSubject } from '../../data/electives';
-import { getSubjectStatus, checkEligibility, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { getSubjectStatus, checkEligibility } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
+import type { Subject } from '../../types/career';
 
 export const ElectivesPicker: React.FC = () => {
   const {
@@ -30,6 +30,9 @@ export const ElectivesPicker: React.FC = () => {
     setSelectedSubjectId,
     settings,
     updateSettings,
+    electives,
+    subjectsById,
+    requiredElectiveCredits,
   } = useCareer();
 
   const [modalYear, setModalYear] = useState<number | null>(null);
@@ -71,7 +74,7 @@ export const ElectivesPicker: React.FC = () => {
   const years = [1, 2, 3, 4, 5];
 
   // Filtered electives for modal
-  const filteredElectives = ELECTIVES.filter((el) => {
+  const filteredElectives = electives.filter((el) => {
     const q = modalSearch.toLowerCase().trim();
     if (!q) return true;
     return (
@@ -112,7 +115,7 @@ export const ElectivesPicker: React.FC = () => {
                 Aprobados
               </div>
               <div className="text-sm sm:text-xl font-black text-amber-400">
-                {computedProgress.totalElectiveCreditsApproved} / {REQUIRED_ELECTIVE_CREDITS_TOTAL}
+                {computedProgress.totalElectiveCreditsApproved} / {requiredElectiveCredits}
               </div>
             </div>
 
@@ -140,10 +143,10 @@ export const ElectivesPicker: React.FC = () => {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-400 font-medium">
-              Meta global de titulación: <span className="text-white font-bold">{REQUIRED_ELECTIVE_CREDITS_TOTAL} créditos</span> en total (cualquier nivel)
+              Meta global de titulación: <span className="text-white font-bold">{requiredElectiveCredits} créditos</span> en total (cualquier nivel)
             </span>
             <span className="font-bold text-amber-400">
-              {Math.min(100, Math.round((computedProgress.totalElectiveCreditsApproved / REQUIRED_ELECTIVE_CREDITS_TOTAL) * 100))}%
+              {requiredElectiveCredits > 0 ? Math.min(100, Math.round((computedProgress.totalElectiveCreditsApproved / requiredElectiveCredits) * 100)) : 0}%
             </span>
           </div>
           <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
@@ -151,7 +154,7 @@ export const ElectivesPicker: React.FC = () => {
               className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 rounded-full"
               initial={{ width: 0 }}
               animate={{
-                width: `${Math.min(100, (computedProgress.totalElectiveCreditsApproved / REQUIRED_ELECTIVE_CREDITS_TOTAL) * 100)}%`,
+                width: `${requiredElectiveCredits > 0 ? Math.min(100, (computedProgress.totalElectiveCreditsApproved / requiredElectiveCredits) * 100) : 0}%`,
               }}
               transition={{ duration: 0.6, ease: 'easeOut' }}
             />
@@ -215,10 +218,10 @@ export const ElectivesPicker: React.FC = () => {
         {years.filter((y) => (!isMobile || selectedMobileYear === 'all' || selectedMobileYear === y)).map((year) => {
           const assignedIds = assignedElectives[year] || [];
           const assignedSubjects = assignedIds
-            .map((id) => ELECTIVES.find((e) => e.id === id))
-            .filter((e): e is ElectiveSubject => Boolean(e));
+            .map((id) => electives.find((e) => e.id === id))
+            .filter((e): e is Subject => Boolean(e));
 
-          const yearTotalCredits = assignedSubjects.reduce((acc, curr) => acc + curr.credits, 0);
+          const yearTotalCredits = assignedSubjects.reduce((acc, curr) => acc + (curr.credits ?? 0), 0);
 
           return (
             <div
@@ -332,7 +335,7 @@ export const ElectivesPicker: React.FC = () => {
                               <div className="text-[10px] text-rose-200">
                                 Falta regularizar:{' '}
                                 {missingRegular
-                                  .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                                  .map((id) => subjectsById.get(id)?.name || `#${id}`)
                                   .join(', ')}
                               </div>
                             )}
@@ -340,7 +343,7 @@ export const ElectivesPicker: React.FC = () => {
                               <div className="text-[10px] text-rose-200">
                                 Falta aprobar:{' '}
                                 {missingApproved
-                                  .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                                  .map((id) => subjectsById.get(id)?.name || `#${id}`)
                                   .join(', ')}
                               </div>
                             )}
@@ -448,7 +451,7 @@ export const ElectivesPicker: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-slate-400">
-                    Mostrando {filteredElectives.length} de {ELECTIVES.length} electivas disponibles
+                    Mostrando {filteredElectives.length} de {electives.length} electivas disponibles
                   </span>
 
                   <label className="flex items-center gap-2 cursor-pointer select-none text-slate-300">
@@ -543,7 +546,7 @@ export const ElectivesPicker: React.FC = () => {
                                       <div className="text-slate-400 text-[10px] pl-4">
                                         Falta regularizar:{' '}
                                         {missingRegular
-                                          .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                                          .map((id) => subjectsById.get(id)?.name || `#${id}`)
                                           .join(', ')}
                                       </div>
                                     )}
@@ -551,7 +554,7 @@ export const ElectivesPicker: React.FC = () => {
                                       <div className="text-slate-400 text-[10px] pl-4">
                                         Falta aprobar:{' '}
                                         {missingApproved
-                                          .map((id) => ALL_SUBJECTS_MAP.get(id)?.name || `#${id}`)
+                                          .map((id) => subjectsById.get(id)?.name || `#${id}`)
                                           .join(', ')}
                                       </div>
                                     )}

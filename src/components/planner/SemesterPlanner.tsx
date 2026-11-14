@@ -15,9 +15,7 @@ import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useScheduleAvailability } from '../../hooks/useScheduleAvailability';
 import { BottomSheet } from '../common/BottomSheet';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
-import { getSubjectStatus, ALL_SUBJECTS_MAP } from '../../utils/correlativas';
+import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
 
 export interface SemesterPlannerProps {
   onNavigateToSchedule?: () => void;
@@ -32,6 +30,9 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
     batchUpdateStatus,
     setSelectedSubjectId,
     settings,
+    coreSubjects,
+    electives,
+    subjectsById,
   } = useCareer();
 
   const [termFilter, setTermFilter] = useState<'all' | '1C' | '2C' | 'A'>('all');
@@ -42,10 +43,8 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
 
   // Available subjects pool
   const availableSubjects = useMemo(() => {
-    const core = settings.includeAnalistaTrack
-      ? CORE_SUBJECTS
-      : CORE_SUBJECTS.filter((s) => s.id !== 99);
-    const pool = includeElectives ? [...core, ...ELECTIVES] : core;
+    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
+    const pool = includeElectives ? [...core, ...electives] : core;
 
     return pool.filter((s) => {
       const status = getSubjectStatus(s, activeState);
@@ -57,12 +56,12 @@ export const SemesterPlanner: React.FC<SemesterPlannerProps> = ({ onNavigateToSc
       if (termFilter === '2C') return s.modality.includes('2C') || s.modality === 'A';
       return true;
     });
-  }, [includeElectives, termFilter, activeState, settings.includeAnalistaTrack]);
+  }, [coreSubjects, electives, includeElectives, termFilter, activeState, settings.includeAnalistaTrack]);
 
   // Basket subjects details & calculation
   const basketSubjects = useMemo(() => {
-    return semesterBasket.map((id) => ALL_SUBJECTS_MAP.get(id)!).filter(Boolean);
-  }, [semesterBasket]);
+    return semesterBasket.map((id) => subjectsById.get(id)!).filter(Boolean);
+  }, [semesterBasket, subjectsById]);
 
   const totalWeeklyHours = useMemo(() => {
     return basketSubjects.reduce((acc, s) => acc + s.weeklyHours, 0);

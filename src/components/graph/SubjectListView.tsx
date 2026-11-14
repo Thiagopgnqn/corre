@@ -4,10 +4,10 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import type { Subject, UserCareerState } from '../../types/career';
+import { useCareer } from '../../context/CareerContext';
 import {
   getSubjectStatus,
   checkEligibility,
-  ALL_SUBJECTS_MAP,
 } from '../../utils/correlativas';
 import { StatusBadge } from '../common/StatusBadge';
 
@@ -28,6 +28,7 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
   isSimulationActive = false,
   sampleSubjectId = 1,
 }) => {
+  const { subjectsById } = useCareer();
   // Agrupar materias por nivel (1° a 5° año)
   const groupedByLevel = useMemo(() => {
     const map = new Map<number, Subject[]>();
@@ -97,10 +98,10 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                 // Correlativas faltantes si está bloqueada
                 const eligibility = checkEligibility(subject, activeState);
                 const missingRegularNames = eligibility.missingRegular
-                  .map((id) => ALL_SUBJECTS_MAP.get(id)?.name)
+                  .map((id) => subjectsById.get(id)?.name)
                   .filter(Boolean);
                 const missingApprovedNames = eligibility.missingApproved
-                  .map((id) => ALL_SUBJECTS_MAP.get(id)?.name)
+                  .map((id) => subjectsById.get(id)?.name)
                   .filter(Boolean);
 
                 const isBlocked = status === 'bloqueada' && !isSimulationActive;

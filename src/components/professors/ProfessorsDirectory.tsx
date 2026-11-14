@@ -21,8 +21,6 @@ import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
-import { CORE_SUBJECTS } from '../../data/plan2023';
-import { ELECTIVES } from '../../data/electives';
 import { professorsApi } from '../../api/professors.api';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
 import type { OwnReviewItem, ProfessorListItem, ReviewableData } from '../../types/professor';
@@ -48,6 +46,7 @@ export const ProfessorsDirectory: React.FC = () => {
     dismissReviewRecommendation,
     refreshReviewableSummary,
     isTutorialOpen,
+    allSubjects,
   } = useCareer();
   const { reloadRatings } = useProfessorRatings(true);
   const shouldReduceMotion = useReducedMotion();
@@ -105,10 +104,10 @@ export const ProfessorsDirectory: React.FC = () => {
   };
 
   const allPlanSubjects = useMemo(() => {
-    return [...CORE_SUBJECTS, ...ELECTIVES].sort(
+    return [...allSubjects].sort(
       (a, b) => a.level - b.level || a.name.localeCompare(b.name, 'es')
     );
-  }, []);
+  }, [allSubjects]);
 
   // Recomendaciones y materias sin comisiones registradas
   const recommendedPairs = useMemo(() => {

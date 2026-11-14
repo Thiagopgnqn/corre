@@ -1,4 +1,4 @@
-import type { Subject } from '../types/career';
+import type { Subject } from '../../src/types/career';
 
 export const CORE_SUBJECTS: Subject[] = [
   // ================= NIVEL 1 =================

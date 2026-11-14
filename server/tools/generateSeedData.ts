@@ -6,9 +6,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Importar datos actuales del frontend (fuera del backend)
-import { CORE_SUBJECTS } from '../../src/data/plan2023.js';
-import { ELECTIVES } from '../../src/data/electives.js';
-import { ACRONYM_TO_ID } from '../../src/data/acronyms.js';
+import { CORE_SUBJECTS } from '../../test/fixtures/plan2023.js';
+import { ELECTIVES } from '../../test/fixtures/electives.js';
+import { ACRONYM_TO_ID } from '../../test/fixtures/acronyms.js';
 
 const targetDir = path.resolve(__dirname, '../seed-data');
 if (!fs.existsSync(targetDir)) {

@@ -5,7 +5,7 @@ import {
   resolveSubjectIds,
   isGenericElective,
   normalizeSubjectName,
-} from '../src/data/subjectAliases';
+} from '../test/fixtures/subjectAliases';
 import { validateScheduleData } from '../src/utils/scheduleLogic';
 import type { DayOfWeek, Shift, TermType } from '../src/types/schedule';
 

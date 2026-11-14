@@ -20,10 +20,10 @@ import { adminApi } from '../../../api/admin.api';
 import type { AdminModerationQueueData, AdminReviewCatalogItem } from '../../../types/professor';
 import { StarRating } from '../../professors/StarRating';
 import { AdminReauthModal } from '../AdminReauthModal';
-import { CORE_SUBJECTS } from '../../../data/plan2023';
+import { useCareer } from '../../../context/CareerContext';
 
 export const AdminReviewsTab: React.FC = () => {
-  const subjects = CORE_SUBJECTS;
+  const { coreSubjects: subjects } = useCareer();
 
   // Tab: 'queue' (moderación) vs 'catalog' (todas con autor) vs 'professors' (docentes y fusiones)
   const [subTab, setSubTab] = useState<'queue' | 'catalog' | 'professors'>('queue');

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, CheckCircle2, Sparkles, BookOpen, Layers, Award } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { CORE_SUBJECTS } from '../../data/plan2023';
+import { getActiveCoreSubjects } from '../../utils/correlativas';
 import type { SubjectStatus } from '../../types/career';
 
 export const OnboardingModal: React.FC = () => {
@@ -12,11 +12,10 @@ export const OnboardingModal: React.FC = () => {
     batchUpdateStatus,
     loadSample,
     settings,
+    coreSubjects,
   } = useCareer();
 
-  const corePool = settings.includeAnalistaTrack
-    ? CORE_SUBJECTS
-    : CORE_SUBJECTS.filter((s) => s.id !== 99);
+  const corePool = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
 
   // Selection state: Map of subjectId -> { selected: boolean, grade: number, status: SubjectStatus }
   const [selections, setSelections] = useState<Record<number, { selected: boolean; grade: number; status: SubjectStatus }>>({});
