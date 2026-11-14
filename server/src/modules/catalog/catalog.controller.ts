@@ -108,11 +108,13 @@ export async function getPlan(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const { plan, career } = resolved;
+    const { plan, career, faculty, institution } = resolved;
     const artifacts = await store.getPlanArtifacts(plan.id);
     const responseData = formatPlanCatalogPayload({
       plan,
       career,
+      faculty,
+      institution,
       subjects: artifacts.subjects,
       prerequisites: artifacts.prerequisites,
       rules: artifacts.rules,

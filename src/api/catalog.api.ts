@@ -31,7 +31,8 @@ export interface Institution {
               totalLevels?: number;
               levelLabel?: string;
               shortTag?: string;
-              ppsRequirement?: { referenceSubjectCode: number } | null;
+              finalDegreeTitle?: string;
+              ppsRequirement?: { referenceSubjectCode: number; label?: string } | null;
               intermediateDegrees?: PlanIntermediateDegree[];
               [key: string]: unknown;
             };
@@ -73,7 +74,7 @@ export interface ScheduleResponse {
 
 export const CATALOG_CACHE_KEY_PREFIX = 'mi_carrera_catalog_cache_v1:';
 export const CATALOG_CURRENT_POINTER_KEY = 'mi_carrera_catalog_current_plan_id_v1';
-export const CATALOG_CACHE_SCHEMA = 2;
+export const CATALOG_CACHE_SCHEMA = 3;
 
 export class CatalogShapeError extends Error {
   constructor(
@@ -109,6 +110,13 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
     return false;
   }
 
+  for (const optKey of ['facultyName', 'institutionName', 'facultyCode', 'institutionCode'] as const) {
+    const val = career[optKey];
+    if (val !== undefined && val !== null && !isNonEmptyString(val)) {
+      return false;
+    }
+  }
+
   if (
     !isPlainObject(plan) ||
     !isNonEmptyString(plan.id) ||
@@ -120,7 +128,7 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
     return false;
   }
 
-  const { totalLevels, levelLabel } = plan.config;
+  const { totalLevels, levelLabel, finalDegreeTitle, ppsRequirement } = plan.config;
   if (
     typeof totalLevels !== 'number' ||
     !Number.isFinite(totalLevels) ||
@@ -128,6 +136,23 @@ export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalo
     !isNonEmptyString(levelLabel)
   ) {
     return false;
+  }
+
+  if (finalDegreeTitle !== undefined && finalDegreeTitle !== null && !isNonEmptyString(finalDegreeTitle)) {
+    return false;
+  }
+
+  if (ppsRequirement !== undefined && ppsRequirement !== null) {
+    if (!isPlainObject(ppsRequirement)) {
+      return false;
+    }
+    if (
+      ppsRequirement.label !== undefined &&
+      ppsRequirement.label !== null &&
+      !isNonEmptyString(ppsRequirement.label)
+    ) {
+      return false;
+    }
   }
 
   if (!Array.isArray(subjects)) return false;

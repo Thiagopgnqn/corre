@@ -69,6 +69,10 @@ export interface PlanCareerMeta {
   name: string;
   code: string;
   facultyId: string;
+  facultyCode?: string;
+  facultyName?: string;
+  institutionCode?: string;
+  institutionName?: string;
 }
 
 export interface ActivePlanCatalog {

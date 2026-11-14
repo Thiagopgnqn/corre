@@ -311,6 +311,19 @@ export class InMemoryCatalogStore implements CatalogStore {
   }
 
   async resolvePublishedPlan(planId: string): Promise<PublishedPlanWithCareer | null> {
+    const withOrgMeta = (row: { plan: CatalogTreePlanRow; career: CatalogTreeCareerRow }) => {
+      const faculty = this.faculties.find((f) => f.id === row.career.facultyId);
+      const institution = faculty
+        ? this.institutions.find((i) => i.id === faculty.institutionId)
+        : undefined;
+      return {
+        plan: row.plan,
+        career: row.career,
+        faculty,
+        institution,
+      } as unknown as PublishedPlanWithCareer;
+    };
+
     if (planId === 'current' || planId === 'default') {
       const candidates = this.plans
         .map((plan) => ({
@@ -331,7 +344,7 @@ export class InMemoryCatalogStore implements CatalogStore {
         (r) => r.career.code === 'ISI' && r.plan.year === 2023
       );
       const picked = canonicalIsi || candidates[0];
-      return picked as unknown as PublishedPlanWithCareer;
+      return withOrgMeta(picked);
     }
 
     if (!isValidUuid(planId)) return null;
@@ -342,7 +355,7 @@ export class InMemoryCatalogStore implements CatalogStore {
     const career = this.careers.find((c) => c.id === plan.careerId && c.status === 'published');
     if (!career) return null;
 
-    return { plan, career } as unknown as PublishedPlanWithCareer;
+    return withOrgMeta({ plan, career });
   }
 
   async getPlanArtifacts(planUuid: string): Promise<PlanArtifactsBundle> {

@@ -452,11 +452,13 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     );
     assert.equal(readCachedCatalog('plan-schema-test', mockStorage), null);
 
-    // Case B: cache with outdated schema number
+    assert.equal(CATALOG_CACHE_SCHEMA, 3);
+
+    // Case B: cache with outdated schema number (specifically schema: 2)
     mockStorage.setItem(
       getCatalogCacheKey('plan-schema-test'),
       JSON.stringify({
-        schema: CATALOG_CACHE_SCHEMA - 1,
+        schema: 2,
         planId: 'plan-schema-test',
         version: 'v1',
         cachedAt: '2026-01-01T00:00:00.000Z',
@@ -502,11 +504,63 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
   it('rejects malformed or incomplete catalog payloads as outdated server without caching them', async () => {
     const validCatalog = buildFictitious3LevelPlan({ planId: 'plan-shape-test' });
     assert.equal(isValidPlanCatalogShape(validCatalog), true);
+    assert.equal(
+      isValidPlanCatalogShape({
+        ...validCatalog,
+        career: {
+          ...validCatalog.career,
+          facultyName: 'Facultad Regional Córdoba',
+          institutionName: 'Universidad Tecnológica Nacional',
+          facultyCode: 'FRC',
+          institutionCode: 'UTN',
+        },
+        plan: {
+          ...validCatalog.plan,
+          config: {
+            ...validCatalog.plan.config,
+            finalDegreeTitle: 'Técnico/a Demo',
+            ppsRequirement: { referenceSubjectCode: 3, label: 'Habilitación PPS' },
+          },
+        },
+      }),
+      true
+    );
 
     const invalidVariants: Array<{ label: string; payload: unknown }> = [
       {
         label: 'sin career',
         payload: { ...validCatalog, career: undefined },
+      },
+      {
+        label: 'con career.facultyName vacío',
+        payload: { ...validCatalog, career: { ...validCatalog.career, facultyName: '' } },
+      },
+      {
+        label: 'con career.institutionName no string',
+        payload: { ...validCatalog, career: { ...validCatalog.career, institutionName: 123 } },
+      },
+      {
+        label: 'con plan.config.finalDegreeTitle vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, finalDegreeTitle: '  ' },
+          },
+        },
+      },
+      {
+        label: 'con plan.config.ppsRequirement.label vacío',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: {
+              ...validCatalog.plan.config,
+              ppsRequirement: { referenceSubjectCode: 3, label: '' },
+            },
+          },
+        },
       },
       {
         label: 'sin plan.config.totalLevels',

@@ -181,7 +181,21 @@ export interface BuildPlanCatalogInput {
     name: string;
     code: string;
     facultyId: string;
+    facultyCode?: string;
+    facultyName?: string;
+    institutionCode?: string;
+    institutionName?: string;
   };
+  faculty?: {
+    id: string;
+    code: string;
+    name: string;
+  } | null;
+  institution?: {
+    id: string;
+    code: string;
+    name: string;
+  } | null;
   subjects: CatalogSubjectInput[];
   prerequisites: Array<{
     subjectId: string;
@@ -196,7 +210,7 @@ export interface BuildPlanCatalogInput {
 }
 
 export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
-  const { plan, career, subjects, prerequisites, rules, acronyms } = input;
+  const { plan, career, faculty, institution, subjects, prerequisites, rules, acronyms } = input;
 
   const uuidToCode = new Map<string, number>();
   subjects.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
@@ -250,6 +264,14 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
     planName: plan.name,
   });
 
+  const pickNonEmpty = (val: unknown): string | undefined =>
+    typeof val === 'string' && val.trim().length > 0 ? val.trim() : undefined;
+
+  const facultyCode = pickNonEmpty(faculty?.code ?? career.facultyCode);
+  const facultyName = pickNonEmpty(faculty?.name ?? career.facultyName);
+  const institutionCode = pickNonEmpty(institution?.code ?? career.institutionCode);
+  const institutionName = pickNonEmpty(institution?.name ?? career.institutionName);
+
   return {
     plan: {
       id: plan.id,
@@ -263,6 +285,10 @@ export function formatPlanCatalogPayload(input: BuildPlanCatalogInput) {
       name: career.name,
       code: career.code,
       facultyId: career.facultyId,
+      ...(facultyCode !== undefined ? { facultyCode } : {}),
+      ...(facultyName !== undefined ? { facultyName } : {}),
+      ...(institutionCode !== undefined ? { institutionCode } : {}),
+      ...(institutionName !== undefined ? { institutionName } : {}),
     },
     subjects: formattedSubjects,
     rules: rules.map((r) => ({

@@ -263,7 +263,14 @@ async function main() {
     const d = currentBody.data;
     assert(
       d.plan.id === publishedIsi.planId &&
+        d.career?.id === publishedIsi.careerId &&
+        d.career?.facultyId === publishedIsi.facultyId &&
+        d.career?.name === 'Ingeniería en Sistemas de Información' &&
         d.career?.code === 'ISI' &&
+        d.career?.facultyName === 'Facultad Regional Córdoba' &&
+        d.career?.facultyCode === 'FRC' &&
+        d.career?.institutionName === 'Universidad Tecnológica Nacional' &&
+        d.career?.institutionCode === 'UTN' &&
         d.plan.config.finalDegreeTitle === 'Ingeniero/a' &&
         d.plan.config.ppsRequirement?.referenceSubjectCode === 36 &&
         d.plan.config.ppsRequirement?.label === 'Habilitación PPS' &&
@@ -273,7 +280,15 @@ async function main() {
         d.plan.config.totalLevels === 5 &&
         d.plan.config.levelLabel === 'Año' &&
         d.plan.config.shortTag === 'ISI · Plan 2023',
-      'Payload incluye career, finalDegreeTitle, ppsRequirement {36, "Habilitación PPS"}, config completa de ISI y excluye ppsSubjectCode'
+      'Payload incluye career (con facultyName/institutionName aditivos sin alterar campos existentes), finalDegreeTitle, ppsRequirement {36, "Habilitación PPS"} y excluye ppsSubjectCode'
+    );
+    const byIdRes = await fetch(`${baseUrl}/api/catalog/plans/${publishedIsi.planId}`);
+    const byIdBody = (await byIdRes.json()) as any;
+    assert(
+      byIdRes.status === 200 &&
+        byIdBody.data?.career?.facultyName === 'Facultad Regional Córdoba' &&
+        byIdBody.data?.career?.institutionName === 'Universidad Tecnológica Nacional',
+      'GET /api/catalog/plans/:planId también devuelve career.facultyName e institutionName'
     );
     assert(
       d.subjects.length === 60 &&

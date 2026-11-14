@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../../db/index.js';
-import { careers, studyPlans } from '../../db/schema.js';
+import { careers, faculties, institutions, studyPlans } from '../../db/schema.js';
 
 export const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,6 +21,8 @@ export function normalizeSharedSubjectName(name: string): string {
 export interface PublishedPlanWithCareer {
   plan: typeof studyPlans.$inferSelect;
   career: typeof careers.$inferSelect;
+  faculty?: typeof faculties.$inferSelect;
+  institution?: typeof institutions.$inferSelect;
 }
 
 export async function findPublishedPlanById(
@@ -32,9 +34,13 @@ export async function findPublishedPlanById(
     .select({
       plan: studyPlans,
       career: careers,
+      faculty: faculties,
+      institution: institutions,
     })
     .from(studyPlans)
     .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+    .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+    .innerJoin(institutions, eq(faculties.institutionId, institutions.id))
     .where(
       and(
         eq(studyPlans.id, planId.trim()),
@@ -53,9 +59,13 @@ export async function findDefaultPublishedPlan(): Promise<PublishedPlanWithCaree
     .select({
       plan: studyPlans,
       career: careers,
+      faculty: faculties,
+      institution: institutions,
     })
     .from(studyPlans)
     .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+    .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+    .innerJoin(institutions, eq(faculties.institutionId, institutions.id))
     .where(
       and(
         eq(studyPlans.status, 'published'),
