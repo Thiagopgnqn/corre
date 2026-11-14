@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
 import { evaluatePlanProgress } from '../src/utils/correlativas';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
+import { getSampleStudentForPlan } from '../src/utils/storage';
 import { CORE_SUBJECTS } from './fixtures/plan2023';
 import { ELECTIVES } from './fixtures/electives';
 import type {
@@ -426,6 +427,37 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
         assert.equal(payloadSubj.trackKey, undefined);
         assert.equal('specialRule' in payloadSubj, false);
       }
+    }
+  });
+
+  it('reproduces the exact getSample3rdYearStudent userState and assignedElectives for ISI Plan 2023', () => {
+    const sampleOracleScenario = oracle.scenarios.find((s) =>
+      s.id.startsWith('03-')
+    );
+    assert.ok(sampleOracleScenario, 'Debe existir el escenario 03 de muestra de 3er año en plan2023Oracle.json');
+
+    const expectedAssignedElectives = {
+      1: [],
+      2: [],
+      3: [301],
+      4: [404],
+      5: [],
+    };
+
+    for (const sortDbOrder of [false, true]) {
+      const plan = buildPlanFromSeedCatalog(sortDbOrder);
+      const generated = getSampleStudentForPlan(plan);
+
+      assert.deepStrictEqual(
+        generated.userState,
+        sampleOracleScenario.input.userState,
+        `getSampleStudentForPlan(sortDbOrder=${sortDbOrder}) debe coincidir materia por materia (estado y nota) con getSample3rdYearStudent`
+      );
+      assert.deepStrictEqual(
+        generated.assignedElectives,
+        expectedAssignedElectives,
+        `assignedElectives(sortDbOrder=${sortDbOrder}) debe coincidir exactamente con getSample3rdYearStudent`
+      );
     }
   });
 });

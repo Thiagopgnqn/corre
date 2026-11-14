@@ -5,12 +5,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
-import { TUTORIAL_STEPS } from '../src/data/tutorialSteps';
+import { TUTORIAL_STEPS, getAvailableTutorialSteps } from '../src/data/tutorialSteps';
 import { SUBJECT_SHORT_NAMES } from '../src/components/schedule/ScheduleWeeklyGrid';
 import { APP_NAME } from '../src/config/brand';
 import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
 import {
   buildPlanTutorialSteps,
+  clampTutorialStep,
+  computeNextTutorialStep,
+  computePrevTutorialStep,
   formatSpanishOrdinal,
   getBadgesSectionSubtitle,
   getDegreeElectiveFootnote,
@@ -648,6 +651,94 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
         null,
         `${relPath} no debe contener códigos de materia fijos 99/36 (hallados: ${codeMatches?.join(', ')})`
       );
+    }
+  });
+
+  it('traverses tutorial steps forward, backward and by index on ISI Plan 2023 and on a plan without intermediate degrees or electives', () => {
+    // Plan ficticio de 3 niveles sin título intermedio ni electivas
+    const minimalPlan: ActivePlanCatalog = {
+      ...ISI_PLAN,
+      plan: {
+        ...ISI_PLAN.plan,
+        id: 'plan-sin-intermedio-ni-electivas',
+        name: 'Plan Cuatrimestral Básico',
+        config: {
+          ...ISI_PLAN.plan.config,
+          totalLevels: 3,
+          levelLabel: 'Cuatrimestre',
+          requiredElectiveCredits: 0,
+          electiveSlotsEquivalent: 0,
+          intermediateDegrees: [],
+          ppsRequirement: null,
+        },
+      },
+      subjects: ISI_PLAN.subjects.filter((s) => !s.isElective && s.level <= 3 && !s.isOptionalTrack),
+      rules: [],
+    };
+
+    // 1. ISI Plan 2023 en desktop (17 pasos) y mobile (16 pasos, sin vista schedule)
+    const isiDesktopSteps = buildPlanTutorialSteps(getAvailableTutorialSteps(true), ISI_PLAN);
+    assert.equal(isiDesktopSteps.length, 17);
+    assert.equal(isiDesktopSteps[0].id, 'welcome');
+    assert.equal(isiDesktopSteps.some((s) => s.id === 'electives-tour'), true);
+    assert.equal(isiDesktopSteps.some((s) => s.id === 'analista-switch'), true);
+    assert.equal(isiDesktopSteps[16].id, 'finish');
+
+    const isiMobileSteps = buildPlanTutorialSteps(getAvailableTutorialSteps(false), ISI_PLAN);
+    assert.equal(isiMobileSteps.length, 16);
+    assert.equal(isiMobileSteps.some((s) => s.targetView === 'schedule'), false);
+
+    // 2. Plan mínimo sin título intermedio ni electivas: 15 pasos en desktop, 14 en mobile
+    const minDesktopSteps = buildPlanTutorialSteps(getAvailableTutorialSteps(true), minimalPlan);
+    assert.equal(minDesktopSteps.length, 15);
+    assert.equal(minDesktopSteps.some((s) => s.id === 'electives-tour'), false);
+    assert.equal(minDesktopSteps.some((s) => s.id === 'analista-switch'), false);
+    assert.ok(
+      minDesktopSteps
+        .find((s) => s.id === 'graph-overview')!
+        .description.includes('3 columnas representan los cuatrimestres de la carrera (1° a 3° cuatrimestre)')
+    );
+
+    const minMobileSteps = buildPlanTutorialSteps(getAvailableTutorialSteps(false), minimalPlan);
+    assert.equal(minMobileSteps.length, 14);
+    assert.equal(minMobileSteps.some((s) => s.targetView === 'schedule'), false);
+    assert.equal(minMobileSteps.some((s) => s.id === 'electives-tour'), false);
+    assert.equal(minMobileSteps.some((s) => s.id === 'analista-switch'), false);
+
+    // 3. Recorrido completo hacia adelante, atrás y acceso directo con clamp en ambos planes
+    for (const steps of [isiDesktopSteps, isiMobileSteps, minDesktopSteps, minMobileSteps]) {
+      let current = 0;
+      const visitedIds: string[] = [steps[current].id];
+
+      for (let i = 0; i < steps.length - 1; i++) {
+        const res = computeNextTutorialStep(current, steps.length);
+        assert.equal(res.shouldClose, false);
+        assert.equal(res.nextStep, current + 1);
+        current = res.nextStep;
+        visitedIds.push(steps[current].id);
+      }
+
+      assert.deepEqual(
+        visitedIds,
+        steps.map((s) => s.id)
+      );
+
+      // Avanzar en el último paso debe cerrar el tutorial sin desbordar
+      const endRes = computeNextTutorialStep(steps.length - 1, steps.length);
+      assert.equal(endRes.shouldClose, true);
+      assert.equal(endRes.nextStep, steps.length - 1);
+
+      // Retroceder desde el final hasta 0 y tope en 0
+      for (let i = steps.length - 1; i > 0; i--) {
+        current = computePrevTutorialStep(current);
+        assert.equal(current, i - 1);
+      }
+      assert.equal(computePrevTutorialStep(0), 0);
+
+      // goToTutorialStep / clampTutorialStep acota al rango válido [0, steps.length - 1]
+      assert.equal(clampTutorialStep(-5, steps.length), 0);
+      assert.equal(clampTutorialStep(999, steps.length), steps.length - 1);
+      assert.equal(clampTutorialStep(3, steps.length), 3);
     }
   });
 });

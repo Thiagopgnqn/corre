@@ -4,6 +4,7 @@ import type {
   ExamAttempt,
   Subject,
   UserCareerState,
+  UserSubjectState,
 } from '../types/career';
 import type { ScheduleDraft, SubjectSchedule } from '../types/schedule';
 import type { SubjectEnrollment } from '../types/enrollment';
@@ -728,9 +729,32 @@ export function clearCareerData(planId?: string | null): void {
   localStorage.removeItem(getPlanStorageKey(STORAGE_KEY_EXAM_ATTEMPTS, planId));
 }
 
+const LEVEL1_SAMPLE_STATES: ReadonlyArray<UserSubjectState> = [
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 7 },
+  { status: 'promocionada', grade: 10 },
+  { status: 'promocionada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'promocionada', grade: 10 },
+];
+
+const LEVEL2_SAMPLE_STATES: ReadonlyArray<UserSubjectState> = [
+  { status: 'regularizada' },
+  { status: 'regularizada' },
+  { status: 'promocionada', grade: 9 },
+  { status: 'aprobada', grade: 8 },
+  { status: 'promocionada', grade: 9 },
+  { status: 'cursando' },
+  { status: 'aprobada', grade: 8 },
+  { status: 'aprobada', grade: 7 },
+];
+
 /**
  * Generates a dynamic sample academic progress state from the active plan catalog
- * (without hardcoding specific subject codes).
+ * (without hardcoding specific subject codes) while reproducing ISI Plan 2023 parity.
  */
 export function getSampleStudentForPlan(plan?: ActivePlanCatalog | null): {
   userState: UserCareerState;
@@ -742,40 +766,59 @@ export function getSampleStudentForPlan(plan?: ActivePlanCatalog | null): {
     return { userState: {}, assignedElectives };
   }
 
+  const clampLevel = (lvl: number): number => Math.min(totalLevels, Math.max(1, lvl));
   const userState: UserCareerState = {};
-  const coreSubjects = plan.subjects.filter((s) => !s.isElective && !s.isOptionalTrack);
-  const electives = plan.subjects.filter((s) => Boolean(s.isElective));
+  const coreSubjects = [...plan.subjects]
+    .filter((s) => !s.isElective && !s.isOptionalTrack)
+    .sort((a, b) => a.level - b.level || a.id - b.id);
+  const electives = [...plan.subjects]
+    .filter((s) => Boolean(s.isElective))
+    .sort((a, b) => a.level - b.level || a.id - b.id);
 
-  coreSubjects.forEach((subj, idx) => {
-    if (subj.level === 1) {
-      userState[subj.id] = {
-        status: idx % 3 === 0 ? 'aprobada' : 'promocionada',
-        grade: idx % 3 === 0 ? 8 : 9,
-      };
-    } else if (subj.level === 2) {
-      if (idx % 4 === 0) {
-        userState[subj.id] = { status: 'regularizada' };
-      } else if (idx % 4 === 1) {
-        userState[subj.id] = { status: 'cursando' };
-      } else {
-        userState[subj.id] = { status: 'aprobada', grade: 8 };
-      }
-    } else if (subj.level === 3 && idx % 3 === 0) {
-      userState[subj.id] = { status: 'cursando' };
-    }
+  const level1Core = coreSubjects.filter((s) => s.level === 1);
+  level1Core.forEach((subj, idx) => {
+    const tpl = LEVEL1_SAMPLE_STATES[idx % LEVEL1_SAMPLE_STATES.length];
+    userState[subj.id] = { ...tpl };
   });
 
-  if (electives.length > 0) {
-    const first = electives[0];
-    userState[first.id] = { status: 'aprobada', grade: 9 };
-    const lvl1 = Math.min(totalLevels, Math.max(1, first.level));
-    assignedElectives[lvl1].push(first.id);
+  const level2Core = coreSubjects.filter((s) => s.level === 2);
+  level2Core.forEach((subj, idx) => {
+    const tpl = LEVEL2_SAMPLE_STATES[idx % LEVEL2_SAMPLE_STATES.length];
+    userState[subj.id] = { ...tpl };
+  });
+
+  const level3Core = coreSubjects.filter((s) => s.level === 3);
+  if (level3Core.length >= 3) {
+    userState[level3Core[1].id] = { status: 'cursando' };
+    userState[level3Core[2].id] = { status: 'cursando' };
+  } else if (level3Core.length >= 1) {
+    userState[level3Core[0].id] = { status: 'cursando' };
   }
-  if (electives.length > 1) {
-    const second = electives[1];
-    userState[second.id] = { status: 'cursando' };
-    const lvl2 = Math.min(totalLevels, Math.max(1, second.level));
-    assignedElectives[lvl2].push(second.id);
+
+  const distinctElectiveLevels = Array.from(new Set(electives.map((e) => e.level))).sort(
+    (a, b) => a - b
+  );
+
+  if (distinctElectiveLevels.length >= 1) {
+    const firstLevelElectives = electives.filter((e) => e.level === distinctElectiveLevels[0]);
+    const first = firstLevelElectives[0];
+    if (first) {
+      userState[first.id] = { status: 'aprobada', grade: 9 };
+      assignedElectives[clampLevel(first.level)].push(first.id);
+    }
+
+    if (distinctElectiveLevels.length >= 2) {
+      const secondLevelElectives = electives.filter((e) => e.level === distinctElectiveLevels[1]);
+      const second = secondLevelElectives[3] ?? secondLevelElectives[0];
+      if (second) {
+        userState[second.id] = { status: 'cursando' };
+        assignedElectives[clampLevel(second.level)].push(second.id);
+      }
+    } else if (firstLevelElectives.length >= 2) {
+      const second = firstLevelElectives[1];
+      userState[second.id] = { status: 'cursando' };
+      assignedElectives[clampLevel(second.level)].push(second.id);
+    }
   }
 
   return { userState, assignedElectives };

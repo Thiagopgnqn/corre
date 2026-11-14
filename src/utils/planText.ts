@@ -621,3 +621,25 @@ export function buildPlanTutorialSteps(
 
   return output;
 }
+
+export function computeNextTutorialStep(
+  prevStep: number,
+  stepsLength: number
+): { nextStep: number; shouldClose: boolean } {
+  if (stepsLength <= 0) {
+    return { nextStep: 0, shouldClose: true };
+  }
+  if (prevStep < stepsLength - 1) {
+    return { nextStep: prevStep + 1, shouldClose: false };
+  }
+  return { nextStep: prevStep, shouldClose: true };
+}
+
+export function computePrevTutorialStep(prevStep: number): number {
+  return Math.max(0, prevStep - 1);
+}
+
+export function clampTutorialStep(targetStep: number, stepsLength: number): number {
+  if (stepsLength <= 0) return 0;
+  return Math.max(0, Math.min(stepsLength - 1, targetStep));
+}

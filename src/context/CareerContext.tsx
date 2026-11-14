@@ -21,7 +21,12 @@ import type {
   UpsertEnrollmentInput,
 } from '../types/enrollment';
 import { getAvailableTutorialSteps } from '../data/tutorialSteps';
-import { buildPlanTutorialSteps } from '../utils/planText';
+import {
+  buildPlanTutorialSteps,
+  clampTutorialStep,
+  computeNextTutorialStep,
+  computePrevTutorialStep,
+} from '../utils/planText';
 import { getScheduleAvailability } from '../utils/scheduleAvailability';
 import {
   buildSubjectsMap,
@@ -1652,9 +1657,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
         : true;
       const steps = buildPlanTutorialSteps(getAvailableTutorialSteps(isSchedAvail), activePlan);
-      if (prev < steps.length - 1) {
+      const { nextStep, shouldClose } = computeNextTutorialStep(prev, steps.length);
+      if (!shouldClose) {
         soundManager.playClick();
-        return prev + 1;
+        return nextStep;
       }
       closeTutorial();
       return prev;
@@ -1664,7 +1670,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const prevTutorialStep = useCallback(() => {
     setCurrentTutorialStep((prev) => {
       soundManager.playClick();
-      return Math.max(0, prev - 1);
+      return computePrevTutorialStep(prev);
     });
   }, []);
 
@@ -1673,7 +1679,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ? getScheduleAvailability(window.innerWidth, window.innerHeight) === 'available'
       : true;
     const steps = buildPlanTutorialSteps(getAvailableTutorialSteps(isSchedAvail), activePlan);
-    setCurrentTutorialStep(Math.max(0, Math.min(steps.length - 1, step)));
+    setCurrentTutorialStep(clampTutorialStep(step, steps.length));
     soundManager.playClick();
   }, [activePlan]);
 
