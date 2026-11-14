@@ -1675,4 +1675,55 @@ const EXPECTED_ISI_SCHEDULE_SHORT_NAMES: Record<number, string> = {
       );
     }
   });
+
+  it('preserves exact pre-Tanda-2c option values, labels and defaults in buildAdminPlanSubjectOptions for AdminScheduleTab and AdminReviewsTab', () => {
+    const legacyMap = (subjects: Array<{ id: number; code: string; name: string }>) => ({
+      options: subjects.map((s) => ({
+        value: String(s.id),
+        label: `#${s.code} ${s.name}`,
+      })),
+      defaultFormSubjectId: subjects[0]?.id ? String(subjects[0].id) : '',
+    });
+
+    // 1. Parity across ALL core subjects on normalized ISI 2023 payload and CORE_SUBJECTS fixture
+    const coreFromPayload = ISI_PLAN.subjects.filter((s) => !s.isElective);
+    const optionsFromPayload = buildAdminPlanSubjectOptions(coreFromPayload);
+    const optionsFromFixture = buildAdminPlanSubjectOptions(CORE_SUBJECTS);
+    const legacyFromFixture = legacyMap(CORE_SUBJECTS);
+
+    assert.equal(coreFromPayload.every((s) => Number.isInteger(s.id) && s.id >= 1), true);
+    assert.deepEqual(
+      optionsFromPayload.map((o) => ({ value: o.value, label: o.label })),
+      legacyFromFixture.options
+    );
+    assert.deepEqual(
+      optionsFromFixture.map((o) => ({ value: o.value, label: o.label })),
+      legacyFromFixture.options
+    );
+    assert.equal(optionsFromPayload[0]?.value ?? '', legacyFromFixture.defaultFormSubjectId);
+    assert.equal(optionsFromFixture[0]?.value ?? '', legacyFromFixture.defaultFormSubjectId);
+
+    // 2. Parity on non-ISI multi-career plan & empty list
+    const otherSubjects = [
+      { id: 101, code: 'BIO-1', name: 'Biología Celular' },
+      { id: 102, code: 'BIO-2', name: 'Genética Molecular' },
+    ];
+    const otherOpts = buildAdminPlanSubjectOptions(otherSubjects);
+    const legacyOther = legacyMap(otherSubjects);
+    assert.deepEqual(
+      otherOpts.map((o) => ({ value: o.value, label: o.label })),
+      legacyOther.options
+    );
+    assert.equal(otherOpts[0]?.value ?? '', legacyOther.defaultFormSubjectId);
+
+    assert.deepEqual(buildAdminPlanSubjectOptions([]), []);
+    assert.equal(buildAdminPlanSubjectOptions([])[0]?.value ?? '', legacyMap([]).defaultFormSubjectId);
+
+    // 3. Explicit edge-case invariant: if a hypothetical catalog used id=0 (falsy in legacy ternary),
+    // subjectOptions[0]?.value ?? '' yields '0' whereas legacy subjects[0]?.id ? String(...) : '' yielded ''.
+    // Real code_in_plan values are strictly >= 1.
+    const zeroIdEdge = buildAdminPlanSubjectOptions([{ id: 0, code: '0', name: 'Zero Edge' }]);
+    assert.equal(zeroIdEdge[0]?.value ?? '', '0');
+    assert.equal(legacyMap([{ id: 0, code: '0', name: 'Zero Edge' }]).defaultFormSubjectId, '');
+  });
 });

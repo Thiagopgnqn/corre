@@ -62,7 +62,7 @@ Con `NODE_ENV=development` y las variables opcionales **omitidas** (tal como fig
 
 ---
 
-## 3. Verificación anti-producción, migraciones (`0008`–`0012`) y arranque del backend
+## 3. Verificación anti-producción, migraciones (`0008`–`0013`) y arranque del backend
 
 > [!CAUTION]
 > **PASO OBLIGATORIO ANTES DE EJECUTAR MIGRACIONES O LEVANTAR EL BACKEND:**
@@ -81,7 +81,8 @@ npm --prefix server run dev
 Verificaciones rápidas antes de abrir el navegador (por ejemplo con `curl` o en otra pestaña del navegador):
 1. `GET http://localhost:4000/api/health` -> debe responder `200 OK`.
 2. `GET http://localhost:4000/api/catalog/plans/current` -> confirmá en el JSON:
-   - `data.plan.config.ppsRequirement` vale `{"referenceSubjectCode":36,"label":"Habilitación PPS"}` y `data.plan.config.finalDegreeTitle` vale `"Ingeniero/a"`
+   - `data.plan.config.ppsRequirement` vale `{"referenceSubjectCode":36,"label":"Habilitación PPS","description":"Cumplís los requisitos para cursar la Práctica Profesional"}` y `data.plan.config.finalDegreeTitle` vale `"Ingeniero/a"`
+   - `data.plan.config.intermediateDegrees[0]` actualizado por la migración `0013` contiene `name: "Analista Universitario de Sistemas de Información"`, `shortLabel: "Analista"` y `shortTitle: "Analista Universitario"`
    - **No existe** el campo `ppsSubjectCode` en `data.plan.config`
    - `data.subjects` contiene las `60` materias (`37` obligatorias + `23` electivas) con `code` en formato fixture (`"1".."36"`, `"99"`, `"E-301"`, `"X-408"`...), `shortName` actualizado por la migración `0010` en las 28 materias alineadas, `"isIntegrator": true` en las 5 integradoras (`16`, `23`, `30`, `36`, `99`), y `"specialRule"` exacto en `99` y `36` (`"Para RENDIRLO ..."`, ausente en el resto)
    - `data.rules` contiene las reglas `99` (`approved_range` 1..23) y `36` (`all_previous_core_approved` excluyendo track `analista`) con las descripciones exactas actualizadas por la migración `0012`
@@ -132,11 +133,15 @@ Compará lado a lado (o pestaña a pestaña) con la versión actual en producci�
    - Verificá que la tarjeta **"Habilitación PPS"** aparece visible y responde al cumplimiento de correlativas de la materia **`36`** (bloqueada inicialmente, habilitada cuando se cumplen las regulares `[25, 26, 30]` y aprobadas `[12, 20, 23]`).
    - Con Analista ON: debe verse el seguimiento de **Analista Universitario** (`23` materias + `99` aprobada + `4` cr. de electivas). El encabezado de la tarjeta de requisitos muestra **`"Título Intermedio: Analista Universitario de Sistemas de Información"`** (única diferencia visible intencional respecto de producción, donde decía `"Título Intermedio: Analista Universitario de Sistemas"`).
    - Confirmá el cálculo del **Camino Crítico**.
-6. **Armador de Horarios, Profesores y Biblioteca:**
-   - **Armador (`ScheduleBuilder` / `ScheduleWeeklyGrid`):** las etiquetas de la grilla semanal muestran nombres cortos claros (migración `0010` y configuración actual), detección de conflictos y sugeridor de combinaciones sin choques.
+6. **Armador de Horarios, Exportación `.ics`, Profesores y Biblioteca:**
+   - **Armador (`ScheduleBuilder` / `ScheduleWeeklyGrid`):** seleccioná comisiones sin conflictos ni duplicados y verificá que las etiquetas cortas de la grilla semanal coinciden exactamente con producción en las `41` materias con oferta (`schedule.json` + migración `0010`), detección de conflictos y sugeridor de combinaciones sin choques.
+   - **Exportación `.ics` y Portapapeles (`ScheduleSummaryPanel`):** ejecutá **Exportar calendario (`.ics`)** (descarga `horarios-utn-YYYY-MM-DD.ics` con `PRODID:-//Stack//Armador de Horarios//ES` y UIDs `@micarrera.utn`) y **Copiar resumen** (encabezado `📅 MI HORARIO DE CURSADA — UTN ISI (Plan 2023)`).
    - **Profesores (`ProfessorsDirectory`):** al filtrar por materia (troncal y electiva como `301`/`E-301`, tanto en desktop como en mobile), devuelve docentes/reseñas correspondientes sin fallar por formato de código.
-   - **Biblioteca (`LibraryHome` / `SubjectLibraryView`):** listado de materias/archivos y flujo de subida usando el simulador en memoria (`MemoryMockR2Service`, sin errores de R2).
-7. **DevTools -> `Application` -> `Local Storage` (`http://localhost:5173`):**
+   - **Biblioteca (`LibraryHome` / `SubjectLibraryView`):** listado de materias/archivos (`1° Año`..`5° Año` + `Electivas`) y flujo de subida usando el simulador en memoria (`MemoryMockR2Service`, sin errores de R2).
+7. **Demo `"3er año"` y Tutorial completo (`Navbar`, `OnboardingModal`, `TutorialTour`):**
+   - **Demo `"3er año"`:** desde el botón demo en `Navbar` u `OnboardingModal`, cargá el perfil demo de 3er año y comprobá que marca exactamente las materias previas, electivas y progreso esperado de Sistemas (mismos estados, notas y fechas que `getSample3rdYearStudent`).
+   - **Tutorial completo:** ejecutá el tutorial de punta a punta en **escritorio (`17` pasos, incluyendo `schedule-builder`, `electives-tour` y `analista-switch`)** y en **celular/mobile (`16` pasos, omitiendo el paso de vista `schedule`)**, avanzando, retrocediendo y saltando pasos para verificar contador (`1 / 17`, `16 / 16`), textos y destacado de elementos sin errores.
+8. **DevTools -> `Application` -> `Local Storage` (`http://localhost:5173`):**
    - **Nota sobre aislamiento por origen:** el `localStorage` de `http://localhost:5173` y el de producción son completamente distintos e independientes entre sí (aislados por origen en el navegador); probar en local no lee ni modifica el `localStorage` de producción.
    - Verificá que exista la clave `mi_carrera_catalog_cache_v1:<planId>` conteniendo `"schema": 6` y `"version"`.
    - Verificá que las claves de progreso locales se guarden bajo `mi_carrera_*::plan:<planId>`.

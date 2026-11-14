@@ -23,7 +23,10 @@ import {
   isGenericElective,
 } from './fixtures/subjectAliases';
 import { validateScheduleData } from '../src/utils/scheduleLogic';
-import { SUBJECT_SHORT_NAMES, getSubjectShortName } from '../src/components/schedule/ScheduleWeeklyGrid';
+import { getSubjectShortName } from '../src/components/schedule/ScheduleWeeklyGrid';
+import { HISTORICAL_SUBJECT_SHORT_NAMES } from './fixtures/subjectShortNames';
+import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
+import type { ActivePlanCatalog, Subject } from '../src/types/career';
 import { CORE_SUBJECTS } from './fixtures/plan2023';
 import { ELECTIVES } from './fixtures/electives';
 
@@ -289,21 +292,270 @@ if (fs.existsSync(scheduleJsonPath)) {
   console.log(`✓ schedule.json is valid according to validateScheduleData (${validation.commissionsCount} commissions, ${validation.reservedElectiveSlotsCount} reserved elective slots)`);
 }
 
-// 14. Verify SUBJECT_SHORT_NAMES alignment with Plan 2023
-assert(SUBJECT_SHORT_NAMES[21] === 'Com. de Datos', 'ID 21 must be Comunicación de Datos');
-assert(SUBJECT_SHORT_NAMES[22] === 'Análisis Numérico', 'ID 22 must be Análisis Numérico');
-assert(SUBJECT_SHORT_NAMES[23] === 'Diseño de Sist. (DSI)', 'ID 23 must be Diseño de Sistemas de Información');
-assert(SUBJECT_SHORT_NAMES[24] === 'Legislación', 'ID 24 must be Legislación');
-assert(SUBJECT_SHORT_NAMES[29] === 'Automatización (TPA)', 'ID 29 must be Tecnologías para la Automatización');
+function buildNormalizedIsiCatalogFromSeed(): ActivePlanCatalog {
+  const catalogSeed = JSON.parse(
+    fs.readFileSync(path.resolve('server/seed-data/plan2023-catalog.json'), 'utf-8')
+  );
+  const codeToUuid = new Map<number, string>();
+  const subjects = catalogSeed.subjects.map((s: any, idx: number) => {
+    const id = `sched-test-subj-${idx + 1}`;
+    codeToUuid.set(s.codeInPlan, id);
+    return {
+      id,
+      codeInPlan: s.codeInPlan,
+      name: s.name,
+      shortName: s.shortName,
+      level: s.level,
+      modality: s.modality,
+      contraCuatrimestral: Boolean(s.contraCuatrimestral),
+      weeklyHours: s.weeklyHours,
+      kind: s.kind,
+      credits: s.credits ?? null,
+      isOptionalTrack: Boolean(s.isOptionalTrack),
+      trackKey: s.trackKey ?? null,
+      isIntegrator: Boolean(s.isIntegrator),
+    };
+  });
 
-// Check that every ID in SUBJECT_SHORT_NAMES actually exists in CORE_SUBJECTS or ELECTIVES
+  const prerequisites: Array<{ subjectId: string; requiresSubjectId: string; type: string }> = [];
+  for (const s of catalogSeed.subjects) {
+    const subjectId = codeToUuid.get(s.codeInPlan)!;
+    for (const req of s.regularPrereqs ?? []) {
+      const requiresSubjectId = codeToUuid.get(req);
+      if (requiresSubjectId) prerequisites.push({ subjectId, requiresSubjectId, type: 'regular' });
+    }
+    for (const req of s.approvedPrereqs ?? []) {
+      const requiresSubjectId = codeToUuid.get(req);
+      if (requiresSubjectId) prerequisites.push({ subjectId, requiresSubjectId, type: 'approved' });
+    }
+  }
+
+  return formatPlanCatalogPayload({
+    plan: {
+      id: 'plan-isi-2023',
+      name: catalogSeed.studyPlan.name,
+      year: catalogSeed.studyPlan.year,
+      config: catalogSeed.studyPlan.config,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    career: {
+      id: 'career-isi',
+      name: catalogSeed.career.name,
+      code: catalogSeed.career.code,
+      facultyId: 'faculty-frc',
+      facultyCode: catalogSeed.faculty.code,
+      facultyName: catalogSeed.faculty.name,
+      institutionCode: catalogSeed.institution.code,
+      institutionName: catalogSeed.institution.name,
+    },
+    subjects,
+    prerequisites,
+    rules: [],
+    acronyms: [],
+  }) as ActivePlanCatalog;
+}
+
+// 14. Verify catalog shortName alignment, schedule.json parity (41 subjects) and exact 15 expected historical diffs (60 subjects)
+const isiCatalog = buildNormalizedIsiCatalogFromSeed();
+const isiSubjectById = new Map<number, Subject>(isiCatalog.subjects.map((s) => [s.id, s]));
+
+assert(
+  getSubjectShortName(21, isiSubjectById.get(21)!.name, isiSubjectById.get(21)) === 'Com. de Datos',
+  'ID 21 must be Comunicación de Datos'
+);
+assert(
+  getSubjectShortName(22, isiSubjectById.get(22)!.name, isiSubjectById.get(22)) === 'Análisis Numérico',
+  'ID 22 must be Análisis Numérico'
+);
+assert(
+  getSubjectShortName(23, isiSubjectById.get(23)!.name, isiSubjectById.get(23)) === 'Diseño de Sist. (DSI)',
+  'ID 23 must be Diseño de Sistemas de Información'
+);
+assert(
+  getSubjectShortName(24, isiSubjectById.get(24)!.name, isiSubjectById.get(24)) === 'Legislación',
+  'ID 24 must be Legislación'
+);
+assert(
+  getSubjectShortName(29, isiSubjectById.get(29)!.name, isiSubjectById.get(29)) === 'Automatización (TPA)',
+  'ID 29 must be Tecnologías para la Automatización'
+);
+
+// Check that every ID in HISTORICAL_SUBJECT_SHORT_NAMES actually exists in CORE_SUBJECTS or ELECTIVES
 const allKnownIds = new Set([...CORE_SUBJECTS.map((s: any) => s.id), ...ELECTIVES.map((e: any) => e.id)]);
-Object.keys(SUBJECT_SHORT_NAMES).forEach((idStr) => {
+Object.keys(HISTORICAL_SUBJECT_SHORT_NAMES).forEach((idStr) => {
   const id = Number(idStr);
-  assert(allKnownIds.has(id), `SUBJECT_SHORT_NAMES contains unknown subject ID ${id}`);
+  assert(allKnownIds.has(id), `HISTORICAL_SUBJECT_SHORT_NAMES contains unknown subject ID ${id}`);
 });
-assert(getSubjectShortName(22, 'Análisis Numérico') === 'Análisis Numérico', 'getSubjectShortName for 22 should return Análisis Numérico');
-console.log('✓ SUBJECT_SHORT_NAMES Plan 2023 alignment tests passed');
+assert(
+  getSubjectShortName(22, 'Análisis Numérico', isiSubjectById.get(22)) === 'Análisis Numérico',
+  'getSubjectShortName for 22 should return Análisis Numérico'
+);
+
+// 14b. Parity test over all 41 subjects present in server/seed-data/schedule.json against historical fixture
+const seedSchedulePayload = JSON.parse(fs.readFileSync(scheduleJsonPath, 'utf-8'));
+const scheduledSubjectIds = Array.from(
+  new Set<number>(seedSchedulePayload.schedule.map((entry: { subjectId: number }) => entry.subjectId))
+).sort((a, b) => a - b);
+assert(
+  scheduledSubjectIds.length === 41,
+  `Expected 41 distinct subjects in server/seed-data/schedule.json, got ${scheduledSubjectIds.length}`
+);
+for (const subjectId of scheduledSubjectIds) {
+  const catalogSubj = isiSubjectById.get(subjectId);
+  assert(Boolean(catalogSubj), `Scheduled subject #${subjectId} must exist in normalized ISI catalog`);
+  const resolvedShort = getSubjectShortName(catalogSubj!.id, catalogSubj!.name, catalogSubj);
+  assert(
+    resolvedShort === HISTORICAL_SUBJECT_SHORT_NAMES[subjectId],
+    `Schedule parity mismatch for #${subjectId}: got "${resolvedShort}", expected "${HISTORICAL_SUBJECT_SHORT_NAMES[subjectId]}"`
+  );
+}
+
+// 14c. Full 60-subject catalog check: only the 15 explicitly listed differences vs HISTORICAL_SUBJECT_SHORT_NAMES are allowed
+interface ExpectedShortNameDiff {
+  id: number;
+  oldName: string | null;
+  newName: string;
+  reason: string;
+}
+
+const EXPECTED_SHORT_NAME_DIFFS: ExpectedShortNameDiff[] = [
+  {
+    id: 301,
+    oldName: null,
+    newName: 'Backend de Aplicaciones',
+    reason: 'Electiva 3er año ausente en el diccionario histórico y sin oferta en schedule.json',
+  },
+  {
+    id: 401,
+    oldName: 'Gerenciamiento Proyectos',
+    newName: 'Green Software',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 402,
+    oldName: 'Arquitectura Software',
+    newName: 'Gestión Industrial de la Producción',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 403,
+    oldName: 'Testing de Software',
+    newName: 'Gestión de la Mejora de los Procesos',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 404,
+    oldName: 'Seguridad en Redes',
+    newName: 'Desarrollo y Operaciones DevOps',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 406,
+    oldName: 'Gobierno de TI',
+    newName: 'Comunicación Multimedial en el Desarrollo de Sistemas de Información',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 407,
+    oldName: 'Bioinformática',
+    newName: 'Arquitectura de Software',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 501,
+    oldName: 'Criptografía Aplicada',
+    newName: 'Desarrollo de Tecnologías Blockchain',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 502,
+    oldName: 'Auditoría de Sistemas',
+    newName: 'Creatividad e Innovación en Ingeniería',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 503,
+    oldName: 'Cloud Computing',
+    newName: 'Auditoría de SI/TI',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 504,
+    oldName: 'DevOps & CI/CD',
+    newName: 'Gerenciamiento Estratégico',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 505,
+    oldName: 'Arquitecturas Cloud Nativas',
+    newName: 'Consultoría en Negocios Digitales',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 506,
+    oldName: 'Deep Learning',
+    newName: 'Emprendimientos Tecnológicos',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 508,
+    oldName: 'Procesamiento Lenguaje Natural',
+    newName: 'Testing de Software',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+  {
+    id: 510,
+    oldName: 'Big Data',
+    newName: 'Integración de Aplicaciones en Entorno Web',
+    reason: 'Electiva reasignada en catálogo Plan 2023 respecto al diccionario histórico (sin comisiones en schedule.json)',
+  },
+];
+
+assert(
+  isiCatalog.subjects.length === 60,
+  `Expected 60 catalog subjects in ISI Plan 2023, got ${isiCatalog.subjects.length}`
+);
+assert(
+  EXPECTED_SHORT_NAME_DIFFS.length === 15,
+  `Expected 15 documented shortName diffs, got ${EXPECTED_SHORT_NAME_DIFFS.length}`
+);
+
+const expectedDiffById = new Map(EXPECTED_SHORT_NAME_DIFFS.map((d) => [d.id, d]));
+const observedDiffIds = new Set<number>();
+
+for (const subj of isiCatalog.subjects) {
+  const resolved = getSubjectShortName(subj.id, subj.name, subj);
+  const historical = HISTORICAL_SUBJECT_SHORT_NAMES[subj.id] ?? null;
+  if (resolved !== historical) {
+    observedDiffIds.add(subj.id);
+    const expected = expectedDiffById.get(subj.id);
+    assert(
+      Boolean(expected),
+      `Unexpected shortName difference for #${subj.id}: old="${historical}" new="${resolved}"`
+    );
+    assert(
+      historical === expected!.oldName,
+      `Expected oldName mismatch for #${subj.id}: got "${historical}", expected "${expected!.oldName}"`
+    );
+    assert(
+      resolved === expected!.newName,
+      `Expected newName mismatch for #${subj.id}: got "${resolved}", expected "${expected!.newName}"`
+    );
+  }
+}
+
+for (const expected of EXPECTED_SHORT_NAME_DIFFS) {
+  assert(
+    observedDiffIds.has(expected.id),
+    `Expected shortName diff for #${expected.id} ("${expected.oldName}" -> "${expected.newName}") disappeared`
+  );
+}
+assert(
+  observedDiffIds.size === EXPECTED_SHORT_NAME_DIFFS.length,
+  `Expected exact count of ${EXPECTED_SHORT_NAME_DIFFS.length} shortName differences, observed ${observedDiffIds.size}`
+);
+
+console.log('✓ Catalog shortName, 41-subject schedule.json parity & 15-diff verification passed');
 
 // 15. Verify importAllSchedules runs cleanly after src/data/schedule.json removal and does NOT overwrite seed by default
 assert(
