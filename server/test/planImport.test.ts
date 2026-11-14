@@ -306,6 +306,42 @@ async function runTests(): Promise<void> {
     'Bloquea claves peligrosas (__proto__) sin contaminar Object.prototype'
   );
 
+  // __proto__ and constructor in headers AND cells
+  const protoHeaderSheets = makeValidNeutralSheets();
+  protoHeaderSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][0][2] = '__proto__';
+  const ctorHeaderSheets = makeValidNeutralSheets();
+  ctorHeaderSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][0][2] = 'constructor';
+  const protoCellSheets = makeValidNeutralSheets();
+  protoCellSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][2] = '__proto__';
+  const ctorCellSheets = makeValidNeutralSheets();
+  ctorCellSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][2] = 'constructor';
+
+  const protoHeaderRes = await parsePlanWorkbookBuffer({
+    fileName: 'proto-header.xlsx',
+    buffer: buildWorkbookBuffer(protoHeaderSheets),
+  });
+  const ctorHeaderRes = await parsePlanWorkbookBuffer({
+    fileName: 'ctor-header.xlsx',
+    buffer: buildWorkbookBuffer(ctorHeaderSheets),
+  });
+  const protoCellRes = await parsePlanWorkbookBuffer({
+    fileName: 'proto-cell.xlsx',
+    buffer: buildWorkbookBuffer(protoCellSheets),
+  });
+  const ctorCellRes = await parsePlanWorkbookBuffer({
+    fileName: 'ctor-cell.xlsx',
+    buffer: buildWorkbookBuffer(ctorCellSheets),
+  });
+  assert(
+    !protoHeaderRes.valid &&
+      !ctorHeaderRes.valid &&
+      !protoCellRes.valid &&
+      !ctorCellRes.valid &&
+      ({} as Record<string, unknown>).polluted === undefined &&
+      ({}).constructor === Object,
+    'Rechaza __proto__ y constructor en encabezados y celdas sin contaminar prototipos'
+  );
+
   // 5. Worker isolation: timeout + concurrency limit = 1 + no secrets leak
   console.log('\n📌 5. Aislamiento del Worker: timeout, mutex concurrencia = 1 y liberación');
   let timeoutCaught: unknown = null;
@@ -368,6 +404,7 @@ async function runTests(): Promise<void> {
   const otherFacId = '22222222-2222-4222-8222-222222222223';
   const existingCareerId = '33333333-3333-4333-8333-333333333333';
   const existingPlanId = '44444444-4444-4444-8444-444444444444';
+  const archivedPlanId = '44444444-4444-4444-8444-444444444445';
   const sharedDibujoId = '55555555-5555-4555-8555-555555555555';
   const sharedOtherFacId = '55555555-5555-4555-8555-555555555556';
 
@@ -383,17 +420,30 @@ async function runTests(): Promise<void> {
     code: 'ISI',
     status: 'published',
   });
-  store.plans.push({
-    id: existingPlanId,
-    careerId: existingCareerId,
-    name: 'Plan 2023',
-    year: 2023,
-    isActive: true,
-    status: 'published',
-    config: { careerCode: 'ISI' },
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-  });
+  store.plans.push(
+    {
+      id: existingPlanId,
+      careerId: existingCareerId,
+      name: 'Plan 2023',
+      year: 2023,
+      isActive: true,
+      status: 'published',
+      config: { careerCode: 'ISI' },
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    },
+    {
+      id: archivedPlanId,
+      careerId: existingCareerId,
+      name: 'Plan 2008',
+      year: 2008,
+      isActive: false,
+      status: 'archived',
+      config: { careerCode: 'ISI' },
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    }
+  );
   store.sharedSubjects.push(
     {
       id: sharedDibujoId,
@@ -608,17 +658,44 @@ async function runTests(): Promise<void> {
     );
 
     console.log('\n📌 7. Vista Previa (/preview), Sugerencias Shared Subjects y Blindaje previewHash');
+    const takeStoreSnapshot = () =>
+      JSON.stringify({
+        careers: store.careers,
+        plans: store.plans,
+        subjects: store.subjects,
+        prerequisites: store.prerequisites,
+        rules: store.rules,
+        acronyms: store.acronyms,
+        sharedSubjects: store.sharedSubjects,
+        auditLogs: store.auditLogs,
+      });
+    let previewTxCalls = 0;
+    const origRunInTx = store.runInTransaction.bind(store);
+    store.runInTransaction = async (fn) => {
+      previewTxCalls += 1;
+      return origRunInTx(fn);
+    };
+    const snapshotBeforePreview = takeStoreSnapshot();
+
     const previewRes = await apiRequest({
       method: 'POST',
       path: '/api/admin/plans/preview',
       token: adminToken,
       body: previewInput,
     });
+    const snapshotAfterPreview = takeStoreSnapshot();
+    store.runInTransaction = origRunInTx;
     const previewData = previewRes.data?.data;
     const sugg1 = previewData?.sharedSubjectSuggestions?.find((s: any) => s.subjectCode === 1);
     const sugg2 = previewData?.sharedSubjectSuggestions?.find((s: any) => s.subjectCode === 2);
     const previewSubjects = previewData?.normalizedPlan?.subjects || [];
 
+    assert(
+      previewRes.status === 200 &&
+        previewTxCalls === 0 &&
+        snapshotBeforePreview === snapshotAfterPreview,
+      'Vista previa (/preview) es estrictamente solo lectura: store espía registra 0 transacciones y 0 escrituras'
+    );
     assert(
       previewRes.status === 200 &&
         previewData?.valid === true &&
@@ -755,6 +832,56 @@ async function runTests(): Promise<void> {
     );
 
     console.log('\n📌 9. Re-importación Idempotente en Draft, Bloqueos de Borrado y Eliminación Segura');
+    const countStateForPlan = (pid: string) => {
+      const subs = store.subjects.filter((s) => s.planId === pid);
+      const subIdSet = new Set(subs.map((s) => s.id));
+      return {
+        subjectIds: subs.map((s) => s.id).sort(),
+        prereqsCount: store.prerequisites.filter((p) => subIdSet.has(p.subjectId)).length,
+        rulesCount: store.rules.filter((r) => r.planId === pid).length,
+        acronymsCount: store.acronyms.filter((a) => a.planId === pid).length,
+        totalSharedSubjects: store.sharedSubjects.length,
+      };
+    };
+    const sameBefore = countStateForPlan(importedPlanId);
+    const sameFilePreview = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'existing_draft_plan',
+        planId: importedPlanId,
+        fileName: 'arquitectura-2026.xlsx',
+        fileBase64: neutralBase64,
+        sharedSubjectDecisions: linkedDecisions,
+      },
+    });
+    const sameFileConfirm = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/import',
+      token: adminToken,
+      reauth: reauthToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'existing_draft_plan',
+        planId: importedPlanId,
+        fileName: 'arquitectura-2026.xlsx',
+        fileBase64: neutralBase64,
+        sharedSubjectDecisions: linkedDecisions,
+        previewHash: sameFilePreview.data?.data?.previewHash,
+      },
+    });
+    const sameAfter = countStateForPlan(importedPlanId);
+    assert(
+      sameFilePreview.status === 200 &&
+        sameFilePreview.data?.data?.draftDiff?.toCreateCodes?.length === 0 &&
+        sameFilePreview.data?.data?.draftDiff?.toRemoveCodes?.length === 0 &&
+        sameFileConfirm.status === 200 &&
+        JSON.stringify(sameBefore) === JSON.stringify(sameAfter),
+      'Re-importar exactamente el mismo archivo sobre el mismo draft no crea duplicados y preserva UUIDs/conteos'
+    );
+
     const reuploadSheets = makeValidNeutralSheets();
     (reuploadSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1] as unknown[])[2] =
       'Dibujo Técnico Arquitectónico';
@@ -855,6 +982,24 @@ async function runTests(): Promise<void> {
     assert(
       reimportPublished.status === 409 && reimportPublished.data?.code === 'PLAN_NOT_DRAFT',
       'Bloquea con 409 PLAN_NOT_DRAFT cualquier intento de re-importar sobre un plan published'
+    );
+
+    // No se puede re-importar sobre un plan archived
+    const reimportArchived = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'existing_draft_plan',
+        planId: archivedPlanId,
+        fileName: 'x.xlsx',
+        fileBase64: reuploadBase64,
+      },
+    });
+    assert(
+      reimportArchived.status === 409 && reimportArchived.data?.code === 'PLAN_NOT_DRAFT',
+      'Bloquea con 409 PLAN_NOT_DRAFT cualquier intento de re-importar sobre un plan archived'
     );
 
     // Referencia en Biblioteca impide quitar materia (y eliminar el plan borrador)

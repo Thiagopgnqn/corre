@@ -144,6 +144,16 @@ function extractSafeSheetRows(
     const strVal = normalizeCellValueToString(cell.v);
     if (!strVal) continue;
 
+    if (FORBIDDEN_KEYS.has(strVal) || strVal.toLowerCase() === '__proto__') {
+      errors.push({
+        sheet: sheetName,
+        row: coords.r + 1,
+        field: key,
+        message: 'Valor no permitido: clave reservada de prototipo (__proto__/constructor/prototype).',
+      });
+      continue;
+    }
+
     if (isDangerousFormulaOrControlText(strVal)) {
       errors.push({
         sheet: sheetName,
