@@ -6,9 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 import {
   evaluatePlanProgress,
+  evaluateSpecialRule,
+  canRenderProyectoFinal,
   checkAnalistaTitle,
   isPPSEligible,
 } from '../src/utils/correlativas';
+import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
 import {
   DEFAULT_SETTINGS,
@@ -1324,5 +1327,207 @@ describe('Career hydration guard (data-overwrite protection)', () => {
     assert.equal(planCOutcome.status, 'aborted');
     assert.equal(hydration.hasHydrated, false);
     assert.equal(canSyncServerState(false, hydration), false);
+  });
+});
+
+describe('Ingeniería Ficticia 5-level engine evaluation', () => {
+  it('evaluates the 5-level Ingeniería Ficticia plan across user states in real correlativas.ts engine', () => {
+    const rawSubjects = [
+      { codeInPlan: 1, displayCode: 'IFIC-1', name: 'Dibujo Técnico', shortName: 'Dibujo Téc.', level: 1, modality: 'A', contraCuatrimestral: false, weeklyHours: 4, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 2, displayCode: 'IFIC-2', name: 'Física General', shortName: 'Física Gral.', level: 1, modality: 'A', contraCuatrimestral: false, weeklyHours: 6, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 3, displayCode: 'IFIC-3', name: 'Termodinámica Básica', shortName: 'Termodinámica', level: 2, modality: '1C', contraCuatrimestral: false, weeklyHours: 5, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 4, displayCode: 'IFIC-4', name: 'Taller de Diseño Aplicado', shortName: 'Taller Diseño', level: 2, modality: '2C', contraCuatrimestral: false, weeklyHours: 4, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: true },
+      { codeInPlan: 5, displayCode: 'IFIC-5', name: 'Taller Intermedio de Síntesis', shortName: 'Taller Síntesis', level: 3, modality: 'A', contraCuatrimestral: false, weeklyHours: 6, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: true },
+      { codeInPlan: 6, displayCode: 'IFIC-6', name: 'Ingeniería de Procesos Ficticios', shortName: 'Ing. Procesos', level: 4, modality: '1C', contraCuatrimestral: false, weeklyHours: 6, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 7, displayCode: 'IFIC-7', name: 'Práctica Profesional Ficticia', shortName: 'Práctica Fict.', level: 4, modality: '2C', contraCuatrimestral: false, weeklyHours: 4, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 8, displayCode: 'IFIC-8', name: 'Proyecto Integrador Final', shortName: 'Proyecto Final', level: 5, modality: 'A', contraCuatrimestral: false, weeklyHours: 8, kind: 'obligatoria', credits: null, isOptionalTrack: false, trackKey: null, isIntegrator: true },
+      { codeInPlan: 101, displayCode: 'ELEC-101', name: 'Seminario Ficticio Alpha', shortName: 'Seminario Alpha', level: 4, modality: '1C-CC', contraCuatrimestral: true, weeklyHours: 4, kind: 'electiva', credits: 4, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+      { codeInPlan: 102, displayCode: 'ELEC-102', name: 'Laboratorio Ficticio Beta', shortName: 'Lab. Beta', level: 5, modality: '2C', contraCuatrimestral: false, weeklyHours: 4, kind: 'electiva', credits: 6, isOptionalTrack: false, trackKey: null, isIntegrator: false },
+    ];
+    const idFor = (code: number) => `ific-sub-${code}`;
+    const prereqPairs: Array<[number, number, 'regular' | 'approved']> = [
+      [3, 2, 'regular'],
+      [4, 1, 'approved'],
+      [5, 3, 'regular'],
+      [5, 4, 'regular'],
+      [6, 5, 'regular'],
+      [7, 3, 'approved'],
+      [7, 4, 'approved'],
+      [7, 5, 'regular'],
+      [8, 5, 'approved'],
+      [8, 6, 'regular'],
+      [101, 3, 'regular'],
+      [102, 6, 'regular'],
+    ];
+
+    const fictitiousPlan = formatPlanCatalogPayload({
+      plan: {
+        id: 'plan-ific-2026',
+        name: 'Plan Ingeniería Ficticia 2026',
+        year: 2026,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+        config: {
+          levelLabel: 'Año',
+          totalLevels: 5,
+          requiredElectiveCredits: 6,
+          electiveSlotsEquivalent: 2,
+          defaultMinPassingGrade: 6,
+          finalDegreeTitle: 'Ingeniero/a Ficticio/a',
+          shortTag: 'IFIC · Plan 2026',
+          ppsRequirement: {
+            referenceSubjectCode: 7,
+            label: 'Habilitación Práctica Ficticia',
+            description: 'Cumplís los requisitos para cursar la práctica supervisada ficticia.',
+          },
+          intermediateDegrees: [
+            {
+              key: 'tecnico',
+              name: 'Técnico/a Universitario/a Ficticio/a',
+              shortLabel: 'Técnico',
+              shortTitle: 'Técnico Ficticio',
+              requiredElectiveCredits: 4,
+              specialRuleSubjectCode: 5,
+            },
+          ],
+        },
+      },
+      career: {
+        id: 'career-ific',
+        name: 'Ingeniería Ficticia',
+        code: 'IFIC',
+        facultyId: 'fac-ficticia',
+      },
+      subjects: rawSubjects.map((s) => ({ ...s, id: idFor(s.codeInPlan) })),
+      prerequisites: prereqPairs.map(([sub, req, type]) => ({
+        subjectId: idFor(sub),
+        requiresSubjectId: idFor(req),
+        type,
+      })),
+      rules: [
+        {
+          id: 'rule-intermedio',
+          subjectId: idFor(5),
+          ruleType: 'approved_range',
+          params: { fromCode: 1, toCode: 4 },
+          description: 'Obligatorias 1 a 4 aprobadas requeridas.',
+        },
+        {
+          id: 'rule-final',
+          subjectId: idFor(8),
+          ruleType: 'all_previous_core_approved',
+          params: {},
+          description: 'Todas las obligatorias previas aprobadas.',
+        },
+      ],
+      acronyms: [
+        { acronym: 'DIB', subjectId: idFor(1) },
+        { acronym: 'TIS', subjectId: idFor(5) },
+        { acronym: 'PPF', subjectId: idFor(7) },
+        { acronym: 'PIF', subjectId: idFor(8) },
+      ],
+    }) as unknown as ActivePlanCatalog;
+
+    const settingsBase = { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true };
+
+    // Estado 0: alumno inicial sin materias
+    const eval0 = evaluatePlanProgress({ plan: fictitiousPlan, userState: {}, settings: settingsBase, examAttempts: [] });
+    assert.deepEqual(eval0.availableCoreIds, [1, 2]);
+    assert.deepEqual(eval0.availableElectiveIds, []);
+    assert.equal(eval0.progress.careerPercentageBySubjects, 0);
+    assert.equal(eval0.progress.percentageApproved, 0);
+    assert.equal(eval0.progress.totalElectiveCreditsApproved, 0);
+    assert.equal(eval0.analista.eligible, false);
+    assert.deepEqual(eval0.analista.missingCoreIds, [1, 2, 3, 4]);
+    assert.equal(eval0.pps.eligible, false);
+    assert.equal(eval0.proyectoFinal.canRender, false);
+
+    // Estado 1: 1º año aprobado (sin electivas en progreso -> 2/8 = 25%)
+    const state1: UserCareerState = {
+      1: { status: 'aprobada', grade: 7 },
+      2: { status: 'promocionada', grade: 8 },
+    };
+    const eval1 = evaluatePlanProgress({
+      plan: fictitiousPlan,
+      userState: state1,
+      settings: { ...settingsBase, includeElectivesInProgress: false },
+      examAttempts: [],
+    });
+    assert.deepEqual(eval1.availableCoreIds, [3, 4]);
+    assert.equal(eval1.progress.careerPercentageBySubjects, 25);
+    assert.equal(eval1.progress.percentageApproved, 25);
+    assert.equal(eval1.progress.percentagePending, 75);
+
+    // Estado 2: obligatorias 1..4 aprobadas -> habilita materia intermedia 5 y electiva 101
+    const state2: UserCareerState = {
+      ...state1,
+      3: { status: 'aprobada', grade: 7 },
+      4: { status: 'aprobada', grade: 8 },
+    };
+    const eval2 = evaluatePlanProgress({ plan: fictitiousPlan, userState: state2, settings: settingsBase, examAttempts: [] });
+    assert.deepEqual(eval2.availableCoreIds, [5]);
+    assert.deepEqual(eval2.availableElectiveIds, [101]);
+    assert.equal(eval2.seminario.canRender, true);
+    assert.equal(eval2.progress.careerPercentageBySubjects, 40);
+    assert.equal(eval2.progress.percentageApproved, 40); // 4 de (8 + 2 slots equiv)
+    assert.equal(eval2.analista.eligible, false);
+    assert.equal(eval2.pps.eligible, false);
+
+    // Estado 3a: 5 regularizada + electiva 101 aprobada (4 cred) -> habilita PPS y desbloquea nivel 4 (6, 7),
+    // pero título intermedio aún bloqueado por faltar aprobación de materia hito 5
+    const state3a: UserCareerState = {
+      ...state2,
+      5: { status: 'regularizada' },
+      101: { status: 'aprobada', grade: 9 },
+    };
+    const eval3a = evaluatePlanProgress({ plan: fictitiousPlan, userState: state3a, settings: settingsBase, examAttempts: [] });
+    assert.equal(eval3a.pps.eligible, true);
+    assert.deepEqual(eval3a.availableCoreIds, [6, 7]);
+    assert.equal(eval3a.progress.totalElectiveCreditsApproved, 4);
+    assert.equal(eval3a.analista.seminarioApproved, false);
+    assert.equal(eval3a.analista.eligible, false);
+
+    // Estado 3b: 1..5 aprobadas sin electiva 101 -> título intermedio bloqueado por falta de créditos electivos (0 < 4)
+    const state3b: UserCareerState = {
+      ...state2,
+      5: { status: 'aprobada', grade: 8 },
+    };
+    const analistaNoElectives = checkAnalistaTitle(state3b, fictitiousPlan, 0);
+    assert.equal(analistaNoElectives.seminarioApproved, true);
+    assert.deepEqual(analistaNoElectives.missingCoreIds, []);
+    assert.equal(analistaNoElectives.eligible, false);
+
+    // Estado 4: 1..6 aprobadas + PPS (7) regular + electivas 101 (4) y 102 (6) aprobadas ->
+    // intermedio eligible, PPS eligible, pero Proyecto Integrador Final (8) aún bloqueado por faltar aprobar 7
+    const state4: UserCareerState = {
+      ...state3b,
+      6: { status: 'aprobada', grade: 7 },
+      7: { status: 'regularizada' },
+      101: { status: 'aprobada', grade: 8 },
+      102: { status: 'aprobada', grade: 9 },
+    };
+    const eval4 = evaluatePlanProgress({ plan: fictitiousPlan, userState: state4, settings: settingsBase, examAttempts: [] });
+    assert.equal(eval4.progress.totalElectiveCreditsApproved, 10);
+    assert.equal(eval4.progress.missingElectiveCreditsForDegree, 0);
+    assert.equal(eval4.progress.percentageApproved, 80); // 6 core + 2 equiv electivas sobre 10
+    assert.equal(eval4.analista.eligible, true);
+    assert.equal(isPPSEligible(state4, fictitiousPlan).eligible, true);
+    assert.equal(eval4.proyectoFinal.canRender, false);
+    assert.deepEqual(eval4.proyectoFinal.missingIds, [7]);
+
+    // Estado 5: 1..8 todas aprobadas + electivas completas -> 100% e integradora final / egreso habilitado
+    const state5: UserCareerState = {
+      ...state4,
+      7: { status: 'aprobada', grade: 8 },
+      8: { status: 'aprobada', grade: 10 },
+    };
+    const eval5 = evaluatePlanProgress({ plan: fictitiousPlan, userState: state5, settings: settingsBase, examAttempts: [] });
+    const capstoneRule = fictitiousPlan.rules.find((r) => r.subjectCode === 8)!;
+    assert.equal(evaluateSpecialRule(capstoneRule, fictitiousPlan.subjects, state5, true).satisfied, true);
+    assert.equal(canRenderProyectoFinal(state5, fictitiousPlan, true).canRender, true);
+    assert.equal(eval5.proyectoFinal.canRender, true);
+    assert.equal(eval5.analista.eligible, true);
+    assert.equal(eval5.progress.careerPercentageBySubjects, 100);
+    assert.equal(eval5.progress.percentageApproved, 100);
+    assert.equal(eval5.progress.isDegreeEligible, true);
   });
 });

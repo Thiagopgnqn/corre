@@ -53,45 +53,65 @@ function makeValidNeutralSheets(): Record<string, unknown[][]> {
     [PLAN_TEMPLATE_SHEETS.PLAN]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PLAN]],
       [
-        'Plan Arquitectura 2026',
+        'Plan Ingeniería Ficticia 2026',
         2026,
-        'Cuatrimestre',
-        '', // omit Total niveles to verify max(level) derivation
-        0,
-        0,
+        'Año',
+        '', // omit Total niveles to verify max(level) derivation (= 5)
         6,
-        'Arquitecto/a',
-        'ARQ · Plan 2026',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
-        '',
+        2,
+        6,
+        'Ingeniero/a Ficticio/a',
+        'IFIC · Plan 2026',
+        7,
+        'Habilitación Práctica Ficticia',
+        'Cumplís los requisitos para cursar la práctica supervisada ficticia.',
+        'Técnico/a Universitario/a Ficticio/a',
+        'Técnico',
+        'Técnico Ficticio',
+        'tecnico',
+        4,
+        5,
       ],
     ],
     [PLAN_TEMPLATE_SHEETS.SUBJECTS]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.SUBJECTS]],
-      [1, 'ARQ-1', 'Dibujo Técnico', 'Dibujo Téc.', 1, '1C', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
-      [2, 'ARQ-2', 'Estructuras I', 'Estruct. I', 2, '2C', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
-      [3, 'ARQ-3', 'Proyecto Urbano Final', 'Proy. Final', 3, 'A', 'NO', 8, 'obligatoria', '', 'SI', 'NO', ''],
+      [1, 'IFIC-1', 'Dibujo Técnico', 'Dibujo Téc.', 1, 'A', 'NO', 4, 'obligatoria', '', 'NO', 'NO', ''],
+      [2, 'IFIC-2', 'Física General', 'Física Gral.', 1, 'A', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
+      [3, 'IFIC-3', 'Termodinámica Básica', 'Termodinámica', 2, '1C', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
+      [4, 'IFIC-4', 'Taller de Diseño Aplicado', 'Taller Diseño', 2, '2C', 'NO', 4, 'obligatoria', '', 'SI', 'NO', ''],
+      [5, 'IFIC-5', 'Taller Intermedio de Síntesis', 'Taller Síntesis', 3, 'A', 'NO', 6, 'obligatoria', '', 'SI', 'NO', ''],
+      [6, 'IFIC-6', 'Ingeniería de Procesos Ficticios', 'Ing. Procesos', 4, '1C', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
+      [7, 'IFIC-7', 'Práctica Profesional Ficticia', 'Práctica Fict.', 4, '2C', 'NO', 4, 'obligatoria', '', 'NO', 'NO', ''],
+      [8, 'IFIC-8', 'Proyecto Integrador Final', 'Proyecto Final', 5, 'A', 'NO', 8, 'obligatoria', '', 'SI', 'NO', ''],
+      [101, 'ELEC-101', 'Seminario Ficticio Alpha', 'Seminario Alpha', 4, '1C-CC', 'SI', 4, 'electiva', 4, 'NO', 'NO', ''],
+      [102, 'ELEC-102', 'Laboratorio Ficticio Beta', 'Lab. Beta', 5, '2C', 'NO', 4, 'electiva', 6, 'NO', 'NO', ''],
     ],
     [PLAN_TEMPLATE_SHEETS.PREREQUISITES]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PREREQUISITES]],
-      [2, 1, 'regular'],
-      [3, 2, 'aprobada'],
+      [3, 2, 'regular'],
+      [4, 1, 'aprobada'],
+      [5, 3, 'regular'],
+      [5, 4, 'regular'],
+      [6, 5, 'regular'],
+      [7, 3, 'aprobada'],
+      [7, 4, 'aprobada'],
+      [7, 5, 'regular'],
+      [8, 5, 'aprobada'],
+      [8, 6, 'regular'],
+      [101, 3, 'regular'],
+      [102, 6, 'regular'],
     ],
     [PLAN_TEMPLATE_SHEETS.RULES]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-      [3, 'approved_range', 1, 2, '', 'Aprobadas 1 a 2 requeridas.'],
+      [5, 'approved_range', 1, 4, '', 'Obligatorias 1 a 4 aprobadas requeridas.'],
+      [8, 'all_previous_core_approved', '', '', '', 'Todas las obligatorias previas aprobadas.'],
     ],
     [PLAN_TEMPLATE_SHEETS.ACRONYMS]: [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
-      ['DT', 1],
-      ['PUF', 3],
+      ['DIB', 1],
+      ['TIS', 5],
+      ['PPF', 7],
+      ['PIF', 8],
     ],
   };
 }
@@ -155,28 +175,38 @@ async function runTests(): Promise<void> {
     fileName: 'plantilla-plan.xlsx',
     buffer: templateBuffer,
   });
+  const templateDump = JSON.stringify(parsedTemplate.data);
+  const containsForbiddenCareerCopy =
+    /Sistemas de Información|Analista Universitario|Ingeniería Industrial|Gestión Industrial/i.test(
+      templateDump
+    );
   assert(
     parsedTemplate.valid === true &&
       parsedTemplate.errors.length === 0 &&
-      parsedTemplate.data?.plan.name === 'Plan Modelo 2026' &&
-      parsedTemplate.data?.subjects.length === 5 &&
-      parsedTemplate.data?.prerequisites.length === 5 &&
-      parsedTemplate.data?.specialRules.length === 1 &&
-      parsedTemplate.data?.acronyms.length === 3,
-    'La plantilla descargable se valida y parsea limpia sin errores en modo ida y vuelta'
+      parsedTemplate.data?.plan.name === 'Plan Ingeniería Ficticia 2026' &&
+      parsedTemplate.data?.plan.totalLevels === 5 &&
+      parsedTemplate.data?.subjects.length === 10 &&
+      parsedTemplate.data?.prerequisites.length === 12 &&
+      parsedTemplate.data?.specialRules.length === 2 &&
+      parsedTemplate.data?.acronyms.length === 4 &&
+      !containsForbiddenCareerCopy,
+    'La plantilla descargable usa Ingeniería Ficticia (5 niveles, sin Sistemas/Industrial) y pasa ida y vuelta'
   );
 
-  // 2. Neutral 3-level plan without Total niveles / without electives / custom displayCode
-  console.log('\n📌 2. Parseo neutro (3 cuatrimestres, displayCode explícito, reglas soportadas)');
+  // 2. Neutral 5-level plan without Total niveles / custom displayCode / intermediate + PPS
+  console.log('\n📌 2. Parseo Ingeniería Ficticia (5 niveles, electivas, intermedio, PPS y displayCode explícito)');
   const validBuf = buildWorkbookBuffer(makeValidNeutralSheets());
-  const validRes = await parsePlanWorkbookBuffer({ fileName: 'arq2026.xlsx', buffer: validBuf });
+  const validRes = await parsePlanWorkbookBuffer({ fileName: 'ingenieria-ficticia-2026.xlsx', buffer: validBuf });
   assert(
     validRes.valid === true &&
-      validRes.data?.plan.totalLevels === 3 &&
+      validRes.data?.plan.totalLevels === 5 &&
       validRes.data?.plan.defaultMinPassingGrade === 6 &&
-      validRes.data?.subjects[0].displayCode === 'ARQ-1' &&
-      validRes.data?.specialRules[0].ruleType === 'approved_range',
-    'Deriva totalLevels desde Materias y conserva displayCode explícito sin prefijos automáticos'
+      validRes.data?.plan.intermediateDegrees[0]?.specialRuleSubjectCode === 5 &&
+      validRes.data?.plan.ppsRequirement?.referenceSubjectCode === 7 &&
+      validRes.data?.subjects[0].displayCode === 'IFIC-1' &&
+      validRes.data?.specialRules[0].ruleType === 'approved_range' &&
+      validRes.data?.specialRules[1].ruleType === 'all_previous_core_approved',
+    'Deriva totalLevels=5 desde Materias y conserva displayCode explícito, título intermedio y PPS sin prefijos automáticos'
   );
 
   // 3. File extension, size, magic bytes & macro artifacts
@@ -235,7 +265,7 @@ async function runTests(): Promise<void> {
   assert(!elevenRes.valid && elevenRes.errors[0].message.includes('10'), 'Rechaza > 10 hojas');
 
   const manyRowsSheets = makeValidNeutralSheets();
-  for (let r = 10; r <= 2020; r++) {
+  for (let r = 200; r <= 2220; r++) {
     manyRowsSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS].push([
       r,
       String(r),
@@ -258,9 +288,9 @@ async function runTests(): Promise<void> {
   });
   assert(!manyRowsRes.valid && manyRowsRes.errors[0].message.includes('2000'), 'Rechaza > 2000 filas');
 
-  // Directed cycle detection (1 -> 2 -> 3 -> 1)
+  // Directed cycle detection (1 -> 5 -> 4 -> 1)
   const cycleSheets = makeValidNeutralSheets();
-  cycleSheets[PLAN_TEMPLATE_SHEETS.PREREQUISITES].push([1, 3, 'regular']);
+  cycleSheets[PLAN_TEMPLATE_SHEETS.PREREQUISITES].push([1, 5, 'regular']);
   const cycleRes = await parsePlanWorkbookBuffer({
     fileName: 'cycle.xlsx',
     buffer: buildWorkbookBuffer(cycleSheets),
@@ -726,9 +756,9 @@ async function runTests(): Promise<void> {
     const previewInput = {
       facultyId: facId,
       targetMode: 'new_career_and_plan' as const,
-      careerName: 'Arquitectura',
-      careerCode: 'ARQ',
-      fileName: 'arquitectura-2026.xlsx',
+      careerName: 'Ingeniería Ficticia',
+      careerCode: 'IFIC',
+      fileName: 'ingenieria-ficticia-2026.xlsx',
       fileBase64: neutralBase64,
     };
 
@@ -797,7 +827,7 @@ async function runTests(): Promise<void> {
         previewData?.valid === true &&
         typeof previewData?.previewHash === 'string' &&
         previewData.previewHash.length === 64,
-      'POST /api/admin/plans/preview valida plan ficticio de 3 niveles y emite previewHash SHA-256'
+      'POST /api/admin/plans/preview valida Ingeniería Ficticia (5 niveles) y emite previewHash SHA-256'
     );
     assert(
       sugg1?.candidates?.length === 1 &&
@@ -810,11 +840,11 @@ async function runTests(): Promise<void> {
       previewSubjects.every(
         (s: any) =>
           typeof s.code === 'string' &&
-          s.code.startsWith('ARQ-') &&
+          (s.code.startsWith('IFIC-') || s.code.startsWith('ELEC-')) &&
           !s.code.startsWith('E-') &&
           !s.code.startsWith('X-')
       ),
-      'El preview neutro preserva code propio (ARQ-*) sin inyectar prefijos E-/X- de ISI'
+      'El preview neutro preserva code propio (IFIC-*/ELEC-*) sin inyectar prefijos E-/X- de ISI'
     );
 
     // Manipulación del binario sin recalcular preview -> 409 PREVIEW_HASH_MISMATCH
@@ -880,7 +910,7 @@ async function runTests(): Promise<void> {
       importRes.status === 201 &&
         importRes.data?.data?.status === 'draft' &&
         importRes.data?.data?.counts?.linkedExistingShared === 1 &&
-        importRes.data?.data?.counts?.createdNewShared === 2 &&
+        importRes.data?.data?.counts?.createdNewShared === 9 &&
         typeof importedPlanId === 'string',
       'POST /api/admin/plans/import crea carrera/plan en status draft, vincula shared elegido y crea nuevos 1:1'
     );
@@ -903,10 +933,10 @@ async function runTests(): Promise<void> {
       listPlansRes.status === 200 &&
         listedDraft?.status === 'draft' &&
         listedDraft?.careerStatus === 'draft' &&
-        listedDraft?.subjectCount === 3 &&
-        listedDraft?.rulesCount === 1 &&
-        listedDraft?.acronymsCount === 2 &&
-        listedDraft?.sharedSubjectsCount === 3 &&
+        listedDraft?.subjectCount === 10 &&
+        listedDraft?.rulesCount === 2 &&
+        listedDraft?.acronymsCount === 4 &&
+        listedDraft?.sharedSubjectsCount === 10 &&
         listedDraft?.facultyName === 'Facultad Regional Córdoba',
       'GET /api/admin/plans devuelve listado enriquecido con conteos, facultades y estados draft'
     );
@@ -922,7 +952,7 @@ async function runTests(): Promise<void> {
     assert(
       detailRes.status === 200 &&
         detailRes.data?.data?.adminMeta?.planStatus === 'draft' &&
-        detailRes.data?.data?.career?.code === 'ARQ' &&
+        detailRes.data?.data?.career?.code === 'IFIC' &&
         dibujoBinding?.linkedPlansCount === 2,
       'GET /api/admin/plans/:id entrega detalle normalizado incluso en estado draft'
     );
@@ -948,7 +978,7 @@ async function runTests(): Promise<void> {
         facultyId: facId,
         targetMode: 'existing_draft_plan',
         planId: importedPlanId,
-        fileName: 'arquitectura-2026.xlsx',
+        fileName: 'ingenieria-ficticia-2026.xlsx',
         fileBase64: neutralBase64,
         sharedSubjectDecisions: linkedDecisions,
       },
@@ -962,7 +992,7 @@ async function runTests(): Promise<void> {
         facultyId: facId,
         targetMode: 'existing_draft_plan',
         planId: importedPlanId,
-        fileName: 'arquitectura-2026.xlsx',
+        fileName: 'ingenieria-ficticia-2026.xlsx',
         fileBase64: neutralBase64,
         sharedSubjectDecisions: linkedDecisions,
         previewHash: sameFilePreview.data?.data?.previewHash,
@@ -980,36 +1010,44 @@ async function runTests(): Promise<void> {
 
     const reuploadSheets = makeValidNeutralSheets();
     (reuploadSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1] as unknown[])[2] =
-      'Dibujo Técnico Arquitectónico';
-    reuploadSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS].pop(); // remove code 3
+      'Dibujo Técnico para Ingeniería';
+    reuploadSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS].pop(); // remove code 102
     reuploadSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS].push([
-      4,
-      'ARQ-4',
-      'Urbanismo Sustentable',
-      'Urbanismo',
-      3,
-      '1C',
+      103,
+      'ELEC-103',
+      'Optativa Ficticia Gamma',
+      'Opt. Gamma',
+      5,
+      '2C',
       'NO',
+      4,
+      'electiva',
       6,
-      'obligatoria',
-      '',
-      'SI',
+      'NO',
       'NO',
       '',
     ]);
     reuploadSheets[PLAN_TEMPLATE_SHEETS.PREREQUISITES] = [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PREREQUISITES]],
-      [2, 1, 'regular'],
-      [4, 2, 'aprobada'],
-    ];
-    reuploadSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
-      [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
-      [4, 'approved_range', 1, 2, '', 'Requiere 1 y 2 aprobadas.'],
+      [3, 2, 'regular'],
+      [4, 1, 'aprobada'],
+      [5, 3, 'regular'],
+      [5, 4, 'regular'],
+      [6, 5, 'regular'],
+      [7, 3, 'aprobada'],
+      [7, 4, 'aprobada'],
+      [7, 5, 'regular'],
+      [8, 5, 'aprobada'],
+      [8, 6, 'regular'],
+      [101, 3, 'regular'],
+      [103, 6, 'regular'],
     ];
     reuploadSheets[PLAN_TEMPLATE_SHEETS.ACRONYMS] = [
       [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
-      ['DT', 1],
-      ['URB', 4],
+      ['DIB', 1],
+      ['TIS', 5],
+      ['PPF', 7],
+      ['PIF', 8],
     ];
     const reuploadBase64 = buildWorkbookBuffer(reuploadSheets).toString('base64');
     const existingCode1Id = store.subjects.find(
@@ -1020,7 +1058,7 @@ async function runTests(): Promise<void> {
       facultyId: facId,
       targetMode: 'existing_draft_plan' as const,
       planId: importedPlanId,
-      fileName: 'arquitectura-2026-v2.xlsx',
+      fileName: 'ingenieria-ficticia-2026-v2.xlsx',
       fileBase64: reuploadBase64,
     };
     const reuploadPreview = await apiRequest({
@@ -1037,14 +1075,14 @@ async function runTests(): Promise<void> {
     );
     assert(
       reuploadPreview.status === 200 &&
-        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toCreateCodes) === '[4]' &&
-        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toUpdateCodes) === '[1,2]' &&
-        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toRemoveCodes) === '[3]' &&
+        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toCreateCodes) === '[103]' &&
+        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toUpdateCodes) === '[1,2,3,4,5,6,7,8,101]' &&
+        JSON.stringify(reuploadPreview.data?.data?.draftDiff?.toRemoveCodes) === '[102]' &&
         reuploadSugg1?.selectedDecision?.action === 'link_existing' &&
         reuploadSugg1?.selectedDecision?.sharedSubjectId === sharedDibujoId &&
         reuploadSugg1?.candidates?.some((c: any) => c.sharedSubjectId === sharedDibujoId) &&
         reuploadSugg2?.selectedDecision === null,
-      'Preview sobre existing_draft_plan calcula diff exacto (crear 4, actualizar 1-2, quitar 3) y preselecciona vínculos cruzados guardados'
+      'Preview sobre existing_draft_plan calcula diff exacto (crear 103, actualizar 9, quitar 102) y preselecciona vínculos cruzados guardados'
     );
 
     const reuploadConfirm = await apiRequest({
@@ -1057,18 +1095,18 @@ async function runTests(): Promise<void> {
     const keptCode1Sub = store.subjects.find(
       (s) => s.planId === importedPlanId && s.codeInPlan === 1
     );
-    const newCode4Sub = store.subjects.find(
-      (s) => s.planId === importedPlanId && s.codeInPlan === 4
+    const newCode103Sub = store.subjects.find(
+      (s) => s.planId === importedPlanId && s.codeInPlan === 103
     );
     const sharedDibujoAfterReupload = store.sharedSubjects.find((s) => s.id === sharedDibujoId);
     assert(
       reuploadConfirm.status === 200 &&
         keptCode1Sub?.id === existingCode1Id &&
         keptCode1Sub?.sharedSubjectId === sharedDibujoId &&
-        keptCode1Sub?.name === 'Dibujo Técnico Arquitectónico' &&
+        keptCode1Sub?.name === 'Dibujo Técnico para Ingeniería' &&
         sharedDibujoAfterReupload?.displayName === 'Dibujo Técnico' &&
-        Boolean(newCode4Sub) &&
-        !store.subjects.some((s) => s.planId === importedPlanId && s.codeInPlan === 3),
+        Boolean(newCode103Sub) &&
+        !store.subjects.some((s) => s.planId === importedPlanId && s.codeInPlan === 102),
       'Re-importación idempotente preserva UUIDs y shared link sin mutar shared_subjects compartido con otros planes'
     );
 
@@ -1109,7 +1147,7 @@ async function runTests(): Promise<void> {
     );
 
     // Referencia en Biblioteca impide quitar materia (y eliminar el plan borrador)
-    store.libraryFileRefs.push({ subjectId: newCode4Sub!.id, sourcePlanId: importedPlanId });
+    store.libraryFileRefs.push({ subjectId: newCode103Sub!.id, sourcePlanId: importedPlanId });
 
     const blockedRemovalPreview = await apiRequest({
       method: 'POST',
@@ -1119,7 +1157,7 @@ async function runTests(): Promise<void> {
         facultyId: facId,
         targetMode: 'existing_draft_plan',
         planId: importedPlanId,
-        fileName: 'arquitectura-sin-4.xlsx',
+        fileName: 'ingenieria-ficticia-sin-103.xlsx',
         fileBase64: neutralBase64,
         sharedSubjectDecisions: linkedDecisions,
       },
@@ -1133,7 +1171,7 @@ async function runTests(): Promise<void> {
         facultyId: facId,
         targetMode: 'existing_draft_plan',
         planId: importedPlanId,
-        fileName: 'arquitectura-sin-4.xlsx',
+        fileName: 'ingenieria-ficticia-sin-103.xlsx',
         fileBase64: neutralBase64,
         sharedSubjectDecisions: linkedDecisions,
         previewHash: blockedRemovalPreview.data?.data?.previewHash,
@@ -1141,7 +1179,7 @@ async function runTests(): Promise<void> {
     });
     assert(
       blockedRemovalPreview.status === 200 &&
-        JSON.stringify(blockedRemovalPreview.data?.data?.draftDiff?.blockedRemovalCodes) === '[4]' &&
+        JSON.stringify(blockedRemovalPreview.data?.data?.draftDiff?.blockedRemovalCodes) === '[103]' &&
         blockedRemovalConfirm.status === 409 &&
         blockedRemovalConfirm.data?.code === 'DRAFT_SUBJECT_REMOVAL_BLOCKED',
       'Bloquea quitar una materia del draft (409 DRAFT_SUBJECT_REMOVAL_BLOCKED) si tiene referencias en Biblioteca'
