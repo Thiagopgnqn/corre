@@ -15,8 +15,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { getSubjectStatus, checkEligibility } from '../../utils/correlativas';
+import {
+  getElectivesAssignedInCurrentLevelBadge,
+  getElectivesAssignedInOtherLevelBadge,
+  getLevelOrdinalTabLabel,
+} from '../../utils/planText';
+import { buildElectivesPickerStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from '../common/StatusBadge';
-import type { Subject } from '../../types/career';
 
 export const ElectivesPicker: React.FC = () => {
   const {
@@ -32,7 +37,8 @@ export const ElectivesPicker: React.FC = () => {
     updateSettings,
     electives,
     subjectsById,
-    requiredElectiveCredits,
+    planConfig,
+    activeCareer,
   } = useCareer();
 
   const [modalYear, setModalYear] = useState<number | null>(null);
@@ -40,9 +46,18 @@ export const ElectivesPicker: React.FC = () => {
   const isMobile = useIsMobile();
   const [selectedMobileYear, setSelectedMobileYear] = useState<number | 'all'>('all');
 
-  // Helper to find which year an elective is assigned to
+  const electivesStructure = buildElectivesPickerStructure({
+    electives,
+    planConfig,
+    career: activeCareer,
+    assignedElectives,
+    computedProgress,
+    modalSearch,
+  });
+
+  // Helper to find which level an elective is assigned to
   const getAssignedYear = (id: number): number | null => {
-    for (let y = 1; y <= 5; y++) {
+    for (const y of electivesStructure.years) {
       if (assignedElectives[y]?.includes(id)) {
         return y;
       }
@@ -71,53 +86,50 @@ export const ElectivesPicker: React.FC = () => {
     }
   };
 
-  const years = [1, 2, 3, 4, 5];
-
-  // Filtered electives for modal
-  const filteredElectives = electives.filter((el) => {
-    const q = modalSearch.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      el.name.toLowerCase().includes(q) ||
-      el.code.toLowerCase().includes(q) ||
-      `nivel ${el.level}`.includes(q)
-    );
-  });
-
   return (
     <div className="w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 min-w-0 max-w-full">
-      {/* Top Banner: Global Credits Progress */}
-      <div
-        data-tour="electives-banner"
-        className="bg-slate-900/70 border border-slate-800 p-3 sm:p-5 rounded-2xl backdrop-blur-md space-y-4 sm:space-y-5 shadow-xl w-full min-w-0 max-w-full"
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <Sparkles className="w-5 h-5" />
-              </span>
+      {!electivesStructure.hasElectivesBlock ? (
+        <div className="bg-slate-900/70 border border-slate-800 p-8 rounded-2xl text-center space-y-2">
+          <Sparkles className="w-8 h-8 text-slate-600 mx-auto" />
+          <h2 className="text-lg font-bold text-white">{electivesStructure.headerTitle}</h2>
+          <p className="text-xs text-slate-400">
+            Este plan de estudio no incluye materias electivas.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Top Banner: Global Credits Progress */}
+          <div
+            data-tour="electives-banner"
+            className="bg-slate-900/70 border border-slate-800 p-3 sm:p-5 rounded-2xl backdrop-blur-md space-y-4 sm:space-y-5 shadow-xl w-full min-w-0 max-w-full"
+          >
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-xl font-black text-white tracking-tight">
-                  Electivas Libres por Año
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Asigná las materias electivas libremente al año que prefieras según cumplas sus correlativas.
-                </p>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    <Sparkles className="w-5 h-5" />
+                  </span>
+                  <div>
+                    <h2 className="text-xl font-black text-white tracking-tight">
+                      {electivesStructure.headerTitle}
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      {electivesStructure.headerSubtitle}
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Credits Summary Badge */}
-          <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
-            <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
-              <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
-                Aprobados
-              </div>
-              <div className="text-sm sm:text-xl font-black text-amber-400">
-                {computedProgress.totalElectiveCreditsApproved} / {requiredElectiveCredits}
-              </div>
-            </div>
+              {/* Credits Summary Badge */}
+              <div className="grid grid-cols-3 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
+                <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
+                  <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
+                    Aprobados
+                  </div>
+                  <div className="text-sm sm:text-xl font-black text-amber-400">
+                    {computedProgress.totalElectiveCreditsApproved} / {electivesStructure.requiredElectiveCredits}
+                  </div>
+                </div>
 
             <div className="bg-slate-950/80 px-2 sm:px-4 py-2 sm:py-2.5 rounded-xl border border-slate-800 text-center flex-1 min-w-0">
               <div className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate">
@@ -143,10 +155,10 @@ export const ElectivesPicker: React.FC = () => {
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="text-slate-400 font-medium">
-              Meta global de titulación: <span className="text-white font-bold">{requiredElectiveCredits} créditos</span> en total (cualquier nivel)
+              Meta global de titulación: <span className="text-white font-bold">{electivesStructure.requiredElectiveCredits} créditos</span> en total (cualquier nivel)
             </span>
             <span className="font-bold text-amber-400">
-              {requiredElectiveCredits > 0 ? Math.min(100, Math.round((computedProgress.totalElectiveCreditsApproved / requiredElectiveCredits) * 100)) : 0}%
+              {electivesStructure.progressPercent}%
             </span>
           </div>
           <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden p-0.5 border border-slate-800">
@@ -154,7 +166,7 @@ export const ElectivesPicker: React.FC = () => {
               className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-amber-400 rounded-full"
               initial={{ width: 0 }}
               animate={{
-                width: `${requiredElectiveCredits > 0 ? Math.min(100, (computedProgress.totalElectiveCreditsApproved / requiredElectiveCredits) * 100) : 0}%`,
+                width: `${electivesStructure.progressBarWidthPercent}%`,
               }}
               transition={{ duration: 0.6, ease: 'easeOut' }}
             />
@@ -175,14 +187,16 @@ export const ElectivesPicker: React.FC = () => {
             </span>
           </label>
 
-          <span className="text-slate-400 text-[11px]">
-            * Los niveles (3°, 4°, 5°) de las electivas son solo sugerencias académicas de la UTN.
-          </span>
+          {electivesStructure.footnote && (
+            <span className="text-slate-400 text-[11px]">
+              {electivesStructure.footnote}
+            </span>
+          )}
         </div>
       </div>
 
 
-      {/* Mobile Year Selector Chips */}
+      {/* Mobile Level Selector Chips */}
       {isMobile && (
         <div className="flex items-center gap-1.5 p-1.5 bg-slate-900/80 rounded-2xl border border-slate-800 overflow-x-auto no-scrollbar">
           <button
@@ -194,81 +208,77 @@ export const ElectivesPicker: React.FC = () => {
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Todos los años
+            {electivesStructure.allLevelsChipLabel}
           </button>
-          {[1, 2, 3, 4, 5].map((y) => (
+          {electivesStructure.yearSections.map((sec) => (
             <button
-              key={y}
+              key={sec.year}
               type="button"
-              onClick={() => setSelectedMobileYear(y)}
+              onClick={() => setSelectedMobileYear(sec.year)}
               className={`px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center shrink-0 ${
-                selectedMobileYear === y
+                selectedMobileYear === sec.year
                   ? 'bg-amber-500 text-slate-950 shadow-md'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              {y}° Año
+              {sec.tabLabel}
             </button>
           ))}
         </div>
       )}
 
-      {/* Years Container: 1° to 5° */}
+      {/* Levels Container */}
       <div className="space-y-5">
-        {years.filter((y) => (!isMobile || selectedMobileYear === 'all' || selectedMobileYear === y)).map((year) => {
-          const assignedIds = assignedElectives[year] || [];
-          const assignedSubjects = assignedIds
-            .map((id) => electives.find((e) => e.id === id))
-            .filter((e): e is Subject => Boolean(e));
+        {electivesStructure.yearSections
+          .filter((sec) => !isMobile || selectedMobileYear === 'all' || selectedMobileYear === sec.year)
+          .map((sec) => {
+            const year = sec.year;
+            const assignedSubjects = sec.assignedSubjects;
 
-          const yearTotalCredits = assignedSubjects.reduce((acc, curr) => acc + (curr.credits ?? 0), 0);
-
-          return (
-            <div
-              key={year}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, year)}
-              className="bg-slate-900/50 border border-slate-800/90 rounded-2xl p-4 sm:p-5 backdrop-blur-sm space-y-4 transition-colors hover:border-slate-700"
-            >
-              {/* Year Card Header */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 font-black text-sm flex items-center justify-center">
-                    {year}°
+            return (
+              <div
+                key={year}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, year)}
+                className="bg-slate-900/50 border border-slate-800/90 rounded-2xl p-4 sm:p-5 backdrop-blur-sm space-y-4 transition-colors hover:border-slate-700"
+              >
+                {/* Level Card Header */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30 font-black text-sm flex items-center justify-center">
+                      {sec.badge}
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-base text-white">
+                        {sec.heading}
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        {sec.summaryText}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="font-bold text-base text-white">
-                      Electivas asignadas a {year}° Año
-                    </h3>
-                    <p className="text-xs text-slate-400">
-                      {assignedSubjects.length === 0
-                        ? 'Sin electivas asignadas todavía'
-                        : `${assignedSubjects.length} electiva${assignedSubjects.length > 1 ? 's' : ''} • ${yearTotalCredits} créditos planificados`}
+
+                  <button
+                    onClick={() => {
+                      setModalSearch('');
+                      setModalYear(year);
+                    }}
+                    className="px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Agregar electiva</span>
+                  </button>
+                </div>
+
+                {/* Electives List for this Level */}
+                {assignedSubjects.length === 0 ? (
+                  <div className="border border-dashed border-slate-800 rounded-xl p-6 text-center text-xs text-slate-400 space-y-1">
+                    <p className="font-medium text-slate-400">{sec.emptyText}</p>
+                    <p className="text-[11px] text-slate-400">
+                      Arrastrá una electiva aquí o hacé clic en "+ Agregar electiva" para elegirla.
                     </p>
                   </div>
-                </div>
-
-                <button
-                  onClick={() => {
-                    setModalSearch('');
-                    setModalYear(year);
-                  }}
-                  className="px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Agregar electiva</span>
-                </button>
-              </div>
-
-              {/* Electives List for this Year */}
-              {assignedSubjects.length === 0 ? (
-                <div className="border border-dashed border-slate-800 rounded-xl p-6 text-center text-xs text-slate-400 space-y-1">
-                  <p className="font-medium text-slate-400">No hay electivas asignadas a {year}° año.</p>
-                  <p className="text-[11px] text-slate-400">
-                    Arrastrá una electiva aquí o hacé clic en "+ Agregar electiva" para elegirla.
-                  </p>
-                </div>
-              ) : (
+                ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {assignedSubjects.map((elective) => {
                     const status = getSubjectStatus(elective, activeState);
@@ -373,20 +383,20 @@ export const ElectivesPicker: React.FC = () => {
                                 }
                               }}
                               className="text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700 rounded-xl px-2.5 py-2 min-h-[44px] focus:ring-1 focus:ring-amber-500"
-                              title="Mover a otro año"
+                              title={electivesStructure.moveSelectTitle}
                             >
-                              <option value={1}>1° Año</option>
-                              <option value={2}>2° Año</option>
-                              <option value={3}>3° Año</option>
-                              <option value={4}>4° Año</option>
-                              <option value={5}>5° Año</option>
+                              {electivesStructure.years.map((y) => (
+                                <option key={y} value={y}>
+                                  {getLevelOrdinalTabLabel(y, planConfig)}
+                                </option>
+                              ))}
                             </select>
 
                             {/* Remove button */}
                             <button
                               onClick={() => removeElectiveFromYear(elective.id, year)}
                               className="p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-500 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
-                              title="Quitar electiva de este año"
+                              title={electivesStructure.removeBtnTitle}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -420,7 +430,7 @@ export const ElectivesPicker: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="font-bold text-base text-white">
-                      Agregar electiva a {modalYear}° Año
+                      {electivesStructure.modalTitleForYear(modalYear)}
                     </h3>
                     <p className="text-xs text-slate-400">
                       Seleccioná cualquier electiva de la oferta académica. Podés cursarla si cumplís sus correlativas.
@@ -451,7 +461,7 @@ export const ElectivesPicker: React.FC = () => {
 
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="text-slate-400">
-                    Mostrando {filteredElectives.length} de {electives.length} electivas disponibles
+                    Mostrando {electivesStructure.filteredElectivesCount} de {electivesStructure.totalElectivesCount} electivas disponibles
                   </span>
 
                   <label className="flex items-center gap-2 cursor-pointer select-none text-slate-300">
@@ -468,14 +478,13 @@ export const ElectivesPicker: React.FC = () => {
 
               {/* Modal Electives List */}
               <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
-                {[3, 4, 5].map((lvl) => {
-                  const levelGroup = filteredElectives.filter((e) => e.level === lvl);
-                  if (levelGroup.length === 0) return null;
+                {electivesStructure.suggestedLevelGroups.map((group) => {
+                  const levelGroup = group.electives;
 
                   return (
-                    <div key={lvl} className="space-y-2.5">
+                    <div key={group.level} className="space-y-2.5">
                       <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400">
-                        <span>Electivas (Nivel Sugerido {lvl}°)</span>
+                        <span>{group.heading}</span>
                         <div className="h-px bg-slate-800 flex-1" />
                       </div>
 
@@ -514,14 +523,14 @@ export const ElectivesPicker: React.FC = () => {
                                   <span className="text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.2 rounded">
                                     {elective.modality}
                                   </span>
-                                  {isAlreadyInOtherYear && (
+                                  {isAlreadyInOtherYear && assignedYear !== null && (
                                     <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                                      Asignada en {assignedYear}° año
+                                      {getElectivesAssignedInOtherLevelBadge(assignedYear, planConfig)}
                                     </span>
                                   )}
                                   {isAlreadyInThisYear && (
                                     <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                      Asignada en este año
+                                      {getElectivesAssignedInCurrentLevelBadge(planConfig)}
                                     </span>
                                   )}
                                 </div>
@@ -619,7 +628,7 @@ export const ElectivesPicker: React.FC = () => {
               {/* Modal Footer */}
               <div className="p-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs">
                 <span className="text-slate-400">
-                  Una electiva solo puede estar asignada a un año a la vez.
+                  {electivesStructure.onePerLevelFooterNote}
                 </span>
                 <button
                   onClick={() => setModalYear(null)}
@@ -632,6 +641,8 @@ export const ElectivesPicker: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+        </>
+      )}
     </div>
   );
 };

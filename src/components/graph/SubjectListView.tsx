@@ -5,10 +5,8 @@ import {
 } from 'lucide-react';
 import type { Subject, UserCareerState } from '../../types/career';
 import { useCareer } from '../../context/CareerContext';
-import {
-  getSubjectStatus,
-  checkEligibility,
-} from '../../utils/correlativas';
+import { checkEligibility } from '../../utils/correlativas';
+import { buildSubjectListViewStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from '../common/StatusBadge';
 
 interface SubjectListViewProps {
@@ -26,63 +24,52 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
   onSelectSubject,
   selectedSubjectId,
   isSimulationActive = false,
-  sampleSubjectId = 1,
+  sampleSubjectId,
 }) => {
-  const { subjectsById } = useCareer();
-  // Agrupar materias por nivel (1° a 5° año)
-  const groupedByLevel = useMemo(() => {
-    const map = new Map<number, Subject[]>();
-    for (let i = 1; i <= 5; i++) {
-      map.set(i, []);
-    }
+  const { subjectsById, planConfig } = useCareer();
+  const effectiveSampleId = sampleSubjectId ?? subjects[0]?.id ?? 1;
 
-    subjects.forEach((s) => {
-      const list = map.get(s.level) || [];
-      list.push(s);
-      map.set(s.level, list);
-    });
-
-    return Array.from(map.entries())
-      .filter(([_, list]) => list.length > 0)
-      .sort(([a], [b]) => a - b);
-  }, [subjects]);
+  // Agrupar materias por nivel según configuración del plan activo
+  const groupedByLevel = useMemo(
+    () =>
+      buildSubjectListViewStructure({
+        subjects,
+        activeState,
+        subjectsById,
+        planConfig,
+        isSimulationActive,
+        checkEligibilityFn: checkEligibility,
+      }),
+    [subjects, activeState, subjectsById, planConfig, isSimulationActive]
+  );
 
   return (
     <div className="w-full flex-1 overflow-y-auto px-3 sm:px-4 py-3 space-y-6 pb-24">
-      {groupedByLevel.map(([level, levelSubjects]) => {
-        // Calcular estadísticas de avance del año
-        const total = levelSubjects.length;
-        const approvedCount = levelSubjects.filter((s) => {
-          const st = getSubjectStatus(s, activeState);
-          return st === 'aprobada' || st === 'promocionada';
-        }).length;
-
-        const percentage = total > 0 ? Math.round((approvedCount / total) * 100) : 0;
-
+      {groupedByLevel.map((group) => {
         return (
-          <div key={level} className="space-y-3">
-            {/* Header del Nivel / Año */}
+          <div key={group.level} className="space-y-3">
+            {/* Header del Nivel */}
             <div className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur-md py-2 border-b border-slate-800/80 flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <span className="w-6 h-6 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-bold text-xs flex items-center justify-center">
-                  {level}°
+                  {group.shortBadge}
                 </span>
                 <h3 className="text-sm font-bold text-white tracking-tight">
-                  {level}° Año
+                  {group.title}
                 </h3>
                 <span className="text-xs text-slate-400 font-medium">
-                  ({approvedCount}/{total} aprobadas)
+                  {group.summaryLabel}
                 </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-xs font-mono font-bold text-indigo-400">
-                  {percentage}%
+                  {group.percentage}%
                 </span>
                 <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
                   <div
                     className="h-full bg-indigo-500 transition-all duration-300"
-                    style={{ width: `${percentage}%` }}
+                    style={{ width: `${group.percentage}%` }}
                   />
                 </div>
               </div>
@@ -90,26 +77,21 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
 
             {/* Lista de Materias del Nivel */}
             <div className="space-y-2">
-              {levelSubjects.map((subject) => {
-                const status = getSubjectStatus(subject, activeState);
-                const grade = activeState[subject.id]?.grade;
+              {group.items.map((item) => {
+                const {
+                  subject,
+                  status,
+                  grade,
+                  isBlocked,
+                  missingRegularNames,
+                  missingApprovedNames,
+                } = item;
                 const isSelected = selectedSubjectId === subject.id;
-
-                // Correlativas faltantes si está bloqueada
-                const eligibility = checkEligibility(subject, activeState);
-                const missingRegularNames = eligibility.missingRegular
-                  .map((id) => subjectsById.get(id)?.name)
-                  .filter(Boolean);
-                const missingApprovedNames = eligibility.missingApproved
-                  .map((id) => subjectsById.get(id)?.name)
-                  .filter(Boolean);
-
-                const isBlocked = status === 'bloqueada' && !isSimulationActive;
 
                 return (
                   <div
                     key={subject.id}
-                    data-tour={subject.id === sampleSubjectId ? 'sample-subject' : undefined}
+                    data-tour={subject.id === effectiveSampleId ? 'sample-subject' : undefined}
                     data-subject-id={subject.id}
                     onClick={() => onSelectSubject(subject.id)}
                     className={`p-3.5 rounded-2xl border transition-all active:scale-[0.99] cursor-pointer shadow-sm ${

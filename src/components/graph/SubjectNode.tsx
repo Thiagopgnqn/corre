@@ -12,11 +12,13 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { Subject, SubjectStatus } from '../../types/career';
+import { buildSubjectNodeViewModel } from '../../utils/planViewSelectors';
 
 export interface SubjectNodeData {
   subject: Subject;
   status: SubjectStatus;
   grade?: number;
+  levelLabel?: string;
   isSelected?: boolean;
   isHovered?: boolean;
   isPrereqHighlight?: boolean; // Highlighted as prerequisite (upstream)
@@ -33,6 +35,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
     subject,
     status,
     grade,
+    levelLabel,
     isSelected,
     isHovered,
     isPrereqHighlight,
@@ -154,6 +157,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
   const dimClass = isDimmed ? 'opacity-25 grayscale-[60%] blur-[0.2px]' : 'opacity-100';
 
   const isElective = subject.isElective;
+  const vm = buildSubjectNodeViewModel(subject, status, grade, { levelLabel });
 
   return (
     <div
@@ -182,22 +186,22 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
         <div className="flex items-center justify-between gap-1 mb-1.5">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
-              #{subject.code}
+              {vm.codeBadge}
             </span>
             <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20 shrink-0">
-              {subject.assignedYear ? `Año ${subject.assignedYear}` : `N${subject.level}`}
+              {vm.levelBadge}
             </span>
             <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/60 px-1 py-0.5 rounded shrink-0">
-              {subject.modality}
+              {vm.modalityBadge}
             </span>
-            {subject.isIntegrator && (
+            {vm.showIntegratorBadge && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 shrink-0">
-                INT
+                {vm.integratorLabel}
               </span>
             )}
-            {isElective && (
+            {vm.showElectiveBadge && (
               <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
-                ELECT
+                {vm.electiveLabel}
               </span>
             )}
           </div>
@@ -223,13 +227,13 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
         <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-800/80 text-[11px]">
           <span className="text-slate-400 flex items-center gap-1 shrink-0">
             <BookOpen className="w-3 h-3 text-slate-500 shrink-0" />
-            <span className="whitespace-nowrap">{subject.weeklyHours} hs</span>
-            {subject.credits && (
-              <span className="text-amber-400/90 font-medium whitespace-nowrap ml-0.5">({subject.credits}cr)</span>
+            <span className="whitespace-nowrap">{vm.hoursLabel}</span>
+            {vm.creditsBadge && (
+              <span className="text-amber-400/90 font-medium whitespace-nowrap ml-0.5">{vm.creditsBadge}</span>
             )}
           </span>
 
-          {grade !== undefined && (status === 'aprobada' || status === 'promocionada') ? (
+          {vm.showGradeBadge ? (
             <span
               className={`px-1.5 py-0.5 rounded font-mono font-bold text-xs whitespace-nowrap shrink-0 ${
                 status === 'promocionada'
@@ -237,7 +241,7 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
                   : 'bg-emerald-900/80 text-emerald-200 border border-emerald-400/60'
               }`}
             >
-              Nota: {grade}
+              {vm.gradeBadge}
             </span>
           ) : (
             <span

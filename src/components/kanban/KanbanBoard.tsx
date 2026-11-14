@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Kanban as KanbanIcon,
   Layers,
@@ -12,7 +12,8 @@ import {
   X,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
-import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
+import { getSubjectStatus } from '../../utils/correlativas';
+import { buildKanbanBoardStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from '../common/StatusBadge';
 import { useIsMobile, useDeviceCapabilities } from '../../hooks/useIsMobile';
 import type { SubjectStatus } from '../../types/career';
@@ -29,6 +30,7 @@ export const KanbanBoard: React.FC = () => {
     openEnrollmentModal,
     getSubjectEnrollments,
     coreSubjects,
+    planConfig,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -38,11 +40,6 @@ export const KanbanBoard: React.FC = () => {
   const [levelFilter, setLevelFilter] = useState<number | 'all'>('all');
   const [mobileColumnTab, setMobileColumnTab] = useState<SubjectStatus>('cursando');
   const [draggedSubjectId, setDraggedSubjectId] = useState<number | null>(null);
-
-  const subjects = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack).filter((s) => {
-    if (levelFilter === 'all') return true;
-    return s.level === levelFilter;
-  });
 
   const columns: Array<{
     id: SubjectStatus;
@@ -91,6 +88,24 @@ export const KanbanBoard: React.FC = () => {
     },
   ];
 
+  const kanbanStructure = useMemo(
+    () =>
+      buildKanbanBoardStructure({
+        coreSubjects,
+        activeState,
+        includeIntermediateTrack: settings.includeAnalistaTrack,
+        levelFilter,
+        planConfig,
+        columnDefs: columns,
+      }),
+    [coreSubjects, activeState, settings.includeAnalistaTrack, levelFilter, planConfig]
+  );
+
+  const colSubjectsById = useMemo(
+    () => new Map(kanbanStructure.columns.map((c) => [c.id, c.subjects])),
+    [kanbanStructure.columns]
+  );
+
   const handleDragStart = (e: React.DragEvent, id: number) => {
     if (isMobile || isTouch) return;
     e.dataTransfer.setData('text/plain', String(id));
@@ -128,7 +143,7 @@ export const KanbanBoard: React.FC = () => {
             <span>Tablero de Seguimiento</span>
           </h2>
           <p className="text-xs text-slate-400">
-            Organizá y visualizá tus materias con arrastrar y soltar o agrupadas por año.
+            {kanbanStructure.subtitle}
           </p>
         </div>
 
@@ -155,24 +170,24 @@ export const KanbanBoard: React.FC = () => {
               }`}
             >
               <Layers className="w-3.5 h-3.5 shrink-0" />
-              <span>Por Nivel <span className="hidden sm:inline">(1° a 5°)</span></span>
+              <span>Por Nivel <span className="hidden sm:inline">{kanbanStructure.levelsRangeTag}</span></span>
             </button>
           </div>
 
           {/* Level Filter */}
           <div className="flex items-center gap-1 text-xs overflow-x-auto no-scrollbar py-0.5 max-w-full">
             <span className="text-slate-500 font-medium mr-1 shrink-0">Filtrar:</span>
-            {(['all', 1, 2, 3, 4, 5] as const).map((lvl) => (
+            {kanbanStructure.levelFilterOptions.map((opt) => (
               <button
-                key={lvl}
-                onClick={() => setLevelFilter(lvl)}
+                key={opt.value}
+                onClick={() => setLevelFilter(opt.value)}
                 className={`min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-xl transition-colors font-semibold shrink-0 cursor-pointer ${
-                  levelFilter === lvl
+                  levelFilter === opt.value
                     ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40'
                     : 'bg-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                {lvl === 'all' ? 'Todos' : `${lvl}°`}
+                {opt.label}
               </button>
             ))}
           </div>
@@ -221,7 +236,7 @@ export const KanbanBoard: React.FC = () => {
           <div className="flex md:hidden items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 text-xs -mx-1 px-1">
             {columns.map((c) => {
               const ColIcon = c.icon;
-              const colSubjects = subjects.filter((s) => c.filterFn(getSubjectStatus(s, activeState)));
+              const colSubjects = colSubjectsById.get(c.id) || [];
               const isSelected = mobileColumnTab === c.id;
 
               return (
@@ -255,10 +270,7 @@ export const KanbanBoard: React.FC = () => {
               .filter((col) => !isMobile || mobileColumnTab === col.id)
               .map((col) => {
                 const ColIcon = col.icon;
-                const colSubjects = subjects.filter((s) => {
-                  const status = getSubjectStatus(s, activeState);
-                  return col.filterFn(status);
-                });
+                const colSubjects = colSubjectsById.get(col.id) || [];
 
                 return (
                   <div
@@ -376,13 +388,8 @@ export const KanbanBoard: React.FC = () => {
       {/* Mode 2: Grouped by Level */}
       {mode === 'levels' && (
         <div className="space-y-6">
-          {[1, 2, 3, 4, 5].map((lvl) => {
-            const lvlSubjects = coreSubjects.filter((s) => s.level === lvl);
-            const approvedLvlCount = lvlSubjects.filter((s) => {
-              const st = getSubjectStatus(s, activeState);
-              return st === 'aprobada' || st === 'promocionada';
-            }).length;
-            const percent = lvlSubjects.length > 0 ? Math.round((approvedLvlCount / lvlSubjects.length) * 100) : 0;
+          {kanbanStructure.levelGroups.map((group) => {
+            const { level: lvl, badge, title, progressText, subjects: lvlSubjects, percent } = group;
 
             return (
               <div
@@ -393,12 +400,12 @@ export const KanbanBoard: React.FC = () => {
                 <div className="p-4 bg-slate-950/70 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <span className="w-8 h-8 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold text-sm">
-                      {lvl}°
+                      {badge}
                     </span>
                     <div>
-                      <h3 className="font-bold text-white text-base">Nivel {lvl}</h3>
+                      <h3 className="font-bold text-white text-base">{title}</h3>
                       <p className="text-xs text-slate-400">
-                        {approvedLvlCount} de {lvlSubjects.length} materias aprobadas ({percent}%)
+                        {progressText}
                       </p>
                     </div>
                   </div>

@@ -8,7 +8,22 @@ import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConf
 import { TUTORIAL_STEPS, getAvailableTutorialSteps } from '../src/data/tutorialSteps';
 import { SUBJECT_SHORT_NAMES } from '../src/components/schedule/ScheduleWeeklyGrid';
 import { APP_NAME } from '../src/config/brand';
-import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
+import { evaluatePlanProgress } from '../src/utils/correlativas';
+import { getSampleStudentForPlan } from '../src/utils/storage';
+import {
+  buildElectivesPickerStructure,
+  buildGraphViewStructure,
+  buildKanbanBoardStructure,
+  buildOnboardingModalStructure,
+  buildSearchModalStructure,
+  buildSemesterPlannerStructure,
+  buildSubjectListViewStructure,
+  buildSubjectNodeViewModel,
+} from '../src/utils/planViewSelectors';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
+import { ELECTIVES } from './fixtures/electives';
+import { ACRONYM_TO_ID } from './fixtures/acronyms';
+import type { ActivePlanCatalog, AssignedElectivesByYear, UserCareerState } from '../src/types/career';
 import {
   buildPlanTutorialSteps,
   clampTutorialStep,
@@ -597,9 +612,10 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
     assert.equal(formatSpanishOrdinal(4), '4to');
   });
 
-  it('contains zero fixed Sistemas strings or standalone 99/36 academic references in Tanda 2a components and tutorialSteps.ts', () => {
+  it('contains zero fixed Sistemas strings or standalone 99/36 academic references in Tanda 2a and Tanda 2b components, selectors and tutorialSteps.ts', () => {
     const repoRoot = path.resolve(currentDir, '..');
-    const tanda2aFiles = [
+    const auditedFiles = [
+      // Tanda 2a
       'src/components/stats/StatsDashboard.tsx',
       'src/components/graph/SubjectDrawer.tsx',
       'src/components/common/QuickStatusModal.tsx',
@@ -607,6 +623,16 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       'src/components/common/UserMenu.tsx',
       'src/data/tutorialSteps.ts',
       'src/components/tutorial/TutorialSpotlight.tsx',
+      // Tanda 2b + selectors
+      'src/components/graph/CorrelativeGraph.tsx',
+      'src/components/graph/SubjectListView.tsx',
+      'src/components/graph/SubjectNode.tsx',
+      'src/components/kanban/KanbanBoard.tsx',
+      'src/components/planner/SemesterPlanner.tsx',
+      'src/components/electives/ElectivesPicker.tsx',
+      'src/components/onboarding/OnboardingModal.tsx',
+      'src/components/common/SearchModal.tsx',
+      'src/utils/planViewSelectors.ts',
     ];
     const forbiddenStrings = [
       'UTN',
@@ -619,19 +645,25 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       'Analista Universitario',
       'Práctica Profesional',
       '3er año',
+      'Algoritmos, 14, DDS',
     ];
-    // Documented non-academic literals containing 99 or 36 (Tailwind heights, SVG math, hex/rgba colors, layout comments/sentinels)
+    // Documented non-academic literals containing 99 or 36 (Tailwind heights/widths, SVG math, hex/rgba colors, layout comments/sentinels, opacity)
     const allowedTechnicalLiterals = [
       'min-h-[36px]',
+      'min-w-[36px]',
+      'min-[360px]',
       '#34d399',
       '163.36',
+      '0.99',
       'rgba(99,102,241,0.2)',
+      'rgba(99,102,241,0.6)',
       '640x360',
       '-9999',
       'rgba(251,191,36,0.4)',
+      'rgba(251,191,36,0.3)',
     ];
 
-    for (const relPath of tanda2aFiles) {
+    for (const relPath of auditedFiles) {
       const content = fs.readFileSync(path.join(repoRoot, relPath), 'utf8');
       for (const forbidden of forbiddenStrings) {
         assert.equal(
@@ -739,6 +771,557 @@ describe('Plan Text Helpers — Character-by-character ISI Plan 2023 parity & Ne
       assert.equal(clampTutorialStep(-5, steps.length), 0);
       assert.equal(clampTutorialStep(999, steps.length), steps.length - 1);
       assert.equal(clampTutorialStep(3, steps.length), 3);
+    }
+  });
+
+  it('reproduces identical Tanda 2b structures from normalized ISI Plan 2023 payload and 60-subject fixtures across all 8 selectors', () => {
+    const payloadCore = ISI_PLAN.subjects.filter((s) => !s.isElective);
+    const payloadElectives = ISI_PLAN.subjects.filter((s) => s.isElective);
+    // El fixture estático pre-multicarrera marcaba el trayecto Analista en la 99 implícitamente;
+    // en DB/payload ese dato viaja explícito en isOptionalTrack/trackKey (ver PAYLOAD_ONLY_KEY_EXCEPTIONS en plan2023Oracle).
+    const fixtureCore = CORE_SUBJECTS.map((s) =>
+      s.id === 99 ? { ...s, isOptionalTrack: true, trackKey: 'analista' } : s
+    );
+    const payloadById = new Map(ISI_PLAN.subjects.map((s) => [s.id, s]));
+    const fixtureById = new Map([...fixtureCore, ...ELECTIVES].map((s) => [s.id, s]));
+
+    assert.equal(payloadCore.length, fixtureCore.length);
+    assert.equal(payloadElectives.length, ELECTIVES.length);
+
+    const sample = getSampleStudentForPlan(ISI_PLAN);
+    const emptyState: UserCareerState = {};
+    const emptyAssigned: AssignedElectivesByYear = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+
+    for (const [label, userState, assignedElectives, includeTrack, showElectives] of [
+      ['empty_trackOn_elecOff', emptyState, emptyAssigned, true, false],
+      ['sample_trackOn_elecOn', sample.userState, sample.assignedElectives, true, true],
+      ['sample_trackOff_elecOn', sample.userState, sample.assignedElectives, false, true],
+    ] as const) {
+      // 1. CorrelativeGraph
+      const graphPayload = buildGraphViewStructure({
+        planConfig: ISI_PLAN.plan.config,
+        coreSubjects: payloadCore,
+        electives: payloadElectives,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        showElectivesInGraph: showElectives,
+        assignedElectives,
+      });
+      const graphFixture = buildGraphViewStructure({
+        planConfig: ISI_PLAN.plan.config,
+        coreSubjects: fixtureCore,
+        electives: ELECTIVES,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        showElectivesInGraph: showElectives,
+        assignedElectives,
+      });
+
+      assert.equal(graphPayload.showElectivesToggle, true, label);
+      assert.equal(graphPayload.totalLevels, 5, label);
+      assert.deepEqual(graphPayload.columns, graphFixture.columns, `graph columns ${label}`);
+      assert.deepEqual(
+        graphPayload.columns.map((c) => c.label),
+        ['1° Año', '2° Año', '3° Año', '4° Año', '5° Año'],
+        `graph column labels ${label}`
+      );
+      assert.deepEqual(
+        graphPayload.nodesLayout.map((n) => ({
+          id: n.id,
+          code: n.code,
+          name: n.name,
+          level: n.level,
+          targetCol: n.targetCol,
+          position: n.position,
+          status: n.status,
+          grade: n.grade,
+          isElective: n.isElective,
+          isIntegrator: n.isIntegrator,
+          assignedYear: n.assignedYear,
+        })),
+        graphFixture.nodesLayout.map((n) => ({
+          id: n.id,
+          code: n.code,
+          name: n.name,
+          level: n.level,
+          targetCol: n.targetCol,
+          position: n.position,
+          status: n.status,
+          grade: n.grade,
+          isElective: n.isElective,
+          isIntegrator: n.isIntegrator,
+          assignedYear: n.assignedYear,
+        })),
+        `graph nodes ${label}`
+      );
+      assert.deepEqual(graphPayload.edgesLayout, graphFixture.edgesLayout, `graph edges ${label}`);
+      assert.equal(graphPayload.sampleSubjectId, graphFixture.sampleSubjectId, `sampleSubjectId ${label}`);
+
+      // 2. SubjectListView
+      const listPayload = buildSubjectListViewStructure({
+        subjects: graphPayload.activeSubjects,
+        activeState: userState,
+        subjectsById: payloadById,
+        planConfig: ISI_PLAN.plan.config,
+      });
+      const listFixture = buildSubjectListViewStructure({
+        subjects: graphFixture.activeSubjects,
+        activeState: userState,
+        subjectsById: fixtureById,
+        planConfig: ISI_PLAN.plan.config,
+      });
+      assert.deepEqual(
+        listPayload.map((g) => ({
+          level: g.level,
+          title: g.title,
+          summaryLabel: g.summaryLabel,
+          percentage: g.percentage,
+          items: g.items.map((it) => ({
+            id: it.subject.id,
+            code: it.subject.code,
+            status: it.status,
+            isBlocked: it.isBlocked,
+            missingRegularNames: it.missingRegularNames,
+            missingApprovedNames: it.missingApprovedNames,
+          })),
+        })),
+        listFixture.map((g) => ({
+          level: g.level,
+          title: g.title,
+          summaryLabel: g.summaryLabel,
+          percentage: g.percentage,
+          items: g.items.map((it) => ({
+            id: it.subject.id,
+            code: it.subject.code,
+            status: it.status,
+            isBlocked: it.isBlocked,
+            missingRegularNames: it.missingRegularNames,
+            missingApprovedNames: it.missingApprovedNames,
+          })),
+        })),
+        `subject list ${label}`
+      );
+
+      // 3. SubjectNode view models across all active subjects
+      for (let i = 0; i < graphPayload.nodesLayout.length; i++) {
+        const pNode = graphPayload.nodesLayout[i];
+        const fNode = graphFixture.nodesLayout[i];
+        assert.deepEqual(
+          buildSubjectNodeViewModel(pNode.subject, pNode.status, pNode.grade, ISI_PLAN.plan.config),
+          buildSubjectNodeViewModel(fNode.subject, fNode.status, fNode.grade, ISI_PLAN.plan.config),
+          `subject node #${pNode.id} ${label}`
+        );
+      }
+
+      // 4. KanbanBoard
+      const kanbanPayload = buildKanbanBoardStructure({
+        coreSubjects: payloadCore,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        levelFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+      });
+      const kanbanFixture = buildKanbanBoardStructure({
+        coreSubjects: fixtureCore,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        levelFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+      });
+      assert.equal(kanbanPayload.subtitle, kanbanFixture.subtitle);
+      assert.equal(kanbanPayload.levelsRangeTag, '(1° a 5°)');
+      assert.deepEqual(kanbanPayload.levelFilterOptions, kanbanFixture.levelFilterOptions);
+      assert.deepEqual(
+        kanbanPayload.columns.map((c) => ({
+          id: c.id,
+          count: c.count,
+          ids: c.subjects.map((s) => s.id),
+        })),
+        kanbanFixture.columns.map((c) => ({
+          id: c.id,
+          count: c.count,
+          ids: c.subjects.map((s) => s.id),
+        })),
+        `kanban columns ${label}`
+      );
+      assert.deepEqual(
+        kanbanPayload.levelGroups.map((g) => ({
+          level: g.level,
+          progressText: g.progressText,
+          ids: g.subjects.map((s) => s.id),
+        })),
+        kanbanFixture.levelGroups.map((g) => ({
+          level: g.level,
+          progressText: g.progressText,
+          ids: g.subjects.map((s) => s.id),
+        })),
+        `kanban levelGroups ${label}`
+      );
+
+      // 5. SemesterPlanner
+      const plannerPayload = buildSemesterPlannerStructure({
+        coreSubjects: payloadCore,
+        electives: payloadElectives,
+        activeState: userState,
+        subjectsById: payloadById,
+        semesterBasket: [6, 301],
+        includeIntermediateTrack: includeTrack,
+        includeElectives: true,
+        termFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+      });
+      const plannerFixture = buildSemesterPlannerStructure({
+        coreSubjects: fixtureCore,
+        electives: ELECTIVES,
+        activeState: userState,
+        subjectsById: fixtureById,
+        semesterBasket: [6, 301],
+        includeIntermediateTrack: includeTrack,
+        includeElectives: true,
+        termFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+      });
+      assert.equal(plannerPayload.showIncludeElectivesToggle, true, label);
+      assert.equal(plannerPayload.availableCount, plannerFixture.availableCount, label);
+      assert.deepEqual(
+        plannerPayload.availableSubjects.map((s) => ({ id: s.id, code: s.code })),
+        plannerFixture.availableSubjects.map((s) => ({ id: s.id, code: s.code })),
+        `planner available ${label}`
+      );
+      assert.equal(plannerPayload.totalWeeklyHours, plannerFixture.totalWeeklyHours, label);
+
+      // 6. ElectivesPicker
+      const evalSettings = {
+        minPassingGrade: 4,
+        includeAnalistaTrack: includeTrack,
+        includeElectivesInProgress: true,
+      };
+      const progressPayload = evaluatePlanProgress({
+        plan: ISI_PLAN,
+        userState,
+        settings: evalSettings,
+        examAttempts: [],
+      }).progress;
+      const fixturePlan: ActivePlanCatalog = {
+        ...ISI_PLAN,
+        subjects: [...fixtureCore, ...ELECTIVES],
+      };
+      const progressFixture = evaluatePlanProgress({
+        plan: fixturePlan,
+        userState,
+        settings: evalSettings,
+        examAttempts: [],
+      }).progress;
+      const electivesPayload = buildElectivesPickerStructure({
+        electives: payloadElectives,
+        planConfig: ISI_PLAN.plan.config,
+        career: ISI_PLAN.career,
+        assignedElectives,
+        computedProgress: progressPayload,
+        modalSearch: '',
+      });
+      const electivesFixture = buildElectivesPickerStructure({
+        electives: ELECTIVES,
+        planConfig: ISI_PLAN.plan.config,
+        career: ISI_PLAN.career,
+        assignedElectives,
+        computedProgress: progressFixture,
+        modalSearch: '',
+      });
+      assert.equal(electivesPayload.hasElectivesBlock, true);
+      assert.deepEqual(electivesPayload.suggestedLevels, [3, 4, 5]);
+      assert.deepEqual(
+        electivesPayload.suggestedLevelGroups.map((g) => ({
+          level: g.level,
+          heading: g.heading,
+          ids: g.electives.map((e) => e.id),
+        })),
+        electivesFixture.suggestedLevelGroups.map((g) => ({
+          level: g.level,
+          heading: g.heading,
+          ids: g.electives.map((e) => e.id),
+        })),
+        `electives groups ${label}`
+      );
+      assert.deepEqual(
+        electivesPayload.yearSections.map((y) => ({
+          year: y.year,
+          heading: y.heading,
+          summaryText: y.summaryText,
+          ids: y.assignedSubjects.map((s) => s.id),
+        })),
+        electivesFixture.yearSections.map((y) => ({
+          year: y.year,
+          heading: y.heading,
+          summaryText: y.summaryText,
+          ids: y.assignedSubjects.map((s) => s.id),
+        })),
+        `electives yearSections ${label}`
+      );
+
+      // 7. OnboardingModal
+      const onboardingPayload = buildOnboardingModalStructure({
+        coreSubjects: payloadCore,
+        includeIntermediateTrack: includeTrack,
+        planConfig: ISI_PLAN.plan.config,
+        selections: {},
+        defaultGradeByLevel: {},
+      });
+      const onboardingFixture = buildOnboardingModalStructure({
+        coreSubjects: fixtureCore,
+        includeIntermediateTrack: includeTrack,
+        planConfig: ISI_PLAN.plan.config,
+        selections: {},
+        defaultGradeByLevel: {},
+      });
+      assert.equal(onboardingPayload.demoButtonLabel, 'Cargar demo: Alumno de 3er año');
+      assert.deepEqual(
+        onboardingPayload.levels.map((l) => ({
+          level: l.level,
+          title: l.title,
+          countLabel: l.countLabel,
+          ids: l.subjects.map((s) => s.id),
+        })),
+        onboardingFixture.levels.map((l) => ({
+          level: l.level,
+          title: l.title,
+          countLabel: l.countLabel,
+          ids: l.subjects.map((s) => s.id),
+        })),
+        `onboarding ${label}`
+      );
+
+      // 8. SearchModal
+      const searchPayload = buildSearchModalStructure({
+        coreSubjects: payloadCore,
+        electives: payloadElectives,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        query: '14',
+        levelFilter: 'all',
+        statusFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+        acronyms: ISI_PLAN.acronyms,
+      });
+      const searchFixture = buildSearchModalStructure({
+        coreSubjects: fixtureCore,
+        electives: ELECTIVES,
+        activeState: userState,
+        includeIntermediateTrack: includeTrack,
+        query: '14',
+        levelFilter: 'all',
+        statusFilter: 'all',
+        planConfig: ISI_PLAN.plan.config,
+        acronyms: ACRONYM_TO_ID,
+      });
+      assert.equal(
+        searchPayload.desktopPlaceholder,
+        'Buscar materia por nombre o código... (ej. Algoritmos, 14, DDS, Física)'
+      );
+      assert.equal(searchPayload.desktopPlaceholder, searchFixture.desktopPlaceholder);
+      assert.equal(searchPayload.countLabelMobile, searchFixture.countLabelMobile);
+      assert.equal(searchPayload.countLabelDesktop, searchFixture.countLabelDesktop);
+      assert.deepEqual(searchPayload.levelFilterOptions, searchFixture.levelFilterOptions);
+      assert.deepEqual(
+        searchPayload.filtered.map((s) => ({ id: s.id, code: s.code })),
+        searchFixture.filtered.map((s) => ({ id: s.id, code: s.code })),
+        `search filtered ${label}`
+      );
+    }
+  });
+
+  it('builds strictly neutral Tanda 2b structures on a 3-level plan without intermediate degrees or electives', () => {
+    const threeLevelConfig = {
+      ...ISI_PLAN.plan.config,
+      totalLevels: 3,
+      levelLabel: 'Cuatrimestre',
+      shortTag: 'Q3C · Plan 2026',
+      requiredElectiveCredits: 0,
+      electiveSlotsEquivalent: 0,
+      intermediateDegrees: [],
+      ppsRequirement: null,
+    };
+    const coreThreeLevels = [
+      {
+        id: 101,
+        code: '101',
+        shortName: 'Química General',
+        name: 'Química General',
+        level: 1,
+        modality: '1C' as const,
+        weeklyHours: 4,
+        regularPrereqs: [],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 102,
+        code: '102',
+        shortName: 'Biología Celular',
+        name: 'Biología Celular',
+        level: 2,
+        modality: '2C' as const,
+        weeklyHours: 5,
+        regularPrereqs: [101],
+        approvedPrereqs: [],
+        isElective: false,
+      },
+      {
+        id: 103,
+        code: '103',
+        shortName: 'Bioquímica Aplicada',
+        name: 'Bioquímica Aplicada',
+        level: 3,
+        modality: 'A' as const,
+        weeklyHours: 6,
+        regularPrereqs: [],
+        approvedPrereqs: [101],
+        isElective: false,
+        isIntegrator: true,
+      },
+    ];
+    const subjectsById = new Map(coreThreeLevels.map((s) => [s.id, s]));
+
+    const graph = buildGraphViewStructure({
+      planConfig: threeLevelConfig,
+      coreSubjects: coreThreeLevels,
+      electives: [],
+      activeState: {},
+      includeIntermediateTrack: false,
+      showElectivesInGraph: true,
+      assignedElectives: {},
+    });
+    assert.equal(graph.totalLevels, 3);
+    assert.deepEqual(
+      graph.columns.map((c) => c.label),
+      ['1° Cuatrimestre', '2° Cuatrimestre', '3° Cuatrimestre']
+    );
+    assert.equal(graph.showElectivesToggle, false);
+    assert.equal(graph.sampleSubjectId, 101);
+
+    const list = buildSubjectListViewStructure({
+      subjects: coreThreeLevels,
+      activeState: {},
+      subjectsById,
+      planConfig: threeLevelConfig,
+    });
+    assert.deepEqual(
+      list.map((g) => g.title),
+      ['1° Cuatrimestre', '2° Cuatrimestre', '3° Cuatrimestre']
+    );
+
+    const node = buildSubjectNodeViewModel(coreThreeLevels[2], 'bloqueada', undefined, threeLevelConfig);
+    assert.equal(node.levelBadge, 'N3');
+    assert.equal(node.showElectiveBadge, false);
+    assert.equal(node.showIntegratorBadge, true);
+
+    const kanban = buildKanbanBoardStructure({
+      coreSubjects: coreThreeLevels,
+      activeState: {},
+      includeIntermediateTrack: false,
+      levelFilter: 'all',
+      planConfig: threeLevelConfig,
+    });
+    assert.equal(kanban.levelsRangeTag, '(1° a 3°)');
+    assert.equal(kanban.subtitle.includes('cuatrimestre'), true);
+    assert.deepEqual(
+      kanban.levelFilterOptions.map((o) => o.label),
+      ['Todos', '1°', '2°', '3°']
+    );
+    assert.equal(kanban.levelGroups.length, 3);
+
+    const planner = buildSemesterPlannerStructure({
+      coreSubjects: coreThreeLevels,
+      electives: [],
+      activeState: {},
+      subjectsById,
+      semesterBasket: [101],
+      includeIntermediateTrack: false,
+      includeElectives: true,
+      termFilter: 'all',
+      planConfig: threeLevelConfig,
+    });
+    assert.equal(planner.showIncludeElectivesToggle, false);
+    assert.equal(planner.availableCount, 1);
+
+    const electives = buildElectivesPickerStructure({
+      electives: [],
+      planConfig: threeLevelConfig,
+      career: { name: 'Tecnicatura en Química', facultyName: 'FCQ' },
+      assignedElectives: {},
+      computedProgress: {
+        totalElectiveCreditsApproved: 0,
+        totalElectiveCreditsTaking: 0,
+        missingElectiveCreditsForDegree: 0,
+      },
+      modalSearch: '',
+    });
+    assert.equal(electives.hasElectivesBlock, false);
+    assert.equal(electives.suggestedLevelGroups.length, 0);
+    assert.deepEqual(electives.years, [1, 2, 3]);
+    assert.equal(electives.headerTitle, 'Electivas Libres por Cuatrimestre');
+
+    const onboarding = buildOnboardingModalStructure({
+      coreSubjects: coreThreeLevels,
+      includeIntermediateTrack: false,
+      planConfig: threeLevelConfig,
+      selections: {},
+      defaultGradeByLevel: {},
+    });
+    assert.equal(onboarding.demoButtonLabel, 'Cargar demo: Alumno de 2do cuatrimestre');
+    assert.deepEqual(
+      onboarding.levels.map((l) => l.level),
+      [1, 2, 3]
+    );
+
+    const search = buildSearchModalStructure({
+      coreSubjects: coreThreeLevels,
+      electives: [],
+      activeState: {},
+      includeIntermediateTrack: false,
+      query: '',
+      levelFilter: 'all',
+      statusFilter: 'all',
+      planConfig: threeLevelConfig,
+      acronyms: { QG: 101 },
+    });
+    assert.deepEqual(
+      search.levelFilterOptions.map((o) => o.label),
+      ['Todos', '1°', '2°', '3°']
+    );
+    assert.equal(
+      search.desktopPlaceholder,
+      'Buscar materia por nombre o código... (ej. Química, 102, QG, Bioquímica)'
+    );
+    const searchNoAcronyms = buildSearchModalStructure({
+      coreSubjects: coreThreeLevels,
+      electives: [],
+      activeState: {},
+      includeIntermediateTrack: false,
+      query: '',
+      levelFilter: 'all',
+      statusFilter: 'all',
+      planConfig: threeLevelConfig,
+      acronyms: {},
+    });
+    assert.equal(searchNoAcronyms.desktopPlaceholder, 'Buscar materia por nombre o código...');
+
+    const serialized = JSON.stringify({
+      graph,
+      list,
+      node,
+      kanban,
+      planner,
+      electives,
+      onboarding,
+      search,
+    });
+    for (const forbidden of ['Analista', 'UTN', 'Sistemas', 'Ingeniero', '4°', '5°', 'Año']) {
+      assert.equal(
+        serialized.includes(forbidden),
+        false,
+        `Estructura 3-niveles no debe contener "${forbidden}"`
+      );
     }
   });
 });

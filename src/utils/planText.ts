@@ -643,3 +643,113 @@ export function clampTutorialStep(targetStep: number, stepsLength: number): numb
   if (stepsLength <= 0) return 0;
   return Math.max(0, Math.min(stepsLength - 1, targetStep));
 }
+
+// ── Tanda 2b Texts (Graph Nodes, Kanban, Electives, Search) ─────────────────
+
+function resolveTotalLevelsCount(config?: Partial<PlanConfig> | null): number {
+  return typeof config?.totalLevels === 'number' &&
+    Number.isFinite(config.totalLevels) &&
+    config.totalLevels >= 1
+    ? Math.trunc(config.totalLevels)
+    : 5;
+}
+
+export function getSubjectNodeLevelBadge(
+  subject: Pick<Subject, 'level' | 'assignedYear'>,
+  config?: Partial<PlanConfig> | null
+): string {
+  const label = trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL;
+  return subject.assignedYear ? `${label} ${subject.assignedYear}` : `N${subject.level}`;
+}
+
+export function getKanbanBoardSubtitle(config?: Partial<PlanConfig> | null): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Organizá y visualizá tus materias con arrastrar y soltar o agrupadas por ${labelLower}.`;
+}
+
+export function getKanbanLevelsRangeTag(config?: Partial<PlanConfig> | null): string {
+  const total = resolveTotalLevelsCount(config);
+  return `(1° a ${total}°)`;
+}
+
+export function getElectivesHeaderTitle(config?: Partial<PlanConfig> | null): string {
+  const label = trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL;
+  return `Electivas Libres por ${label}`;
+}
+
+export function getElectivesHeaderSubtitle(config?: Partial<PlanConfig> | null): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Asigná las materias electivas libremente al ${labelLower} que prefieras según cumplas sus correlativas.`;
+}
+
+export function getElectivesAllLevelsChipLabel(config?: Partial<PlanConfig> | null): string {
+  return `Todos los ${pluralizeLevelLabelLower(config?.levelLabel)}`;
+}
+
+export function getElectivesEmptyAssignedText(
+  level: number,
+  config?: Partial<PlanConfig> | null
+): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `No hay electivas asignadas a ${level}° ${labelLower}.`;
+}
+
+export function getElectivesMoveSelectTitle(config?: Partial<PlanConfig> | null): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Mover a otro ${labelLower}`;
+}
+
+export function getElectivesRemoveBtnTitle(config?: Partial<PlanConfig> | null): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Quitar electiva de este ${labelLower}`;
+}
+
+export function getElectivesAddModalTitle(
+  level: number,
+  config?: Partial<PlanConfig> | null
+): string {
+  const label = trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL;
+  return `Agregar electiva a ${level}° ${label}`;
+}
+
+export function getElectivesAssignedInOtherLevelBadge(
+  level: number,
+  config?: Partial<PlanConfig> | null
+): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Asignada en ${level}° ${labelLower}`;
+}
+
+export function getElectivesAssignedInCurrentLevelBadge(
+  config?: Partial<PlanConfig> | null
+): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Asignada en este ${labelLower}`;
+}
+
+export function getElectivesOnePerLevelFooterNote(config?: Partial<PlanConfig> | null): string {
+  const labelLower = lowerFirst(trimOrEmpty(config?.levelLabel) || DEFAULT_FALLBACK_LEVEL_LABEL);
+  return `Una electiva solo puede estar asignada a un ${labelLower} a la vez.`;
+}
+
+export function getSearchModalDesktopPlaceholder(
+  subjects: Pick<Subject, 'id' | 'code' | 'name' | 'level'>[],
+  acronyms?: Record<string, number>
+): string {
+  const basePlaceholder = 'Buscar materia por nombre o código...';
+  const sortedSubjects = [...subjects].sort((a, b) => a.level - b.level || a.id - b.id);
+  const subjectById = new Map(sortedSubjects.map((s) => [s.id, s]));
+  const acrEntries = Object.entries(acronyms ?? {});
+
+  const s1 = acrEntries[0] ? subjectById.get(acrEntries[0][1]) : sortedSubjects[0];
+  const s2 = acrEntries[2] ? subjectById.get(acrEntries[2][1]) : sortedSubjects[1];
+  const ex1 = trimOrEmpty(s1?.name).split(/\s+/)[0] || '';
+  const ex2 = trimOrEmpty(s2?.code);
+  const ex3 = trimOrEmpty(acrEntries[5]?.[0] ?? acrEntries[0]?.[0]);
+  const ex4 = trimOrEmpty(sortedSubjects[2]?.name).split(/\s+/)[0] || '';
+
+  if (ex1 && ex2 && ex3 && ex4) {
+    return `${basePlaceholder} (ej. ${ex1}, ${ex2}, ${ex3}, ${ex4})`;
+  }
+  return basePlaceholder;
+}

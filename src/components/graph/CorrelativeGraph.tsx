@@ -25,7 +25,7 @@ import {
 import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
-import { getActiveCoreSubjects, getSubjectStatus } from '../../utils/correlativas';
+import { buildGraphViewStructure } from '../../utils/planViewSelectors';
 import { SubjectNode } from './SubjectNode';
 import { SubjectDrawer } from './SubjectDrawer';
 import { SubjectListView } from './SubjectListView';
@@ -113,7 +113,7 @@ const CorrelativeGraphContent: React.FC = () => {
     coreSubjects,
     electives,
     subjectsById,
-    totalLevels,
+    planConfig,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -153,29 +153,36 @@ const CorrelativeGraphContent: React.FC = () => {
   // Active focus is either hovered node or selected node
   const focusedId = hoveredNodeId ?? selectedSubjectId;
 
-  // Build the complete list of subjects to display
-  const activeSubjects = useMemo(() => {
-    const core = getActiveCoreSubjects(coreSubjects, settings.includeAnalistaTrack);
+  const graphStructure = useMemo(
+    () =>
+      buildGraphViewStructure({
+        planConfig,
+        coreSubjects,
+        electives,
+        activeState,
+        includeIntermediateTrack: settings.includeAnalistaTrack,
+        showElectivesInGraph,
+        assignedElectives,
+        screenWidth: typeof window !== 'undefined' ? window.innerWidth : 390,
+      }),
+    [
+      planConfig,
+      coreSubjects,
+      electives,
+      activeState,
+      settings.includeAnalistaTrack,
+      showElectivesInGraph,
+      assignedElectives,
+    ]
+  );
 
-    if (!showElectivesInGraph) {
-      return core;
-    }
-
-    const yearByElective = new Map<number, number>();
-    for (let y = 1; y <= totalLevels; y++) {
-      (assignedElectives[y] || []).forEach((id) => yearByElective.set(id, y));
-    }
-
-    const electivesWithAssignedYear: Subject[] = electives.map((el) => {
-      const assignedYear = yearByElective.get(el.id);
-      return {
-        ...el,
-        assignedYear,
-      };
-    });
-
-    return [...core, ...electivesWithAssignedYear];
-  }, [coreSubjects, electives, totalLevels, settings.includeAnalistaTrack, showElectivesInGraph, assignedElectives]);
+  const {
+    activeSubjects,
+    initialViewport,
+    dynamicTranslateExtent,
+    isDegreeComplete,
+    sampleSubjectId,
+  } = graphStructure;
 
   // Compute upstream (prerequisites) and downstream (unlocked) dependency sets
   const { upstreamSet, downstreamSet } = useMemo(() => {
@@ -217,31 +224,10 @@ const CorrelativeGraphContent: React.FC = () => {
     return { upstreamSet: upstream, downstreamSet: downstream };
   }, [focusedId, activeSubjects]);
 
-  // Generate nodes with positions grouped in columns by level
-  const currentNodes = useMemo(() => {
-    const xPositions: Record<number, number> = {
-      1: 50,
-      2: 380,
-      3: 710,
-      4: 1040,
-      5: 1370,
-    };
-
-    const levelCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-    return activeSubjects.map((subject) => {
-      const targetCol = subject.assignedYear && subject.assignedYear >= 1 && subject.assignedYear <= 5
-        ? subject.assignedYear
-        : subject.level;
-      const colIndex = levelCounts[targetCol] || 0;
-      levelCounts[targetCol] = colIndex + 1;
-
-      const x = xPositions[targetCol] || 50;
-      const y = 80 + colIndex * 155;
-
-      const status = getSubjectStatus(subject, activeState);
-      const grade = activeState[subject.id]?.grade;
-
+  // Generate React Flow nodes from computed graph layout
+  const nodesWithSampleSubject = useMemo(() => {
+    return graphStructure.nodesLayout.map((item) => {
+      const { subject, status, grade, id, position } = item;
       const isSelected = selectedSubjectId === subject.id;
       const isHovered = hoveredNodeId === subject.id;
       const isPrereqHighlight = upstreamSet.has(subject.id);
@@ -257,185 +243,55 @@ const CorrelativeGraphContent: React.FC = () => {
         subject,
         status,
         grade,
+        levelLabel: planConfig?.levelLabel,
         isSelected,
         isHovered,
         isPrereqHighlight,
         isUnlockHighlight,
         isDimmed,
+        isSampleSubject: subject.id === sampleSubjectId,
         onOpenStatusModal: setStatusModalSubjectId,
       };
 
       return {
-        id: String(subject.id),
+        id,
         type: 'subjectNode',
-        position: { x, y },
+        position,
         data: nodeData,
       } as Node;
     });
   }, [
-    activeSubjects,
-    activeState,
+    graphStructure.nodesLayout,
+    planConfig?.levelLabel,
     selectedSubjectId,
     hoveredNodeId,
     upstreamSet,
     downstreamSet,
     focusedId,
+    sampleSubjectId,
     setStatusModalSubjectId,
   ]);
 
-  // Generate edges: dashed for regular, solid for approved
-  
-  // Dynamic initial viewport and translateExtent based on actual nodes
-  const { initialViewport, dynamicTranslateExtent, isDegreeComplete, sampleSubjectId } = useMemo(() => {
-    if (currentNodes.length === 0) {
-      return {
-        initialViewport: { x: 50, y: 120, zoom: 0.78 },
-        dynamicTranslateExtent: [[-400, -200], [3200, 2200]] as [[number, number], [number, number]],
-        isDegreeComplete: false,
-        sampleSubjectId: 1,
-      };
-    }
-
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-
-    currentNodes.forEach((n) => {
-      if (n.position.x < minX) minX = n.position.x;
-      if (n.position.x > maxX) maxX = n.position.x;
-      if (n.position.y < minY) minY = n.position.y;
-      if (n.position.y > maxY) maxY = n.position.y;
-    });
-
-    const NODE_WIDTH = 240;
-    const NODE_HEIGHT = 120;
-    const MARGIN_X = 300;
-    const MARGIN_Y = 250;
-
-    const dynamicTranslateExtent: [[number, number], [number, number]] = [
-      [Math.round(minX - MARGIN_X), Math.round(minY - MARGIN_Y)],
-      [Math.round(maxX + NODE_WIDTH + MARGIN_X), Math.round(maxY + NODE_HEIGHT + MARGIN_Y)],
-    ];
-
-    // Verificar si la carrera está completa (todas aprobadas/promocionadas y ninguna cursando)
-    const cursandoNodes = currentNodes.filter((n) => {
-      const data = n.data as unknown as SubjectNodeData;
-      return data.status === 'cursando';
-    });
-    const unapprovedNodes = currentNodes.filter((n) => {
-      const data = n.data as unknown as SubjectNodeData;
-      return data.status !== 'aprobada' && data.status !== 'promocionada';
-    });
-
-    const isDegreeComplete = cursandoNodes.length === 0 && unapprovedNodes.length === 0;
-
-    let targetNodes: Node[] = [];
-
-    if (cursandoNodes.length > 0) {
-      // Si las materias cursando están en años distintos, centrar en el año con más materias cursando
-      // (o en el menor año si hay empate) para evitar caer en un espacio vacío entre nodos.
-      const yearBuckets = new Map<number, Node[]>();
-      cursandoNodes.forEach((n) => {
-        const data = n.data as unknown as SubjectNodeData;
-        const yr = data.subject.level || 1;
-        const bucket = yearBuckets.get(yr) || [];
-        bucket.push(n);
-        yearBuckets.set(yr, bucket);
-      });
-
-      let bestYear = 1;
-      let maxCount = -1;
-      const sortedYears = Array.from(yearBuckets.keys()).sort((a, b) => a - b);
-      sortedYears.forEach((yr) => {
-        const count = yearBuckets.get(yr)!.length;
-        if (count > maxCount) {
-          maxCount = count;
-          bestYear = yr;
-        }
-      });
-
-      targetNodes = yearBuckets.get(bestYear) || cursandoNodes;
-    } else if (unapprovedNodes.length > 0) {
-      // Si no hay materias cursando, centrar en el año más bajo con materias no aprobadas
-      const minYear = Math.min(
-        ...unapprovedNodes.map((n) => {
-          const data = n.data as unknown as SubjectNodeData;
-          return data.subject.level || 1;
-        })
-      );
-      targetNodes = unapprovedNodes.filter((n) => {
-        const data = n.data as unknown as SubjectNodeData;
-        return (data.subject.level || 1) === minYear;
-      });
-    }
-
-    if (targetNodes.length === 0) {
-      targetNodes = currentNodes.filter((n) => {
-        const data = n.data as unknown as SubjectNodeData;
-        return (data.subject.level || 1) === 1;
-      });
-    }
-
-    let tMinX = Infinity;
-    let tMaxX = -Infinity;
-    let tMinY = Infinity;
-    targetNodes.forEach((n) => {
-      if (n.position.x < tMinX) tMinX = n.position.x;
-      if (n.position.x > tMaxX) tMaxX = n.position.x;
-      if (n.position.y < tMinY) tMinY = n.position.y;
-    });
-
-    const zoom = 0.78; // Texto legible de al menos 11-12px efectivos
-    const screenWidth = typeof window !== 'undefined' ? window.innerWidth : 390;
-    const targetCenterX = (tMinX + tMaxX + NODE_WIDTH) / 2;
-    const calcX = Math.round(screenWidth / 2 - targetCenterX * zoom);
-    const calcY = Math.round(140 - tMinY * zoom);
-
-    const topTargetNode = [...targetNodes].sort((a, b) => a.position.y - b.position.y)[0];
-    const sampleSubjectId = topTargetNode ? Number(topTargetNode.id) : 1;
-
-    return {
-      initialViewport: { x: calcX, y: calcY, zoom },
-      dynamicTranslateExtent,
-      isDegreeComplete,
-      sampleSubjectId,
-    };
-  }, [currentNodes]);
-
-  const nodesWithSampleSubject = useMemo(() => {
-    return currentNodes.map((n) => ({
-      ...n,
-      data: {
-        ...n.data,
-        isSampleSubject: Number(n.id) === sampleSubjectId,
-      },
-    }));
-  }, [currentNodes, sampleSubjectId]);
-
   const currentEdges = useMemo(() => {
-    const edges: Edge[] = [];
-    const displayedIds = new Set(activeSubjects.map((s) => s.id));
+    return graphStructure.edgesLayout.map((edge) => {
+      const reqId = Number(edge.source);
+      const subjectId = Number(edge.target);
 
-    activeSubjects.forEach((subject) => {
-      // Regular prereqs: dashed amber
-      subject.regularPrereqs.forEach((reqId) => {
-        if (!displayedIds.has(reqId)) return;
+      const isConnectedToFocus = Boolean(
+        focusedId &&
+        ((focusedId === subjectId && upstreamSet.has(reqId)) ||
+          (focusedId === reqId && downstreamSet.has(subjectId)) ||
+          (upstreamSet.has(subjectId) && upstreamSet.has(reqId)) ||
+          (downstreamSet.has(subjectId) && downstreamSet.has(reqId)))
+      );
 
-        const isConnectedToFocus = Boolean(
-          focusedId &&
-          ((focusedId === subject.id && upstreamSet.has(reqId)) ||
-            (focusedId === reqId && downstreamSet.has(subject.id)) ||
-            (upstreamSet.has(subject.id) && upstreamSet.has(reqId)) ||
-            (downstreamSet.has(subject.id) && downstreamSet.has(reqId)))
-        );
+      const isDimmed = Boolean(focusedId && !isConnectedToFocus);
 
-        const isDimmed = Boolean(focusedId && !isConnectedToFocus);
-
-        edges.push({
-          id: `reg-${reqId}-${subject.id}`,
-          source: String(reqId),
-          target: String(subject.id),
+      if (edge.type === 'regular') {
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
           animated: isConnectedToFocus,
           style: {
             stroke: isConnectedToFocus ? '#fbbf24' : isDimmed ? '#334155' : '#d97706',
@@ -443,39 +299,22 @@ const CorrelativeGraphContent: React.FC = () => {
             strokeDasharray: '5,5',
             opacity: isDimmed ? 0.15 : 0.85,
           },
-        });
-      });
+        } as Edge;
+      }
 
-      // Approved prereqs: solid emerald
-      subject.approvedPrereqs.forEach((reqId) => {
-        if (!displayedIds.has(reqId)) return;
-
-        const isConnectedToFocus = Boolean(
-          focusedId &&
-          ((focusedId === subject.id && upstreamSet.has(reqId)) ||
-            (focusedId === reqId && downstreamSet.has(subject.id)) ||
-            (upstreamSet.has(subject.id) && upstreamSet.has(reqId)) ||
-            (downstreamSet.has(subject.id) && downstreamSet.has(reqId)))
-        );
-
-        const isDimmed = Boolean(focusedId && !isConnectedToFocus);
-
-        edges.push({
-          id: `apr-${reqId}-${subject.id}`,
-          source: String(reqId),
-          target: String(subject.id),
-          animated: isConnectedToFocus,
-          style: {
-            stroke: isConnectedToFocus ? '#34d399' : isDimmed ? '#334155' : '#059669',
-            strokeWidth: isConnectedToFocus ? 2.5 : 1.5,
-            opacity: isDimmed ? 0.15 : 0.85,
-          },
-        });
-      });
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        animated: isConnectedToFocus,
+        style: {
+          stroke: isConnectedToFocus ? '#34d399' : isDimmed ? '#334155' : '#059669',
+          strokeWidth: isConnectedToFocus ? 2.5 : 1.5,
+          opacity: isDimmed ? 0.15 : 0.85,
+        },
+      } as Edge;
     });
-
-    return edges;
-  }, [activeSubjects, focusedId, upstreamSet, downstreamSet]);
+  }, [graphStructure.edgesLayout, focusedId, upstreamSet, downstreamSet]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -597,23 +436,27 @@ const CorrelativeGraphContent: React.FC = () => {
 
           <FitViewButton className="min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2 sm:px-2.5 py-1 rounded-lg font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 flex items-center justify-center gap-1 cursor-pointer text-xs transition-colors shrink-0" />
 
-          <div className="h-3 w-[1px] bg-slate-800 hidden sm:block" />
+          {graphStructure.showElectivesToggle && (
+            <>
+              <div className="h-3 w-[1px] bg-slate-800 hidden sm:block" />
 
-          {/* Electives toggle */}
-          <button
-            type="button"
-            onClick={() => setShowElectivesInGraph(!showElectivesInGraph)}
-            className={`min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2 sm:px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
-              showElectivesInGraph
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
-            }`}
-            title={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
-            aria-label={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
-          >
-            <Sparkles className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden sm:inline">{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
-          </button>
+              {/* Electives toggle */}
+              <button
+                type="button"
+                onClick={() => setShowElectivesInGraph(!showElectivesInGraph)}
+                className={`min-h-[44px] min-w-[44px] sm:min-h-[38px] sm:min-w-0 px-2 sm:px-2.5 py-1 rounded-lg font-semibold transition-all flex items-center justify-center gap-1 whitespace-nowrap shrink-0 cursor-pointer ${
+                  showElectivesInGraph
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : 'bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700/80'
+                }`}
+                title={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
+                aria-label={showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}
+              >
+                <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">{showElectivesInGraph ? 'Ocultar Electivas' : 'Ver Electivas'}</span>
+              </button>
+            </>
+          )}
 
           {/* Active selection badge */}
           {selectedSubjectId && (
@@ -639,7 +482,7 @@ const CorrelativeGraphContent: React.FC = () => {
             onSelectSubject={(id) => setSelectedSubjectId(id)}
             selectedSubjectId={selectedSubjectId}
             isSimulationActive={isSimulationMode}
-            sampleSubjectId={1}
+            sampleSubjectId={sampleSubjectId}
           />
         </div>
       ) : (
