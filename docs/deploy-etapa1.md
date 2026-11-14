@@ -138,7 +138,7 @@ Elegir **una** de las dos variantes según cómo quieras manejar Render/Vercel:
    Esperado:
    - `/api/health`: HTTP `200`, `{"status":"ok","environment":"production","timestamp":"..."}`.
    - `/api/catalog/version`: HTTP `200` y nueva `version` generada por el bump condicional de `0009`–`0013`.
-   - `/api/catalog/plans/current`: `career` (`code: "ISI"`, `facultyName`, `institutionName`), `plan.config.totalLevels === 5`, `levelLabel === "Año"`, `finalDegreeTitle`, `ppsRequirement.referenceSubjectCode === 36`, `intermediateDegrees[0].name === "Analista Universitario de Sistemas de Información"` (`shortLabel: "Analista"`, `shortTitle: "Analista Universitario"`), **ausencia total de `ppsSubjectCode`**, `60` materias con `shortName`, `kind`, `code`, `5` integradoras (`isIntegrator: true` en `12, 16, 23, 30, 36`) y `specialRule` en `36` y `99`.
+   - `/api/catalog/plans/current`: `career` (`code: "ISI"`, `facultyName`, `institutionName`), `plan.config.totalLevels === 5`, `levelLabel === "Año"`, `finalDegreeTitle`, `ppsRequirement.referenceSubjectCode === 36`, `intermediateDegrees[0].name === "Analista Universitario de Sistemas de Información"` (`shortLabel: "Analista"`, `shortTitle: "Analista Universitario"`), **ausencia total de `ppsSubjectCode`**, `60` materias con `shortName`, `kind`, `code`, `5` integradoras (`isIntegrator: true` en `16, 23, 30, 36, 99`) y `specialRule` en `36` y `99`.
    - `/api/catalog/careers`: `ISI` Plan 2023 publicado, sin `draft` y sin `ppsSubjectCode`.
 4. **Verificaciones privilegiadas en Neon SQL Editor *(usuario)*:**
    ```sql
