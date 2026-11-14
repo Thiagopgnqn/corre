@@ -474,6 +474,8 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       } catch (e) {
         if (seq !== reloadSeqRef.current) return;
         console.error('Error loading active plan catalog:', e);
+        activePlanRef.current = null;
+        setActivePlan(null);
         setCatalogError(
           e instanceof Error && e.message
             ? e.message

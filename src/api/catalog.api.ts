@@ -75,6 +75,80 @@ export const CATALOG_CACHE_KEY_PREFIX = 'mi_carrera_catalog_cache_v1:';
 export const CATALOG_CURRENT_POINTER_KEY = 'mi_carrera_catalog_current_plan_id_v1';
 export const CATALOG_CACHE_SCHEMA = 2;
 
+export class CatalogShapeError extends Error {
+  constructor(
+    message: string = 'El servidor está desactualizado: el catálogo recibido está incompleto.'
+  ) {
+    super(message);
+    this.name = 'CatalogShapeError';
+  }
+}
+
+function isNonEmptyString(val: unknown): val is string {
+  return typeof val === 'string' && val.trim().length > 0;
+}
+
+function isPlainObject(val: unknown): val is Record<string, unknown> {
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
+}
+
+/**
+ * Validates that a catalog response has the complete shape required by the frontend
+ * before using it or storing it in localStorage cache.
+ */
+export function isValidPlanCatalogShape(data: unknown): data is ActivePlanCatalog {
+  if (!isPlainObject(data)) return false;
+
+  const { career, plan, subjects, rules, acronyms } = data;
+  if (
+    !isPlainObject(career) ||
+    !isNonEmptyString(career.id) ||
+    !isNonEmptyString(career.name) ||
+    !isNonEmptyString(career.code)
+  ) {
+    return false;
+  }
+
+  if (
+    !isPlainObject(plan) ||
+    !isNonEmptyString(plan.id) ||
+    !isNonEmptyString(plan.name) ||
+    typeof plan.year !== 'number' ||
+    !Number.isFinite(plan.year) ||
+    !isPlainObject(plan.config)
+  ) {
+    return false;
+  }
+
+  const { totalLevels, levelLabel } = plan.config;
+  if (
+    typeof totalLevels !== 'number' ||
+    !Number.isFinite(totalLevels) ||
+    totalLevels < 1 ||
+    !isNonEmptyString(levelLabel)
+  ) {
+    return false;
+  }
+
+  if (!Array.isArray(subjects)) return false;
+  for (const subj of subjects) {
+    if (
+      !isPlainObject(subj) ||
+      typeof subj.id !== 'number' ||
+      !Number.isFinite(subj.id) ||
+      !isNonEmptyString(subj.name) ||
+      !isNonEmptyString(subj.shortName)
+    ) {
+      return false;
+    }
+  }
+
+  if (!Array.isArray(rules)) return false;
+  if (!isPlainObject(acronyms)) return false;
+
+  return true;
+}
+
 export interface CachedPlanCatalog {
   schema: number;
   planId: string;
@@ -107,7 +181,7 @@ export function readCachedCatalog(
       !parsed ||
       typeof parsed !== 'object' ||
       parsed.schema !== CATALOG_CACHE_SCHEMA ||
-      !parsed.catalog?.plan?.id
+      !isValidPlanCatalogShape(parsed.catalog)
     ) {
       return null;
     }
@@ -130,7 +204,7 @@ export function writeCachedCatalog(
     ? localStorage
     : undefined
 ): void {
-  if (!storage || !catalog?.plan?.id) return;
+  if (!storage || !isValidPlanCatalogShape(catalog)) return;
   try {
     const entry: CachedPlanCatalog = {
       schema: CATALOG_CACHE_SCHEMA,
@@ -149,6 +223,9 @@ export function writeCachedCatalog(
 }
 
 function isRetryableCatalogError(err: unknown): boolean {
+  if (err instanceof CatalogShapeError) {
+    return false;
+  }
   if (err instanceof ApiError) {
     return err.status >= 500 || err.status === 408 || err.status === 429;
   }
@@ -270,8 +347,8 @@ export async function loadPlanCatalogSmart(
         }
 
         const planRes = await runWithRetry((reqOpts) => getPlanFn(requestedPlanId, reqOpts));
-        if (!planRes?.success || !planRes.data) {
-          throw new Error('Respuesta inválida del catálogo');
+        if (!planRes?.success || !isValidPlanCatalogShape(planRes.data)) {
+          throw new CatalogShapeError();
         }
         const effectiveVersion =
           remoteVersion || String(planRes.data.plan.updatedAt ?? cached.version);
@@ -282,7 +359,10 @@ export async function loadPlanCatalogSmart(
           fromCache: false,
           staleOffline: false,
         };
-      } catch {
+      } catch (err) {
+        if (err instanceof CatalogShapeError) {
+          throw err;
+        }
         // Red caída o backend en cold start: se mantiene el caché exclusivo de ESTE planId
         return {
           catalog: cached.catalog,
@@ -294,8 +374,8 @@ export async function loadPlanCatalogSmart(
     }
 
     const planRes = await runWithRetry((reqOpts) => getPlanFn(requestedPlanId, reqOpts));
-    if (!planRes?.success || !planRes.data) {
-      throw new Error('No se pudo cargar el plan de estudio');
+    if (!planRes?.success || !isValidPlanCatalogShape(planRes.data)) {
+      throw new CatalogShapeError();
     }
 
     const versionRes = await getVersionFn().catch(() => null);

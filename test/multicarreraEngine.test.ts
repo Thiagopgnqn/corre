@@ -23,7 +23,9 @@ import {
 } from '../src/utils/storage';
 import {
   CATALOG_CACHE_SCHEMA,
+  CatalogShapeError,
   getCatalogCacheKey,
+  isValidPlanCatalogShape,
   readCachedCatalog,
   writeCachedCatalog,
   loadPlanCatalogSmart,
@@ -490,6 +492,114 @@ describe('Multicarrera Frontend Engine, Storage & Catalog Cache', () => {
     assert.ok(written);
     assert.equal(written.schema, CATALOG_CACHE_SCHEMA);
     assert.equal(written.catalog.plan.id, 'plan-schema-test');
+  });
+
+  it('rejects malformed or incomplete catalog payloads as outdated server without caching them', async () => {
+    const validCatalog = buildFictitious3LevelPlan({ planId: 'plan-shape-test' });
+    assert.equal(isValidPlanCatalogShape(validCatalog), true);
+
+    const invalidVariants: Array<{ label: string; payload: unknown }> = [
+      {
+        label: 'sin career',
+        payload: { ...validCatalog, career: undefined },
+      },
+      {
+        label: 'sin plan.config.totalLevels',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, totalLevels: undefined },
+          },
+        },
+      },
+      {
+        label: 'sin plan.config.levelLabel',
+        payload: {
+          ...validCatalog,
+          plan: {
+            ...validCatalog.plan,
+            config: { ...validCatalog.plan.config, levelLabel: '' },
+          },
+        },
+      },
+      {
+        label: 'sin subjects[].shortName',
+        payload: {
+          ...validCatalog,
+          subjects: validCatalog.subjects.map((s, idx) =>
+            idx === 0 ? { ...s, shortName: '' } : s
+          ),
+        },
+      },
+      {
+        label: 'sin rules',
+        payload: { ...validCatalog, rules: undefined },
+      },
+      {
+        label: 'sin acronyms',
+        payload: { ...validCatalog, acronyms: null },
+      },
+    ];
+
+    for (const variant of invalidVariants) {
+      assert.equal(
+        isValidPlanCatalogShape(variant.payload),
+        false,
+        `isValidPlanCatalogShape debe rechazar payload ${variant.label}`
+      );
+
+      const mockStorage = createMockStorage();
+      await assert.rejects(
+        () =>
+          loadPlanCatalogSmart({
+            planId: 'plan-shape-test',
+            storage: mockStorage,
+            maxRetries: 2,
+            baseBackoffMs: 1,
+            getVersion: async () => ({ success: true, version: 'v1' }),
+            getPlan: async () => ({
+              success: true,
+              data: variant.payload as ActivePlanCatalog,
+            }),
+          }),
+        (err: unknown) =>
+          err instanceof CatalogShapeError &&
+          /el servidor está desactualizado/i.test(err.message),
+        `loadPlanCatalogSmart debe fallar por servidor desactualizado ante ${variant.label}`
+      );
+      assert.equal(
+        mockStorage.getItem(getCatalogCacheKey('plan-shape-test')),
+        null,
+        `No debe cachear payload inválido (${variant.label})`
+      );
+    }
+
+    // Even when a valid v1 cache existed, an invalid v2 payload must throw and never overwrite the cache
+    const cachedStorage = createMockStorage();
+    writeCachedCatalog('plan-shape-test', 'v1', validCatalog, cachedStorage);
+    const invalidV2Payload = {
+      ...validCatalog,
+      subjects: validCatalog.subjects.map((s) => ({ ...s, shortName: undefined })),
+    };
+
+    await assert.rejects(
+      () =>
+        loadPlanCatalogSmart({
+          planId: 'plan-shape-test',
+          storage: cachedStorage,
+          getVersion: async () => ({ success: true, version: 'v2' }),
+          getPlan: async () => ({
+            success: true,
+            data: invalidV2Payload as unknown as ActivePlanCatalog,
+          }),
+        }),
+      /el servidor está desactualizado/i
+    );
+
+    const preservedCache = readCachedCatalog('plan-shape-test', cachedStorage);
+    assert.ok(preservedCache, 'El caché v1 previo válido no debe corromperse ni borrarse');
+    assert.equal(preservedCache.version, 'v1');
   });
 
   it('contains zero imports from static Sistemas data modules or test/fixtures inside src/', () => {
