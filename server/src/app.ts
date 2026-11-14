@@ -192,7 +192,10 @@ if (process.env.NODE_ENV !== 'test' && currentFile === entryFile) {
   import('./db/migrate.js')
     .then((m) => m.runMigrations())
     .catch((err) => {
-      console.warn('⚠️ Nota sobre migraciones automáticas al iniciar:', err?.message || err);
+      console.error(
+        '❌ ERROR al verificar/aplicar migraciones al iniciar el servidor (el proceso continúa activo):',
+        err?.message || err
+      );
     });
 
   // Limpieza periódica liviana de cuentas no verificadas de más de 7 días (cada 12h)

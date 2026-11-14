@@ -2,9 +2,20 @@ import './setupTestEnv.js';
 
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from '../src/app.js';
+import {
+  assertJournalStrictlyIncreasing,
+  findMissingMigrations,
+  findMigrationHashMismatches,
+  readLocalMigrationEntries,
+  verifyMigrationState,
+  type AppliedMigrationRow,
+  type JournalEntry,
+} from '../src/db/migrationGuard.js';
+import { runMigrations } from '../src/db/migrate.js';
 import {
   InMemoryCatalogStore,
   setCatalogStoreForTesting,
@@ -771,7 +782,6 @@ async function main() {
 
   // 1f. Integridad global de _journal.json y simulación exacta de drizzle-orm migrate
   console.log('\n📌 1f. Integridad de _journal.json y simulación de migraciones pendientes en drizzle-orm');
-  type JournalEntry = { idx: number; when: number; tag: string };
   const journalEntries = (journal.entries ?? []) as JournalEntry[];
 
   // (a) "when" estrictamente crecientes en orden del arreglo
@@ -889,6 +899,214 @@ async function main() {
       JSON.stringify(pendingFromEmpty) === JSON.stringify(journalEntries.map((e) => e.tag)),
     '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0013)',
     `pendientes=${JSON.stringify(pendingFromEmpty)}`
+  );
+
+  // 1g. Guarda runtime de migraciones (migrationGuard + demo rojo-verde c5d321f -> c04fbb9)
+  console.log('\n📌 1g. Guarda runtime de migraciones (findMissingMigrations, assertJournalStrictlyIncreasing, demo rojo-verde)');
+  const localEntries = readLocalMigrationEntries(drizzleDir);
+  const fullDbRows: AppliedMigrationRow[] = localEntries.map((entry, idx) => ({
+    id: idx + 1,
+    hash: entry.hash,
+    created_at: String(entry.when),
+  }));
+
+  // (f1) Todo registrado -> 0 faltantes, 0 warnings, verifyMigrationState pasa
+  const warningsAllOk: string[] = [];
+  let verifyAllOkError: Error | null = null;
+  try {
+    assertJournalStrictlyIncreasing(localEntries);
+    verifyMigrationState(localEntries, fullDbRows, (msg) => warningsAllOk.push(msg));
+  } catch (err) {
+    verifyAllOkError = err as Error;
+  }
+  assert(
+    verifyAllOkError === null &&
+      findMissingMigrations(localEntries, fullDbRows).length === 0 &&
+      warningsAllOk.length === 0,
+    '(f1) Todo registrado en drizzle.__drizzle_migrations pasa sin faltantes ni advertencias'
+  );
+
+  // (f2) Falta una migración -> devuelve exactamente la faltante y falla con idx, tag y when
+  const rowsMissing0011 = fullDbRows.filter((r) => Number(r.created_at) !== 1793710000000);
+  const missing0011 = findMissingMigrations(localEntries, rowsMissing0011);
+  let errorMissing0011 = '';
+  try {
+    verifyMigrationState(localEntries, rowsMissing0011, () => {});
+  } catch (err) {
+    errorMissing0011 = (err as Error).message;
+  }
+  assert(
+    missing0011.length === 1 &&
+      missing0011[0].idx === 11 &&
+      missing0011[0].tag === '0011_isi_plan_integrator_subjects' &&
+      missing0011[0].when === 1793710000000 &&
+      errorMissing0011.includes('idx=11') &&
+      errorMissing0011.includes('0011_isi_plan_integrator_subjects') &&
+      errorMissing0011.includes('1793710000000'),
+    '(f2) Si falta 0011 en __drizzle_migrations falla indicando idx, tag y when',
+    errorMissing0011
+  );
+
+  // (f3) Falta una con filas extra en la DB -> sigue fallando; con todas + filas extra -> pasa
+  const extraRows: AppliedMigrationRow[] = [
+    { id: 99, hash: 'extra-hash-1', created_at: '1999999999999' },
+    { id: 100, hash: 'extra-hash-2', created_at: '1700000000001' },
+  ];
+  const rowsMissing0012WithExtras = [
+    ...fullDbRows.filter((r) => Number(r.created_at) !== 1793720000000),
+    ...extraRows,
+  ];
+  let errorMissingWithExtras = '';
+  try {
+    verifyMigrationState(localEntries, rowsMissing0012WithExtras, () => {});
+  } catch (err) {
+    errorMissingWithExtras = (err as Error).message;
+  }
+  const missingWithAllAndExtras = findMissingMigrations(localEntries, [...fullDbRows, ...extraRows]);
+  let errorAllWithExtras: Error | null = null;
+  try {
+    verifyMigrationState(localEntries, [...fullDbRows, ...extraRows], () => {});
+  } catch (err) {
+    errorAllWithExtras = err as Error;
+  }
+  assert(
+    errorMissingWithExtras.includes('idx=12') &&
+      errorMissingWithExtras.includes('0012_isi_plan_special_rules_descriptions') &&
+      errorMissingWithExtras.includes('1793720000000') &&
+      missingWithAllAndExtras.length === 0 &&
+      errorAllWithExtras === null,
+    '(f3) Falta una migración con filas extra falla igual; todas registradas + filas extra pasan sin fallar',
+    errorMissingWithExtras
+  );
+
+  // (f4) Hash distinto en migración ya aplicada -> solo avisa (warn), nunca aborta
+  const rowsDifferentHash = fullDbRows.map((row) =>
+    Number(row.created_at) === 1793700000000 ? { ...row, hash: 'hash-modificado-manual' } : row
+  );
+  const hashMismatchWarnings: string[] = [];
+  let hashMismatchError: Error | null = null;
+  const detectedMismatches = findMigrationHashMismatches(localEntries, rowsDifferentHash);
+  try {
+    verifyMigrationState(localEntries, rowsDifferentHash, (msg) => hashMismatchWarnings.push(msg));
+  } catch (err) {
+    hashMismatchError = err as Error;
+  }
+  assert(
+    hashMismatchError === null &&
+      detectedMismatches.length === 1 &&
+      detectedMismatches[0].tag === '0010_isi_plan_short_names' &&
+      hashMismatchWarnings.length === 1 &&
+      hashMismatchWarnings[0].includes('0010_isi_plan_short_names'),
+    '(f4) Hash distinto en migración aplicada emite console.warn sin abortar'
+  );
+
+  // (f5) when repetido o decreciente falla la verificación previa estática
+  let repeatedError = '';
+  try {
+    assertJournalStrictlyIncreasing([
+      { idx: 0, tag: '0000_a', when: 1000 },
+      { idx: 1, tag: '0001_b', when: 1000 },
+    ]);
+  } catch (err) {
+    repeatedError = (err as Error).message;
+  }
+  let decreasingError = '';
+  try {
+    assertJournalStrictlyIncreasing([
+      { idx: 0, tag: '0000_a', when: 1000 },
+      { idx: 1, tag: '0001_b', when: 2000 },
+      { idx: 2, tag: '0002_c', when: 1500 },
+    ]);
+  } catch (err) {
+    decreasingError = (err as Error).message;
+  }
+  assert(
+    repeatedError.includes('idx=1') &&
+      repeatedError.includes('1000') &&
+      decreasingError.includes('idx=2') &&
+      decreasingError.includes('1500'),
+    '(f5) when repetido o decreciente falla la verificación estática previa del journal'
+  );
+
+  // (f6) Base vacía (dbRows = []) -> reporta todas las migraciones como faltantes y falla
+  const missingEmpty = findMissingMigrations(localEntries, []);
+  let emptyDbError = '';
+  try {
+    verifyMigrationState(localEntries, [], () => {});
+  } catch (err) {
+    emptyDbError = (err as Error).message;
+  }
+  assert(
+    missingEmpty.length === localEntries.length &&
+      emptyDbError.includes(`Faltan ${localEntries.length} migración(es)`),
+    '(f6) Base vacía (dbRows = []) detecta todas las migraciones faltantes y falla'
+  );
+
+  // (g) Demo rojo-verde: _journal.json pre-fix (c5d321f) vs corregido (c04fbb9)
+  const brokenTimestamps = new Map<number, number>([
+    [11, 1776729600000],
+    [12, 1776816000000],
+    [13, 1776902400000],
+  ]);
+  const c5d321fEntries = localEntries.map((e) => ({
+    ...e,
+    when: brokenTimestamps.get(e.idx) ?? e.when,
+  }));
+
+  // Rojo 1: pre-check + runMigrations detienen c5d321f antes de migrar
+  const tmpBrokenDir = fs.mkdtempSync(path.join(os.tmpdir(), 'correlativas-mig-c5d321f-'));
+  let runMigrationsBrokenMsg = '';
+  try {
+    fs.mkdirSync(path.join(tmpBrokenDir, 'meta'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpBrokenDir, 'meta', '_journal.json'),
+      JSON.stringify({ version: '7', dialect: 'postgresql', entries: c5d321fEntries }, null, 2)
+    );
+    for (const e of c5d321fEntries) {
+      fs.copyFileSync(path.join(drizzleDir, `${e.tag}.sql`), path.join(tmpBrokenDir, `${e.tag}.sql`));
+    }
+    try {
+      await runMigrations({ migrationsFolder: tmpBrokenDir });
+    } catch (err) {
+      runMigrationsBrokenMsg = (err as Error).message;
+    }
+  } finally {
+    fs.rmSync(tmpBrokenDir, { recursive: true, force: true });
+  }
+
+  // Rojo 2: simulación post-migrate contra DB en 0010 también frena 0011..0013 de c5d321f
+  const dbRowsUpTo0010 = fullDbRows.slice(0, 11); // id 1..11 (0000..0010)
+  const c5d321fSkippedByDrizzle = simulateDrizzlePending(c5d321fEntries, {
+    created_at: 1793700000000,
+  });
+  let postMigrateGuardError = '';
+  try {
+    verifyMigrationState(c5d321fEntries, dbRowsUpTo0010, () => {});
+  } catch (err) {
+    postMigrateGuardError = (err as Error).message;
+  }
+
+  // Verde: c04fbb9 (HEAD) aplica 0011..0013 desde 0010 y pasa pre-check + verifyMigrationState
+  const c04fbb9AppliedTags = simulateDrizzlePending(localEntries, { created_at: 1793700000000 });
+  let greenError: Error | null = null;
+  try {
+    assertJournalStrictlyIncreasing(localEntries);
+    verifyMigrationState(localEntries, fullDbRows, () => {});
+  } catch (err) {
+    greenError = err as Error;
+  }
+
+  assert(
+    runMigrationsBrokenMsg.includes('idx=11') &&
+      runMigrationsBrokenMsg.includes('0011_isi_plan_integrator_subjects') &&
+      runMigrationsBrokenMsg.includes('1776729600000') &&
+      c5d321fSkippedByDrizzle.length === 0 &&
+      postMigrateGuardError.includes('0011_isi_plan_integrator_subjects') &&
+      postMigrateGuardError.includes('0012_isi_plan_special_rules_descriptions') &&
+      postMigrateGuardError.includes('0013_isi_plan_intermediate_and_pps_copy') &&
+      c04fbb9AppliedTags.length === 3 &&
+      greenError === null,
+    '(g) Demo rojo-verde: _journal.json pre-fix (c5d321f) frena el incidente 0011-0013 y c04fbb9 pasa'
   );
 
   // 2. Normalizador neutro (sin hardcoded de Sistemas)
