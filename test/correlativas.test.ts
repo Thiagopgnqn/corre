@@ -7,7 +7,12 @@ import {
 import { ACRONYM_TO_ID } from './fixtures/acronyms';
 import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
 import {
+  SUPPORTED_SPECIAL_RULE_TYPES,
+  isSupportedSpecialRuleType,
+} from '../server/src/modules/admin/planImport.rules';
+import {
   getSubjectStatus,
+  evaluateSpecialRule,
   canRenderSeminario,
   canRenderProyectoFinal,
   checkAnalistaTitle,
@@ -653,5 +658,46 @@ const impossibleCombos = generateScheduleCombinations(
 assert(impossibleCombos.hasConflictFree === false, 'Must report hasConflictFree = false when no solution exists');
 assert(impossibleCombos.combinations.length === 1, 'Must still return the best combination with minimal conflicts');
 assert(impossibleCombos.combinations[0].conflictCount === 1, 'Returned combination must reflect 1 conflict');
+
+// 21. Importer <-> Frontend Engine Parity for Special Rules (Etapa 2 Adjustment 3)
+assert(
+  JSON.stringify(SUPPORTED_SPECIAL_RULE_TYPES) ===
+    JSON.stringify(['approved_range', 'all_previous_core_approved']),
+  'Importer supported rule types must match correlativas.ts evaluators strictly'
+);
+assert(
+  !isSupportedSpecialRuleType('min_credits'),
+  'min_credits must be rejected by importer because evaluateSpecialRule does not implement it'
+);
+
+const neutralSubjects = [
+  { id: 1, code: '1', shortName: 'M1', name: 'M1', level: 1, modality: '1C', contraCuatrimestral: false, weeklyHours: 4, isElective: false },
+  { id: 2, code: '2', shortName: 'M2', name: 'M2', level: 2, modality: '2C', contraCuatrimestral: false, weeklyHours: 4, isElective: false },
+  { id: 3, code: '3', shortName: 'M3', name: 'M3', level: 3, modality: 'A', contraCuatrimestral: false, weeklyHours: 4, isElective: false },
+];
+const ruleSamplesByType: Record<(typeof SUPPORTED_SPECIAL_RULE_TYPES)[number], { rule: any; satisfiedState: UserCareerState }> = {
+  approved_range: {
+    rule: { subjectCode: 3, ruleType: 'approved_range', params: { fromCode: 1, toCode: 2 }, description: 'Test range' },
+    satisfiedState: { 1: { status: 'aprobada', grade: 7 }, 2: { status: 'aprobada', grade: 8 } },
+  },
+  all_previous_core_approved: {
+    rule: { subjectCode: 3, ruleType: 'all_previous_core_approved', params: {}, description: 'Test all core' },
+    satisfiedState: { 1: { status: 'aprobada', grade: 7 }, 2: { status: 'promocionada', grade: 9 } },
+  },
+};
+
+for (const ruleType of SUPPORTED_SPECIAL_RULE_TYPES) {
+  const sample = ruleSamplesByType[ruleType];
+  const emptyEval = evaluateSpecialRule(sample.rule, neutralSubjects as any, {});
+  assert(
+    emptyEval.satisfied === false && emptyEval.missingIds.length > 0,
+    `Rule "${ruleType}" must genuinely block when requirements are unmet (not fall through)`
+  );
+  const passEval = evaluateSpecialRule(sample.rule, neutralSubjects as any, sample.satisfiedState);
+  assert(
+    passEval.satisfied === true && passEval.missingIds.length === 0,
+    `Rule "${ruleType}" must evaluate satisfied=true when prerequisites are met`
+  );
+}
 
 console.log('ALL UNIT LOGIC TESTS (INCLUDING SCHEDULE BUILDER, CLASH DETECTOR & COMBINATIONS) PASSED SUCCESSFULLY!');
