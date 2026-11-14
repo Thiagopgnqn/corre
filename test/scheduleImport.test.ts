@@ -18,11 +18,11 @@ import {
   resolveSubjectId,
   resolveSubjectIds,
   isGenericElective,
-} from '../src/data/subjectAliases';
+} from './fixtures/subjectAliases';
 import { validateScheduleData } from '../src/utils/scheduleLogic';
 import { SUBJECT_SHORT_NAMES, getSubjectShortName } from '../src/components/schedule/ScheduleWeeklyGrid';
-import { CORE_SUBJECTS } from '../src/data/plan2023';
-import { ELECTIVES } from '../src/data/electives';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
+import { ELECTIVES } from './fixtures/electives';
 
 const XLSX = (xlsxModule as any).default || xlsxModule;
 

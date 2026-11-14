@@ -1,10 +1,11 @@
-import { CORE_SUBJECTS } from '../src/data/plan2023';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
 import {
   ELECTIVES,
   REQUIRED_ELECTIVE_CREDITS_TOTAL,
   ELECTIVE_SLOTS_EQUIVALENT,
-} from '../src/data/electives';
-import { ACRONYM_TO_ID } from '../src/data/acronyms';
+} from './fixtures/electives';
+import { ACRONYM_TO_ID } from './fixtures/acronyms';
+import type { ActivePlanCatalog, UserCareerState } from '../src/types/career';
 import {
   getSubjectStatus,
   canRenderSeminario,
@@ -32,8 +33,65 @@ import {
   validateScheduleData,
   generateScheduleCombinations,
 } from '../src/utils/scheduleLogic';
-import type { UserCareerState } from '../src/types/career';
 import type { Commission, Slot } from '../src/types/schedule';
+
+const PLAN_2023_FIXTURE: ActivePlanCatalog = {
+  plan: {
+    id: 'plan-isi-2023',
+    name: 'Plan 2023',
+    year: 2023,
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    config: {
+      requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
+      electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+      totalLevels: 5,
+      levelLabel: 'Año',
+      shortTag: 'ISI · Plan 2023',
+      ppsRequirement: { referenceSubjectCode: 36 },
+      intermediateDegrees: [
+        {
+          key: 'analista',
+          name: 'Analista Universitario en Sistemas',
+          requiredElectiveCredits: 4,
+          specialRuleSubjectCode: 99,
+        },
+      ],
+    },
+  },
+  career: {
+    id: 'career-isi',
+    name: 'Ingeniería en Sistemas de Información',
+    code: 'ISI',
+    facultyId: 'fac-frc',
+  },
+  subjects: [
+    ...CORE_SUBJECTS.map((s) => ({
+      ...s,
+      isElective: false,
+      isOptionalTrack: s.id === 99,
+      trackKey: s.id === 99 ? 'analista' : null,
+    })),
+    ...ELECTIVES.map((e) => ({
+      ...e,
+      isElective: true,
+    })),
+  ],
+  rules: [
+    {
+      subjectCode: 99,
+      ruleType: 'approved_range',
+      params: { fromCode: 1, toCode: 23 },
+      description: 'Todas las materias 1 a 23 aprobadas',
+    },
+    {
+      subjectCode: 36,
+      ruleType: 'all_previous_core_approved',
+      params: { excludeTrackKeys: ['analista'] },
+      description: 'Todas las obligatorias previas aprobadas',
+    },
+  ],
+  acronyms: { ...ACRONYM_TO_ID },
+};
 
 function assert(cond: boolean, message: string) {
   if (!cond) {
@@ -84,14 +142,14 @@ const stateWith1and2Apr: UserCareerState = {
 assert(getSubjectStatus(econ, stateWith1and2Apr) === 'disponible', 'Economia is available when 1 and 2 are approved/promoted');
 
 // 5. Special rule: Seminario Integrador 99 requires approved all 1..23 to render
-const semCheck1 = canRenderSeminario(emptyState);
+const semCheck1 = canRenderSeminario(emptyState, PLAN_2023_FIXTURE);
 assert(!semCheck1.canRender && semCheck1.missingIds.length === 23, 'Seminario requires 23 subjects approved');
 
 const stateWithAll1to23: UserCareerState = {};
 for (let i = 1; i <= 23; i++) {
   stateWithAll1to23[i] = { status: 'aprobada', grade: 8 };
 }
-const semCheck2 = canRenderSeminario(stateWithAll1to23);
+const semCheck2 = canRenderSeminario(stateWithAll1to23, PLAN_2023_FIXTURE);
 assert(semCheck2.canRender && semCheck2.missingIds.length === 0, 'Seminario can render when all 1..23 are approved');
 
 // 6. Proyecto Final (ID 36) with Analista Active vs Inactive
@@ -104,12 +162,12 @@ CORE_SUBJECTS.forEach((s) => {
 });
 
 // A) When Analista is INACTIVE (false): PF rendering does NOT require 99
-const pfAnalistaOff = canRenderProyectoFinal(stateWith1to35Approved, false);
+const pfAnalistaOff = canRenderProyectoFinal(stateWith1to35Approved, PLAN_2023_FIXTURE, false);
 assert(pfAnalistaOff.canRender === true, 'Proyecto Final can be rendered when Analista is OFF and 1..35 are approved');
 assert(!pfAnalistaOff.missingIds.includes(99), 'Missing IDs must NOT include 99 when Analista track is disabled');
 
 // B) When Analista is ACTIVE (true): PF rendering DOES require 99
-const pfAnalistaOn = canRenderProyectoFinal(stateWith1to35Approved, true);
+const pfAnalistaOn = canRenderProyectoFinal(stateWith1to35Approved, PLAN_2023_FIXTURE, true);
 assert(pfAnalistaOn.canRender === false, 'Proyecto Final CANNOT be rendered when Analista is ON and 99 is unapproved');
 assert(pfAnalistaOn.missingIds.includes(99), 'Missing IDs MUST include 99 when Analista track is enabled');
 
@@ -118,7 +176,7 @@ const stateWith1to35And99Approved: UserCareerState = {
   ...stateWith1to35Approved,
   99: { status: 'aprobada', grade: 10 },
 };
-const pfAnalistaOnWith99 = canRenderProyectoFinal(stateWith1to35And99Approved, true);
+const pfAnalistaOnWith99 = canRenderProyectoFinal(stateWith1to35And99Approved, PLAN_2023_FIXTURE, true);
 assert(pfAnalistaOnWith99.canRender === true, 'Proyecto Final can render when 99 is approved with Analista ON');
 
 // 7. Electives: Backend de Aplicaciones (301) requires reg [14, 13] and apr [6]
@@ -136,7 +194,7 @@ assert(greenSoft.regularPrereqs.includes(19), 'Green Software regularPrereqs inc
 assert(REQUIRED_ELECTIVE_CREDITS_TOTAL === 20, 'Required elective credits total must be 20');
 
 // Analista title requirement: any 4 elective credits (regardless of level)
-const analistaCheckNoElectives = checkAnalistaTitle(stateWithAll1to23, 0);
+const analistaCheckNoElectives = checkAnalistaTitle(stateWithAll1to23, PLAN_2023_FIXTURE, 0);
 assert(!analistaCheckNoElectives.eligible, 'Analista not eligible with 0 elective credits');
 
 const stateWithAnalistaComplete: UserCareerState = {
@@ -144,7 +202,7 @@ const stateWithAnalistaComplete: UserCareerState = {
   99: { status: 'aprobada', grade: 9 },
   503: { status: 'aprobada', grade: 8 }, // 4 credits elective (even if level 5 suggested!)
 };
-const analistaCheckWithL5Elective = checkAnalistaTitle(stateWithAnalistaComplete, 4);
+const analistaCheckWithL5Elective = checkAnalistaTitle(stateWithAnalistaComplete, PLAN_2023_FIXTURE, 4);
 assert(analistaCheckWithL5Elective.eligible, 'Analista title eligible with any 4 elective credits + 1..23 + 99');
 
 // 9. Validation against duplicate electives across years
@@ -155,7 +213,11 @@ const rawDuplicateState: Record<number, number[]> = {
   4: [401],      // 401 appears in year 3 and year 4
   5: [9999],     // invalid elective id
 };
-const sanitized = sanitizeAssignedElectives(rawDuplicateState);
+const sanitized = sanitizeAssignedElectives(
+  rawDuplicateState,
+  ELECTIVES.map((e) => e.id),
+  5
+);
 assert(sanitized[1].includes(301), '301 stays in year 1');
 assert(!sanitized[3].includes(301), '301 must NOT appear in year 3 as it was already in year 1');
 assert(sanitized[3].includes(401), '401 stays in year 3');
@@ -173,25 +235,25 @@ const legacyUserState: UserCareerState = {
   404: { status: 'cursando' },           // Nivel 4 elective
   502: { status: 'promocionada', grade: 10 }, // Nivel 5 elective
 };
-const migrated = migrateLegacyElectives(legacyUserState);
+const migrated = migrateLegacyElectives(legacyUserState, ELECTIVES, 5);
 assert(migrated[3].includes(301), '301 migrated into year 3 matching its suggested level');
 assert(migrated[4].includes(404), '404 migrated into year 4 matching its suggested level');
 assert(migrated[5].includes(502), '502 migrated into year 5 matching its suggested level');
 
 // 11. Critical path test (Analista ON vs OFF)
-const pathWithoutAnalista = calculateCriticalPath(emptyState, false);
-const pathWithAnalista = calculateCriticalPath(emptyState, true);
+const pathWithoutAnalista = calculateCriticalPath(emptyState, PLAN_2023_FIXTURE, false);
+const pathWithAnalista = calculateCriticalPath(emptyState, PLAN_2023_FIXTURE, true);
 assert(pathWithoutAnalista.length > 0, 'Critical path exists without Analista');
 assert(!pathWithoutAnalista.chain.some((s) => s.id === 99), 'Critical path without Analista excludes subject 99');
 console.log(`Critical path without Analista: ${pathWithoutAnalista.length} subjects (~${pathWithoutAnalista.estimatedTerms} terms)`);
 console.log(`Critical path with Analista: ${pathWithAnalista.length} subjects (~${pathWithAnalista.estimatedTerms} terms)`);
 
 // 12. PPS eligibility requires meeting Proyecto Final enrollment conditions
-const ppsCheckEmpty = isPPSEligible(emptyState);
+const ppsCheckEmpty = isPPSEligible(emptyState, PLAN_2023_FIXTURE);
 assert(!ppsCheckEmpty.eligible, 'PPS not eligible on empty state');
 
 // 13. Unlocks check: AM1 unlocks AM2, Fisica 2, Probabilidad, Economia, Analisis Numerico
-const am1Unlocks = getUnlockedBySubject(1);
+const am1Unlocks = getUnlockedBySubject(1, PLAN_2023_FIXTURE.subjects);
 assert(am1Unlocks.totalCount >= 5, 'AM1 unlocks at least 5 subjects');
 
 // 14. Progress Breakdown: Mode "Solo obligatorias"
@@ -231,6 +293,7 @@ const prog0cr = calculateProgressBreakdown({
   electiveCreditsTaking: 0,
   includeElectives: true,
   electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+  requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
 });
 // 18 / 43 ~ 41.86% -> rounded to 42%
 assert(prog0cr.totalEquivalentSlots === 43, 'Total slots is 36 + 7 = 43');
@@ -256,6 +319,7 @@ const prog10cr = calculateProgressBreakdown({
   electiveCreditsTaking: 6, // 6 credits taking = 2.1 slots
   includeElectives: true,
   electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+  requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
 });
 assert(prog10cr.totalEquivalentSlots === 43, 'Total slots with electives is 43');
 assert(prog10cr.approvedEquivalentSlots === 21.5, '18 + 3.5 = 21.5 slots');
@@ -278,6 +342,7 @@ const prog20cr = calculateProgressBreakdown({
   electiveCreditsTaking: 0,
   includeElectives: true,
   electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+  requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
 });
 assert(prog20cr.approvedEquivalentSlots === 43, 'All 36 + 7 = 43 slots approved');
 assert(prog20cr.percentageApproved === 100, 'All approved is 100%');
@@ -302,6 +367,7 @@ const prog24cr = calculateProgressBreakdown({
   electiveCreditsTaking: 0,
   includeElectives: true,
   electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+  requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
 });
 assert(prog24cr.approvedEquivalentSlots === 25, '18 + 7 = 25 (capped at 7 slots for electives)');
 assert(
@@ -325,6 +391,7 @@ const progAnalistaOn = calculateProgressBreakdown({
   electiveCreditsTaking: 3,
   includeElectives: true,
   electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+  requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
 });
 assert(progAnalistaOn.totalEquivalentSlots === 44, 'Total slots with Analista ON is 37 + 7 = 44');
 const sumAnalista =
@@ -353,6 +420,8 @@ randomScenarios.forEach((sc, i) => {
     electiveCreditsRegularized: sc.eR,
     electiveCreditsTaking: sc.eT,
     includeElectives: sc.inc,
+    electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
+    requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
   });
   const sum = res.percentageApproved + res.percentageRegularized + res.percentageTaking + res.percentagePending;
   assert(sum === 100, `Scenario ${i} sum must be 100, got ${sum}`);

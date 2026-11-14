@@ -4,23 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { CORE_SUBJECTS } from '../src/data/plan2023';
-import {
-  ELECTIVES,
-  REQUIRED_ELECTIVE_CREDITS_TOTAL,
-  ELECTIVE_SLOTS_EQUIVALENT,
-} from '../src/data/electives';
-import {
-  getSubjectStatus,
-  isApprovedOrHigher,
-  canRenderSeminario,
-  canRenderProyectoFinal,
-  checkAnalistaTitle,
-  isPPSEligible,
-  calculateProgressBreakdown,
-} from '../src/utils/correlativas';
+import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
+import { evaluatePlanProgress } from '../src/utils/correlativas';
 import { calculateCriticalPath } from '../src/utils/criticalPath';
 import type {
+  ActivePlanCatalog,
   CareerProgress,
   ExamAttempt,
   Subject,
@@ -70,202 +58,151 @@ interface OracleFile {
   scenarios: OracleScenario[];
 }
 
+interface RawSeedCatalog {
+  career: { code: string; name: string };
+  studyPlan: { name: string; year: number; config: Record<string, unknown> };
+  subjects: Array<{
+    codeInPlan: number;
+    name: string;
+    shortName?: string;
+    level: number;
+    modality: string;
+    contraCuatrimestral?: boolean;
+    weeklyHours: number;
+    kind: string;
+    credits?: number | null;
+    isOptionalTrack?: boolean;
+    trackKey?: string | null;
+    regularPrereqs?: number[];
+    approvedPrereqs?: number[];
+  }>;
+  specialRules?: Array<{
+    subjectCode: number;
+    ruleType: string;
+    params?: Record<string, unknown>;
+    description?: string;
+  }>;
+  acronyms?: Array<{
+    acronym: string;
+    subjectCode: number;
+  }>;
+}
+
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const oraclePath = path.resolve(currentDir, 'fixtures/plan2023Oracle.json');
+const seedCatalogPath = path.resolve(currentDir, '../server/seed-data/plan2023-catalog.json');
 const oracle: OracleFile = JSON.parse(fs.readFileSync(oraclePath, 'utf8'));
+const seedRaw: RawSeedCatalog = JSON.parse(fs.readFileSync(seedCatalogPath, 'utf8'));
 
-function evaluatePlan2023WithCurrentEngine(
+function buildPlanFromSeedCatalog(sortDbOrder: boolean): ActivePlanCatalog {
+  const rawSubjects = [...seedRaw.subjects];
+  if (sortDbOrder) {
+    rawSubjects.sort((a, b) => a.level - b.level || a.codeInPlan - b.codeInPlan);
+  }
+
+  const codeToUuid = new Map<number, string>();
+  const subjects = rawSubjects.map((s, idx) => {
+    const id = `subj-${s.codeInPlan}-${idx}`;
+    codeToUuid.set(s.codeInPlan, id);
+    return {
+      id,
+      codeInPlan: s.codeInPlan,
+      name: s.name,
+      shortName: s.shortName,
+      level: s.level,
+      modality: s.modality,
+      contraCuatrimestral: Boolean(s.contraCuatrimestral),
+      weeklyHours: s.weeklyHours,
+      kind: s.kind,
+      credits: s.credits ?? null,
+      isOptionalTrack: Boolean(s.isOptionalTrack),
+      trackKey: s.trackKey ?? null,
+    };
+  });
+
+  const prerequisites: Array<{ subjectId: string; requiresSubjectId: string; type: string }> = [];
+  for (const s of rawSubjects) {
+    const subjectId = codeToUuid.get(s.codeInPlan)!;
+    for (const reqCode of s.regularPrereqs ?? []) {
+      const requiresSubjectId = codeToUuid.get(reqCode);
+      if (requiresSubjectId) {
+        prerequisites.push({ subjectId, requiresSubjectId, type: 'regular' });
+      }
+    }
+    for (const reqCode of s.approvedPrereqs ?? []) {
+      const requiresSubjectId = codeToUuid.get(reqCode);
+      if (requiresSubjectId) {
+        prerequisites.push({ subjectId, requiresSubjectId, type: 'approved' });
+      }
+    }
+  }
+
+  const rules = (seedRaw.specialRules ?? []).map((r, idx) => ({
+    id: `rule-${idx}`,
+    subjectId: codeToUuid.get(r.subjectCode)!,
+    ruleType: r.ruleType,
+    params: r.params ?? {},
+    description: r.description ?? '',
+  }));
+
+  const acronyms = (seedRaw.acronyms ?? []).map((a) => ({
+    acronym: a.acronym,
+    subjectId: codeToUuid.get(a.subjectCode)!,
+  }));
+
+  return formatPlanCatalogPayload({
+    plan: {
+      id: 'plan-isi-2023',
+      name: seedRaw.studyPlan.name,
+      year: seedRaw.studyPlan.year,
+      config: seedRaw.studyPlan.config,
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+    career: {
+      id: 'career-isi',
+      name: seedRaw.career.name,
+      code: seedRaw.career.code,
+      facultyId: 'fac-frc',
+    },
+    subjects,
+    prerequisites,
+    rules,
+    acronyms,
+  }) as unknown as ActivePlanCatalog;
+}
+
+const seedOrderPlan = buildPlanFromSeedCatalog(false);
+const dbSortedPlan = buildPlanFromSeedCatalog(true);
+
+function evaluatePlan2023WithEngine(
+  plan: ActivePlanCatalog,
   activeState: UserCareerState,
   settings: AppSettings,
   examAttempts: ExamAttempt[]
 ) {
-  const activeCoreSubjects = settings.includeAnalistaTrack
-    ? CORE_SUBJECTS
-    : CORE_SUBJECTS.filter((s) => s.id !== 99);
-
-  let approvedCount = 0;
-  let promotedCount = 0;
-  let regularizedCount = 0;
-  let takingCount = 0;
-  let blockedCount = 0;
-  let availableCount = 0;
-  let libreCount = 0;
-
-  let totalWeeklyHours = 0;
-  let approvedWeeklyHours = 0;
-
-  const gradesToAverage: number[] = [];
-  const coreStatuses: Record<string, SubjectStatus> = {};
-  const availableCoreIds: number[] = [];
-
-  activeCoreSubjects.forEach((subject) => {
-    totalWeeklyHours += subject.weeklyHours;
-    const status = getSubjectStatus(subject, activeState);
-    coreStatuses[String(subject.id)] = status;
-    if (status === 'disponible') {
-      availableCoreIds.push(subject.id);
-    }
-    const st = activeState[subject.id];
-
-    if (status === 'aprobada') {
-      approvedCount++;
-      approvedWeeklyHours += subject.weeklyHours;
-      if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-        gradesToAverage.push(st.grade);
-      }
-    } else if (status === 'promocionada') {
-      promotedCount++;
-      approvedWeeklyHours += subject.weeklyHours;
-      if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-        gradesToAverage.push(st.grade);
-      }
-    } else if (status === 'regularizada') {
-      regularizedCount++;
-    } else if (status === 'cursando') {
-      takingCount++;
-    } else if (status === 'disponible') {
-      availableCount++;
-    } else if (status === 'libre') {
-      libreCount++;
-      blockedCount++;
-    } else {
-      blockedCount++;
-    }
+  const evaluated = evaluatePlanProgress({
+    plan,
+    userState: activeState,
+    settings,
+    examAttempts,
   });
 
-  const electiveStatuses: Record<string, SubjectStatus> = {};
-  const availableElectiveIds: number[] = [];
-  let totalElectiveCreditsApproved = 0;
-  let totalElectiveCreditsRegularized = 0;
-  let totalElectiveCreditsTaking = 0;
-
-  ELECTIVES.forEach((el) => {
-    const computedStatus = getSubjectStatus(el, activeState);
-    electiveStatuses[String(el.id)] = computedStatus;
-    if (computedStatus === 'disponible') {
-      availableElectiveIds.push(el.id);
-    }
-
-    const st = activeState[el.id];
-    if (isApprovedOrHigher(st)) {
-      totalElectiveCreditsApproved += el.credits;
-      if (st?.grade !== undefined && st.grade >= settings.minPassingGrade) {
-        gradesToAverage.push(st.grade);
-      }
-    } else if (st?.status === 'regularizada') {
-      totalElectiveCreditsRegularized += el.credits;
-    } else if (st?.status === 'cursando') {
-      totalElectiveCreditsTaking += el.credits;
-    }
-  });
-
-  const coreApproved = approvedCount + promotedCount;
-  const corePending = blockedCount + availableCount;
-
-  const breakdown = calculateProgressBreakdown({
-    coreApproved,
-    coreRegularized: regularizedCount,
-    coreTaking: takingCount,
-    corePending,
-    totalCore: activeCoreSubjects.length,
-    electiveCreditsApproved: totalElectiveCreditsApproved,
-    electiveCreditsRegularized: totalElectiveCreditsRegularized,
-    electiveCreditsTaking: totalElectiveCreditsTaking,
-    includeElectives: settings.includeElectivesInProgress,
-    electiveSlotsEquivalent: ELECTIVE_SLOTS_EQUIVALENT,
-    requiredElectiveCredits: REQUIRED_ELECTIVE_CREDITS_TOTAL,
-  });
-
-  const careerPercentageBySubjects = breakdown.percentageApproved;
-  const careerPercentageByHours = totalWeeklyHours > 0
-    ? Math.round((approvedWeeklyHours / totalWeeklyHours) * 100)
-    : 0;
-
-  const failGrades = examAttempts
-    .filter((att) => !att.isPassed || att.grade < settings.minPassingGrade)
-    .map((att) => att.grade);
-
-  const allGradesWithFails = [...gradesToAverage, ...failGrades];
-
-  const averageGradeWithoutFails = gradesToAverage.length > 0
-    ? Number((gradesToAverage.reduce((a, b) => a + b, 0) / gradesToAverage.length).toFixed(2))
-    : 0;
-
-  const averageGradeWithFails = allGradesWithFails.length > 0
-    ? Number((allGradesWithFails.reduce((a, b) => a + b, 0) / allGradesWithFails.length).toFixed(2))
-    : averageGradeWithoutFails;
-
-  const averageGrade = settings.includeFailsInGPA
-    ? averageGradeWithFails
-    : averageGradeWithoutFails;
-
-  const missingElectiveCreditsForDegree = Math.max(0, REQUIRED_ELECTIVE_CREDITS_TOTAL - totalElectiveCreditsApproved);
-  const missingCoreForDegree = activeCoreSubjects
-    .filter((s) => !isApprovedOrHigher(activeState[s.id]))
-    .map((s) => s.id);
-
-  const seminario = canRenderSeminario(activeState);
-  const proyectoFinal = canRenderProyectoFinal(activeState, settings.includeAnalistaTrack);
-  const analista = checkAnalistaTitle(activeState, totalElectiveCreditsApproved);
-  const pps = isPPSEligible(activeState);
-
-  const isDegreeEligible =
-    missingCoreForDegree.length === 0 &&
-    totalElectiveCreditsApproved >= REQUIRED_ELECTIVE_CREDITS_TOTAL;
-
-  const progress: CareerProgress = {
-    totalSubjects: activeCoreSubjects.length,
-    approvedCount,
-    promotedCount,
-    regularizedCount,
-    takingCount,
-    blockedCount,
-    availableCount,
-    totalWeeklyHours,
-    approvedWeeklyHours,
-    careerPercentageBySubjects,
-    careerPercentageByHours,
-    percentageApproved: breakdown.percentageApproved,
-    percentageTaking: breakdown.percentageTaking,
-    percentageRegularized: breakdown.percentageRegularized,
-    percentagePending: breakdown.percentagePending,
-    totalEquivalentSlots: breakdown.totalEquivalentSlots,
-    approvedEquivalentSlots: breakdown.approvedEquivalentSlots,
-    averageGrade,
-    averageGradeWithPromotions: averageGrade,
-    averageGradeWithoutFails,
-    averageGradeWithFails,
-    totalFailsCount: failGrades.length,
-    libreCount,
-    pendingFinalsCount: regularizedCount,
-    totalElectiveCreditsApproved,
-    totalElectiveCreditsTaking,
-    totalElectiveCreditsRegularized,
-    totalElectiveCreditsRequired: REQUIRED_ELECTIVE_CREDITS_TOTAL,
-    missingElectiveCreditsForDegree,
-    missingCoreForDegree,
-    isAnalistaEligible: analista.eligible,
-    missingForAnalista: {
-      missingCoreIds: analista.missingCoreIds,
-      seminarioApproved: analista.seminarioApproved,
-      electiveCredits: analista.electiveCredits,
-    },
-    isPPSEligible: pps.eligible,
-    isDegreeEligible,
-  };
-
-  const criticalPath = calculateCriticalPath(activeState, settings.includeAnalistaTrack);
+  const criticalPath = calculateCriticalPath(
+    activeState,
+    plan,
+    settings.includeAnalistaTrack
+  );
 
   return {
-    progress,
-    availableCoreIds,
-    availableElectiveIds,
-    coreStatuses,
-    electiveStatuses,
-    seminario,
-    proyectoFinal,
-    analista,
-    pps,
+    progress: evaluated.progress,
+    availableCoreIds: evaluated.availableCoreIds,
+    availableElectiveIds: evaluated.availableElectiveIds,
+    coreStatuses: evaluated.coreStatuses,
+    electiveStatuses: evaluated.electiveStatuses,
+    seminario: evaluated.seminario,
+    proyectoFinal: evaluated.proyectoFinal,
+    analista: evaluated.analista,
+    pps: evaluated.pps,
     criticalPath: {
       chainIds: criticalPath.chain.map((s: Subject) => s.id),
       length: criticalPath.length,
@@ -292,7 +229,8 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
 
   for (const scenario of oracle.scenarios) {
     it(`matches frozen oracle output for scenario: ${scenario.id}`, () => {
-      const actual = evaluatePlan2023WithCurrentEngine(
+      const actual = evaluatePlan2023WithEngine(
+        seedOrderPlan,
         scenario.input.userState,
         scenario.input.settings,
         scenario.input.examAttempts
@@ -315,6 +253,27 @@ describe('Plan 2023 Frozen Regression Oracle', () => {
         actual.progress.percentageTaking +
         actual.progress.percentagePending;
       assert.equal(pctSum, 100, `${scenario.id}: percentages must sum strictly to 100`);
+
+      // Verify identical output when catalog subjects are sorted in DB order (level ASC, codeInPlan ASC)
+      const dbActual = evaluatePlan2023WithEngine(
+        dbSortedPlan,
+        scenario.input.userState,
+        scenario.input.settings,
+        scenario.input.examAttempts
+      );
+      assert.deepStrictEqual(dbActual.availableCoreIds, scenario.expected.availableCoreIds);
+      assert.deepStrictEqual(
+        [...dbActual.availableElectiveIds].sort((a, b) => a - b),
+        [...scenario.expected.availableElectiveIds].sort((a, b) => a - b)
+      );
+      assert.deepStrictEqual(dbActual.coreStatuses, scenario.expected.coreStatuses);
+      assert.deepStrictEqual(dbActual.electiveStatuses, scenario.expected.electiveStatuses);
+      assert.deepStrictEqual(dbActual.progress, scenario.expected.progress);
+      assert.deepStrictEqual(dbActual.seminario, scenario.expected.seminario);
+      assert.deepStrictEqual(dbActual.proyectoFinal, scenario.expected.proyectoFinal);
+      assert.deepStrictEqual(dbActual.analista, scenario.expected.analista);
+      assert.deepStrictEqual(dbActual.pps, scenario.expected.pps);
+      assert.deepStrictEqual(dbActual.criticalPath, scenario.expected.criticalPath);
     });
   }
 

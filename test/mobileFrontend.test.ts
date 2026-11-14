@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { registerLayer, unregisterLayer, getActiveLayersCount, isTopLayer } from '../src/components/common/BottomSheet';
-import { checkEligibility, ALL_SUBJECTS_MAP } from '../src/utils/correlativas';
+import { checkEligibility, buildSubjectsMap } from '../src/utils/correlativas';
+import { CORE_SUBJECTS } from './fixtures/plan2023';
 import { PLURAL_DAYS_MAP } from '../src/components/schedule/ScheduleWeeklyGrid';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -422,7 +423,7 @@ describe('Ajustes de Cierre de Fases 1 a 3: Capas Anidadas, Tablets, Correlativa
 
   it('2. Validación de Correlativas: checkEligibility bloquea estados no permitidos y habilita al cumplirlas', () => {
     // Materia de segundo año (Sistemas Operativos, ID 15) que tiene correlativas
-    const soSubject = ALL_SUBJECTS_MAP.get(15);
+    const soSubject = buildSubjectsMap(CORE_SUBJECTS).get(15);
     assert.ok(soSubject, 'Sistemas Operativos debe existir en el plan');
 
     // Con estado académico vacío
