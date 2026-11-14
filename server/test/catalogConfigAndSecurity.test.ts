@@ -33,15 +33,18 @@ async function main() {
   }
 
   // 1. Migración 0009
-  console.log('📌 1. Migración 0009 (datos idempotentes, sin ppsSubjectCode)');
+  console.log('📌 1. Migración 0009 (datos idempotentes, sin ppsSubjectCode, CTE catalog_versions)');
   const sqlPath = path.resolve(__dirname, '../drizzle/0009_isi_plan_pps_config.sql');
   const journalPath = path.resolve(__dirname, '../drizzle/meta/_journal.json');
   const sql = fs.readFileSync(sqlPath, 'utf8');
   const journal = JSON.parse(fs.readFileSync(journalPath, 'utf8'));
 
   assert(
-    !/^\s*(DROP|DELETE|ALTER|CREATE|INSERT|TRUNCATE)\s+/im.test(sql) && /\bUPDATE\s+"study_plans"/i.test(sql),
-    '0009 contiene únicamente UPDATE de datos sobre study_plans'
+    !/\b(DROP|DELETE|ALTER|CREATE|TRUNCATE)\b/i.test(sql) &&
+      /^\s*WITH\s+upd\s+AS\s*\(/i.test(sql) &&
+      /\bUPDATE\s+"study_plans"/i.test(sql) &&
+      /\bRETURNING\s+sp\."id"/i.test(sql),
+    '0009 usa una única sentencia CTE aditiva (WITH upd AS ... UPDATE study_plans RETURNING sp.id)'
   );
   assert(
     sql.includes(`'{"ppsRequirement":{"referenceSubjectCode":36}}'::jsonb || COALESCE(sp."config", '{}'::jsonb)`),
@@ -55,6 +58,63 @@ async function main() {
     sql.includes(`c."code" = 'ISI'`) && sql.includes('sp."year" = 2023') && !sql.includes('ppsSubjectCode'),
     '0009 apunta exclusivamente a ISI Plan 2023 y no incluye ppsSubjectCode'
   );
+  assert(
+    sql.includes(`INSERT INTO "catalog_versions"`) &&
+      sql.includes(`ON CONFLICT ("id") DO NOTHING`) &&
+      sql.includes(`UPDATE "catalog_versions"`) &&
+      /WHERE\s+"id"\s*=\s*'default'\s+AND\s+EXISTS\s*\(\s*SELECT\s+1\s+FROM\s+upd\s*\)/i.test(sql) &&
+      sql.includes(`'v-' ||`),
+    '0009 crea idempotentemente "default" y actualiza catalog_versions con formato bumpCatalogVersion() solo si EXISTS (SELECT 1 FROM upd)'
+  );
+
+  // Simulación funcional de dos corridas de la CTE de 0009 (con y sin fila 'default')
+  const simulate0009Run = (
+    plans: Array<{ id: string; careerCode: string; year: number; config: Record<string, unknown> }>,
+    versions: Map<string, string>,
+    fakeTs: number,
+    fakeHex: string
+  ) => {
+    const updIds: string[] = [];
+    for (const sp of plans) {
+      if (sp.careerCode === 'ISI' && sp.year === 2023 && !('ppsRequirement' in sp.config)) {
+        sp.config = { ppsRequirement: { referenceSubjectCode: 36 }, ...sp.config };
+        updIds.push(sp.id);
+      }
+    }
+    const generatedVer = `v-${fakeTs}-${fakeHex}`;
+    if (updIds.length > 0) {
+      if (!versions.has('default')) {
+        versions.set('default', generatedVer);
+      }
+      if (versions.has('default')) {
+        versions.set('default', generatedVer);
+      }
+    }
+    return { updatedRows: updIds.length, version: versions.get('default') || null };
+  };
+
+  const simPlansNoRow = [{ id: 'p-isi', careerCode: 'ISI', year: 2023, config: { totalLevels: 5 } }];
+  const simVersionsEmpty = new Map<string, string>();
+  const run1NoRow = simulate0009Run(simPlansNoRow, simVersionsEmpty, 1700000000123, 'a1b2c3');
+  const run2NoRow = simulate0009Run(simPlansNoRow, simVersionsEmpty, 1700000000999, 'ffffff');
+
+  const simPlansWithRow = [{ id: 'p-isi', careerCode: 'ISI', year: 2023, config: {} }];
+  const simVersionsExisting = new Map<string, string>([['default', 'v-1600000000000-000000']]);
+  const run1WithRow = simulate0009Run(simPlansWithRow, simVersionsExisting, 1700000000456, '09ef12');
+  const run2WithRow = simulate0009Run(simPlansWithRow, simVersionsExisting, 1700000000888, 'eeeeee');
+
+  assert(
+    run1NoRow.updatedRows === 1 &&
+      /^v-\d+-[0-9a-f]{6}$/.test(run1NoRow.version || '') &&
+      run2NoRow.updatedRows === 0 &&
+      run2NoRow.version === run1NoRow.version &&
+      run1WithRow.updatedRows === 1 &&
+      run1WithRow.version === 'v-1700000000456-09ef12' &&
+      run2WithRow.updatedRows === 0 &&
+      run2WithRow.version === run1WithRow.version,
+    '0009 actualiza catalog_versions solo en la primera corrida (con o sin fila previa) y es no-op en la segunda'
+  );
+
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
     lastJournalEntry?.idx === 9 && lastJournalEntry?.tag === '0009_isi_plan_pps_config',
