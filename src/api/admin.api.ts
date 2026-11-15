@@ -1,5 +1,6 @@
-import { apiFetch } from './client';
+import { ApiError, apiFetch } from './client';
 import type { AdminReviewCatalogItem } from '../types/professor';
+import type { ActivePlanCatalog } from '../types/career';
 
 export interface AdminStatsResponse {
   range: '7d' | '30d' | '90d';
@@ -416,5 +417,256 @@ export const adminApi = {
     const query = qs.toString();
     return apiFetch(`/api/admin/audit-logs${query ? `?${query}` : ''}`);
   },
+
+  // ── Carreras y Planes de Estudio (Etapa 2) ──
+  async listPlans(): Promise<{ success: boolean; data: AdminPlansOverviewResponse }> {
+    return apiFetch('/api/admin/plans');
+  },
+
+  async getPlanDetail(planId: string): Promise<{ success: boolean; data: AdminPlanDetailResponse }> {
+    return apiFetch(`/api/admin/plans/${encodeURIComponent(planId)}`);
+  },
+
+  getPlanTemplateDownloadUrl(): string {
+    return '/api/admin/plans/template';
+  },
+
+  async downloadPlanTemplate(): Promise<{ blob: Blob; fileName: string }> {
+    const response = await fetch('/api/admin/plans/template', {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    });
+    if (!response.ok) {
+      let msg = `Error ${response.status} al descargar plantilla`;
+      let code: string | undefined;
+      try {
+        const data = await response.json();
+        msg = data?.error || data?.message || msg;
+        code = data?.code;
+      } catch {
+        // respuesta binaria o vacía
+      }
+      throw new ApiError(msg, response.status, code);
+    }
+    const disposition = response.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="?([^"]+)"?/i);
+    const fileName = match?.[1] || 'plantilla-plan-de-estudios.xlsx';
+    const blob = await response.blob();
+    return { blob, fileName };
+  },
+
+  async previewPlanImport(
+    payload: AdminPlanImportRequest
+  ): Promise<{ success: boolean; data: AdminPlanPreviewResponse }> {
+    return apiFetch('/api/admin/plans/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async confirmPlanImport(
+    payload: AdminPlanImportRequest
+  ): Promise<{ success: boolean; data: AdminPlanImportConfirmResponse }> {
+    return apiFetch('/api/admin/plans/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteDraftPlan(
+    planId: string
+  ): Promise<{ success: boolean; message: string; data?: { deletedPlanId: string } }> {
+    return apiFetch(`/api/admin/plans/${encodeURIComponent(planId)}`, {
+      method: 'DELETE',
+    });
+  },
 };
+
+export interface AdminInstitutionItem {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface AdminFacultyItem {
+  id: string;
+  institutionId: string;
+  name: string;
+  code: string;
+}
+
+export interface AdminCareerItem {
+  id: string;
+  facultyId: string;
+  name: string;
+  code: string;
+  status: string;
+}
+
+export interface AdminPlanOverviewItem {
+  id: string;
+  careerId: string;
+  name: string;
+  year: number;
+  status: string;
+  isActive: boolean;
+  config: ActivePlanCatalog['plan']['config'];
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
+  subjectCount: number;
+  rulesCount: number;
+  acronymsCount: number;
+  activeUsersCount: number;
+  sharedSubjectsCount: number;
+  careerName: string;
+  careerCode: string;
+  careerStatus: string;
+  facultyId: string;
+  facultyName: string;
+  institutionName: string;
+}
+
+export interface AdminPlansOverviewResponse {
+  institutions: AdminInstitutionItem[];
+  faculties: AdminFacultyItem[];
+  careers: AdminCareerItem[];
+  plans: AdminPlanOverviewItem[];
+}
+
+export type AdminPlanImportTargetMode =
+  | 'new_career_and_plan'
+  | 'existing_career_new_plan'
+  | 'existing_draft_plan';
+
+export interface AdminSharedSubjectDecision {
+  subjectCode: number;
+  action: 'create_new' | 'link_existing';
+  sharedSubjectId?: string;
+}
+
+export interface AdminPlanImportRequest {
+  facultyId: string;
+  targetMode: AdminPlanImportTargetMode;
+  careerId?: string;
+  careerName?: string;
+  careerCode?: string;
+  planId?: string;
+  fileName: string;
+  fileBase64: string;
+  sharedSubjectDecisions?: AdminSharedSubjectDecision[];
+  previewHash?: string;
+}
+
+export interface AdminPlanImportIssue {
+  sheet: string;
+  row: number;
+  field?: string;
+  message: string;
+}
+
+export interface AdminPlanImportStats {
+  sheetCount: number;
+  totalRowsProcessed: number;
+  subjectsCount: number;
+  coreSubjectsCount: number;
+  electiveSubjectsCount: number;
+  prerequisitesCount: number;
+  specialRulesCount: number;
+  acronymsCount: number;
+  maxLevel: number;
+}
+
+export interface AdminSharedSubjectCandidate {
+  sharedSubjectId: string;
+  stableCode: string;
+  displayName: string;
+  normalizedName: string;
+  linkedPlanLabels: string[];
+  matchType?: 'exact' | 'similar';
+  confidence?: 'high' | 'low';
+}
+
+export interface AdminSharedSubjectSuggestion {
+  subjectCode: number;
+  displayCode?: string | null;
+  subjectName: string;
+  normalizedName: string;
+  candidates: AdminSharedSubjectCandidate[];
+  selectedDecision: AdminSharedSubjectDecision | null;
+}
+
+export interface AdminPlanDraftDiff {
+  toCreateCodes: number[];
+  toUpdateCodes: number[];
+  toRemoveCodes: number[];
+  blockedRemovalCodes: number[];
+}
+
+export interface AdminPlanPreviewResponse {
+  valid: boolean;
+  previewHash: string;
+  fileSha256: string;
+  errors: AdminPlanImportIssue[];
+  warnings: AdminPlanImportIssue[];
+  stats: AdminPlanImportStats;
+  targetSummary: {
+    facultyId: string;
+    facultyName: string;
+    institutionName: string;
+    targetMode: AdminPlanImportTargetMode;
+    careerCode: string;
+    careerName: string;
+    careerId: string | null;
+    planId: string | null;
+    planStatus: string;
+  };
+  sharedSubjectSuggestions: AdminSharedSubjectSuggestion[];
+  draftDiff: AdminPlanDraftDiff | null;
+  normalizedPlan: ActivePlanCatalog | null;
+}
+
+export interface AdminPlanImportConfirmResponse {
+  planId: string;
+  careerId: string;
+  careerCode: string;
+  status: string;
+  previewHash: string;
+  fileSha256: string;
+  counts: {
+    subjects: number;
+    prerequisites: number;
+    specialRules: number;
+    acronyms: number;
+    linkedExistingShared: number;
+    createdNewShared: number;
+  };
+}
+
+export interface AdminPlanSharedBindingItem {
+  subjectId: string;
+  codeInPlan: number;
+  displayCode: string | null;
+  sharedSubjectId: string | null;
+  stableCode: string | null;
+  sharedDisplayName: string | null;
+  linkedPlansCount: number;
+}
+
+export interface AdminPlanDetailResponse extends ActivePlanCatalog {
+  adminMeta: {
+    planStatus: string;
+    isActive: boolean;
+    careerStatus: string;
+    facultyId: string;
+    facultyName: string;
+    institutionName: string;
+    activeUsersCount: number;
+    createdAt?: string | Date;
+    updatedAt?: string | Date;
+    sharedSubjectBindings: AdminPlanSharedBindingItem[];
+  };
+}
 

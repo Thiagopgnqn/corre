@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Lock,
   BookOpen,
+  GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AdminOverviewTab } from './tabs/AdminOverviewTab';
@@ -16,11 +17,19 @@ import { AdminUsersTab } from './tabs/AdminUsersTab';
 import { AdminScheduleTab } from './tabs/AdminScheduleTab';
 import { AdminReviewsTab } from './tabs/AdminReviewsTab';
 import { AdminLibraryTab } from './tabs/AdminLibraryTab';
+import { AdminCareersTab } from './tabs/AdminCareersTab';
 import { AdminAuditTab } from './tabs/AdminAuditTab';
 import { AdminErrorBoundary } from './AdminErrorBoundary';
 import { APP_NAME } from '../../config/brand';
 
-export type AdminTab = 'overview' | 'users' | 'schedule' | 'reviews' | 'library' | 'audit';
+export type AdminTab =
+  | 'overview'
+  | 'users'
+  | 'careers'
+  | 'schedule'
+  | 'reviews'
+  | 'library'
+  | 'audit';
 
 interface AdminDashboardProps {
   onNavigateHome: () => void;
@@ -53,6 +62,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
   const tabsConfig = [
     { id: 'overview', label: 'Resumen', icon: Activity },
     { id: 'users', label: 'Usuarios', icon: Users },
+    { id: 'careers', label: 'Carreras', icon: GraduationCap },
     { id: 'schedule', label: 'Horarios y Catálogo', icon: Calendar },
     { id: 'reviews', label: 'Docentes y Reseñas', icon: MessageSquare },
     { id: 'library', label: 'Biblioteca', icon: BookOpen },
@@ -131,6 +141,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigateHome }
         <AdminErrorBoundary key={activeTab}>
           {activeTab === 'overview' && <AdminOverviewTab />}
           {activeTab === 'users' && <AdminUsersTab />}
+          {activeTab === 'careers' && <AdminCareersTab />}
           {activeTab === 'schedule' && <AdminScheduleTab />}
           {activeTab === 'reviews' && <AdminReviewsTab />}
           {activeTab === 'library' && <AdminLibraryTab />}
