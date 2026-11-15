@@ -45,7 +45,7 @@ export function buildPlanImportTemplateBuffer(): Buffer {
     [2, 'IFIC-2', 'Física General', 'Física Gral.', 1, 'A', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
     [3, 'IFIC-3', 'Termodinámica Básica', 'Termodinámica', 2, '1C', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
     [4, 'IFIC-4', 'Taller de Diseño Aplicado', 'Taller Diseño', 2, '2C', 'NO', 4, 'obligatoria', '', 'SI', 'NO', ''],
-    [5, 'IFIC-5', 'Taller Intermedio de Síntesis', 'Taller Síntesis', 3, 'A', 'NO', 6, 'obligatoria', '', 'SI', 'NO', ''],
+    [5, 'IFIC-5', 'Taller Intermedio de Síntesis', 'Taller Síntesis', 3, 'A', 'NO', 6, 'obligatoria', '', 'SI', 'SI', 'tecnico'],
     [6, 'IFIC-6', 'Ingeniería de Procesos Ficticios', 'Ing. Procesos', 4, '1C', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
     [7, 'IFIC-7', 'Práctica Profesional Ficticia', 'Práctica Fict.', 4, '2C', 'NO', 4, 'obligatoria', '', 'NO', 'NO', ''],
     [8, 'IFIC-8', 'Proyecto Integrador Final', 'Proyecto Final', 5, 'A', 'NO', 8, 'obligatoria', '', 'SI', 'NO', ''],

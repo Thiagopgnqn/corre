@@ -81,7 +81,7 @@ function makeValidNeutralSheets(): Record<string, unknown[][]> {
       [2, 'IFIC-2', 'Física General', 'Física Gral.', 1, 'A', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
       [3, 'IFIC-3', 'Termodinámica Básica', 'Termodinámica', 2, '1C', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
       [4, 'IFIC-4', 'Taller de Diseño Aplicado', 'Taller Diseño', 2, '2C', 'NO', 4, 'obligatoria', '', 'SI', 'NO', ''],
-      [5, 'IFIC-5', 'Taller Intermedio de Síntesis', 'Taller Síntesis', 3, 'A', 'NO', 6, 'obligatoria', '', 'SI', 'NO', ''],
+      [5, 'IFIC-5', 'Taller Intermedio de Síntesis', 'Taller Síntesis', 3, 'A', 'NO', 6, 'obligatoria', '', 'SI', 'SI', 'tecnico'],
       [6, 'IFIC-6', 'Ingeniería de Procesos Ficticios', 'Ing. Procesos', 4, '1C', 'NO', 6, 'obligatoria', '', 'NO', 'NO', ''],
       [7, 'IFIC-7', 'Práctica Profesional Ficticia', 'Práctica Fict.', 4, '2C', 'NO', 4, 'obligatoria', '', 'NO', 'NO', ''],
       [8, 'IFIC-8', 'Proyecto Integrador Final', 'Proyecto Final', 5, 'A', 'NO', 8, 'obligatoria', '', 'SI', 'NO', ''],
@@ -356,6 +356,9 @@ async function runTests(): Promise<void> {
 
   // Optional description generates clear default + comma-separated excludeTrackKeys validation
   const trackRuleSheets = makeValidNeutralSheets();
+  for (let col = 12; col <= 17; col++) {
+    trackRuleSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][col] = '';
+  }
   trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][11] = 'SI';
   trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][1][12] = 'tr_a';
   trackRuleSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][2][11] = 'SI';
@@ -369,6 +372,9 @@ async function runTests(): Promise<void> {
     buffer: buildWorkbookBuffer(trackRuleSheets),
   });
   const badTrackRuleSheets = makeValidNeutralSheets();
+  for (let col = 12; col <= 17; col++) {
+    badTrackRuleSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][col] = '';
+  }
   badTrackRuleSheets[PLAN_TEMPLATE_SHEETS.RULES] = [
     [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
     [3, 'all_previous_core_approved', 1, '', 'inexistente', ''],
@@ -1401,6 +1407,143 @@ async function runTests(): Promise<void> {
         errors: similarityPreview.data?.data?.errors,
         suggestions: simSuggestions,
       })
+    );
+
+    console.log('\n📌 11. Paso 2 Reducido: Validación de título intermedio estilo Industrial y rechazos sin criterios');
+    const makeIndustrialImportSheets = (): Record<string, unknown[][]> => {
+      const coreRows1to25: unknown[][] = Array.from({ length: 25 }, (_, i) => {
+        const code = i + 1;
+        const level = code <= 8 ? 1 : code <= 17 ? 2 : 3;
+        return [
+          code,
+          `IND-${code}`,
+          `Materia Troncal Industrial ${code}`,
+          `Ind ${code}`,
+          level,
+          '1C',
+          'NO',
+          4,
+          'obligatoria',
+          '',
+          'NO',
+          'NO',
+          '',
+        ];
+      });
+      return {
+        [PLAN_TEMPLATE_SHEETS.PLAN]: [
+          [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PLAN]],
+          [
+            'Ingeniería Industrial Mock 2026',
+            2026,
+            'Año',
+            5,
+            4,
+            1,
+            6,
+            'Ingeniero/a Industrial',
+            'IND · Mock 2026',
+            27,
+            'Habilitación PPS',
+            'Requiere Inv. Operativa regularizada',
+            'Técnico Universitario en Gestión Industrial',
+            'Técnico',
+            'Téc. Gestión Ind.',
+            'tecnico',
+            0,
+            26,
+          ],
+        ],
+        [PLAN_TEMPLATE_SHEETS.SUBJECTS]: [
+          [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.SUBJECTS]],
+          ...coreRows1to25,
+          [26, 'IND-26', 'Gestión Industrial', 'Gest. Ind.', 4, 'A', 'NO', 6, 'obligatoria', '', 'NO', 'SI', 'tecnico'],
+          [27, 'IND-27', 'Investigación Operativa', 'Inv. Op.', 4, '1C', 'NO', 5, 'obligatoria', '', 'NO', 'NO', ''],
+          [28, 'IND-28', 'Proyecto Final Industrial', 'Proy. Final', 5, 'A', 'NO', 8, 'obligatoria', '', 'SI', 'NO', ''],
+          [101, 'IND-E1', 'Logística Aplicada', 'Logística', 5, '2C', 'NO', 4, 'electiva', 4, 'NO', 'NO', ''],
+        ],
+        [PLAN_TEMPLATE_SHEETS.PREREQUISITES]: [
+          [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.PREREQUISITES]],
+          [26, 25, 'aprobada'],
+          [27, 25, 'regular'],
+          [28, 27, 'regular'],
+          [28, 25, 'aprobada'],
+        ],
+        [PLAN_TEMPLATE_SHEETS.RULES]: [
+          [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]],
+          [26, 'approved_range', 1, 25, '', 'Todas las obligatorias de 1° a 3° año aprobadas'],
+        ],
+        [PLAN_TEMPLATE_SHEETS.ACRONYMS]: [
+          [...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.ACRONYMS]],
+          ['GI', 26],
+          ['PF', 28],
+        ],
+      };
+    };
+
+    const industrialImportParsed = await parsePlanWorkbookBuffer({
+      fileName: 'industrial-mock.xlsx',
+      buffer: buildWorkbookBuffer(makeIndustrialImportSheets()),
+    });
+    assert(
+      industrialImportParsed.valid &&
+        industrialImportParsed.errors.length === 0 &&
+        industrialImportParsed.data?.plan.intermediateDegrees.length === 1 &&
+        industrialImportParsed.data.plan.intermediateDegrees[0].specialRuleSubjectCode === 26 &&
+        (industrialImportParsed.data.plan.intermediateDegrees[0].requiredElectiveCredits ?? 0) === 0,
+      'Importador acepta plan estilo Industrial (hito nivel 4 opcional + approved_range 1..25 + 0 créditos electivas + Proyecto Final sin regla especial)',
+      JSON.stringify(industrialImportParsed.errors)
+    );
+
+    const noCriteriaSheets = makeIndustrialImportSheets();
+    noCriteriaSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][17] = '';
+    noCriteriaSheets[PLAN_TEMPLATE_SHEETS.RULES] = [[...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]]];
+    const noCriteriaParsed = await parsePlanWorkbookBuffer({
+      fileName: 'intermedio-sin-criterios.xlsx',
+      buffer: buildWorkbookBuffer(noCriteriaSheets),
+    });
+    assert(
+      !noCriteriaParsed.valid &&
+        noCriteriaParsed.errors.some((e) => e.message.includes('al menos un criterio evaluable')),
+      'Importador rechaza título intermedio sin ningún criterio evaluable'
+    );
+
+    const missingMilestoneSheets = makeIndustrialImportSheets();
+    missingMilestoneSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][17] = 999;
+    const missingMilestoneParsed = await parsePlanWorkbookBuffer({
+      fileName: 'intermedio-hito-inexistente.xlsx',
+      buffer: buildWorkbookBuffer(missingMilestoneSheets),
+    });
+    assert(
+      !missingMilestoneParsed.valid &&
+        missingMilestoneParsed.errors.some((e) => e.message.includes('no existe en la hoja "Materias"')),
+      'Importador rechaza materia hito del título intermedio inexistente en Materias'
+    );
+
+    const nonOptionalMilestoneSheets = makeIndustrialImportSheets();
+    const row26Idx = nonOptionalMilestoneSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS].findIndex((r) => r[0] === 26);
+    nonOptionalMilestoneSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][row26Idx][11] = 'NO';
+    nonOptionalMilestoneSheets[PLAN_TEMPLATE_SHEETS.SUBJECTS][row26Idx][12] = '';
+    const nonOptionalMilestoneParsed = await parsePlanWorkbookBuffer({
+      fileName: 'intermedio-hito-no-opcional.xlsx',
+      buffer: buildWorkbookBuffer(nonOptionalMilestoneSheets),
+    });
+    assert(
+      !nonOptionalMilestoneParsed.valid &&
+        nonOptionalMilestoneParsed.errors.some((e) => e.message.includes('Trayecto opcional')),
+      'Importador rechaza materia hito del título intermedio si Trayecto opcional != SI'
+    );
+
+    const missingRangeRuleSheets = makeIndustrialImportSheets();
+    missingRangeRuleSheets[PLAN_TEMPLATE_SHEETS.RULES] = [[...PLAN_TEMPLATE_HEADERS[PLAN_TEMPLATE_SHEETS.RULES]]];
+    const missingRangeRuleParsed = await parsePlanWorkbookBuffer({
+      fileName: 'intermedio-hito-sin-regla.xlsx',
+      buffer: buildWorkbookBuffer(missingRangeRuleSheets),
+    });
+    assert(
+      !missingRangeRuleParsed.valid &&
+        missingRangeRuleParsed.errors.some((e) => e.message.includes('approved_range')),
+      'Importador rechaza materia hito del título intermedio sin regla approved_range en Reglas'
     );
   } finally {
     setPlanImportStoreForTesting(null);

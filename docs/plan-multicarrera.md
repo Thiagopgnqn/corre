@@ -881,4 +881,21 @@ El catálogo `server/seed-data/plan2023-catalog.json` define `60` materias; `SUB
 - **Línea base actualizada tras ajustes `a)–g)` de Tramo 2A:**
   - Frontend (`npm test`): **`15 / 15` archivos en verde** (`apiContract`, `correlativas`, `plan2023Oracle` `25`, `multicarreraEngine` `16`, `planText` `11`, entre otros) + `npm run build` OK (`tsc -b && vite build`).
   - Backend (`npm --prefix server test`): **`482` pasaron, `0` fallaron** (`reviews 92`, `authVerification 59`, `admin 37`, `library 149`, `multicarreraIsolation 28`, `catalogConfigAndSecurity 63`, `planImport 54`) + `npm --prefix server run build` OK (`tsc`).
-  - Próximo hito pendiente de aprobación: resolver cambio mínimo de motor para título intermedio `(i)`/`(ii)` y luego iniciar **Tramo 2B** (panel frontend `"Carreras"` en `/#admin` + vista previa solo lectura).
+  - Próximo hito inicial superado y aprobado: **Tramo 2A aprobado** (línea base verificada `frontend 15/15`, `backend 482/0`; SHA-256 del tarball `server/vendor/xlsx-0.20.3.tgz` verificado contra descarga independiente).
+- **10.4. Paso 2 reducido (título intermedio) y reglas invariantes (aprobado):**
+  - El plan oficial de la primera carrera real (**Ingeniería Industrial UTN FRC**) modela su título intermedio con **1 materia hito de trayecto opcional** (*Gestión Industrial*) + regla `approved_range` de `1` a `25` + `0` créditos de electivas del título, cubierto íntegramente por el modelo actual sin ampliar el esquema.
+  - **Cambios aplicados (Paso 2 reducido):**
+    - `checkAnalistaTitle` (`src/utils/correlativas.ts`): un título intermedio sin ningún criterio evaluable devuelve `eligible: false` (antes devolvía `true` con `0` aprobadas); sin cambios para Sistemas (oráculo 25/25 intacto).
+    - Importador (`server/src/modules/admin/planImport.worker.ts` y plantilla `planImport.template.ts`): rechaza como error bloqueante un título intermedio sin criterio evaluable (`(materia hito existente + Trayecto opcional = SI + regla approved_range) || créditos electivas título > 0`), valida que la materia hito exista en `Materias`, tenga `Trayecto opcional = SI`, coincida con `Clave trayecto intermedio` si se declara, y tenga su regla `approved_range` en `Reglas`.
+  - **Invariante documentado (`isPPSEligible`):** `isPPSEligible` NO cambia de significado; evalúa únicamente correlativas (`regularPrereqs` y `approvedPrereqs`) de la materia de referencia (obligatoria o electiva), sin evaluar `plan.rules` (en Sistemas la `36` tiene `all_previous_core_approved` que la tarjeta PPS no exige; cambiarlo rompería escenarios `05–07` del oráculo).
+  - **Alcance de motor con título estilo Industrial y materia obligatoria final sin regla especial:**
+    - `approved_range` (`evaluateSpecialRule`) filtra `!s.isElective && s.id !== rule.subjectCode && s.id >= fromCode && s.id <= toCode`, por lo que cuenta solo obligatorias del rango excluyendo la materia hito.
+    - Con interruptor de trayecto opcional apagado (`includeAnalistaTrack = false`), `getActiveCoreSubjects` oculta la materia hito del mapa (`CorrelativeGraph` / `buildGraphViewStructure`), la excluye del numerador y denominador de `evaluatePlanProgress` y la excluye de `calculateCriticalPath`.
+    - Una materia obligatoria con correlativas explícitas y sin regla especial (como Proyecto Final de Industrial) funciona sin cambios (`getSubjectStatus`, `canRenderProyectoFinal`, `isDegreeEligible`, `SubjectDrawer`).
+  - **Diferidos hasta que un plan real los necesite** (motivo: Ingeniería Industrial UTN FRC queda cubierto por el modelo actual de materia hito + `approved_range`):
+    - `requiredSubjectCodes` en `PlanIntermediateDegree` / motor.
+    - `requiredSubjectRange` (rango con códigos excluidos) en `PlanIntermediateDegree` / motor.
+    - Nuevas columnas de la hoja `Plan` en la plantilla de importación para listas o rangos con exclusiones de título intermedio.
+    - Cambio del subtítulo mobile (`getIntermediateDegreeMobileSubtitle` en `src/utils/planText.ts`).
+    - Cambio del paso `'analista-switch'` del tutorial (`buildPlanTutorialSteps` en `src/utils/planText.ts`).
+- **10.5. Estado actual:** Paso 2 reducido completado -> **Tramo 2B** (panel frontend `"Carreras"` en `/#admin` con vista previa de solo lectura sin refactorizar `CorrelativeGraph` y botón `Publicar` deshabilitado hasta Tramo 2C/2D).

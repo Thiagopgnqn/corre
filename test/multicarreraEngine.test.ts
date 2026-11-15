@@ -8,7 +8,11 @@ import {
   evaluatePlanProgress,
   evaluateSpecialRule,
   canRenderProyectoFinal,
+  canRenderSeminario,
+  canRenderSpecialRuleSubject,
   checkAnalistaTitle,
+  getActiveCoreSubjects,
+  getSubjectStatus,
   isPPSEligible,
 } from '../src/utils/correlativas';
 import { formatPlanCatalogPayload } from '../server/src/modules/catalog/planConfig.helpers';
@@ -1678,5 +1682,272 @@ describe('Migration 0014 displayCode character-by-character parity', () => {
     const customById = new Map(formattedCustom.subjects.map((s) => [s.id, s.code]));
     assert.strictEqual(customById.get(1), 'ALT-01');
     assert.strictEqual(customById.get(301), 'CUSTOM-301');
+  });
+});
+
+describe('Paso 2 reducido: título intermedio estilo Industrial y criterio no evaluable', () => {
+  it('evaluates Industrial-like intermediate degree (1..25 approved_range + level-4 optional milestone + 0 credits) and rejects empty intermediate criteria', () => {
+    const coreSubjects1to25 = Array.from({ length: 25 }, (_, idx) => {
+      const id = idx + 1;
+      const level = id <= 8 ? 1 : id <= 17 ? 2 : 3;
+      return {
+        id,
+        code: String(id),
+        name: `Materia Troncal ${id}`,
+        shortName: `Mat ${id}`,
+        level,
+        modality: 'cuatrimestral' as const,
+        weeklyHours: 4,
+        regularPrereqs: id > 1 ? [id - 1] : [],
+        approvedPrereqs: id > 8 ? [id - 8] : [],
+        isElective: false,
+        isOptionalTrack: false,
+      };
+    });
+
+    const industrialLikePlan: ActivePlanCatalog = {
+      plan: {
+        id: 'plan-ind-mock-2026',
+        name: 'Ingeniería Industrial Mock 2026',
+        year: 2026,
+        updatedAt: '2026-07-01T00:00:00.000Z',
+        config: {
+          requiredElectiveCredits: 4,
+          electiveSlotsEquivalent: 1,
+          defaultMinPassingGrade: 6,
+          totalLevels: 5,
+          levelLabel: 'Año',
+          shortTag: 'II · Plan Mock',
+          ppsRequirement: {
+            referenceSubjectCode: 27,
+            label: 'Práctica Profesional Supervisada',
+          },
+          intermediateDegrees: [
+            {
+              key: 'tecnico',
+              name: 'Técnico Universitario en Gestión Industrial',
+              shortLabel: 'Téc. Univ. en Gestión Industrial',
+              shortTitle: 'Título Intermedio',
+              requiredElectiveCredits: 0,
+              specialRuleSubjectCode: 26,
+            },
+          ],
+        },
+      },
+      career: {
+        id: 'career-ind-mock',
+        name: 'Ingeniería Industrial Mock',
+        code: 'IIND',
+        facultyId: 'fac-frc',
+      },
+      subjects: [
+        ...coreSubjects1to25,
+        {
+          id: 26,
+          code: '26',
+          name: 'Gestión Industrial',
+          shortName: 'Gest. Ind.',
+          level: 4,
+          modality: 'anual',
+          weeklyHours: 6,
+          regularPrereqs: [25],
+          approvedPrereqs: [17],
+          isElective: false,
+          isOptionalTrack: true,
+          trackKey: 'tecnico',
+        },
+        {
+          id: 27,
+          code: '27',
+          name: 'Investigación Operativa',
+          shortName: 'Inv. Op.',
+          level: 4,
+          modality: 'cuatrimestral',
+          weeklyHours: 5,
+          regularPrereqs: [25],
+          approvedPrereqs: [17],
+          isElective: false,
+          isOptionalTrack: false,
+        },
+        {
+          id: 28,
+          code: '28',
+          name: 'Proyecto Final',
+          shortName: 'Proy. Final',
+          level: 5,
+          modality: 'anual',
+          weeklyHours: 8,
+          regularPrereqs: [27],
+          approvedPrereqs: [25],
+          isElective: false,
+          isOptionalTrack: false,
+          isIntegrator: true,
+        },
+        {
+          id: 101,
+          code: 'E-101',
+          name: 'Logística Aplicada',
+          shortName: 'Logística',
+          level: 5,
+          modality: 'cuatrimestral',
+          weeklyHours: 4,
+          regularPrereqs: [25],
+          approvedPrereqs: [],
+          isElective: true,
+          credits: 4,
+        },
+      ],
+      rules: [
+        {
+          subjectCode: 26,
+          ruleType: 'approved_range',
+          params: { fromCode: 1, toCode: 25 },
+          description: 'Tener aprobadas todas las materias obligatorias de 1° a 3° año (códigos 1 a 25)',
+        },
+      ],
+      acronyms: {
+        GI: 26,
+        IO: 27,
+        PF: 28,
+      },
+    };
+
+    // (a) Un título intermedio SIN criterios evaluables jamás devuelve eligible: true (ni con 0 aprobadas)
+    const noCriteriaPlan: ActivePlanCatalog = {
+      ...industrialLikePlan,
+      plan: {
+        ...industrialLikePlan.plan,
+        config: {
+          ...industrialLikePlan.plan.config,
+          intermediateDegrees: [
+            {
+              key: 'vacio',
+              name: 'Título Intermedio Inválido Sin Criterios',
+              requiredElectiveCredits: 0,
+            },
+          ],
+        },
+      },
+      rules: [],
+    };
+    const emptyTitleEval = checkAnalistaTitle({}, noCriteriaPlan, 0);
+    assert.equal(emptyTitleEval.eligible, false);
+    assert.equal(emptyTitleEval.seminarioApproved, false);
+
+    // También debe dar eligible: false si declarara un hito sin regla approved_range propia
+    const missingRulePlan: ActivePlanCatalog = {
+      ...industrialLikePlan,
+      rules: [],
+    };
+    assert.equal(checkAnalistaTitle({ 26: { status: 'aprobada', grade: 8 } }, missingRulePlan, 0).eligible, false);
+
+    // Estado 1: año 3 incompleto (falta la 25) pero hito 26 marcado aprobado -> NO cumple título intermedio
+    const year3IncompleteState: UserCareerState = {};
+    for (let id = 1; id <= 24; id++) {
+      year3IncompleteState[id] = { status: 'aprobada', grade: 8 };
+    }
+    year3IncompleteState[26] = { status: 'aprobada', grade: 9 };
+    const evalState1 = evaluatePlanProgress({
+      plan: industrialLikePlan,
+      userState: year3IncompleteState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(evalState1.analista.eligible, false);
+    assert.equal(evalState1.analista.seminarioApproved, true);
+    assert.deepEqual(evalState1.analista.missingCoreIds, [25]);
+    assert.equal(evalState1.seminario.canRender, false);
+    assert.deepEqual(evalState1.seminario.missingIds, [25]);
+
+    // Estado 2: año 3 completo (1..25 aprobadas) pero hito 26 aún pendiente -> hito habilitado, título NO cumplido
+    const year3CompleteState: UserCareerState = {};
+    for (let id = 1; id <= 25; id++) {
+      year3CompleteState[id] = { status: 'aprobada', grade: 8 };
+    }
+    year3CompleteState[26] = { status: 'regularizada' };
+    const evalState2 = evaluatePlanProgress({
+      plan: industrialLikePlan,
+      userState: year3CompleteState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(evalState2.analista.eligible, false);
+    assert.deepEqual(evalState2.analista.missingCoreIds, []);
+    assert.equal(evalState2.analista.seminarioApproved, false);
+    assert.equal(evalState2.seminario.canRender, true);
+    assert.deepEqual(evalState2.seminario.missingIds, []);
+
+    // Estado 3: año 3 completo + hito 26 aprobado, aún con 0 créditos de electivas -> título intermedio CUMPLIDO
+    const bothFulfilledState: UserCareerState = {
+      ...year3CompleteState,
+      26: { status: 'aprobada', grade: 9 },
+    };
+    const evalState3On = evaluatePlanProgress({
+      plan: industrialLikePlan,
+      userState: bothFulfilledState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: true, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(evalState3On.analista.eligible, true);
+    assert.deepEqual(evalState3On.analista.missingCoreIds, []);
+    assert.equal(evalState3On.analista.seminarioApproved, true);
+    assert.equal(evalState3On.analista.electiveCredits, 0);
+
+    // Estado 4: interruptor del trayecto opcional APAGADO -> oculta la 26 del mapa, avance y camino crítico
+    const coreOnly = industrialLikePlan.subjects.filter((s) => !s.isElective);
+    const activeWithSwitchOff = getActiveCoreSubjects(coreOnly, false);
+    const activeWithSwitchOn = getActiveCoreSubjects(coreOnly, true);
+    assert.equal(activeWithSwitchOff.some((s) => s.id === 26), false);
+    assert.equal(activeWithSwitchOff.length, 27);
+    assert.equal(activeWithSwitchOn.some((s) => s.id === 26), true);
+    assert.equal(activeWithSwitchOn.length, 28);
+
+    const evalState3Off = evaluatePlanProgress({
+      plan: industrialLikePlan,
+      userState: bothFulfilledState,
+      settings: { ...DEFAULT_SETTINGS, includeAnalistaTrack: false, includeElectivesInProgress: true },
+      examAttempts: [],
+    });
+    assert.equal(evalState3Off.progress.totalSubjects, 27);
+    assert.equal(evalState3Off.progress.approvedCount, 25);
+    assert.equal(evalState3Off.progress.totalEquivalentSlots, 28);
+    assert.equal(evalState3On.progress.totalSubjects, 28);
+    assert.equal(evalState3On.progress.approvedCount, 26);
+    assert.equal(evalState3On.progress.totalEquivalentSlots, 29);
+
+    const cpEmptyOffIds = calculateCriticalPath({}, industrialLikePlan, false).chain.map((s) => s.id);
+    assert.equal(cpEmptyOffIds.includes(26), false);
+    assert.ok(cpEmptyOffIds.includes(28));
+
+    const only26PendingState: UserCareerState = {
+      ...year3CompleteState,
+      27: { status: 'aprobada', grade: 8 },
+      28: { status: 'aprobada', grade: 9 },
+    };
+    const cpOnly26OffIds = calculateCriticalPath(only26PendingState, industrialLikePlan, false).chain.map(
+      (s) => s.id
+    );
+    const cpOnly26OnIds = calculateCriticalPath(only26PendingState, industrialLikePlan, true).chain.map(
+      (s) => s.id
+    );
+    assert.deepEqual(cpOnly26OffIds, []);
+    assert.deepEqual(cpOnly26OnIds, [26]);
+
+    // Materia obligatoria con correlativas explícitas y SIN regla especial (Proyecto Final 28) funciona sin cambios
+    const pfSubject = industrialLikePlan.subjects.find((s) => s.id === 28)!;
+    assert.equal(getSubjectStatus(pfSubject, year3CompleteState), 'bloqueada');
+    assert.equal(
+      getSubjectStatus(pfSubject, { ...year3CompleteState, 27: { status: 'regularizada' } }),
+      'disponible'
+    );
+    assert.equal(canRenderSpecialRuleSubject(28, year3CompleteState, industrialLikePlan, false).canRender, true);
+    assert.deepEqual(
+      canRenderSpecialRuleSubject(28, year3CompleteState, industrialLikePlan, false).missingIds,
+      []
+    );
+    assert.equal(
+      isPPSEligible({ ...year3CompleteState, 17: { status: 'aprobada', grade: 8 } }, industrialLikePlan).eligible,
+      true
+    );
   });
 });

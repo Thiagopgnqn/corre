@@ -329,25 +329,40 @@ export function checkAnalistaTitle(
     };
   }
 
-  const rangeRule =
-    (primaryDegree.specialRuleSubjectCode !== undefined
+  const requiredCredits = primaryDegree.requiredElectiveCredits ?? 0;
+  const milestoneCode = primaryDegree.specialRuleSubjectCode;
+  const milestoneExists =
+    milestoneCode !== undefined && plan.subjects.some((s) => s.id === milestoneCode);
+  const ownRangeRule =
+    milestoneCode !== undefined
       ? plan.rules.find(
-          (r) =>
-            r.subjectCode === primaryDegree.specialRuleSubjectCode &&
-            r.ruleType === 'approved_range'
+          (r) => r.subjectCode === milestoneCode && r.ruleType === 'approved_range'
         )
-      : undefined) || plan.rules.find((r) => r.ruleType === 'approved_range');
+      : undefined;
+  const rangeRule = ownRangeRule || plan.rules.find((r) => r.ruleType === 'approved_range');
+  const hasEvaluableCriterion =
+    (milestoneExists && Boolean(ownRangeRule)) || requiredCredits > 0;
+
+  if (!hasEvaluableCriterion) {
+    return {
+      eligible: false,
+      missingCoreIds: rangeRule
+        ? evaluateSpecialRule(rangeRule, plan.subjects, userState, false).missingIds
+        : [],
+      seminarioApproved: false,
+      electiveCredits,
+    };
+  }
 
   const missingCoreIds = rangeRule
     ? evaluateSpecialRule(rangeRule, plan.subjects, userState, false).missingIds
     : [];
 
   const seminarioApproved =
-    primaryDegree.specialRuleSubjectCode !== undefined
-      ? isApprovedOrHigher(userState[primaryDegree.specialRuleSubjectCode])
+    milestoneCode !== undefined
+      ? milestoneExists && isApprovedOrHigher(userState[milestoneCode])
       : true;
 
-  const requiredCredits = primaryDegree.requiredElectiveCredits ?? 0;
   const eligible =
     missingCoreIds.length === 0 && seminarioApproved && electiveCredits >= requiredCredits;
 

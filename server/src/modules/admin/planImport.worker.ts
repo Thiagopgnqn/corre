@@ -489,7 +489,9 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
   const interTrackKey = rawPlan['Clave trayecto intermedio'];
   const interCreditsRaw = rawPlan['Créditos electivas intermedio'];
   const interRuleCodeRaw = rawPlan['Código materia regla intermedio'];
+  const explicitInterTrackKey = interTrackKey.trim().toLowerCase();
   const intermediateDegrees: ParsedPlanMetadata['intermediateDegrees'] = [];
+  let intermediateDegreeFieldParseError = false;
 
   if (
     interName ||
@@ -511,6 +513,7 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
       if (interCreditsRaw) {
         const parsedCred = parseStrictInt(interCreditsRaw);
         if (parsedCred === null || parsedCred < 0) {
+          intermediateDegreeFieldParseError = true;
           errors.push({
             sheet: PLAN_TEMPLATE_SHEETS.PLAN,
             row: planRows[0].rowNumber,
@@ -526,6 +529,7 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
       if (interRuleCodeRaw) {
         const parsedRuleCode = parseStrictInt(interRuleCodeRaw);
         if (parsedRuleCode === null || parsedRuleCode < 1) {
+          intermediateDegreeFieldParseError = true;
           errors.push({
             sheet: PLAN_TEMPLATE_SHEETS.PLAN,
             row: planRows[0].rowNumber,
@@ -808,18 +812,6 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
     });
   }
 
-  if (intermediateDegrees.length > 0) {
-    const deg = intermediateDegrees[0];
-    if (deg.specialRuleSubjectCode !== undefined && !knownSubjectCodes.has(deg.specialRuleSubjectCode)) {
-      errors.push({
-        sheet: PLAN_TEMPLATE_SHEETS.PLAN,
-        row: planRows[0].rowNumber,
-        field: 'Código materia regla intermedio',
-        message: `La materia regla del título intermedio (${deg.specialRuleSubjectCode}) no existe en "Materias".`,
-      });
-    }
-  }
-
   const electiveSubjectsCount = parsedSubjects.filter((s) => s.kind === 'electiva').length;
   const coreSubjectsCount = parsedSubjects.length - electiveSubjectsCount;
   if ((requiredElectiveCredits ?? 0) > 0 && electiveSubjectsCount === 0) {
@@ -1026,6 +1018,91 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
       params: paramValidation.params,
       description,
     });
+  }
+
+  // Cross-checks del título intermedio contra Materias y Reglas (Paso 2 reducido)
+  if (intermediateDegrees.length > 0) {
+    const deg = intermediateDegrees[0];
+    let milestoneValidationErrors = 0;
+    const milestoneSub =
+      deg.specialRuleSubjectCode !== undefined
+        ? subjectByCode.get(deg.specialRuleSubjectCode)
+        : undefined;
+    const milestoneRangeRule =
+      deg.specialRuleSubjectCode !== undefined
+        ? parsedRules.find(
+            (r) => r.subjectCode === deg.specialRuleSubjectCode && r.ruleType === 'approved_range'
+          )
+        : undefined;
+
+    if (deg.specialRuleSubjectCode !== undefined) {
+      if (!milestoneSub) {
+        milestoneValidationErrors++;
+        errors.push({
+          sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+          row: planRows[0].rowNumber,
+          field: 'Código materia regla intermedio',
+          message: `La materia hito del título intermedio (${deg.specialRuleSubjectCode}) no existe en la hoja "Materias".`,
+        });
+      } else {
+        if (!milestoneSub.isOptionalTrack) {
+          milestoneValidationErrors++;
+          errors.push({
+            sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+            row: planRows[0].rowNumber,
+            field: 'Código materia regla intermedio',
+            message: `La materia hito del título intermedio (${deg.specialRuleSubjectCode}) debe tener "Trayecto opcional" = SI en la hoja "Materias".`,
+          });
+        }
+        if (explicitInterTrackKey && milestoneSub.trackKey !== explicitInterTrackKey) {
+          milestoneValidationErrors++;
+          errors.push({
+            sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+            row: planRows[0].rowNumber,
+            field: 'Clave trayecto intermedio',
+            message: `La materia hito (${deg.specialRuleSubjectCode}) pertenece al trayecto "${milestoneSub.trackKey ?? 'sin clave'}", distinto de "${explicitInterTrackKey}".`,
+          });
+        }
+        if (!milestoneRangeRule) {
+          milestoneValidationErrors++;
+          errors.push({
+            sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+            row: planRows[0].rowNumber,
+            field: 'Código materia regla intermedio',
+            message: `La materia hito del título intermedio (${deg.specialRuleSubjectCode}) debe tener una regla "approved_range" en la hoja "Reglas".`,
+          });
+        }
+      }
+    }
+
+    const interRequiredCredits = deg.requiredElectiveCredits ?? 0;
+    if (interRequiredCredits > 0 && electiveSubjectsCount === 0) {
+      milestoneValidationErrors++;
+      errors.push({
+        sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+        row: planRows[0].rowNumber,
+        field: 'Créditos electivas intermedio',
+        message: `El título intermedio exige ${interRequiredCredits} créditos de electivas, pero el plan no incluye materias de tipo "electiva".`,
+      });
+    }
+
+    const hasMilestoneCriterion =
+      milestoneSub !== undefined && milestoneSub.isOptionalTrack && Boolean(milestoneRangeRule);
+    const hasElectiveCriterion = interRequiredCredits > 0;
+    if (
+      !intermediateDegreeFieldParseError &&
+      !hasMilestoneCriterion &&
+      !hasElectiveCriterion &&
+      milestoneValidationErrors === 0
+    ) {
+      errors.push({
+        sheet: PLAN_TEMPLATE_SHEETS.PLAN,
+        row: planRows[0].rowNumber,
+        field: 'Título intermedio',
+        message:
+          'El título intermedio debe definir al menos un criterio evaluable (materia hito opcional con regla "approved_range" o créditos de electivas > 0).',
+      });
+    }
   }
 
   // 5. Parse Acronyms ("Acrónimos")
