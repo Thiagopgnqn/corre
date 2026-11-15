@@ -27,6 +27,31 @@ export class PlanImportTimeoutError extends Error {
   }
 }
 
+export class PlanImportUncompressedLimitError extends Error {
+  readonly statusCode = 413;
+  readonly code = 'PLAN_IMPORT_UNCOMPRESSED_LIMIT';
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlanImportUncompressedLimitError';
+  }
+}
+
+export class PlanImportWorkerError extends Error {
+  readonly statusCode = 500;
+  readonly code = 'PLAN_IMPORT_WORKER_FAILED';
+
+  constructor(message = 'El worker aislado de importación finalizó de forma controlada por límite de recursos.') {
+    super(message);
+    this.name = 'PlanImportWorkerError';
+  }
+}
+
+export const PLAN_IMPORT_WORKER_RESOURCE_LIMITS = {
+  maxOldGenerationSizeMb: 128,
+  maxYoungGenerationSizeMb: 32,
+} as const;
+
 let activePlanImportOperation = false;
 
 /**
@@ -94,7 +119,7 @@ export interface ParsePlanWorkbookOptions {
   artificialWorkerDelayMs?: number;
 }
 
-function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[]; isTsRuntime: boolean } {
+export function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[]; isTsRuntime: boolean } {
   const isTsRuntime = import.meta.url.endsWith('.ts');
   const workerUrl = new URL(
     isTsRuntime ? './planImport.worker.ts' : './planImport.worker.js',
@@ -120,31 +145,44 @@ function resolveWorkerSpec(): { workerUrl: URL; execArgv: string[]; isTsRuntime:
   return { workerUrl, execArgv: filteredExecArgv, isTsRuntime: true };
 }
 
+export function buildWorkerLaunchOptions(spec: { execArgv: string[]; isTsRuntime: boolean }) {
+  return {
+    env: spec.isTsRuntime
+      ? {
+          TMPDIR: os.tmpdir(),
+          TEMP: os.tmpdir(),
+          TMP: os.tmpdir(),
+          TSX_DISABLE_CACHE: '1',
+        }
+      : {}, // Isolate worker completely from process secrets (DATABASE_URL, JWT_SECRET, etc.)
+    execArgv: spec.execArgv,
+    resourceLimits: {
+      maxOldGenerationSizeMb: PLAN_IMPORT_WORKER_RESOURCE_LIMITS.maxOldGenerationSizeMb,
+      maxYoungGenerationSizeMb: PLAN_IMPORT_WORKER_RESOURCE_LIMITS.maxYoungGenerationSizeMb,
+    },
+  };
+}
+
+interface WorkerSecurityRejectionMessage {
+  __workerSecurityRejection?: true;
+  code?: string;
+  message?: string;
+}
+
 function executeInIsolatedWorker(
   buffer: Buffer,
   timeoutMs: number,
   artificialDelayMs?: number
 ): Promise<ParsePlanWorkbookResult> {
   return new Promise((resolve, reject) => {
-    const { workerUrl, execArgv, isTsRuntime } = resolveWorkerSpec();
-    const worker = new Worker(workerUrl, {
+    const spec = resolveWorkerSpec();
+    const launchOpts = buildWorkerLaunchOptions(spec);
+    const worker = new Worker(spec.workerUrl, {
       workerData: {
         fileBytes: new Uint8Array(buffer),
         ...(artificialDelayMs ? { artificialDelayMs } : {}),
       },
-      env: isTsRuntime
-        ? {
-            TMPDIR: os.tmpdir(),
-            TEMP: os.tmpdir(),
-            TMP: os.tmpdir(),
-            TSX_DISABLE_CACHE: '1',
-          }
-        : {}, // Isolate worker completely from process secrets (DATABASE_URL, JWT_SECRET, etc.)
-      execArgv,
-      resourceLimits: {
-        maxOldGenerationSizeMb: 128,
-        maxYoungGenerationSizeMb: 32,
-      },
+      ...launchOpts,
     });
 
     let settled = false;
@@ -156,12 +194,25 @@ function executeInIsolatedWorker(
     }, timeoutMs);
     timer.unref?.();
 
-    worker.once('message', (msg: ParsePlanWorkbookResult) => {
+    worker.once('message', (msg: ParsePlanWorkbookResult | WorkerSecurityRejectionMessage) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       worker.unref();
-      resolve(msg);
+      if (
+        msg &&
+        typeof msg === 'object' &&
+        (msg as WorkerSecurityRejectionMessage).__workerSecurityRejection === true
+      ) {
+        reject(
+          new PlanImportUncompressedLimitError(
+            (msg as WorkerSecurityRejectionMessage).message ||
+              'El contenido descomprimido del .xlsx supera el límite permitido.'
+          )
+        );
+        return;
+      }
+      resolve(msg as ParsePlanWorkbookResult);
     });
 
     worker.once('error', (err) => {
@@ -169,6 +220,15 @@ function executeInIsolatedWorker(
       settled = true;
       clearTimeout(timer);
       worker.terminate().catch(() => undefined);
+      const code = (err as { code?: string })?.code;
+      if (code === 'ERR_WORKER_OUT_OF_MEMORY') {
+        reject(
+          new PlanImportWorkerError(
+            'El worker de procesamiento superó el límite de memoria asignado y fue cancelado.'
+          )
+        );
+        return;
+      }
       reject(err);
     });
 
@@ -177,7 +237,11 @@ function executeInIsolatedWorker(
       settled = true;
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new Error(`El worker de importación finalizó inesperadamente (código ${code}).`));
+        reject(
+          new PlanImportWorkerError(
+            `El worker de importación finalizó inesperadamente (código ${code}).`
+          )
+        );
       }
     });
   });

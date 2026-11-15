@@ -6,7 +6,13 @@ process.env.REFRESH_SECRET =
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || 'postgresql://offline:offline@localhost:5432/offline_test';
 
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import http from 'http';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
+import zlib from 'node:zlib';
 import jwt from 'jsonwebtoken';
 import * as xlsxModule from 'xlsx';
 import {
@@ -22,8 +28,10 @@ import { buildPlanImportTemplateBuffer } from '../src/modules/admin/planImport.t
 import {
   PlanImportConcurrencyError,
   PlanImportTimeoutError,
+  PlanImportUncompressedLimitError,
   isPlanImportLocked,
   parsePlanWorkbookBuffer,
+  withPlanImportLock,
 } from '../src/modules/admin/planImport.parser.js';
 
 const XLSX = (xlsxModule as any).default || xlsxModule;
@@ -1541,9 +1549,315 @@ async function runTests(): Promise<void> {
       buffer: buildWorkbookBuffer(missingRangeRuleSheets),
     });
     assert(
-      !missingRangeRuleParsed.valid &&
+      missingRangeRuleParsed.valid === false &&
         missingRangeRuleParsed.errors.some((e) => e.message.includes('approved_range')),
       'Importador rechaza materia hito del título intermedio sin regla approved_range en Reglas'
+    );
+
+    console.log('\n📌 12. Seguridad: Zip bomb, Worker compilado sin secretos + resourceLimits, y liberación de lock ante errores no controlados');
+
+    const buildSyntheticZip = (
+      entries: Array<{ name: string; data: Buffer; spoofUncompressedSize?: number }>
+    ): Buffer => {
+      const localChunks: Buffer[] = [];
+      const cdChunks: Buffer[] = [];
+      let offset = 0;
+
+      for (const entry of entries) {
+        const nameBuf = Buffer.from(entry.name, 'utf8');
+        const compressed = zlib.deflateRawSync(entry.data, { level: 9 });
+        const realUncompressed = entry.data.length >>> 0;
+        const cdUncompressed =
+          entry.spoofUncompressedSize !== undefined
+            ? entry.spoofUncompressedSize >>> 0
+            : realUncompressed;
+
+        const lfh = Buffer.alloc(30);
+        lfh.writeUInt32LE(0x04034b50, 0);
+        lfh.writeUInt16LE(20, 4);
+        lfh.writeUInt16LE(0, 6);
+        lfh.writeUInt16LE(8, 8);
+        lfh.writeUInt32LE(0, 14);
+        lfh.writeUInt32LE(compressed.length >>> 0, 18);
+        lfh.writeUInt32LE(cdUncompressed, 22);
+        lfh.writeUInt16LE(nameBuf.length, 26);
+        lfh.writeUInt16LE(0, 28);
+        localChunks.push(lfh, nameBuf, compressed);
+
+        const cdh = Buffer.alloc(46);
+        cdh.writeUInt32LE(0x02014b50, 0);
+        cdh.writeUInt16LE(20, 4);
+        cdh.writeUInt16LE(20, 6);
+        cdh.writeUInt16LE(0, 8);
+        cdh.writeUInt16LE(8, 10);
+        cdh.writeUInt32LE(0, 16);
+        cdh.writeUInt32LE(compressed.length >>> 0, 20);
+        cdh.writeUInt32LE(cdUncompressed, 24);
+        cdh.writeUInt16LE(nameBuf.length, 28);
+        cdh.writeUInt16LE(0, 30);
+        cdh.writeUInt16LE(0, 32);
+        cdh.writeUInt32LE(offset >>> 0, 42);
+        cdChunks.push(cdh, nameBuf);
+
+        offset += 30 + nameBuf.length + compressed.length;
+      }
+
+      const cdBuf = Buffer.concat(cdChunks);
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);
+      eocd.writeUInt16LE(entries.length, 8);
+      eocd.writeUInt16LE(entries.length, 10);
+      eocd.writeUInt32LE(cdBuf.length >>> 0, 12);
+      eocd.writeUInt32LE(offset >>> 0, 16);
+      eocd.writeUInt16LE(0, 20);
+      return Buffer.concat([...localChunks, cdBuf, eocd]);
+    };
+
+    // 2(a) Zip bomb con cabecera falsa (25 MB reales comprimidos en pocos KB)
+    const bombXmlPayload = Buffer.from('<row><c t="inlineStr"><is><t>Z</t></is></c></row>'.repeat(500_000));
+    const spoofedZipBomb = buildSyntheticZip([
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: bombXmlPayload,
+        spoofUncompressedSize: 128, // mente al directorio central
+      },
+    ]);
+    assert(
+      spoofedZipBomb.length < 256 * 1024,
+      `Zip bomb armado en pocos KB comprimidos (${spoofedZipBomb.length} bytes)`
+    );
+
+    let directBombErr: unknown = null;
+    try {
+      await parsePlanWorkbookBuffer({
+        fileName: 'zipbomb-spoofed.xlsx',
+        buffer: spoofedZipBomb,
+      });
+    } catch (err) {
+      directBombErr = err;
+    }
+    assert(
+      directBombErr instanceof PlanImportUncompressedLimitError && !isPlanImportLocked(),
+      'parsePlanWorkbookBuffer rechaza zip bomb con cabecera engañosa antes de SheetJS y libera el lock'
+    );
+
+    // Zip bomb por relación extrema declarada en Central Directory
+    const declaredHugeZipBomb = buildSyntheticZip([
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: Buffer.from('A'.repeat(256)),
+        spoofUncompressedSize: 120 * 1024 * 1024,
+      },
+    ]);
+    let declaredBombErr: unknown = null;
+    try {
+      await parsePlanWorkbookBuffer({
+        fileName: 'zipbomb-declared.xlsx',
+        buffer: declaredHugeZipBomb,
+      });
+    } catch (err) {
+      declaredBombErr = err;
+    }
+    assert(
+      declaredBombErr instanceof PlanImportUncompressedLimitError && !isPlanImportLocked(),
+      'parsePlanWorkbookBuffer rechaza zip bomb por tamaño descomprimido declarado en Central Directory'
+    );
+
+    // Zip bomb vía HTTP POST /api/admin/plans/preview responde controlado (413), deja el server vivo y libera lock
+    const httpBombRes = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Carrera Bomb Test',
+        careerCode: 'BOMB',
+        fileName: 'zipbomb.xlsx',
+        fileBase64: spoofedZipBomb.toString('base64'),
+      },
+    });
+    const postBombHealthyRes = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Carrera Post Bomb',
+        careerCode: 'CPB',
+        fileName: 'valid-post-bomb.xlsx',
+        fileBase64: neutralBase64,
+      },
+    });
+    assert(
+      httpBombRes.status === 413 &&
+        httpBombRes.data?.code === 'PLAN_IMPORT_UNCOMPRESSED_LIMIT' &&
+        !isPlanImportLocked() &&
+        postBombHealthyRes.status === 200,
+      'POST /api/admin/plans/preview responde 413 PLAN_IMPORT_UNCOMPRESSED_LIMIT ante zip bomb, libera lock y mantiene vivo al servidor'
+    );
+
+    // 2(b) Worker compilado (dist/): no accede a secretos de process.env y aplica resourceLimits
+    const serverRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const distParserPath = path.join(serverRoot, 'dist', 'modules', 'admin', 'planImport.parser.js');
+    const distWorkerPath = path.join(serverRoot, 'dist', 'modules', 'admin', 'planImport.worker.js');
+    const srcWorkerPath = path.join(serverRoot, 'src', 'modules', 'admin', 'planImport.worker.ts');
+    const srcParserPath = path.join(serverRoot, 'src', 'modules', 'admin', 'planImport.parser.ts');
+    const needCompile =
+      !fs.existsSync(distParserPath) ||
+      !fs.existsSync(distWorkerPath) ||
+      fs.statSync(srcWorkerPath).mtimeMs > fs.statSync(distWorkerPath).mtimeMs ||
+      fs.statSync(srcParserPath).mtimeMs > fs.statSync(distParserPath).mtimeMs;
+    if (needCompile) {
+      const tscBin = path.join(serverRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+      execFileSync(process.execPath, [tscBin, '-p', path.join(serverRoot, 'tsconfig.json')], {
+        cwd: serverRoot,
+        stdio: 'pipe',
+      });
+    }
+
+    process.env.ADMIN_REAUTH_SECRET = process.env.ADMIN_REAUTH_SECRET || 'secret-admin-reauth-test-only';
+    const compiledParser = await import(`${pathToFileURL(distParserPath).href}?t=${Date.now()}`);
+    const compiledSpec = compiledParser.resolveWorkerSpec();
+    const compiledLaunchOpts = compiledParser.buildWorkerLaunchOptions(compiledSpec);
+    assert(
+      compiledSpec.isTsRuntime === false &&
+        compiledSpec.workerUrl.pathname.endsWith('/dist/modules/admin/planImport.worker.js') &&
+        compiledSpec.execArgv.length === 0 &&
+        JSON.stringify(compiledLaunchOpts.env) === '{}' &&
+        compiledLaunchOpts.resourceLimits.maxOldGenerationSizeMb === 128 &&
+        compiledLaunchOpts.resourceLimits.maxYoungGenerationSizeMb === 32,
+      'Worker compilado (dist/) resuelve planImport.worker.js con env={} y resourceLimits (128 MB / 32 MB)'
+    );
+
+    const compiledValidRes = await compiledParser.parsePlanWorkbookBuffer({
+      fileName: 'compiled-check.xlsx',
+      buffer: validBuf,
+    });
+    assert(compiledValidRes.valid, 'El parser y worker compilados (dist/) parsean .xlsx válidos correctamente');
+
+    // Demuestra en un Worker Node real con las exactas launchOpts del worker compilado que no lee secretos ni excede el heap
+    const envAndLimitsObservation = await new Promise<{
+      envKeys: string[];
+      hasJwt: boolean;
+      hasDb: boolean;
+      hasRefresh: boolean;
+      hasReauth: boolean;
+      heapLimitMb: number;
+      parentObservedLimits: any;
+    }>((resolve, reject) => {
+      const w = new Worker(
+        `
+        const { parentPort } = require('node:worker_threads');
+        const v8 = require('node:v8');
+        parentPort.postMessage({
+          envKeys: Object.keys(process.env),
+          hasJwt: process.env.JWT_SECRET !== undefined,
+          hasDb: process.env.DATABASE_URL !== undefined,
+          hasRefresh: process.env.REFRESH_SECRET !== undefined,
+          hasReauth: process.env.ADMIN_REAUTH_SECRET !== undefined,
+          heapLimitMb: Math.round(v8.getHeapStatistics().heap_size_limit / (1024 * 1024)),
+        });
+        `,
+        {
+          eval: true,
+          env: compiledLaunchOpts.env,
+          resourceLimits: compiledLaunchOpts.resourceLimits,
+        }
+      );
+      const parentObservedLimits = w.resourceLimits;
+      w.once('message', (data) => resolve({ ...data, parentObservedLimits }));
+      w.once('error', reject);
+    });
+
+    const oomTriggered = await new Promise<boolean>((resolve) => {
+      const oomWorker = new Worker(
+        `
+        const chunks = [];
+        while (true) {
+          chunks.push(new Array(512 * 1024).fill('x'));
+        }
+        `,
+        {
+          eval: true,
+          env: compiledLaunchOpts.env,
+          resourceLimits: compiledLaunchOpts.resourceLimits,
+        }
+      );
+      let settled = false;
+      const done = (val: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        oomWorker.terminate().catch(() => undefined);
+        resolve(val);
+      };
+      const timer = setTimeout(() => done(false), 4000);
+      oomWorker.once('error', () => done(true));
+      oomWorker.once('exit', (code) => done(code !== 0));
+    });
+
+    assert(
+      envAndLimitsObservation.envKeys.length === 0 &&
+        !envAndLimitsObservation.hasJwt &&
+        !envAndLimitsObservation.hasDb &&
+        !envAndLimitsObservation.hasRefresh &&
+        !envAndLimitsObservation.hasReauth &&
+        envAndLimitsObservation.parentObservedLimits?.maxOldGenerationSizeMb === 128 &&
+        envAndLimitsObservation.parentObservedLimits?.maxYoungGenerationSizeMb === 32 &&
+        envAndLimitsObservation.heapLimitMb <= 220 &&
+        oomTriggered,
+      `Worker aislado con opciones de dist/ no accede a secretos (envKeys=${envAndLimitsObservation.envKeys.length}), aplica resourceLimits (${envAndLimitsObservation.parentObservedLimits?.maxOldGenerationSizeMb}MB old, heap=${envAndLimitsObservation.heapLimitMb}MB) y aborta OOM controlado`
+    );
+
+    // 2(c) Liberación de lock ante errores no controlados (directo y HTTP 500)
+    let unhandledCaught: unknown = null;
+    try {
+      await withPlanImportLock(async () => {
+        throw new TypeError('Error inesperado no controlado dentro del lock');
+      });
+    } catch (err) {
+      unhandledCaught = err;
+    }
+    assert(
+      unhandledCaught instanceof TypeError && !isPlanImportLocked(),
+      'withPlanImportLock libera el lock en finally ante un error sincrónico/asíncrono no controlado'
+    );
+
+    store.shouldThrowOnOperation = 'findSharedSubjectSuggestions';
+    const unhandledHttpPreviewRes = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Carrera Error No Controlado',
+        careerCode: 'ERRC',
+        fileName: 'err.xlsx',
+        fileBase64: neutralBase64,
+      },
+    });
+    store.shouldThrowOnOperation = undefined;
+    const recoveryPreviewRes = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Carrera Recuperada',
+        careerCode: 'REC',
+        fileName: 'recovered.xlsx',
+        fileBase64: neutralBase64,
+      },
+    });
+    assert(
+      unhandledHttpPreviewRes.status === 500 &&
+        !isPlanImportLocked() &&
+        recoveryPreviewRes.status === 200,
+      'Fallo inesperado (500) dentro de POST /api/admin/plans/preview libera el lock y permite importar nuevamente sin 409'
     );
   } finally {
     setPlanImportStoreForTesting(null);

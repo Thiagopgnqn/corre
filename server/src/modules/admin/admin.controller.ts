@@ -12,7 +12,12 @@ import {
 import { AdminService, bumpCatalogVersion } from './admin.service.js';
 import { logAdminAction } from './admin.audit.js';
 import { buildPlanImportTemplateBuffer } from './planImport.template.js';
-import { PlanImportConcurrencyError, PlanImportTimeoutError } from './planImport.parser.js';
+import {
+  PlanImportConcurrencyError,
+  PlanImportTimeoutError,
+  PlanImportUncompressedLimitError,
+  PlanImportWorkerError,
+} from './planImport.parser.js';
 import {
   PlanImportRequestSchema,
   PlanImportServiceError,
@@ -770,6 +775,22 @@ function handlePlanImportControllerError(
     res.status(error.statusCode).json({
       success: false,
       code: 'PLAN_IMPORT_TIMEOUT',
+      error: error.message,
+    });
+    return;
+  }
+  if (error instanceof PlanImportUncompressedLimitError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      error: error.message,
+    });
+    return;
+  }
+  if (error instanceof PlanImportWorkerError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
       error: error.message,
     });
     return;

@@ -1169,6 +1169,9 @@ export class InMemoryPlanImportStore implements PlanImportStore {
     facultyId: string,
     normalizedNames: string[]
   ): Promise<Map<string, SharedSubjectCandidateDTO[]>> {
+    if (this.shouldThrowOnOperation === 'findSharedSubjectSuggestions') {
+      throw new Error('Falla inesperada no controlada simulada durante findSharedSubjectSuggestions');
+    }
     const uniqueNorms = Array.from(new Set(normalizedNames.filter(Boolean)));
     if (uniqueNorms.length === 0) return new Map();
 

@@ -1,11 +1,17 @@
 import { parentPort, workerData } from 'node:worker_threads';
+import zlib from 'node:zlib';
 import * as xlsxModule from 'xlsx';
 import {
   ALLOWED_PREREQ_TYPES,
   ALLOWED_SUBJECT_KINDS,
   ALLOWED_SUBJECT_MODALITIES,
+  PLAN_IMPORT_MAX_COMPRESSION_RATIO,
+  PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES,
   PLAN_IMPORT_MAX_ROWS,
   PLAN_IMPORT_MAX_SHEETS,
+  PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES,
+  PLAN_IMPORT_MAX_ZIP_ENTRIES,
+  PLAN_IMPORT_RATIO_CHECK_THRESHOLD_BYTES,
   PLAN_TEMPLATE_HEADERS,
   PLAN_TEMPLATE_SHEETS,
   deriveShortSubjectName,
@@ -1204,12 +1210,264 @@ function parseAndValidateWorkbook(buffer: Buffer): ParsePlanWorkbookResult {
   return { valid: true, errors, warnings, stats, data };
 }
 
+interface WorkerSecurityRejection {
+  __workerSecurityRejection: true;
+  code: 'PLAN_IMPORT_UNCOMPRESSED_LIMIT';
+  statusCode: 413;
+  message: string;
+}
+
+function readZip64EntryFields(
+  buffer: Buffer,
+  extraOffset: number,
+  extraLen: number,
+  needUncompressed: boolean,
+  needCompressed: boolean,
+  needLocalOffset: boolean
+): { uncompressed?: number; compressed?: number; localOffset?: number } {
+  let cursor = extraOffset;
+  const end = Math.min(buffer.length, extraOffset + extraLen);
+  while (cursor + 4 <= end) {
+    const headerId = buffer.readUInt16LE(cursor);
+    const dataSize = buffer.readUInt16LE(cursor + 2);
+    const dataStart = cursor + 4;
+    if (headerId === 0x0001 && dataStart + dataSize <= end) {
+      let ptr = dataStart;
+      const out: { uncompressed?: number; compressed?: number; localOffset?: number } = {};
+      if (needUncompressed && ptr + 8 <= dataStart + dataSize) {
+        out.uncompressed = Number(buffer.readBigUInt64LE(ptr));
+        ptr += 8;
+      }
+      if (needCompressed && ptr + 8 <= dataStart + dataSize) {
+        out.compressed = Number(buffer.readBigUInt64LE(ptr));
+        ptr += 8;
+      }
+      if (needLocalOffset && ptr + 8 <= dataStart + dataSize) {
+        out.localOffset = Number(buffer.readBigUInt64LE(ptr));
+      }
+      return out;
+    }
+    cursor = dataStart + dataSize;
+  }
+  return {};
+}
+
+function findZipEndOfCentralDirectory(buffer: Buffer): number {
+  if (buffer.length < 22) return -1;
+  const minPos = Math.max(0, buffer.length - 65557);
+  let fallback = -1;
+  for (let i = buffer.length - 22; i >= minPos; i--) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) {
+      const commentLen = buffer.readUInt16LE(i + 20);
+      if (i + 22 + commentLen === buffer.length) {
+        return i;
+      }
+      if (fallback === -1) fallback = i;
+    }
+  }
+  return fallback;
+}
+
+/**
+ * Inspects ZIP Central Directory sizes/ratios and safely inflates entries with hard
+ * byte ceilings before SheetJS loads XML into V8 heap (prevents zip bombs).
+ */
+function inspectZipBombLimits(buffer: Buffer): string | null {
+  const eocdOffset = findZipEndOfCentralDirectory(buffer);
+  if (eocdOffset < 0) return null;
+
+  let totalEntries = buffer.readUInt16LE(eocdOffset + 10);
+  let cdSize = buffer.readUInt32LE(eocdOffset + 12);
+  let cdOffset = buffer.readUInt32LE(eocdOffset + 16);
+
+  if (
+    (totalEntries === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) &&
+    eocdOffset >= 20 &&
+    buffer.readUInt32LE(eocdOffset - 20) === 0x07064b50
+  ) {
+    const zip64EocdOffset = Number(buffer.readBigUInt64LE(eocdOffset - 12));
+    if (
+      zip64EocdOffset >= 0 &&
+      zip64EocdOffset + 56 <= buffer.length &&
+      buffer.readUInt32LE(zip64EocdOffset) === 0x06064b50
+    ) {
+      totalEntries = Number(buffer.readBigUInt64LE(zip64EocdOffset + 32));
+      cdSize = Number(buffer.readBigUInt64LE(zip64EocdOffset + 40));
+      cdOffset = Number(buffer.readBigUInt64LE(zip64EocdOffset + 48));
+    }
+  }
+
+  if (totalEntries > PLAN_IMPORT_MAX_ZIP_ENTRIES) {
+    return `El archivo .xlsx supera el máximo de ${PLAN_IMPORT_MAX_ZIP_ENTRIES} entradas ZIP (${totalEntries}).`;
+  }
+  if (cdOffset < 0 || cdSize < 0 || cdOffset + cdSize > buffer.length) {
+    return null;
+  }
+
+  interface ParsedCdEntry {
+    method: number;
+    compressedSize: number;
+    localHeaderOffset: number;
+  }
+  const entries: ParsedCdEntry[] = [];
+  let cursor = cdOffset;
+  const cdEnd = cdOffset + cdSize;
+  let declaredTotalUncompressed = 0;
+
+  while (cursor + 46 <= cdEnd && entries.length < totalEntries) {
+    if (buffer.readUInt32LE(cursor) !== 0x02014b50) {
+      return null;
+    }
+    const method = buffer.readUInt16LE(cursor + 10);
+    let compressedSize = buffer.readUInt32LE(cursor + 20);
+    let uncompressedSize = buffer.readUInt32LE(cursor + 24);
+    const fileNameLen = buffer.readUInt16LE(cursor + 28);
+    const extraLen = buffer.readUInt16LE(cursor + 30);
+    const commentLen = buffer.readUInt16LE(cursor + 32);
+    let localHeaderOffset = buffer.readUInt32LE(cursor + 42);
+
+    if (
+      uncompressedSize === 0xffffffff ||
+      compressedSize === 0xffffffff ||
+      localHeaderOffset === 0xffffffff
+    ) {
+      const z64 = readZip64EntryFields(
+        buffer,
+        cursor + 46 + fileNameLen,
+        extraLen,
+        uncompressedSize === 0xffffffff,
+        compressedSize === 0xffffffff,
+        localHeaderOffset === 0xffffffff
+      );
+      if (z64.uncompressed !== undefined) uncompressedSize = z64.uncompressed;
+      if (z64.compressed !== undefined) compressedSize = z64.compressed;
+      if (z64.localOffset !== undefined) localHeaderOffset = z64.localOffset;
+    }
+
+    if (uncompressedSize > PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES) {
+      return `Una entrada del .xlsx supera el límite descomprimido permitido (${Math.round(
+        PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES / (1024 * 1024)
+      )} MB).`;
+    }
+    declaredTotalUncompressed += uncompressedSize;
+    if (declaredTotalUncompressed > PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES) {
+      return `El contenido descomprimido del .xlsx supera el límite total de ${Math.round(
+        PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES / (1024 * 1024)
+      )} MB.`;
+    }
+    if (
+      uncompressedSize > PLAN_IMPORT_RATIO_CHECK_THRESHOLD_BYTES &&
+      uncompressedSize / Math.max(1, compressedSize) > PLAN_IMPORT_MAX_COMPRESSION_RATIO
+    ) {
+      return `Se rechazó el .xlsx por relación de compresión extrema (>${PLAN_IMPORT_MAX_COMPRESSION_RATIO}:1, posible zip bomb).`;
+    }
+
+    entries.push({ method, compressedSize, localHeaderOffset });
+    cursor += 46 + fileNameLen + extraLen + commentLen;
+  }
+
+  if (
+    declaredTotalUncompressed > PLAN_IMPORT_RATIO_CHECK_THRESHOLD_BYTES &&
+    declaredTotalUncompressed / Math.max(1, buffer.length) > PLAN_IMPORT_MAX_COMPRESSION_RATIO
+  ) {
+    return `Se rechazó el .xlsx por relación de compresión extrema (>${PLAN_IMPORT_MAX_COMPRESSION_RATIO}:1, posible zip bomb).`;
+  }
+
+  let actualTotalUncompressed = 0;
+  for (const entry of entries) {
+    const off = entry.localHeaderOffset;
+    if (off < 0 || off + 30 > buffer.length || buffer.readUInt32LE(off) !== 0x04034b50) {
+      continue;
+    }
+    const lfNameLen = buffer.readUInt16LE(off + 26);
+    const lfExtraLen = buffer.readUInt16LE(off + 28);
+    const dataStart = off + 30 + lfNameLen + lfExtraLen;
+    if (dataStart > buffer.length) continue;
+
+    const dataEnd =
+      entry.compressedSize > 0
+        ? Math.min(buffer.length, dataStart + entry.compressedSize)
+        : buffer.length;
+    const compressedSlice = buffer.subarray(dataStart, dataEnd);
+
+    if (entry.method === 0) {
+      if (compressedSlice.length > PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES) {
+        return `Una entrada del .xlsx supera el límite descomprimido por entrada (${Math.round(
+          PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES / (1024 * 1024)
+        )} MB).`;
+      }
+      actualTotalUncompressed += compressedSlice.length;
+      if (actualTotalUncompressed > PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES) {
+        return `El contenido descomprimido del .xlsx supera el límite total de ${Math.round(
+          PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES / (1024 * 1024)
+        )} MB.`;
+      }
+    } else if (entry.method === 8) {
+      const remainingBudget = PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES - actualTotalUncompressed;
+      if (remainingBudget <= 0) {
+        return `El contenido descomprimido del .xlsx supera el límite total de ${Math.round(
+          PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES / (1024 * 1024)
+        )} MB.`;
+      }
+      const entryBudget = Math.min(PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES, remainingBudget);
+      try {
+        const inflated = zlib.inflateRawSync(compressedSlice, {
+          maxOutputLength: entryBudget + 1,
+        });
+        if (inflated.length > entryBudget) {
+          return `El contenido descomprimido real del .xlsx supera el límite permitido (posible zip bomb).`;
+        }
+        actualTotalUncompressed += inflated.length;
+        if (
+          inflated.length > PLAN_IMPORT_RATIO_CHECK_THRESHOLD_BYTES &&
+          inflated.length / Math.max(1, compressedSlice.length) > PLAN_IMPORT_MAX_COMPRESSION_RATIO
+        ) {
+          return `Se rechazó el .xlsx por relación de compresión real extrema (>${PLAN_IMPORT_MAX_COMPRESSION_RATIO}:1, posible zip bomb).`;
+        }
+      } catch (err: unknown) {
+        const errCode = (err as { code?: string })?.code;
+        const errMsg = err instanceof Error ? err.message : String(err ?? '');
+        if (
+          err instanceof RangeError ||
+          errCode === 'ERR_BUFFER_OUT_OF_RANGE' ||
+          /maxOutputLength|Cannot create a Buffer larger|exceed/i.test(errMsg)
+        ) {
+          return `El contenido descomprimido real del .xlsx supera el límite permitido de ${Math.round(
+            PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES / (1024 * 1024)
+          )} MB (posible zip bomb).`;
+        }
+        // Corrupt deflate streams will be reported cleanly as invalid OOXML by SheetJS
+      }
+    }
+
+    if (
+      actualTotalUncompressed > PLAN_IMPORT_RATIO_CHECK_THRESHOLD_BYTES &&
+      actualTotalUncompressed / Math.max(1, buffer.length) > PLAN_IMPORT_MAX_COMPRESSION_RATIO
+    ) {
+      return `Se rechazó el .xlsx por relación de compresión real extrema (>${PLAN_IMPORT_MAX_COMPRESSION_RATIO}:1, posible zip bomb).`;
+    }
+  }
+
+  return null;
+}
+
 async function runWorker(): Promise<void> {
   const input = workerData as WorkerInputPayload;
   if (input.artificialDelayMs && input.artificialDelayMs > 0) {
     await sleep(input.artificialDelayMs);
   }
   const buffer = Buffer.from(input.fileBytes);
+  const zipBombReason = inspectZipBombLimits(buffer);
+  if (zipBombReason) {
+    const rejection: WorkerSecurityRejection = {
+      __workerSecurityRejection: true,
+      code: 'PLAN_IMPORT_UNCOMPRESSED_LIMIT',
+      statusCode: 413,
+      message: zipBombReason,
+    };
+    parentPort?.postMessage(rejection);
+    return;
+  }
   const result = parseAndValidateWorkbook(buffer);
   parentPort?.postMessage(result);
 }
