@@ -1557,7 +1557,12 @@ async function runTests(): Promise<void> {
     console.log('\n📌 12. Seguridad: Zip bomb, Worker compilado sin secretos + resourceLimits, y liberación de lock ante errores no controlados');
 
     const buildSyntheticZip = (
-      entries: Array<{ name: string; data: Buffer; spoofUncompressedSize?: number }>
+      entries: Array<{
+        name: string;
+        data: Buffer;
+        spoofUncompressedSize?: number;
+        spoofCompressedSize?: number;
+      }>
     ): Buffer => {
       const localChunks: Buffer[] = [];
       const cdChunks: Buffer[] = [];
@@ -1571,6 +1576,10 @@ async function runTests(): Promise<void> {
           entry.spoofUncompressedSize !== undefined
             ? entry.spoofUncompressedSize >>> 0
             : realUncompressed;
+        const reportedCompressed =
+          entry.spoofCompressedSize !== undefined
+            ? entry.spoofCompressedSize >>> 0
+            : compressed.length >>> 0;
 
         const lfh = Buffer.alloc(30);
         lfh.writeUInt32LE(0x04034b50, 0);
@@ -1578,7 +1587,7 @@ async function runTests(): Promise<void> {
         lfh.writeUInt16LE(0, 6);
         lfh.writeUInt16LE(8, 8);
         lfh.writeUInt32LE(0, 14);
-        lfh.writeUInt32LE(compressed.length >>> 0, 18);
+        lfh.writeUInt32LE(reportedCompressed, 18);
         lfh.writeUInt32LE(cdUncompressed, 22);
         lfh.writeUInt16LE(nameBuf.length, 26);
         lfh.writeUInt16LE(0, 28);
@@ -1591,7 +1600,7 @@ async function runTests(): Promise<void> {
         cdh.writeUInt16LE(0, 8);
         cdh.writeUInt16LE(8, 10);
         cdh.writeUInt32LE(0, 16);
-        cdh.writeUInt32LE(compressed.length >>> 0, 20);
+        cdh.writeUInt32LE(reportedCompressed, 20);
         cdh.writeUInt32LE(cdUncompressed, 24);
         cdh.writeUInt16LE(nameBuf.length, 28);
         cdh.writeUInt16LE(0, 30);
@@ -1619,7 +1628,7 @@ async function runTests(): Promise<void> {
       {
         name: 'xl/worksheets/sheet1.xml',
         data: bombXmlPayload,
-        spoofUncompressedSize: 128, // mente al directorio central
+        spoofUncompressedSize: 128, // miente al directorio central
       },
     ]);
     assert(
@@ -1639,6 +1648,75 @@ async function runTests(): Promise<void> {
     assert(
       directBombErr instanceof PlanImportUncompressedLimitError && !isPlanImportLocked(),
       'parsePlanWorkbookBuffer rechaza zip bomb con cabecera engañosa antes de SheetJS y libera el lock'
+    );
+
+    // 2(a-bis) Total acumulado REAL > 32 MB entre varias entradas (< 20 MB y ratio < 100:1 cada una) con directorio falso chico
+    const incompressibleHead = Buffer.alloc(250 * 1024);
+    let prng = 0x13579bdf;
+    for (let i = 0; i < incompressibleHead.length; i++) {
+      prng = (Math.imul(prng, 1664525) + 1013904223) >>> 0;
+      incompressibleHead[i] = prng & 0xff;
+    }
+    const midSized18Mb = Buffer.concat([
+      incompressibleHead,
+      Buffer.alloc(18 * 1024 * 1024 - incompressibleHead.length, 0x41),
+    ]);
+    assert(
+      midSized18Mb.length < 20 * 1024 * 1024 && midSized18Mb.length * 2 > 32 * 1024 * 1024,
+      'Fixture multi-entrada: cada entrada < 20 MB pero suma real > 32 MB'
+    );
+    const accumulatedSpoofedBomb = buildSyntheticZip([
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: midSized18Mb,
+        spoofUncompressedSize: 128,
+      },
+      {
+        name: 'xl/worksheets/sheet2.xml',
+        data: midSized18Mb,
+        spoofUncompressedSize: 128,
+      },
+    ]);
+    assert(
+      accumulatedSpoofedBomb.length < 2 * 1024 * 1024,
+      `Multi-entry bomb compacto (${accumulatedSpoofedBomb.length} bytes)`
+    );
+
+    let accBombErr: unknown = null;
+    try {
+      await parsePlanWorkbookBuffer({
+        fileName: 'zipbomb-accumulated-real.xlsx',
+        buffer: accumulatedSpoofedBomb,
+      });
+    } catch (err) {
+      accBombErr = err;
+    }
+    assert(
+      accBombErr instanceof PlanImportUncompressedLimitError && !isPlanImportLocked(),
+      'Total acumulado en bytes REALES (>32 MB entre múltiples entradas con directorio falso) rechaza con 413 y libera el lock'
+    );
+
+    // 2(a-ter) Zip bomb que miente TANTO uncompressedSize (64) como compressedSize (16) en el directorio
+    const doubleSpoofedBomb = buildSyntheticZip([
+      {
+        name: 'xl/worksheets/sheet1.xml',
+        data: bombXmlPayload,
+        spoofUncompressedSize: 64,
+        spoofCompressedSize: 16,
+      },
+    ]);
+    let doubleSpoofErr: unknown = null;
+    try {
+      await parsePlanWorkbookBuffer({
+        fileName: 'zipbomb-double-spoofed.xlsx',
+        buffer: doubleSpoofedBomb,
+      });
+    } catch (err) {
+      doubleSpoofErr = err;
+    }
+    assert(
+      doubleSpoofErr instanceof PlanImportUncompressedLimitError && !isPlanImportLocked(),
+      'Rechaza zip bomb aun si el directorio falsea tanto uncompressedSize como compressedSize'
     );
 
     // Zip bomb por relación extrema declarada en Central Directory

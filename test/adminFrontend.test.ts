@@ -374,10 +374,10 @@ console.log('\n📌 6. Identificación de Autores de Reseñas para Administrador
 
   const serializedDecisions = serializeSharedDecisionsForApi({
     ...decisionMap,
-    1: { subjectCode: 1, action: 'keep_separate', sharedSubjectId: 'ignored-id' },
+    1: { subjectCode: 1, action: 'create_new', sharedSubjectId: 'ignored-id' },
   });
   assert.deepEqual(serializedDecisions, [
-    { subjectCode: 1, action: 'keep_separate' },
+    { subjectCode: 1, action: 'create_new' },
     { subjectCode: 2, action: 'link_existing', sharedSubjectId: 'shared-aga' },
   ]);
 
@@ -412,7 +412,7 @@ console.log('\n📌 6. Identificación de Autores de Reseñas para Administrador
     sigInitial,
     buildPreviewStateSignature({
       ...baseSigParams,
-      decisions: [{ subjectCode: 1, action: 'keep_separate' }],
+      decisions: [{ subjectCode: 1, action: 'create_new' }],
     }),
     'Cambiar decisiones de materias compartidas debe invalidar la firma de vista previa'
   );

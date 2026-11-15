@@ -1410,10 +1410,38 @@ function inspectZipBombLimits(buffer: Buffer): string | null {
         )} MB.`;
       }
       const entryBudget = Math.min(PLAN_IMPORT_MAX_ENTRY_UNCOMPRESSED_BYTES, remainingBudget);
-      try {
-        const inflated = zlib.inflateRawSync(compressedSlice, {
+      const tryInflateBounded = (slice: Buffer): Buffer =>
+        zlib.inflateRawSync(slice, {
           maxOutputLength: entryBudget + 1,
         });
+
+      const isOverOutputLimitError = (err: unknown): boolean => {
+        const errCode = (err as { code?: string })?.code;
+        const errMsg = err instanceof Error ? err.message : String(err ?? '');
+        return (
+          err instanceof RangeError ||
+          errCode === 'ERR_BUFFER_OUT_OF_RANGE' ||
+          /maxOutputLength|Cannot create a Buffer larger|exceed/i.test(errMsg)
+        );
+      };
+
+      try {
+        let inflated: Buffer;
+        try {
+          inflated = tryInflateBounded(compressedSlice);
+        } catch (sliceErr: unknown) {
+          if (isOverOutputLimitError(sliceErr)) {
+            throw sliceErr;
+          }
+          // Si el directorio mintió también sobre compressedSize recortando el stream,
+          // reintentamos desde dataStart hasta fin de buffer con el mismo tope estricto maxOutputLength.
+          if (entry.compressedSize > 0 && dataEnd < buffer.length) {
+            inflated = tryInflateBounded(buffer.subarray(dataStart));
+          } else {
+            throw sliceErr;
+          }
+        }
+
         if (inflated.length > entryBudget) {
           return `El contenido descomprimido real del .xlsx supera el límite permitido (posible zip bomb).`;
         }
@@ -1425,13 +1453,7 @@ function inspectZipBombLimits(buffer: Buffer): string | null {
           return `Se rechazó el .xlsx por relación de compresión real extrema (>${PLAN_IMPORT_MAX_COMPRESSION_RATIO}:1, posible zip bomb).`;
         }
       } catch (err: unknown) {
-        const errCode = (err as { code?: string })?.code;
-        const errMsg = err instanceof Error ? err.message : String(err ?? '');
-        if (
-          err instanceof RangeError ||
-          errCode === 'ERR_BUFFER_OUT_OF_RANGE' ||
-          /maxOutputLength|Cannot create a Buffer larger|exceed/i.test(errMsg)
-        ) {
+        if (isOverOutputLimitError(err)) {
           return `El contenido descomprimido real del .xlsx supera el límite permitido de ${Math.round(
             PLAN_IMPORT_MAX_TOTAL_UNCOMPRESSED_BYTES / (1024 * 1024)
           )} MB (posible zip bomb).`;
