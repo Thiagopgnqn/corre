@@ -87,7 +87,7 @@ async function run(): Promise<void> {
   process.env.REFRESH_SECRET ||= 'verify_import_neon_refresh_secret_local_only_32';
 
   // Imports dinámicos recién después de validar ALLOW_DESTRUCTIVE_TEST=1 y --host-ok
-  const { and, eq, inArray } = await import('drizzle-orm');
+  const { and, count, eq, inArray, or } = await import('drizzle-orm');
   const { db, pool } = await import('../db/index.js');
   const {
     acronyms,
@@ -122,13 +122,42 @@ async function run(): Promise<void> {
   const pubCareerCode = `VPUB_${runId}`;
   const fictCareerCode = `VF_${runId}`;
   const rbCareerCode = `VRB_${runId}`;
+  const twoPlanCareerCode = `VTWO_${runId}`;
+  const pubOnlyDraftCareerCode = `VPDR_${runId}`;
 
+  const readGlobalCounts = async () => {
+    const [[c], [p], [s], [sh], [pr]] = await Promise.all([
+      db.select({ value: count() }).from(careers),
+      db.select({ value: count() }).from(studyPlans),
+      db.select({ value: count() }).from(subjects),
+      db.select({ value: count() }).from(sharedSubjects),
+      db.select({ value: count() }).from(subjectPrerequisites),
+    ]);
+    return {
+      careers: Number(c?.value ?? 0),
+      study_plans: Number(p?.value ?? 0),
+      subjects: Number(s?.value ?? 0),
+      shared_subjects: Number(sh?.value ?? 0),
+      subject_prerequisites: Number(pr?.value ?? 0),
+    };
+  };
+
+  let initialCounts: Awaited<ReturnType<typeof readGlobalCounts>> | null = null;
   let tempUserId: string | null = null;
   let instId: string | null = null;
   let facId: string | null = null;
+  const trackedCareerIds = new Set<string>();
+  const trackedPlanIds = new Set<string>();
+  const trackedSubjectIds = new Set<string>();
 
   try {
     setPlanImportStoreForTesting(null);
+
+    initialCounts = await readGlobalCounts();
+    console.log('\n📊 Conteos globales INICIALES:');
+    console.log(
+      `   careers=${initialCounts.careers} | study_plans=${initialCounts.study_plans} | subjects=${initialCounts.subjects} | shared_subjects=${initialCounts.shared_subjects} | subject_prerequisites=${initialCounts.subject_prerequisites}`
+    );
 
     console.log(`\n🔧 Creando entorno temporal aislado con prefijo ${tag}...`);
     const [tempAdmin] = await db
@@ -165,6 +194,7 @@ async function run(): Promise<void> {
         status: 'draft',
       })
       .returning({ id: careers.id });
+    trackedCareerIds.add(peerCareer.id);
 
     const [peerPlan] = await db
       .insert(studyPlans)
@@ -177,6 +207,7 @@ async function run(): Promise<void> {
         config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
       })
       .returning({ id: studyPlans.id });
+    trackedPlanIds.add(peerPlan.id);
 
     const [peerShared] = await db
       .insert(sharedSubjects)
@@ -214,6 +245,7 @@ async function run(): Promise<void> {
         status: 'published',
       })
       .returning({ id: careers.id });
+    trackedCareerIds.add(pubCareer.id);
 
     const [pubPlan] = await db
       .insert(studyPlans)
@@ -226,6 +258,7 @@ async function run(): Promise<void> {
         config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
       })
       .returning({ id: studyPlans.id });
+    trackedPlanIds.add(pubPlan.id);
 
     const xlsxBuffer = buildPlanImportTemplateBuffer();
     const fileBase64 = xlsxBuffer.toString('base64');
@@ -319,6 +352,8 @@ async function run(): Promise<void> {
     });
 
     assert.equal(createdResult.status, 'draft');
+    trackedCareerIds.add(createdResult.careerId);
+    trackedPlanIds.add(createdResult.planId);
     assert.equal(createdResult.counts.subjects, 10);
     assert.equal(createdResult.counts.prerequisites, 12);
     assert.equal(createdResult.counts.specialRules, 2);
@@ -534,16 +569,16 @@ async function run(): Promise<void> {
     console.log('  ✅ Rollback ACID verificado en Postgres: 0 registros huérfanos tras error FK en correlativas');
 
     // ----------------------------------------------------------------------
-    // PASO 6: DELETE draft limpia sus registros y preserva shared_subjects compartidas
+    // PASO 6: DELETE draft limpia sus registros, preserva shared compartidas y limpia carrera draft vacía
     // ----------------------------------------------------------------------
-    console.log('\n[6/6] Probando deleteAdminDraftPlan y preservación de shared_subjects compartidas...');
+    console.log('\n[6/6] Probando deleteAdminDraftPlan (carrera draft vacía, 2 planes y carrera published)...');
     const sharedBeforeDelete = await db
       .select({ id: sharedSubjects.id })
       .from(sharedSubjects)
       .where(eq(sharedSubjects.facultyId, facId));
     assert.equal(sharedBeforeDelete.length, 10, 'Antes de borrar: 1 shared compartida + 9 exclusivas del draft');
 
-    await deleteAdminDraftPlan({
+    const deleteSingleRes = await deleteAdminDraftPlan({
       planId: createdResult.planId,
       adminUserId: tempUserId,
       adminEmail: tempAdminEmail,
@@ -551,6 +586,7 @@ async function run(): Promise<void> {
     });
 
     const deletedPlans = await db.select({ id: studyPlans.id }).from(studyPlans).where(eq(studyPlans.id, createdResult.planId));
+    const deletedCareerRows = await db.select({ id: careers.id }).from(careers).where(eq(careers.id, createdResult.careerId));
     const deletedSubs = await db.select({ id: subjects.id }).from(subjects).where(eq(subjects.planId, createdResult.planId));
     const deletedRules = await db.select({ id: planSpecialRules.id }).from(planSpecialRules).where(eq(planSpecialRules.planId, createdResult.planId));
     const deletedAcronyms = await db.select({ id: acronyms.id }).from(acronyms).where(eq(acronyms.planId, createdResult.planId));
@@ -560,6 +596,9 @@ async function run(): Promise<void> {
       .where(eq(sharedSubjects.facultyId, facId));
 
     assert.equal(deletedPlans.length, 0, 'El plan borrador debe eliminarse');
+    assert.equal(deleteSingleRes.deletedCareer, true, 'Al borrar el último plan de una carrera draft debe informar deletedCareer=true');
+    assert.equal(deleteSingleRes.deletedCareerId, createdResult.careerId);
+    assert.equal(deletedCareerRows.length, 0, 'Al borrar el último plan de una carrera draft debe eliminarse la carrera');
     assert.equal(deletedSubs.length, 0, 'Las materias del borrador deben eliminarse por cascada');
     assert.equal(deletedRules.length, 0, 'Las reglas del borrador deben eliminarse por cascada');
     assert.equal(deletedAcronyms.length, 0, 'Los acrónimos del borrador deben eliminarse por cascada');
@@ -568,43 +607,388 @@ async function run(): Promise<void> {
       [peerShared.id],
       'DELETE debe limpiar las 9 shared_subjects huérfanas y preservar la compartida con el plan par'
     );
-    console.log('  ✅ DELETE draft verificado: borró 9 huérfanas y conservó shared_subject compartida');
+
+    // Subcaso 6b: carrera 'draft' con DOS planes -> borrar el primero conserva la carrera; borrar el segundo la elimina
+    const [twoPlanCareer] = await db
+      .insert(careers)
+      .values({
+        facultyId: facId,
+        name: `[VERIFY ${runId}] Carrera Dos Planes`,
+        code: twoPlanCareerCode,
+        status: 'draft',
+      })
+      .returning({ id: careers.id });
+    trackedCareerIds.add(twoPlanCareer.id);
+
+    const [twoPlanA] = await db
+      .insert(studyPlans)
+      .values({
+        careerId: twoPlanCareer.id,
+        name: `[VERIFY ${runId}] Plan A`,
+        year: 2026,
+        status: 'draft',
+        isActive: true,
+        config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
+      })
+      .returning({ id: studyPlans.id });
+    const [twoPlanB] = await db
+      .insert(studyPlans)
+      .values({
+        careerId: twoPlanCareer.id,
+        name: `[VERIFY ${runId}] Plan B`,
+        year: 2027,
+        status: 'draft',
+        isActive: true,
+        config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
+      })
+      .returning({ id: studyPlans.id });
+    trackedPlanIds.add(twoPlanA.id);
+    trackedPlanIds.add(twoPlanB.id);
+
+    const delTwoARes = await deleteAdminDraftPlan({
+      planId: twoPlanA.id,
+      adminUserId: tempUserId,
+      adminEmail: tempAdminEmail,
+      ip: '127.0.0.1',
+    });
+    const twoCareerAfterA = await db.select({ id: careers.id }).from(careers).where(eq(careers.id, twoPlanCareer.id));
+    const twoPlanBStillThere = await db.select({ id: studyPlans.id }).from(studyPlans).where(eq(studyPlans.id, twoPlanB.id));
+    assert.equal(delTwoARes.deletedCareer, false, 'Carrera draft con 2 planes: borrar el primero NO borra la carrera');
+    assert.equal(twoCareerAfterA.length, 1, 'La carrera draft con 2do plan activo debe seguir existiendo');
+    assert.equal(twoPlanBStillThere.length, 1, 'El segundo plan debe seguir intacto');
+
+    const delTwoBRes = await deleteAdminDraftPlan({
+      planId: twoPlanB.id,
+      adminUserId: tempUserId,
+      adminEmail: tempAdminEmail,
+      ip: '127.0.0.1',
+    });
+    const twoCareerAfterB = await db.select({ id: careers.id }).from(careers).where(eq(careers.id, twoPlanCareer.id));
+    assert.equal(delTwoBRes.deletedCareer, true, 'Carrera draft con 2 planes: borrar el último SÍ borra la carrera');
+    assert.equal(twoCareerAfterB.length, 0, 'La carrera draft vacía debe quedar eliminada');
+
+    // Subcaso 6c: carrera 'published' con un último plan draft -> el plan se borra pero la carrera published NO se toca
+    const [pubOnlyDraftCareer] = await db
+      .insert(careers)
+      .values({
+        facultyId: facId,
+        name: `[VERIFY ${runId}] Carrera Published Protegida`,
+        code: pubOnlyDraftCareerCode,
+        status: 'published',
+      })
+      .returning({ id: careers.id });
+    trackedCareerIds.add(pubOnlyDraftCareer.id);
+
+    const [draftUnderPubPlan] = await db
+      .insert(studyPlans)
+      .values({
+        careerId: pubOnlyDraftCareer.id,
+        name: `[VERIFY ${runId}] Draft en Published`,
+        year: 2028,
+        status: 'draft',
+        isActive: true,
+        config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
+      })
+      .returning({ id: studyPlans.id });
+    trackedPlanIds.add(draftUnderPubPlan.id);
+
+    const delUnderPubRes = await deleteAdminDraftPlan({
+      planId: draftUnderPubPlan.id,
+      adminUserId: tempUserId,
+      adminEmail: tempAdminEmail,
+      ip: '127.0.0.1',
+    });
+    const pubCareerStillExists = await db
+      .select({ id: careers.id, status: careers.status })
+      .from(careers)
+      .where(eq(careers.id, pubOnlyDraftCareer.id));
+    assert.equal(delUnderPubRes.deletedCareer, false, 'Carrera published NO debe borrarse aunque quede sin planes');
+    assert.equal(pubCareerStillExists.length, 1);
+    assert.equal(pubCareerStillExists[0].status, 'published');
+
+    console.log('  ✅ DELETE draft verificado: huérfanas, carrera draft vacía (1 y 2 planes) y protección de carrera published');
 
     console.log('\n======================================================================');
     console.log(' 🎉 TODAS LAS VERIFICACIONES DRIZZLE EN NEON PASARON EXITOSAMENTE');
     console.log('======================================================================\n');
   } finally {
-    console.log('🧹 Limpiando TODOS los registros temporales de verificación...');
-    try {
-      setPlanImportStoreForTesting(null);
-      await db.delete(adminAuditLog).where(eq(adminAuditLog.adminEmail, tempAdminEmail));
+    console.log('🧹 Limpiando registros temporales por orden seguro de FK (SIN tocar admin_audit_log)...');
+    setPlanImportStoreForTesting(null);
+
+    const cleanupErrors: Array<{ table: string; message: string }> = [];
+    const safeExec = async (table: string, fn: () => Promise<void>): Promise<void> => {
+      try {
+        await fn();
+      } catch (err) {
+        cleanupErrors.push({
+          table,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    const allCareerIdsSet = new Set<string>(trackedCareerIds);
+    const allPlanIdsSet = new Set<string>(trackedPlanIds);
+    const allSubjectIdsSet = new Set<string>(trackedSubjectIds);
+
+    await safeExec('discover_ids', async () => {
+      if (facId) {
+        const facCareers = await db.select({ id: careers.id }).from(careers).where(eq(careers.facultyId, facId));
+        for (const r of facCareers) allCareerIdsSet.add(r.id);
+      }
+      const cIds = Array.from(allCareerIdsSet);
+      if (cIds.length > 0) {
+        const facPlans = await db.select({ id: studyPlans.id }).from(studyPlans).where(inArray(studyPlans.careerId, cIds));
+        for (const r of facPlans) allPlanIdsSet.add(r.id);
+      }
+      const pIds = Array.from(allPlanIdsSet);
+      if (pIds.length > 0) {
+        const facSubs = await db.select({ id: subjects.id }).from(subjects).where(inArray(subjects.planId, pIds));
+        for (const r of facSubs) allSubjectIdsSet.add(r.id);
+      }
+    });
+
+    const allCareerIds = Array.from(allCareerIdsSet);
+    const allPlanIds = Array.from(allPlanIdsSet);
+    const allSubjectIds = Array.from(allSubjectIdsSet);
+
+    await safeExec('acronyms', async () => {
+      if (allPlanIds.length > 0) {
+        await db.delete(acronyms).where(inArray(acronyms.planId, allPlanIds));
+      }
+    });
+    await safeExec('plan_special_rules', async () => {
+      if (allPlanIds.length > 0) {
+        await db.delete(planSpecialRules).where(inArray(planSpecialRules.planId, allPlanIds));
+      }
+    });
+    await safeExec('subject_prerequisites', async () => {
+      if (allSubjectIds.length > 0) {
+        await db
+          .delete(subjectPrerequisites)
+          .where(
+            or(
+              inArray(subjectPrerequisites.subjectId, allSubjectIds),
+              inArray(subjectPrerequisites.requiresSubjectId, allSubjectIds)
+            )
+          );
+      }
+    });
+    await safeExec('subjects', async () => {
+      if (allPlanIds.length > 0) {
+        await db.delete(subjects).where(inArray(subjects.planId, allPlanIds));
+      }
+    });
+    await safeExec('shared_subjects', async () => {
+      if (facId) {
+        await db.delete(sharedSubjects).where(eq(sharedSubjects.facultyId, facId));
+      }
+    });
+    await safeExec('study_plans', async () => {
+      if (allPlanIds.length > 0 || allCareerIds.length > 0) {
+        const cond =
+          allPlanIds.length > 0 && allCareerIds.length > 0
+            ? or(inArray(studyPlans.id, allPlanIds), inArray(studyPlans.careerId, allCareerIds))
+            : allPlanIds.length > 0
+              ? inArray(studyPlans.id, allPlanIds)
+              : inArray(studyPlans.careerId, allCareerIds);
+        await db.delete(studyPlans).where(cond);
+      }
+    });
+    await safeExec('careers', async () => {
+      if (facId || allCareerIds.length > 0) {
+        const cond =
+          facId && allCareerIds.length > 0
+            ? or(eq(careers.facultyId, facId), inArray(careers.id, allCareerIds))
+            : facId
+              ? eq(careers.facultyId, facId)
+              : inArray(careers.id, allCareerIds);
+        await db.delete(careers).where(cond);
+      }
+    });
+    await safeExec('faculties', async () => {
+      if (facId || instId) {
+        const cond =
+          facId && instId
+            ? or(eq(faculties.id, facId), eq(faculties.institutionId, instId))
+            : facId
+              ? eq(faculties.id, facId)
+              : eq(faculties.institutionId, instId!);
+        await db.delete(faculties).where(cond);
+      }
+    });
+    await safeExec('institutions', async () => {
       if (instId) {
         await db.delete(institutions).where(eq(institutions.id, instId));
       }
+    });
+    await safeExec('users', async () => {
       if (tempUserId) {
+        // ON DELETE SET NULL actualiza únicamente admin_user_id = NULL en admin_audit_log (permitido por el trigger).
         await db.delete(users).where(eq(users.id, tempUserId));
       }
+    });
 
-      const leftoverInst = instId
-        ? await db.select({ id: institutions.id }).from(institutions).where(eq(institutions.id, instId))
-        : [];
-      const leftoverAudit = await db
-        .select({ id: adminAuditLog.id })
+    const leftovers: Record<string, number> = {};
+    const safeCount = async (table: string, fn: () => Promise<number>): Promise<void> => {
+      try {
+        leftovers[table] = await fn();
+      } catch (err) {
+        leftovers[table] = -1;
+        cleanupErrors.push({
+          table: `count(${table})`,
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+
+    await safeCount('acronyms', async () =>
+      allPlanIds.length > 0
+        ? Number((await db.select({ value: count() }).from(acronyms).where(inArray(acronyms.planId, allPlanIds)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('plan_special_rules', async () =>
+      allPlanIds.length > 0
+        ? Number((await db.select({ value: count() }).from(planSpecialRules).where(inArray(planSpecialRules.planId, allPlanIds)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('subject_prerequisites', async () =>
+      allSubjectIds.length > 0
+        ? Number(
+            (
+              await db
+                .select({ value: count() })
+                .from(subjectPrerequisites)
+                .where(
+                  or(
+                    inArray(subjectPrerequisites.subjectId, allSubjectIds),
+                    inArray(subjectPrerequisites.requiresSubjectId, allSubjectIds)
+                  )
+                )
+            )[0]?.value ?? 0
+          )
+        : 0
+    );
+    await safeCount('subjects', async () =>
+      allPlanIds.length > 0
+        ? Number((await db.select({ value: count() }).from(subjects).where(inArray(subjects.planId, allPlanIds)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('shared_subjects', async () =>
+      facId
+        ? Number((await db.select({ value: count() }).from(sharedSubjects).where(eq(sharedSubjects.facultyId, facId)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('study_plans', async () =>
+      allPlanIds.length > 0 || allCareerIds.length > 0
+        ? Number(
+            (
+              await db
+                .select({ value: count() })
+                .from(studyPlans)
+                .where(
+                  allPlanIds.length > 0 && allCareerIds.length > 0
+                    ? or(inArray(studyPlans.id, allPlanIds), inArray(studyPlans.careerId, allCareerIds))
+                    : allPlanIds.length > 0
+                      ? inArray(studyPlans.id, allPlanIds)
+                      : inArray(studyPlans.careerId, allCareerIds)
+                )
+            )[0]?.value ?? 0
+          )
+        : 0
+    );
+    await safeCount('careers', async () =>
+      facId || allCareerIds.length > 0
+        ? Number(
+            (
+              await db
+                .select({ value: count() })
+                .from(careers)
+                .where(
+                  facId && allCareerIds.length > 0
+                    ? or(eq(careers.facultyId, facId), inArray(careers.id, allCareerIds))
+                    : facId
+                      ? eq(careers.facultyId, facId)
+                      : inArray(careers.id, allCareerIds)
+                )
+            )[0]?.value ?? 0
+          )
+        : 0
+    );
+    await safeCount('faculties', async () =>
+      facId
+        ? Number((await db.select({ value: count() }).from(faculties).where(eq(faculties.id, facId)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('institutions', async () =>
+      instId
+        ? Number((await db.select({ value: count() }).from(institutions).where(eq(institutions.id, instId)))[0]?.value ?? 0)
+        : 0
+    );
+    await safeCount('users', async () =>
+      tempUserId
+        ? Number((await db.select({ value: count() }).from(users).where(eq(users.id, tempUserId)))[0]?.value ?? 0)
+        : 0
+    );
+
+    let auditRowsCount = 0;
+    await safeExec('count(admin_audit_log)', async () => {
+      const [auditRow] = await db
+        .select({ value: count() })
         .from(adminAuditLog)
         .where(eq(adminAuditLog.adminEmail, tempAdminEmail));
-      const leftoverUsers = tempUserId
-        ? await db.select({ id: users.id }).from(users).where(eq(users.id, tempUserId))
-        : [];
+      auditRowsCount = Number(auditRow?.value ?? 0);
+    });
 
-      assert.equal(leftoverInst.length, 0);
-      assert.equal(leftoverAudit.length, 0);
-      assert.equal(leftoverUsers.length, 0);
-      console.log('✅ Limpieza verificada: 0 registros temporales restantes en la base.');
-    } catch (cleanupErr) {
-      console.error('❌ Error durante la limpieza en finally:', cleanupErr);
-      process.exitCode = 1;
+    let finalCounts: Awaited<ReturnType<typeof readGlobalCounts>> | null = null;
+    await safeExec('readGlobalCounts(final)', async () => {
+      finalCounts = await readGlobalCounts();
+    });
+
+    console.log('\n📋 Resumen de residuos temporales en tablas no-auditoría:');
+    for (const [table, qty] of Object.entries(leftovers)) {
+      console.log(`   - ${table}: ${qty}`);
+    }
+    console.log(
+      `ℹ️ admin_audit_log (resto esperado por diseño — tabla inmutable): ${auditRowsCount} fila(s) para prefijo=${tag} (${tempAdminEmail}); NO cuenta como fallo.`
+    );
+
+    let globalCountMismatch = false;
+    if (initialCounts && finalCounts) {
+      const fin = finalCounts as NonNullable<typeof finalCounts>;
+      const keys: Array<keyof typeof initialCounts> = [
+        'careers',
+        'study_plans',
+        'subjects',
+        'shared_subjects',
+        'subject_prerequisites',
+      ];
+      console.log('\n📊 Comparación de conteos globales (inicial -> final):');
+      for (const k of keys) {
+        const diff = fin[k] - initialCounts[k];
+        if (diff !== 0) globalCountMismatch = true;
+        console.log(`   - ${k}: ${initialCounts[k]} -> ${fin[k]} (diff: ${diff >= 0 ? `+${diff}` : diff})`);
+      }
+    } else if (!finalCounts) {
+      globalCountMismatch = true;
+    }
+
+    try {
+      const nonZeroLeftovers = Object.entries(leftovers).filter(([, qty]) => qty !== 0);
+      if (cleanupErrors.length > 0 || nonZeroLeftovers.length > 0 || globalCountMismatch) {
+        console.error('\n❌ Quedaron errores o residuos distintos de admin_audit_log tras la limpieza:');
+        for (const e of cleanupErrors) {
+          console.error(`   - [${e.table}] ${e.message}`);
+        }
+        for (const [t, qty] of nonZeroLeftovers) {
+          console.error(`   - Residuo en ${t}: ${qty}`);
+        }
+        process.exitCode = 1;
+      } else {
+        console.log('\n✅ Limpieza verificada: 0 residuos distintos de la auditoría y conteos globales restaurados.');
+      }
     } finally {
-      await pool.end();
+      await pool.end().catch(() => undefined);
     }
   }
 }
