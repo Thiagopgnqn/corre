@@ -638,6 +638,16 @@ async function runTests(): Promise<void> {
       },
     ],
     [
+      'admin-import-2',
+      {
+        id: 'admin-import-2',
+        email: 'admin-import-2@stack.com',
+        role: 'admin',
+        status: 'active',
+        emailVerified: true,
+      },
+    ],
+    [
       'user-regular-1',
       {
         id: 'user-regular-1',
@@ -655,6 +665,11 @@ async function runTests(): Promise<void> {
     env.JWT_SECRET,
     { expiresIn: '1h' }
   );
+  const adminToken2 = jwt.sign(
+    { id: 'admin-import-2', email: 'admin-import-2@stack.com', role: 'admin', emailVerified: true },
+    env.JWT_SECRET,
+    { expiresIn: '1h' }
+  );
   const userToken = jwt.sign(
     { id: 'user-regular-1', email: 'alumno@frc.utn.edu.ar', role: 'user', emailVerified: true },
     env.JWT_SECRET,
@@ -665,6 +680,16 @@ async function runTests(): Promise<void> {
       purpose: 'admin-reauth',
       userId: 'admin-import-1',
       adminEmail: 'admin-import@stack.com',
+      iat: Math.floor(Date.now() / 1000),
+    },
+    env.JWT_SECRET,
+    { expiresIn: '10m' }
+  );
+  const reauthToken2 = jwt.sign(
+    {
+      purpose: 'admin-reauth',
+      userId: 'admin-import-2',
+      adminEmail: 'admin-import-2@stack.com',
       iat: Math.floor(Date.now() / 1000),
     },
     env.JWT_SECRET,
@@ -1224,7 +1249,8 @@ async function runTests(): Promise<void> {
       'DELETE /api/admin/plans/:id bloquea con 409 si el plan está published'
     );
 
-    // Quitar referencia -> DELETE draft exitoso, preservando sharedDibujoId compartido con ISI 2023
+    // Quitar referencia -> DELETE draft exitoso, preservando sharedDibujoId compartido con ISI 2023 y borrando carrera 'draft' vacía
+    const importedCareerId = importRes.data?.data?.careerId as string;
     store.libraryFileRefs.length = 0;
     const sharedBeforeDeleteCount = store.sharedSubjects.length;
     const deleteDraftRes = await apiRequest({
@@ -1235,12 +1261,159 @@ async function runTests(): Promise<void> {
     });
     assert(
       deleteDraftRes.status === 200 &&
+        deleteDraftRes.data?.data?.deletedCareer === true &&
+        deleteDraftRes.data?.data?.deletedCareerId === importedCareerId &&
         !store.plans.some((p) => p.id === importedPlanId) &&
+        !store.careers.some((c) => c.id === importedCareerId) &&
         !store.subjects.some((s) => s.planId === importedPlanId) &&
         store.sharedSubjects.some((sh) => sh.id === sharedDibujoId) &&
         store.sharedSubjects.length < sharedBeforeDeleteCount,
-      'DELETE /api/admin/plans/:id elimina draft sin referencias, limpia shared huérfanas y preserva shared compartidas'
+      'DELETE /api/admin/plans/:id elimina draft sin referencias, limpia shared huérfanas, preserva shared compartidas y elimina la carrera draft vacía'
     );
+
+    // El código de carrera queda libre para volver a importarse tras eliminar su único plan draft
+    const reuseCareerCodePreview = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken2,
+      body: previewInput,
+    });
+    assert(
+      reuseCareerCodePreview.status === 200 && reuseCareerCodePreview.data?.data?.valid === true,
+      'Tras eliminar el último plan de una carrera draft, su código queda disponible sin 409 CAREER_CODE_ALREADY_EXISTS'
+    );
+
+    // Carrera 'draft' con DOS planes: borrar el primero NO borra la carrera; borrar el segundo (último) SÍ la borra
+    const twoPlansSheets = makeValidNeutralSheets();
+    twoPlansSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][0] = 'Plan Ingeniería Química 2026';
+    twoPlansSheets[PLAN_TEMPLATE_SHEETS.PLAN][1][1] = 2026;
+    const plan1Buf = buildWorkbookBuffer(twoPlansSheets).toString('base64');
+    const prevPlan1 = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken2,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Ingeniería Química',
+        careerCode: 'IQUI',
+        fileName: 'iquim-2026.xlsx',
+        fileBase64: plan1Buf,
+      },
+    });
+    const impPlan1 = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/import',
+      token: adminToken2,
+      reauth: reauthToken2,
+      body: {
+        facultyId: facId,
+        targetMode: 'new_career_and_plan',
+        careerName: 'Ingeniería Química',
+        careerCode: 'IQUI',
+        fileName: 'iquim-2026.xlsx',
+        fileBase64: plan1Buf,
+        previewHash: prevPlan1.data.data.previewHash,
+      },
+    });
+    const twoPlanCareerId = impPlan1.data?.data?.careerId as string;
+    const twoPlanFirstId = impPlan1.data?.data?.planId as string;
+
+    const twoPlansSheets2 = makeValidNeutralSheets();
+    twoPlansSheets2[PLAN_TEMPLATE_SHEETS.PLAN][1][0] = 'Plan Ingeniería Química 2027';
+    twoPlansSheets2[PLAN_TEMPLATE_SHEETS.PLAN][1][1] = 2027;
+    const plan2Buf = buildWorkbookBuffer(twoPlansSheets2).toString('base64');
+    const prevPlan2 = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/preview',
+      token: adminToken2,
+      body: {
+        facultyId: facId,
+        targetMode: 'existing_career_new_plan',
+        careerId: twoPlanCareerId,
+        fileName: 'iquim-2027.xlsx',
+        fileBase64: plan2Buf,
+      },
+    });
+    const impPlan2 = await apiRequest({
+      method: 'POST',
+      path: '/api/admin/plans/import',
+      token: adminToken2,
+      reauth: reauthToken2,
+      body: {
+        facultyId: facId,
+        targetMode: 'existing_career_new_plan',
+        careerId: twoPlanCareerId,
+        fileName: 'iquim-2027.xlsx',
+        fileBase64: plan2Buf,
+        previewHash: prevPlan2.data.data.previewHash,
+      },
+    });
+    const twoPlanSecondId = impPlan2.data?.data?.planId as string;
+
+    const delFirstOfTwoRes = await apiRequest({
+      method: 'DELETE',
+      path: `/api/admin/plans/${twoPlanFirstId}`,
+      token: adminToken2,
+      reauth: reauthToken2,
+    });
+    assert(
+      delFirstOfTwoRes.status === 200 &&
+        delFirstOfTwoRes.data?.data?.deletedCareer === false &&
+        delFirstOfTwoRes.data?.data?.deletedCareerId === null &&
+        store.careers.some((c) => c.id === twoPlanCareerId) &&
+        store.plans.some((p) => p.id === twoPlanSecondId),
+      'Carrera draft con 2 planes: al borrar el primero NO se borra la carrera porque conserva el segundo plan'
+    );
+
+    const delSecondOfTwoRes = await apiRequest({
+      method: 'DELETE',
+      path: `/api/admin/plans/${twoPlanSecondId}`,
+      token: adminToken2,
+      reauth: reauthToken2,
+    });
+    assert(
+      delSecondOfTwoRes.status === 200 &&
+        delSecondOfTwoRes.data?.data?.deletedCareer === true &&
+        delSecondOfTwoRes.data?.data?.deletedCareerId === twoPlanCareerId &&
+        !store.careers.some((c) => c.id === twoPlanCareerId),
+      'Carrera draft con 2 planes: al borrar el último plan SÍ se borra también la carrera'
+    );
+
+    // Carrera 'published' cuyo único plan (draft) se elimina: el plan se borra pero la carrera published NO se toca
+    const pubCareerWithOnlyDraftId = '99999999-9999-4999-8999-999999999901';
+    const draftUnderPubCareerId = '99999999-9999-4999-8999-999999999902';
+    store.careers.push({
+      id: pubCareerWithOnlyDraftId,
+      facultyId: facId,
+      name: 'Ingeniería Publicada Protegida',
+      code: 'IPUB',
+      status: 'published',
+    });
+    store.plans.push({
+      id: draftUnderPubCareerId,
+      careerId: pubCareerWithOnlyDraftId,
+      name: 'Borrador Sobre Publicada',
+      year: 2028,
+      status: 'draft',
+      isActive: true,
+      config: { requiredElectiveCredits: 0, defaultMinPassingGrade: 4 },
+    });
+    const delDraftUnderPubRes = await apiRequest({
+      method: 'DELETE',
+      path: `/api/admin/plans/${draftUnderPubCareerId}`,
+      token: adminToken2,
+      reauth: reauthToken2,
+    });
+    assert(
+      delDraftUnderPubRes.status === 200 &&
+        delDraftUnderPubRes.data?.data?.deletedCareer === false &&
+        delDraftUnderPubRes.data?.data?.deletedCareerId === null &&
+        !store.plans.some((p) => p.id === draftUnderPubCareerId) &&
+        store.careers.some((c) => c.id === pubCareerWithOnlyDraftId && c.status === 'published'),
+      'Carrera published sin otros planes NO se borra aunque se elimine su último plan draft'
+    );
+    store.careers = store.careers.filter((c) => c.id !== pubCareerWithOnlyDraftId);
 
     console.log('\n📌 10. Rollback Transaccional y Concurrencia HTTP = 1 (409)');
     const rollbackPreview = await apiRequest({

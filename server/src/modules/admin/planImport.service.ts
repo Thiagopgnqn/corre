@@ -361,7 +361,10 @@ export interface PlanImportTxContext {
     planId: string,
     subjectIds: string[]
   ): Promise<ReferenceBlockersSummary>;
-  deleteDraftPlanCascade(planId: string, candidateOrphanSharedIds: string[]): Promise<void>;
+  deleteDraftPlanCascade(
+    planId: string,
+    candidateOrphanSharedIds: string[]
+  ): Promise<{ deletedCareer: boolean; deletedCareerId: string | null }>;
   recordAudit(entry: AdminPlanAuditSummaryEntry): Promise<void>;
 }
 
@@ -754,8 +757,14 @@ class DrizzlePlanImportTxContext implements PlanImportTxContext {
     };
   }
 
-  async deleteDraftPlanCascade(planId: string, candidateOrphanSharedIds: string[]): Promise<void> {
-    await this.tx.delete(studyPlans).where(eq(studyPlans.id, planId));
+  async deleteDraftPlanCascade(
+    planId: string,
+    candidateOrphanSharedIds: string[]
+  ): Promise<{ deletedCareer: boolean; deletedCareerId: string | null }> {
+    const [deletedPlan] = await this.tx
+      .delete(studyPlans)
+      .where(eq(studyPlans.id, planId))
+      .returning({ careerId: studyPlans.careerId });
 
     for (const sharedId of candidateOrphanSharedIds) {
       const [subRef] = await this.tx
@@ -770,6 +779,27 @@ class DrizzlePlanImportTxContext implements PlanImportTxContext {
         await this.tx.delete(sharedSubjects).where(eq(sharedSubjects.id, sharedId));
       }
     }
+
+    let deletedCareer = false;
+    let deletedCareerId: string | null = null;
+    if (deletedPlan?.careerId) {
+      const [remainingPlans] = await this.tx
+        .select({ value: count() })
+        .from(studyPlans)
+        .where(eq(studyPlans.careerId, deletedPlan.careerId));
+      if (Number(remainingPlans?.value ?? 0) === 0) {
+        const [removedCareer] = await this.tx
+          .delete(careers)
+          .where(and(eq(careers.id, deletedPlan.careerId), eq(careers.status, 'draft')))
+          .returning({ id: careers.id });
+        if (removedCareer) {
+          deletedCareer = true;
+          deletedCareerId = removedCareer.id;
+        }
+      }
+    }
+
+    return { deletedCareer, deletedCareerId };
   }
 
   async recordAudit(entry: AdminPlanAuditSummaryEntry): Promise<void> {
@@ -1452,6 +1482,7 @@ export class InMemoryPlanImportStore implements PlanImportStore {
       },
       checkPlanAndSubjectReferences: (pid, sids) => store.checkPlanAndSubjectReferences(pid, sids),
       async deleteDraftPlanCascade(planId, candidateOrphanSharedIds) {
+        const targetPlan = store.plans.find((p) => p.id === planId);
         const removedSubIds = new Set(
           store.subjects.filter((s) => s.planId === planId).map((s) => s.id)
         );
@@ -1467,6 +1498,22 @@ export class InMemoryPlanImportStore implements PlanImportStore {
             store.sharedSubjects = store.sharedSubjects.filter((sh) => sh.id !== sid);
           }
         }
+
+        let deletedCareer = false;
+        let deletedCareerId: string | null = null;
+        if (targetPlan) {
+          const hasRemainingPlans = store.plans.some((p) => p.careerId === targetPlan.careerId);
+          if (!hasRemainingPlans) {
+            const career = store.careers.find((c) => c.id === targetPlan.careerId);
+            if (career && career.status === 'draft') {
+              store.careers = store.careers.filter((c) => c.id !== career.id);
+              deletedCareer = true;
+              deletedCareerId = career.id;
+            }
+          }
+        }
+
+        return { deletedCareer, deletedCareerId };
       },
       async recordAudit(entry) {
         store.auditLogs.push(entry);
@@ -2349,7 +2396,10 @@ export async function deleteAdminDraftPlan(params: {
       new Set(planSubs.map((s) => s.sharedSubjectId).filter((id): id is string => Boolean(id)))
     );
 
-    await tx.deleteDraftPlanCascade(planId, candidateOrphanSharedIds);
+    const { deletedCareer, deletedCareerId } = await tx.deleteDraftPlanCascade(
+      planId,
+      candidateOrphanSharedIds
+    );
 
     await tx.recordAudit({
       adminUserId,
@@ -2361,6 +2411,8 @@ export async function deleteAdminDraftPlan(params: {
         planId,
         planName: plan.name,
         planYear: plan.year,
+        careerId: plan.careerId,
+        deletedCareer,
         deletedSubjectsCount: planSubs.length,
       },
       ip,
@@ -2370,6 +2422,8 @@ export async function deleteAdminDraftPlan(params: {
       deletedPlanId: planId,
       planName: plan.name,
       deletedSubjectsCount: planSubs.length,
+      deletedCareer,
+      deletedCareerId,
     };
   });
 }
