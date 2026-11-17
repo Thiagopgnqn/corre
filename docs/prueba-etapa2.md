@@ -71,7 +71,12 @@ ORDER BY created_at ASC;
 
 ## 3. Correr el script manual `verifyImportNeon.ts`
 
-El script [`server/src/scripts/verifyImportNeon.ts`](../server/src/scripts/verifyImportNeon.ts) **nunca forma parte de `npm test`**. Usa el almacén real [`DrizzlePlanImportStore`](../server/src/modules/admin/planImport.service.ts) contra Postgres/Neon, exige confirmación explícita (`ALLOW_DESTRUCTIVE_TEST=1` + `--host-ok=<host>`), escribe únicamente registros temporales aislados con prefijo `__VERIFY_IMPORT_<runId>__` y limpia todo en `finally` (incluso si falla algún `assert`).
+El script [`server/src/scripts/verifyImportNeon.ts`](../server/src/scripts/verifyImportNeon.ts) **nunca forma parte de `npm test`**. Usa el almacén real [`DrizzlePlanImportStore`](../server/src/modules/admin/planImport.service.ts) contra Postgres/Neon, exige confirmación explícita (`ALLOW_DESTRUCTIVE_TEST=1` + `--host-ok=<host>`), escribe únicamente registros temporales aislados con prefijo `__VERIFY_IMPORT_<runId>__` y limpia todas las tablas operativas en `finally` (incluso si falla algún `assert`).
+
+> [!CAUTION]
+> **El script deja filas de auditoría en `admin_audit_log` por diseño: ejecutalo SOLO en ramas temporales de Neon, NUNCA en producción.**
+> - La tabla `admin_audit_log` está protegida por el trigger inmutable `trg_protect_admin_audit_log` (`prevent_audit_log_modification()`), por lo que la limpieza **nunca** intenta borrar filas de auditoría.
+> - Las filas creadas durante la prueba (`__verify_import_<runId>@verify.local`) permanecen en `admin_audit_log` y el script las informa al final como **"resto esperado por diseño"** (sin contarlo como fallo).
 
 1. Primer paso (detección segura de host sin credenciales):
 
@@ -90,13 +95,17 @@ Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
 ```
 
 3. Qué verifica automáticamente contra Neon real:
+   - **Conteos iniciales y finales:** captura al inicio y tras la limpieza los conteos globales de `careers`, `study_plans`, `subjects`, `shared_subjects` y `subject_prerequisites`, y exige que vuelvan exactamente al valor inicial (`diff: 0`).
    - **`[1/6]` Vista previa (`previewPlanImport`):** lee la plantilla `"Ingeniería Ficticia"` sin insertar filas (`0` escrituras en `careers`, `study_plans`, `shared_subjects` ni `admin_audit_log`) y detecta sugerencia compartida (`Dibujo Técnico`) sin autovincular (`selectedDecision: null`).
    - **`[2/6]` Creación en `draft` (`confirmPlanImport`):** crea el plan en borrador (`10` materias, `12` correlativas, `2` reglas especiales, `4` acrónimos, `1` `shared_subject` vinculada + `9` nuevas) y valida `getAdminPlanDetail`.
    - **`[3/6]` Re-importación idempotente (`existing_draft_plan`):** confirma `toCreateCodes: 0`, `toUpdateCodes: 10`, `toRemoveCodes: 0` y preserva exactamente los **`10/10` UUIDs** de materias y sus `sharedSubjectId`.
    - **`[4/6]` Protección de planes `published`:** comprueba que tanto `previewPlanImport` como `confirmPlanImport` rechazan con HTTP `409` (`PLAN_NOT_DRAFT`) al intentar importar sobre un plan publicado.
    - **`[5/6]` Rollback ACID en PostgreSQL:** fuerza un error real de foreign key en `replacePlanPrerequisites` tras haber insertado carrera, plan y materias dentro de la transacción y verifica que PostgreSQL revierte el lote completo (`0` registros huérfanos).
-   - **`[6/6]` Eliminación de borrador (`deleteAdminDraftPlan`):** elimina el `draft`, verifica cascada sobre `study_plans`, `subjects`, `plan_special_rules` y `acronyms`, elimina las `9` `shared_subjects` huérfanas y **preserva** la `shared_subject` compartida con el plan par.
-   - **`finally`:** elimina cualquier registro con prefijo `__VERIFY_IMPORT_<runId>__` y verifica `0` residuos antes de cerrar el pool.
+   - **`[6/6]` Eliminación de borrador (`deleteAdminDraftPlan`):** elimina el `draft`, verifica cascada sobre `study_plans`, `subjects`, `plan_special_rules` y `acronyms`, elimina las `9` `shared_subjects` huérfanas, **preserva** la `shared_subject` compartida con el plan par, y valida la limpieza transaccional de carreras:
+     - Borrar el último plan de una carrera `'draft'` (`"Ingeniería Ficticia"`) elimina también la carrera `'draft'` vacía.
+     - En una carrera `'draft'` con `2` planes, borrar el primero conserva la carrera y borrar el segundo la elimina.
+     - En una carrera `'published'` cuyo único plan `draft` se borra, se elimina el plan pero la carrera `'published'` **no** se toca.
+   - **`finally` (limpieza segura y resumen de residuos):** borra todos los registros creados por el script tabla por tabla en orden seguro de claves foráneas (`acronyms`, `plan_special_rules`, `subject_prerequisites`, `subjects`, `shared_subjects`, `study_plans`, `careers`, `faculties`, `institutions`, `users`) usando `try/catch` aislado por tabla para que un fallo no bloquee al resto, **sin intentar borrar nunca `admin_audit_log`**. Imprime el resumen de residuos por tabla, informa las filas de auditoría del prefijo `__VERIFY_IMPORT_<runId>__` como `"resto esperado por diseño"`, y termina con código `0` únicamente si no quedan residuos distintos de la auditoría y todos los conteos globales vuelven a los iniciales.
 
 ---
 
@@ -167,4 +176,4 @@ Invoke-RestMethod -Uri "http://localhost:4000/api/catalog/plans/current" | Selec
    - Confirmá en **Diferencias sobre el draft existente** que muestra: **`Crear: 0 · Actualizar: 56 · Quitar: 0`**, y confirmá la re-importación verificando que no se duplicaron materias ni correlativas.
 8. **Comprobar botón `Publicar` deshabilitado y limpiar borrador:**
    - Verificá que **`Publicar`** figura visible pero **deshabilitado** con el aviso de que se habilitará en Tramo 2C/2D.
-   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado sin afectar el plan publicado de Sistemas.
+   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado (junto con la carrera `IIND` en estado `draft`, por ser su único plan, sin dejar carreras fantasma y dejando el código libre para reimportar) sin afectar el plan publicado de Sistemas.
