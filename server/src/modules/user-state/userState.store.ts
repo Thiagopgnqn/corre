@@ -17,7 +17,7 @@ import {
 } from '../../db/schema.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
 import { findDefaultPublishedPlan, isValidUuid } from '../catalog/catalog.helpers.js';
-import { LibraryService } from '../library/library.service.js';
+import { getActiveLibraryService, getLibraryService } from '../library/library.service.js';
 import { defaultReviewsStore } from '../reviews/reviews.store.js';
 import {
   DEFAULT_PLAN_SETTINGS,
@@ -1059,7 +1059,7 @@ export class DrizzleUserStateStore implements UserStateStore {
   }
 
   async deleteAccount(userId: string, deleteFiles: boolean): Promise<void> {
-    const libraryService = new LibraryService();
+    const libraryService = getLibraryService();
     await libraryService.handleAccountDeletion(userId, deleteFiles);
 
     const affectedProfessorIds = await defaultReviewsStore.getAffectedProfessorIdsByUser(userId);
@@ -1542,7 +1542,11 @@ export class InMemoryUserStateStore implements UserStateStore {
     return { progressCount, electivesCount, basketCount, proposalsCount };
   }
 
-  async deleteAccount(userId: string, _deleteFiles: boolean): Promise<void> {
+  async deleteAccount(userId: string, deleteFiles: boolean): Promise<void> {
+    const activeLib = getActiveLibraryService();
+    if (activeLib) {
+      await activeLib.handleAccountDeletion(userId, deleteFiles);
+    }
     this.deletedUsers.add(userId);
     this.usersPlan.delete(userId);
     this.settings.delete(userId);

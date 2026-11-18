@@ -36,7 +36,7 @@ import { verifyGoogleCredential } from '../auth/googleAuth.service.js';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { hashVerificationCode, computeCanonicalEmail } from '../auth/auth.service.js';
 import { invalidateUserStatusCache, getUserLiveStatus } from '../../middlewares/auth.middleware.js';
-import { LibraryService } from '../library/library.service.js';
+import { getLibraryService } from '../library/library.service.js';
 import { findDefaultPublishedPlan } from '../catalog/catalog.helpers.js';
 
 // Cache de estadísticas en memoria (TTL 60 segundos) (Ajuste 2)
@@ -1026,7 +1026,7 @@ export class AdminService {
     }
 
     // Ajuste 1: Gestionar archivos en R2 (eliminar o desvincular con uploader_user_id = null)
-    const libraryService = new LibraryService();
+    const libraryService = getLibraryService();
     await libraryService.handleAccountDeletion(targetUserId, deleteFiles);
 
     await db.transaction(async (tx) => {

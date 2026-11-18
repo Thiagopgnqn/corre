@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { hash, verify, Algorithm } from '@node-rs/argon2';
 import jwt from 'jsonwebtoken';
-import { eq, and, isNull, gte, lte, desc, or } from 'drizzle-orm';
+import { eq, and, isNull, gte, lte, desc, or, count } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   users,
@@ -9,6 +9,7 @@ import {
   userSettings,
   userIdentities,
   emailVerificationCodes,
+  libraryFiles,
   subjectProgress,
   electiveAssignments,
   professorReviews,
@@ -151,11 +152,29 @@ function generateTokens(payload: {
 export const MIGRATION_0003_CUTOFF = new Date(1793410567201); // 2026-10-31T01:36:07.201Z
 
 let customDataChecker: ((userId: string) => Promise<boolean> | boolean) | null = null;
+let customLibraryFileCountChecker: ((userId: string) => Promise<number> | number) | null = null;
 
 export function setUserDataCheckerForTesting(
   fn: ((userId: string) => Promise<boolean> | boolean) | null
 ) {
   customDataChecker = fn;
+}
+
+export function setLibraryFileCountCheckerForTesting(
+  fn: ((userId: string) => Promise<number> | number) | null
+) {
+  customLibraryFileCountChecker = fn;
+}
+
+export async function countUserAssociatedLibraryFiles(userId: string): Promise<number> {
+  if (customLibraryFileCountChecker) {
+    return Number(await customLibraryFileCountChecker(userId));
+  }
+  const [row] = await db
+    .select({ value: count() })
+    .from(libraryFiles)
+    .where(or(eq(libraryFiles.uploaderUserId, userId), eq(libraryFiles.reviewedBy, userId)));
+  return Number(row?.value ?? 0);
 }
 
 /**
@@ -215,6 +234,9 @@ export async function userHasAssociatedData(userId: string): Promise<boolean> {
     .where(eq(scheduleSelections.userId, userId))
     .limit(1);
   if (hasSelections) return true;
+
+  const libFilesCount = await countUserAssociatedLibraryFiles(userId);
+  if (libFilesCount > 0) return true;
 
   return false;
 }
@@ -922,11 +944,7 @@ export class AuthService {
    * Cancela el registro eliminando la cuenta no verificada para permitir cambiar el email
    */
   static async cancelRegistration(userId: string) {
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
+    const user = await getAuthStore().findUserById(userId);
 
     if (!user) {
       return { success: true, message: 'Cuenta no encontrada' };
@@ -935,6 +953,17 @@ export class AuthService {
     if (user.emailVerifiedAt !== null) {
       const err = new Error('No podés cancelar una cuenta que ya está verificada.');
       (err as any).status = 400;
+      throw err;
+    }
+
+    const associatedLibraryFiles = await countUserAssociatedLibraryFiles(userId);
+    if (associatedLibraryFiles > 0) {
+      const err = new Error(
+        `No se puede cancelar la cuenta porque tiene ${associatedLibraryFiles} archivo(s) de Biblioteca asociados.`
+      );
+      (err as any).status = 409;
+      (err as any).code = 'ACCOUNT_HAS_LIBRARY_FILES';
+      (err as any).details = { libraryFilesCount: associatedLibraryFiles };
       throw err;
     }
 
@@ -954,6 +983,8 @@ export class AuthService {
 
     let deletedCount = 0;
     for (const u of unverified) {
+      const hasData = await userHasAssociatedData(u.id);
+      if (hasData) continue;
       await db.delete(users).where(eq(users.id, u.id));
       deletedCount++;
     }

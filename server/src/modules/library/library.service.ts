@@ -3568,6 +3568,10 @@ export function getLibraryService(): ILibraryService {
   return new PgLibraryService();
 }
 
+export function getActiveLibraryService(): ILibraryService | null {
+  return activeLibraryService;
+}
+
 export function setLibraryServiceForTesting(service: ILibraryService | null): void {
   activeLibraryService = service;
   if (service && 'getPendingAdminFiles' in (service as any)) {
