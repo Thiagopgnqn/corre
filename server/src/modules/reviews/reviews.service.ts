@@ -1198,9 +1198,22 @@ export class ReviewsService {
   // OPERACIONES DE ADMINISTRACIÓN
   // ==========================================================================
 
-  async adminListProfessors(params: { adminUserId: string; planId?: string | null }) {
-    const ctx = await this.store.resolvePlanContext(params.adminUserId, params.planId);
-    const facultyId = ctx?.facultyId || (await this.store.getDefaultFacultyId());
+  async adminListProfessors(params: {
+    adminUserId: string;
+    planId?: string | null;
+    facultyId?: string | null;
+  }) {
+    let facultyId: string | null = params.facultyId || null;
+    if (!facultyId && params.planId) {
+      const explicitCtx = await this.store.getPlanContextById(params.planId);
+      if (!explicitCtx) {
+        throw appError('Plan de estudios no encontrado', 404, 'PLAN_NOT_FOUND');
+      }
+      facultyId = explicitCtx.facultyId;
+    }
+    if (!facultyId) {
+      facultyId = await this.store.getDefaultFacultyId();
+    }
     if (!facultyId) {
       return { professors: [], duplicateCandidates: [] };
     }
@@ -1234,26 +1247,71 @@ export class ReviewsService {
     adminUserId: string;
     displayName: string;
     facultyId?: string;
+    planId?: string;
     subjectId?: string | number;
     note?: string | null;
   }) {
-    const ctx = await this.store.resolvePlanContext(params.adminUserId);
-    const facultyId = params.facultyId || ctx?.facultyId || (await this.store.getDefaultFacultyId());
-    if (!facultyId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let explicitPlanCtx: { planId: string; facultyId: string } | null = null;
+    if (params.planId) {
+      explicitPlanCtx = await this.store.getPlanContextById(params.planId);
+      if (!explicitPlanCtx) {
+        throw appError('Plan de estudios no encontrado', 404, 'PLAN_NOT_FOUND');
+      }
+      if (params.facultyId && explicitPlanCtx.facultyId !== params.facultyId) {
+        throw appError('El plan indicado pertenece a otra facultad.', 400, 'FACULTY_MISMATCH');
+      }
+    }
+
+    let resolvedFacultyId: string | null = params.facultyId || explicitPlanCtx?.facultyId || null;
+    let linkedSubject: PlanSubjectRef | null = null;
+
+    if (params.subjectId !== undefined) {
+      if (typeof params.subjectId === 'string' && UUID_RE.test(params.subjectId)) {
+        const subCtx = await this.store.getSubjectWithPlanContextById(params.subjectId);
+        if (!subCtx) {
+          throw appError('Materia no encontrada para vincular al profesor histórico', 404);
+        }
+        if (params.planId && subCtx.planId !== params.planId) {
+          throw appError(
+            'La materia seleccionada no pertenece al plan indicado.',
+            400,
+            'SUBJECT_PLAN_MISMATCH'
+          );
+        }
+        if (params.facultyId && subCtx.facultyId !== params.facultyId) {
+          throw appError('La materia seleccionada pertenece a otra facultad.', 400, 'FACULTY_MISMATCH');
+        }
+        resolvedFacultyId = subCtx.facultyId;
+        linkedSubject = subCtx;
+      } else {
+        if (!params.planId || !explicitPlanCtx) {
+          throw appError(
+            'Indicá el plan (planId) o enviá el UUID de la materia para vincular al docente histórico.',
+            400,
+            'PLAN_ID_REQUIRED'
+          );
+        }
+        linkedSubject = await this.store.getSubjectByIdOrCode(params.planId, params.subjectId);
+        if (!linkedSubject) {
+          throw appError('Materia no encontrada para vincular al profesor histórico', 404);
+        }
+        resolvedFacultyId = params.facultyId || explicitPlanCtx.facultyId;
+      }
+    } else if (!resolvedFacultyId) {
+      resolvedFacultyId = await this.store.getDefaultFacultyId();
+    }
+
+    if (!resolvedFacultyId) {
       throw appError('No se encontró una facultad válida', 400);
     }
 
     const professor = await this.store.createOrResolveProfessor({
-      facultyId,
+      facultyId: resolvedFacultyId,
       displayName: params.displayName,
     });
 
-    let linkedSubject: PlanSubjectRef | null = null;
-    if (params.subjectId !== undefined && ctx) {
-      linkedSubject = await this.store.getSubjectByIdOrCode(ctx.planId, params.subjectId);
-      if (!linkedSubject) {
-        throw appError('Materia no encontrada para vincular al profesor histórico', 404);
-      }
+    if (linkedSubject) {
       await this.store.linkHistoricalSubject({
         professorId: professor.id,
         subjectId: linkedSubject.id,
@@ -1271,6 +1329,7 @@ export class ReviewsService {
   async adminLinkProfessorToSubject(params: {
     adminUserId: string;
     professorId: string;
+    planId?: string;
     subjectId: string | number;
     note?: string | null;
   }) {
@@ -1279,14 +1338,55 @@ export class ReviewsService {
       throw appError('Profesor no encontrado', 404);
     }
 
-    const ctx = await this.store.resolvePlanContext(params.adminUserId);
-    if (!ctx) {
-      throw appError('No hay plan de estudios activo', 400);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let explicitPlanCtx: { planId: string; facultyId: string } | null = null;
+    if (params.planId) {
+      explicitPlanCtx = await this.store.getPlanContextById(params.planId);
+      if (!explicitPlanCtx) {
+        throw appError('Plan de estudios no encontrado', 404, 'PLAN_NOT_FOUND');
+      }
+      if (explicitPlanCtx.facultyId !== prof.professor.facultyId) {
+        throw appError(
+          'El plan indicado pertenece a una facultad distinta a la del docente.',
+          400,
+          'FACULTY_MISMATCH'
+        );
+      }
     }
 
-    const subject = await this.store.getSubjectByIdOrCode(ctx.planId, params.subjectId);
-    if (!subject) {
-      throw appError('Materia no encontrada en el catálogo', 404);
+    let subject: PlanSubjectRef | null = null;
+    if (typeof params.subjectId === 'string' && UUID_RE.test(params.subjectId)) {
+      const subCtx = await this.store.getSubjectWithPlanContextById(params.subjectId);
+      if (!subCtx) {
+        throw appError('Materia no encontrada en el catálogo', 404);
+      }
+      if (params.planId && subCtx.planId !== params.planId) {
+        throw appError(
+          'La materia seleccionada no pertenece al plan indicado.',
+          400,
+          'SUBJECT_PLAN_MISMATCH'
+        );
+      }
+      if (subCtx.facultyId !== prof.professor.facultyId) {
+        throw appError(
+          'No podés vincular una materia de otra facultad a este docente.',
+          400,
+          'FACULTY_MISMATCH'
+        );
+      }
+      subject = subCtx;
+    } else {
+      if (!params.planId || !explicitPlanCtx) {
+        throw appError(
+          'Indicá el plan (planId) o enviá el UUID de la materia para vincular al docente.',
+          400,
+          'PLAN_ID_REQUIRED'
+        );
+      }
+      subject = await this.store.getSubjectByIdOrCode(params.planId, params.subjectId);
+      if (!subject) {
+        throw appError('Materia no encontrada en el catálogo', 404);
+      }
     }
 
     const link = await this.store.linkHistoricalSubject({

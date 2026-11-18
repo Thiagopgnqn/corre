@@ -401,6 +401,7 @@ async function main() {
       `/api/admin/professors/${histProfId}/subjects`,
       tokenAdmin,
       {
+        planId: store.defaultPlanId,
         subjectId: subjects[3].codeInPlan,
         note: 'Titular histórico cátedra 2022-2024',
       }
@@ -1449,6 +1450,125 @@ async function main() {
         catalogIsi?.id === revIsiMulti.id &&
         catalogIsi?.careerCode === 'ISI',
       'Reviews admin (/reports, /all y /api/admin/reviews) exponen metadatos carrera/plan y filtran por careerId/planId'
+    );
+
+    // -------------------------------------------------------------------------
+    // 13. TRAMO 2C PARTE D: DOCENTES DESDE ADMIN DESACOPLADOS DE selectedPlanId
+    // -------------------------------------------------------------------------
+    console.log('\n📌 13. Parte D: Crear/vincular docentes en planB con admin selectedPlanId=planA');
+    const facOtherId = crypto.randomUUID();
+    const pIndOtherFacId = crypto.randomUUID();
+    store.seedPlan(pIndOtherFacId, facOtherId, {
+      careerId: crypto.randomUUID(),
+      careerCode: 'IND-B',
+      careerName: 'Ingeniería Industrial Regional B',
+      planName: 'Plan 2023 Regional B',
+      facultyName: 'UTN FRBA',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const sIndOtherFac = store.seedSubject({
+      codeInPlan: 501,
+      name: 'Gestión de Calidad Regional B',
+      planId: pIndOtherFacId,
+    });
+    const sIndSameCodeAsIsi = store.seedSubject({
+      codeInPlan: subjects[0].codeInPlan,
+      name: 'Química General IND',
+      planId: pIndMultiId,
+    });
+
+    // Admin con selectedPlanId = pIsiMultiId (planA) crea docente directamente en pIndMultiId (planB)
+    const tokenAdminPlanA = makeToken({
+      ...adminUser,
+      selectedPlanId: pIsiMultiId,
+    });
+    store.seedUserPlan(adminUser.id, pIsiMultiId);
+
+    const createInPlanB = await api('POST', '/api/admin/professors', tokenAdminPlanA, {
+      displayName: 'Gomez, Industrial Docente',
+      planId: pIndMultiId,
+      subjectId: sIndSameCodeAsIsi.id,
+      note: 'Docente histórico de Industrial',
+    });
+    const createdProfBId = createInPlanB.data?.data?.professor?.id as string | undefined;
+    const isLinkedToIndSub =
+      createdProfBId &&
+      store.historicalLinks.some(
+        (l) => l.professorId === createdProfBId && l.subjectId === sIndSameCodeAsIsi.id
+      );
+    const isLinkedToIsiSub =
+      createdProfBId &&
+      store.historicalLinks.some(
+        (l) => l.professorId === createdProfBId && l.subjectId === subjects[0].id
+      );
+    assert(
+      createInPlanB.status === 201 &&
+        createInPlanB.data?.data?.linkedSubject?.id === sIndSameCodeAsIsi.id &&
+        Boolean(isLinkedToIndSub) &&
+        !isLinkedToIsiSub,
+      'POST /api/admin/professors con planId/subjectId de planB vincula en planB aunque el admin tenga selectedPlanId=planA'
+    );
+
+    // Vincular docente existente a materia de pIndMultiId por UUID sin usar selectedPlanId
+    const linkCrossPlan = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIndMultiId,
+        subjectId: sIndMulti.id,
+        note: 'Vínculo multiplan por UUID',
+      }
+    );
+    const profListPlanB = await api('GET', `/api/admin/professors?planId=${pIndOtherFacId}`, tokenAdminPlanA);
+
+    // Validaciones negativas: mismatch plan/materia (400), numeric sin planId (400), otra facultad (400)
+    const createPlanMismatch = await api('POST', '/api/admin/professors', tokenAdminPlanA, {
+      displayName: 'Mismatch, Docente',
+      planId: pIsiMultiId,
+      subjectId: sIndSameCodeAsIsi.id,
+    });
+    const linkPlanMismatch = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIsiMultiId,
+        subjectId: sIndMulti.id,
+      }
+    );
+    const linkNumericNoPlan = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        subjectId: 1,
+      }
+    );
+    const linkCrossFaculty = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIndOtherFacId,
+        subjectId: sIndOtherFac.id,
+      }
+    );
+
+    assert(
+      linkCrossPlan.status === 201 &&
+        linkCrossPlan.data?.data?.subject?.id === sIndMulti.id &&
+        profListPlanB.status === 200 &&
+        !(profListPlanB.data?.data?.professors || []).some((p: any) => p.id === profBotta1.id) &&
+        createPlanMismatch.status === 400 &&
+        linkPlanMismatch.status === 400 &&
+        linkNumericNoPlan.status === 400 &&
+        linkCrossFaculty.status === 400,
+      'POST /subjects vincula en planB, GET /professors?planId filtra por facultad y rechaza con 400 mismatch plan/materia, numérico sin planId o cruce de facultades',
+      `statuses=${linkCrossPlan.status}/${profListPlanB.status}/${createPlanMismatch.status}/${linkPlanMismatch.status}/${linkNumericNoPlan.status}/${linkCrossFaculty.status}`
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

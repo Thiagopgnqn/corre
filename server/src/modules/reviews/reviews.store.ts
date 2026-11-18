@@ -366,6 +366,10 @@ function formatYearMonth(date: Date): string {
 
 export interface ReviewsStore {
   resolvePlanContext(userId: string, requestedPlanId?: string | null): Promise<PlanContext | null>;
+  getPlanContextById(planId: string): Promise<PlanContext | null>;
+  getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null>;
   getDefaultFacultyId(): Promise<string | null>;
   getPlanSubjects(planId: string): Promise<PlanSubjectRef[]>;
   getSubjectByIdOrCode(planId: string, idOrCode: string | number): Promise<PlanSubjectRef | null>;
@@ -716,6 +720,43 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async getDefaultFacultyId(): Promise<string | null> {
     const [fac] = await db.select({ id: faculties.id }).from(faculties).limit(1);
     return fac?.id || null;
+  }
+
+  async getPlanContextById(planId: string): Promise<PlanContext | null> {
+    if (!this.isValidUuid(planId)) return null;
+    const [row] = await db
+      .select({
+        planId: studyPlans.id,
+        facultyId: careers.facultyId,
+      })
+      .from(studyPlans)
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .where(eq(studyPlans.id, planId))
+      .limit(1);
+    return row ? { planId: row.planId, facultyId: row.facultyId } : null;
+  }
+
+  async getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null> {
+    if (!this.isValidUuid(subjectId)) return null;
+    const [row] = await db
+      .select({
+        id: subjects.id,
+        planId: subjects.planId,
+        facultyId: careers.facultyId,
+        codeInPlan: subjects.codeInPlan,
+        name: subjects.name,
+        shortName: subjects.shortName,
+        level: subjects.level,
+        kind: subjects.kind,
+      })
+      .from(subjects)
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .where(eq(subjects.id, subjectId))
+      .limit(1);
+    return row || null;
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
@@ -3313,6 +3354,35 @@ export class InMemoryReviewsStore implements ReviewsStore {
 
   async getDefaultFacultyId(): Promise<string | null> {
     return this.defaultFacultyId;
+  }
+
+  async getPlanContextById(planId: string): Promise<PlanContext | null> {
+    if (this.planFaculties.has(planId)) {
+      return { planId, facultyId: this.planFaculties.get(planId)! };
+    }
+    const meta = this.planMetadata.get(planId);
+    if (meta) {
+      return { planId, facultyId: meta.facultyId };
+    }
+    if (planId === this.defaultPlanId) {
+      return { planId: this.defaultPlanId, facultyId: this.defaultFacultyId };
+    }
+    return null;
+  }
+
+  async getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null> {
+    const sub = this.subjectsMap.get(subjectId);
+    if (!sub) return null;
+    const facultyId =
+      this.planFaculties.get(sub.planId) ||
+      this.planMetadata.get(sub.planId)?.facultyId ||
+      this.defaultFacultyId;
+    return {
+      ...sub,
+      facultyId,
+    };
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
