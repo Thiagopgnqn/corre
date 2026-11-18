@@ -88,7 +88,28 @@ export const AdminReviewsTab: React.FC = () => {
 
   const [historicalModalOpen, setHistoricalModalOpen] = useState(false);
   const [historicalName, setHistoricalName] = useState('');
+  const [historicalCareerId, setHistoricalCareerId] = useState('');
+  const [historicalPlanId, setHistoricalPlanId] = useState('');
   const [historicalSubjectId, setHistoricalSubjectId] = useState('');
+  const [historicalNote, setHistoricalNote] = useState('');
+  const [historicalPlanSubjects, setHistoricalPlanSubjects] = useState<
+    Array<{ id: string; value: string; label: string }>
+  >([]);
+  const [isLoadingHistoricalSubjects, setIsLoadingHistoricalSubjects] = useState(false);
+
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+  const [linkCareerId, setLinkCareerId] = useState('');
+  const [linkPlanId, setLinkPlanId] = useState('');
+  const [linkProfessorId, setLinkProfessorId] = useState('');
+  const [linkSubjectId, setLinkSubjectId] = useState('');
+  const [linkNote, setLinkNote] = useState('');
+  const [linkPlanProfessors, setLinkPlanProfessors] = useState<
+    Array<{ id: string; facultyId: string; displayName: string; reviewCount: number }>
+  >([]);
+  const [linkPlanSubjects, setLinkPlanSubjects] = useState<
+    Array<{ id: string; value: string; label: string }>
+  >([]);
+  const [isLoadingLinkOptions, setIsLoadingLinkOptions] = useState(false);
 
   // Reauth Modal
   const [reauthOpen, setReauthOpen] = useState(false);
@@ -290,21 +311,157 @@ export const AdminReviewsTab: React.FC = () => {
     );
   };
 
+  const extractPlanSubjectOptionsFromDetail = useCallback((detail: any) => {
+    const bindingByCode = new Map<number, string>();
+    for (const b of detail?.adminMeta?.sharedSubjectBindings || []) {
+      if (typeof b?.codeInPlan === 'number' && typeof b?.subjectId === 'string') {
+        bindingByCode.set(b.codeInPlan, b.subjectId);
+      }
+    }
+    const combined = [...(detail?.subjects || []), ...(detail?.electivePool || [])];
+    const seen = new Set<string>();
+    const options: Array<{ id: string; value: string; label: string }> = [];
+    for (const s of combined) {
+      const code = Number(s.id);
+      const uuid = (typeof s.dbId === 'string' && s.dbId) || bindingByCode.get(code) || '';
+      const val = uuid || String(code);
+      if (!val || seen.has(val)) continue;
+      seen.add(val);
+      const display = s.displayCode || `#${code}`;
+      options.push({ id: val, value: val, label: `${display} - ${s.name}` });
+    }
+    return options;
+  }, []);
+
+  useEffect(() => {
+    if (!historicalModalOpen || !historicalPlanId) {
+      setHistoricalPlanSubjects([]);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingHistoricalSubjects(true);
+    adminApi
+      .getPlanDetail(historicalPlanId)
+      .then((res) => {
+        if (!cancelled && res.success && res.data) {
+          setHistoricalPlanSubjects(extractPlanSubjectOptionsFromDetail(res.data));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setHistoricalPlanSubjects([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingHistoricalSubjects(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [historicalModalOpen, historicalPlanId, extractPlanSubjectOptionsFromDetail]);
+
+  useEffect(() => {
+    if (!linkModalOpen || !linkPlanId) {
+      setLinkPlanProfessors([]);
+      setLinkPlanSubjects([]);
+      return;
+    }
+    let cancelled = false;
+    setIsLoadingLinkOptions(true);
+    Promise.all([
+      adminApi.listProfessors({ planId: linkPlanId }),
+      adminApi.getPlanDetail(linkPlanId),
+    ])
+      .then(([profRes, planRes]) => {
+        if (cancelled) return;
+        if (profRes.success && profRes.data) {
+          setLinkPlanProfessors(profRes.data.professors || []);
+        }
+        if (planRes.success && planRes.data) {
+          setLinkPlanSubjects(extractPlanSubjectOptionsFromDetail(planRes.data));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLinkPlanProfessors([]);
+          setLinkPlanSubjects([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingLinkOptions(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkModalOpen, linkPlanId, extractPlanSubjectOptionsFromDetail]);
+
+  const openHistoricalModal = () => {
+    const initialPlan =
+      (planFilter !== 'all' ? adminPlans.find((p) => p.id === planFilter) : undefined) ||
+      (careerFilter !== 'all' ? adminPlans.find((p) => p.careerId === careerFilter) : undefined) ||
+      adminPlans[0];
+    setHistoricalCareerId(initialPlan?.careerId || '');
+    setHistoricalPlanId(initialPlan?.id || '');
+    setHistoricalSubjectId('');
+    setHistoricalNote('');
+    setHistoricalModalOpen(true);
+  };
+
+  const openLinkModal = () => {
+    const initialPlan =
+      (planFilter !== 'all' ? adminPlans.find((p) => p.id === planFilter) : undefined) ||
+      (careerFilter !== 'all' ? adminPlans.find((p) => p.careerId === careerFilter) : undefined) ||
+      adminPlans[0];
+    setLinkCareerId(initialPlan?.careerId || '');
+    setLinkPlanId(initialPlan?.id || '');
+    setLinkProfessorId('');
+    setLinkSubjectId('');
+    setLinkNote('');
+    setLinkModalOpen(true);
+  };
+
   const handleCreateHistoricalSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!historicalName.trim()) return;
     try {
       const res = await adminApi.createHistoricalProfessor({
         displayName: historicalName.trim(),
+        planId: historicalPlanId || undefined,
         subjectId: historicalSubjectId || undefined,
+        note: historicalNote.trim() || undefined,
       });
       setSuccessMsg(`Docente histórico "${res.data.professor?.displayName || historicalName}" registrado.`);
       setHistoricalModalOpen(false);
       setHistoricalName('');
       setHistoricalSubjectId('');
+      setHistoricalNote('');
       loadDuplicates();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error al crear docente histórico.');
+    }
+  };
+
+  const handleLinkProfessorSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkProfessorId || !linkSubjectId) {
+      setErrorMsg('Seleccioná un docente y una materia del plan.');
+      return;
+    }
+    try {
+      const res = await adminApi.linkProfessorToSubject(linkProfessorId, {
+        planId: linkPlanId || undefined,
+        subjectId: linkSubjectId,
+        note: linkNote.trim() || undefined,
+      });
+      setSuccessMsg(
+        `Docente "${res.data?.professor?.displayName || 'seleccionado'}" vinculado a "${
+          res.data?.subject?.name || 'la materia'
+        }".`
+      );
+      setLinkModalOpen(false);
+      setLinkProfessorId('');
+      setLinkSubjectId('');
+      setLinkNote('');
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Error al vincular docente con la materia.');
     }
   };
 
@@ -421,14 +578,22 @@ export const AdminReviewsTab: React.FC = () => {
         )}
 
         {subTab === 'professors' && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
-              onClick={() => setHistoricalModalOpen(true)}
+              onClick={openHistoricalModal}
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
               <span>Docente Histórico</span>
+            </button>
+            <button
+              type="button"
+              onClick={openLinkModal}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-200 border border-cyan-500/25 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Vincular Docente a Materia</span>
             </button>
             <button
               type="button"
@@ -990,20 +1155,83 @@ export const AdminReviewsTab: React.FC = () => {
                 />
               </div>
 
+              {adminPlans.length > 0 && (
+                <>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Carrera</label>
+                    <select
+                      aria-label="Carrera del docente histórico"
+                      value={historicalCareerId}
+                      onChange={(e) => {
+                        const nextCareer = e.target.value;
+                        setHistoricalCareerId(nextCareer);
+                        const firstPlan = adminPlans.find((p) => p.careerId === nextCareer);
+                        setHistoricalPlanId(firstPlan?.id || '');
+                        setHistoricalSubjectId('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      {adminCareers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code} · {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Plan de Estudio</label>
+                    <select
+                      aria-label="Plan del docente histórico"
+                      value={historicalPlanId}
+                      onChange={(e) => {
+                        setHistoricalPlanId(e.target.value);
+                        setHistoricalSubjectId('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">Seleccionar plan...</option>
+                      {adminPlans
+                        .filter((p) => !historicalCareerId || p.careerId === historicalCareerId)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.careerCode} · {p.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Materia Asociada</label>
                 <select
+                  aria-label="Materia del docente histórico"
                   value={historicalSubjectId}
                   onChange={(e) => setHistoricalSubjectId(e.target.value)}
+                  disabled={isLoadingHistoricalSubjects}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="">Seleccionar materia...</option>
-                  {subjectOptions.map((s) => (
+                  <option value="">
+                    {isLoadingHistoricalSubjects ? 'Cargando materias...' : 'Seleccionar materia...'}
+                  </option>
+                  {(historicalPlanId ? historicalPlanSubjects : subjectOptions).map((s) => (
                     <option key={s.id} value={s.value}>
                       {s.label}
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Observación (opcional)</label>
+                <input
+                  type="text"
+                  value={historicalNote}
+                  onChange={(e) => setHistoricalNote(e.target.value)}
+                  placeholder="Ej: Titular ciclo 2022"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                />
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -1019,6 +1247,139 @@ export const AdminReviewsTab: React.FC = () => {
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl"
                 >
                   Crear Docente
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Link Professor to Subject (Multi-Plan) ── */}
+      {linkModalOpen && (
+        <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-100">
+            <h3 className="text-base font-bold text-white mb-2">Vincular Docente a Materia</h3>
+            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+              Seleccioná la carrera, plan y materia explícita donde dicta o dictó el docente, sin depender de tu plan activo.
+            </p>
+
+            <form onSubmit={handleLinkProfessorSubmit} className="space-y-4 text-xs">
+              {adminPlans.length > 0 && (
+                <>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Carrera</label>
+                    <select
+                      aria-label="Carrera para vincular docente"
+                      value={linkCareerId}
+                      onChange={(e) => {
+                        const nextCareer = e.target.value;
+                        setLinkCareerId(nextCareer);
+                        const firstPlan = adminPlans.find((p) => p.careerId === nextCareer);
+                        setLinkPlanId(firstPlan?.id || '');
+                        setLinkProfessorId('');
+                        setLinkSubjectId('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      {adminCareers.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code} · {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Plan de Estudio</label>
+                    <select
+                      aria-label="Plan para vincular docente"
+                      value={linkPlanId}
+                      onChange={(e) => {
+                        setLinkPlanId(e.target.value);
+                        setLinkProfessorId('');
+                        setLinkSubjectId('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">Seleccionar plan...</option>
+                      {adminPlans
+                        .filter((p) => !linkCareerId || p.careerId === linkCareerId)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.careerCode} · {p.name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Docente</label>
+                <select
+                  aria-label="Docente a vincular"
+                  required
+                  value={linkProfessorId}
+                  onChange={(e) => setLinkProfessorId(e.target.value)}
+                  disabled={isLoadingLinkOptions}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">
+                    {isLoadingLinkOptions ? 'Cargando docentes...' : 'Seleccionar docente...'}
+                  </option>
+                  {linkPlanProfessors.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.displayName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Materia</label>
+                <select
+                  aria-label="Materia para vincular"
+                  required
+                  value={linkSubjectId}
+                  onChange={(e) => setLinkSubjectId(e.target.value)}
+                  disabled={isLoadingLinkOptions}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">
+                    {isLoadingLinkOptions ? 'Cargando materias...' : 'Seleccionar materia...'}
+                  </option>
+                  {(linkPlanId ? linkPlanSubjects : subjectOptions).map((s) => (
+                    <option key={s.id} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Observación (opcional)</label>
+                <input
+                  type="text"
+                  value={linkNote}
+                  onChange={(e) => setLinkNote(e.target.value)}
+                  placeholder="Ej: Adjunto comisión noche"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setLinkModalOpen(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-semibold rounded-xl"
+                >
+                  Vincular Materia
                 </button>
               </div>
             </form>

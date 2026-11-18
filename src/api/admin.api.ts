@@ -388,8 +388,47 @@ export const adminApi = {
     });
   },
 
-  async createHistoricalProfessor(payload: { displayName: string; subjectId?: string }): Promise<{ success: boolean; data: any }> {
+  async listProfessors(params?: {
+    planId?: string;
+    facultyId?: string;
+  }): Promise<{
+    success: boolean;
+    data: {
+      professors: Array<{
+        id: string;
+        facultyId: string;
+        displayName: string;
+        normalizedKey: string;
+        reviewCount: number;
+      }>;
+      duplicateCandidates: any[];
+    };
+  }> {
+    const qs = new URLSearchParams();
+    if (params?.planId) qs.set('planId', params.planId);
+    if (params?.facultyId) qs.set('facultyId', params.facultyId);
+    const query = qs.toString();
+    return apiFetch(`/api/admin/professors${query ? `?${query}` : ''}`);
+  },
+
+  async createHistoricalProfessor(payload: {
+    displayName: string;
+    facultyId?: string;
+    planId?: string;
+    subjectId?: string;
+    note?: string;
+  }): Promise<{ success: boolean; data: any }> {
     return apiFetch('/api/admin/professors', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async linkProfessorToSubject(
+    professorId: string,
+    payload: { planId?: string; subjectId: string | number; note?: string }
+  ): Promise<{ success: boolean; data: any }> {
+    return apiFetch(`/api/admin/professors/${encodeURIComponent(professorId)}/subjects`, {
       method: 'POST',
       body: JSON.stringify(payload),
     });

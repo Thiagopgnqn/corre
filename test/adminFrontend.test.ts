@@ -542,6 +542,8 @@ console.log('📌 8. Tramo 2C Parte C: Filtros careerId/planId en clientes API y
   assert.equal(typeof adminLibraryApi.getCatalog, 'function');
   assert.equal(typeof professorsApi.adminGetModerationQueue, 'function');
   assert.equal(typeof adminApi.listReviews, 'function');
+  assert.equal(typeof adminApi.listProfessors, 'function');
+  assert.equal(typeof adminApi.linkProfessorToSubject, 'function');
 
   const testDir = path.dirname(fileURLToPath(import.meta.url));
   const libTabSrc = fs.readFileSync(
@@ -561,8 +563,12 @@ console.log('📌 8. Tramo 2C Parte C: Filtros careerId/planId en clientes API y
   assert.match(revTabSrc, /Filtrar por plan/);
   assert.match(revTabSrc, /formatCareerPlanBadge/);
   assert.match(revTabSrc, /adminApi\s*\n?\s*\.listPlans\(\)/);
+  assert.match(revTabSrc, /Vincular Docente a Materia/);
+  assert.match(revTabSrc, /adminApi\.getPlanDetail/);
+  assert.match(revTabSrc, /adminApi\.linkProfessorToSubject/);
+  assert.match(revTabSrc, /adminApi\.listProfessors/);
 
-  console.log('  ✅ Filtros multi-plan y badges carrera/plan verificados en AdminLibraryTab y AdminReviewsTab');
+  console.log('  ✅ Filtros multi-plan, badges y gestión docente desacoplada de selectedPlanId verificados');
 }
 
 console.log('\n======================================================================');
