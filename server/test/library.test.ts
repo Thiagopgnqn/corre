@@ -610,12 +610,22 @@ async function main() {
     updatedAt: new Date(),
   });
 
-  // Alumno 2 se da de baja con deleteFiles = false (preservar para la comunidad)
+  // Alumno 2 se da de baja con deleteFiles = false (preservar para la comunidad, 0 llamadas a R2)
+  const r2DeleteSpyCalls: string[] = [];
+  const origR2Delete = mockR2.deleteObject.bind(mockR2);
+  mockR2.deleteObject = async (key: string) => {
+    r2DeleteSpyCalls.push(key);
+    return origR2Delete(key);
+  };
   await libraryStore.handleAccountDeletion(student2Id, false);
   const preservedFile = libraryStore.files.get('file-community');
   assert(preservedFile !== undefined, 'Archivo se preserva en el catálogo si deleteFiles: false');
   assert(preservedFile.uploaderUserId === null, 'La autoría se desvincula fijando uploaderUserId = null');
   assert(mockR2.hasObjectDirect(fileKeepKey), 'El objeto en R2 permanece activo');
+  assert(
+    r2DeleteSpyCalls.length === 0,
+    'handleAccountDeletion(..., false) realiza 0 llamadas a r2.deleteObject'
+  );
 
   // Alumno 3 se da de baja con deleteFiles = true
   const fileDeleteKey = 'library/to-delete.pdf';
@@ -635,6 +645,11 @@ async function main() {
   await libraryStore.handleAccountDeletion(student3Id, true);
   assert(!libraryStore.files.has('file-delete-user'), 'Archivo eliminado de la base si deleteFiles: true');
   assert(!mockR2.hasObjectDirect(fileDeleteKey), 'Objeto eliminado físicamente de R2 si deleteFiles: true');
+  assert(
+    r2DeleteSpyCalls.length === 1 && r2DeleteSpyCalls[0] === fileDeleteKey,
+    'handleAccountDeletion(..., true) invoca r2.deleteObject solo para los archivos propios del usuario'
+  );
+  mockR2.deleteObject = origR2Delete;
 
   // ---------------------------------------------------------------------------
   // 14. SISTEMA DE NOTIFICACIONES POR CORREO ELECTRÓNICO (BIBLIOTECA)

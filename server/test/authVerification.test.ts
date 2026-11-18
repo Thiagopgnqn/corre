@@ -25,6 +25,8 @@ async function main() {
     AuthService,
     userHasAssociatedData,
     setUserDataCheckerForTesting,
+    countUserAssociatedLibraryFiles,
+    setLibraryFileCountCheckerForTesting,
     MIGRATION_0003_CUTOFF,
   } = await import('../src/modules/auth/auth.service.js');
   const { isDisposableEmail } = await import('../src/config/disposableDomains.js');
@@ -843,6 +845,44 @@ async function main() {
     'userHasAssociatedData: Detecta correctamente presencia y ausencia de datos del usuario'
   );
   setUserDataCheckerForTesting(null);
+
+  // Parte B: cancelRegistration bloquea con 409 ACCOUNT_HAS_LIBRARY_FILES si hay archivos de Biblioteca
+  const cancelMemStore = new InMemoryAuthStore();
+  setAuthStoreForTesting(cancelMemStore);
+  const unverifiedWithFilesId = '00000000-0000-4000-8000-000000000771';
+  cancelMemStore.seedUser({
+    id: unverifiedWithFilesId,
+    email: 'cancel.files@gmail.com',
+    canonicalEmail: 'cancelfiles@gmail.com',
+    passwordHash: 'hash',
+    role: 'user',
+    status: 'active',
+    selectedPlanId: null,
+    emailVerifiedAt: null,
+    lastLoginAt: null,
+    createdAt: new Date(),
+  });
+  setLibraryFileCountCheckerForTesting((uid) => (uid === unverifiedWithFilesId ? 3 : 0));
+  let cancelErrStatus = 0;
+  let cancelErrCode = '';
+  let cancelErrCount = 0;
+  try {
+    await AuthService.cancelRegistration(unverifiedWithFilesId);
+  } catch (err: any) {
+    cancelErrStatus = err?.status ?? 0;
+    cancelErrCode = err?.code ?? '';
+    cancelErrCount = err?.details?.libraryFilesCount ?? 0;
+  }
+  const detectedLibCount = await countUserAssociatedLibraryFiles(unverifiedWithFilesId);
+  setLibraryFileCountCheckerForTesting(null);
+  setAuthStoreForTesting(null);
+  assert(
+    detectedLibCount === 3 &&
+      cancelErrStatus === 409 &&
+      cancelErrCode === 'ACCOUNT_HAS_LIBRARY_FILES' &&
+      cancelErrCount === 3,
+    'AuthService.cancelRegistration bloquea con 409 ACCOUNT_HAS_LIBRARY_FILES e informa la cantidad cuando la cuenta tiene archivos de Biblioteca'
+  );
 
   // Intentar login con contraseña en cuenta creada únicamente con Google
   const googleOnlyUser = mockUsersTable.find((u) => u.email === 'nuevo.estudiante@gmail.com');

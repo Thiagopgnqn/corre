@@ -1187,8 +1187,28 @@ async function runTests(): Promise<void> {
       'Bloquea con 409 PLAN_NOT_DRAFT cualquier intento de re-importar sobre un plan archived'
     );
 
-    // Referencia en Biblioteca impide quitar materia (y eliminar el plan borrador)
-    store.libraryFileRefs.push({ subjectId: newCode103Sub!.id, sourcePlanId: importedPlanId });
+    // Referencia en Biblioteca impide quitar materia (y eliminar el plan borrador) sin tocar R2
+    const spyR2DeleteCalls: string[] = [];
+    const {
+      InMemoryLibraryService,
+      setLibraryServiceForTesting,
+    } = await import('../src/modules/library/library.service.js');
+    const spyR2 = {
+      deleteObject: async (key: string) => {
+        spyR2DeleteCalls.push(key);
+        return true;
+      },
+      getPresignedUploadUrl: async () => 'https://example.invalid',
+      getPresignedDownloadUrl: async () => 'https://example.invalid',
+      headObject: async () => ({ exists: true, contentLength: 1 }),
+      getObjectStream: async () => null as any,
+    };
+    setLibraryServiceForTesting(new InMemoryLibraryService(spyR2 as any));
+
+    store.libraryFileRefs.push(
+      { subjectId: newCode103Sub!.id, sourcePlanId: importedPlanId },
+      { subjectId: newCode103Sub!.id, sourceSubjectId: newCode103Sub!.id, sourcePlanId: importedPlanId }
+    );
 
     const blockedRemovalPreview = await apiRequest({
       method: 'POST',
@@ -1221,9 +1241,15 @@ async function runTests(): Promise<void> {
     assert(
       blockedRemovalPreview.status === 200 &&
         JSON.stringify(blockedRemovalPreview.data?.data?.draftDiff?.blockedRemovalCodes) === '[103]' &&
+        (blockedRemovalPreview.data?.data?.errors || []).some(
+          (e: any) => typeof e.message === 'string' && e.message.includes('2 archivo(s) de Biblioteca')
+        ) &&
         blockedRemovalConfirm.status === 409 &&
-        blockedRemovalConfirm.data?.code === 'DRAFT_SUBJECT_REMOVAL_BLOCKED',
-      'Bloquea quitar una materia del draft (409 DRAFT_SUBJECT_REMOVAL_BLOCKED) si tiene referencias en Biblioteca'
+        blockedRemovalConfirm.data?.code === 'DRAFT_SUBJECT_REMOVAL_BLOCKED' &&
+        blockedRemovalConfirm.data?.details?.libraryFilesCount === 2 &&
+        String(blockedRemovalConfirm.data?.error || '').includes('2 archivo(s) de Biblioteca') &&
+        spyR2DeleteCalls.length === 0,
+      'Bloquea quitar una materia del draft (409 DRAFT_SUBJECT_REMOVAL_BLOCKED) con conteo exacto de Biblioteca y 0 llamadas a R2'
     );
 
     const blockDeleteRes = await apiRequest({
@@ -1233,9 +1259,14 @@ async function runTests(): Promise<void> {
       reauth: reauthToken,
     });
     assert(
-      blockDeleteRes.status === 409 && blockDeleteRes.data?.code === 'PLAN_DELETE_HAS_REFERENCES',
-      'DELETE /api/admin/plans/:id bloquea con 409 cuando hay registros asociados (library_files, etc.)'
+      blockDeleteRes.status === 409 &&
+        blockDeleteRes.data?.code === 'PLAN_DELETE_HAS_REFERENCES' &&
+        blockDeleteRes.data?.details?.libraryFilesCount === 2 &&
+        String(blockDeleteRes.data?.error || '').includes('2 archivo(s) de Biblioteca') &&
+        spyR2DeleteCalls.length === 0,
+      'DELETE /api/admin/plans/:id bloquea con 409 PLAN_DELETE_HAS_REFERENCES indicando cantidad exacta de Biblioteca y 0 llamadas a R2'
     );
+    setLibraryServiceForTesting(null);
 
     const blockPublishedDelete = await apiRequest({
       method: 'DELETE',
@@ -2109,6 +2140,29 @@ async function runTests(): Promise<void> {
         !isPlanImportLocked() &&
         recoveryPreviewRes.status === 200,
       'Fallo inesperado (500) dentro de POST /api/admin/plans/preview libera el lock y permite importar nuevamente sin 409'
+    );
+
+    // Migración 0016 y schema.ts: library_files(subject_id) -> subjects(id) con ON DELETE restrict
+    const testDirPath = path.dirname(fileURLToPath(import.meta.url));
+    const sql0016Path = path.resolve(testDirPath, '../drizzle/0016_library_files_restrict_delete.sql');
+    const sql0016 = fs.readFileSync(sql0016Path, 'utf-8');
+    const schemaSrc = fs.readFileSync(
+      path.resolve(testDirPath, '../src/db/schema.ts'),
+      'utf-8'
+    );
+    const libFilesBlockMatch = schemaSrc.match(
+      /export const libraryFiles = pgTable\([\s\S]*?\n\);/
+    );
+    const libFilesBlock = libFilesBlockMatch?.[0] ?? '';
+    assert(
+      !sql0016.includes('\r\n') &&
+        sql0016.includes('DROP CONSTRAINT') &&
+        sql0016.includes('ON DELETE restrict') &&
+        sql0016.includes('library_files_subject_id_subjects_id_fk') &&
+        /subjectId:\s*uuid\('subject_id'\)\s*\.notNull\(\)\s*\.references\(\(\)\s*=>\s*subjects\.id,\s*\{\s*onDelete:\s*'restrict'\s*\}\)/.test(
+          libFilesBlock
+        ),
+      'Migración 0016 (LF) y schema.ts protegen library_files.subject_id con ON DELETE restrict'
     );
   } finally {
     setPlanImportStoreForTesting(null);

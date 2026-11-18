@@ -858,8 +858,10 @@ async function main() {
 
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 15 && lastJournalEntry?.tag === '0015_user_state_composite_keys',
-    'meta/_journal.json registra 0015_user_state_composite_keys como última entrada'
+    lastJournalEntry?.idx === 16 &&
+      lastJournalEntry?.tag === '0016_library_files_restrict_delete' &&
+      lastJournalEntry?.when === 1793760000000,
+    'meta/_journal.json registra 0016_library_files_restrict_delete como última entrada'
   );
 
   // 1f. Integridad global de _journal.json y simulación exacta de drizzle-orm migrate
@@ -935,7 +937,7 @@ async function main() {
     return pending;
   };
 
-  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0015 en orden
+  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0016 en orden
   const prod0007 = journalEntries.find((e) => e.idx === 7);
   const pendingFromProd = simulateDrizzlePending(
     journalEntries,
@@ -953,12 +955,13 @@ async function main() {
           '0013_isi_plan_intermediate_and_pps_copy',
           '0014_subject_display_code',
           '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
         ]),
-    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0015 en orden',
+    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0016 en orden',
     `pendientes=${JSON.stringify(pendingFromProd)}`
   );
 
-  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0015 en orden
+  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0016 en orden
   const trial0010 = journalEntries.find((e) => e.idx === 10);
   const pendingFromTrial0010 = simulateDrizzlePending(
     journalEntries,
@@ -973,12 +976,13 @@ async function main() {
           '0013_isi_plan_intermediate_and_pps_copy',
           '0014_subject_display_code',
           '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
         ]),
-    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0015 en orden',
+    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0016 en orden',
     `pendientes=${JSON.stringify(pendingFromTrial0010)}`
   );
 
-  // (d2) Producción Etapa 1 en 0013 (when = 1793730000000) -> pendientes 0014 y 0015
+  // (d2) Producción Etapa 1 en 0013 (when = 1793730000000) -> pendientes 0014..0016
   const prod0013 = journalEntries.find((e) => e.idx === 13);
   const pendingFromProd0013 = simulateDrizzlePending(
     journalEntries,
@@ -992,10 +996,18 @@ async function main() {
   assert(
     prod0013?.when === 1793730000000 &&
       JSON.stringify(pendingFromProd0013) ===
-        JSON.stringify(['0014_subject_display_code', '0015_user_state_composite_keys']) &&
+        JSON.stringify([
+          '0014_subject_display_code',
+          '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
+        ]) &&
       branch0014?.when === 1793740000000 &&
-      JSON.stringify(pendingFrom0014) === JSON.stringify(['0015_user_state_composite_keys']),
-    '(d2) Simulación drizzle-orm desde 0013 aplica 0014..0015 y desde 0014 aplica únicamente 0015_user_state_composite_keys',
+      JSON.stringify(pendingFrom0014) ===
+        JSON.stringify([
+          '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
+        ]),
+    '(d2) Simulación drizzle-orm desde 0013 aplica 0014..0016 y desde 0014 aplica 0015 y 0016 en orden',
     `desde0013=${JSON.stringify(pendingFromProd0013)} desde0014=${JSON.stringify(pendingFrom0014)}`
   );
 
@@ -1004,7 +1016,7 @@ async function main() {
   assert(
     pendingFromEmpty.length === journalEntries.length &&
       JSON.stringify(pendingFromEmpty) === JSON.stringify(journalEntries.map((e) => e.tag)),
-    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0015)',
+    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0016)',
     `pendientes=${JSON.stringify(pendingFromEmpty)}`
   );
 

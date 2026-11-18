@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { z } from 'zod';
-import { and, count, eq, inArray, ne } from 'drizzle-orm';
+import { and, count, eq, inArray, ne, or } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   acronyms,
@@ -255,6 +255,8 @@ export interface AdminPlanAuditSummaryEntry {
 export interface ReferenceBlockersSummary {
   planLevelReferences: Record<string, number>;
   subjectLevelReferences: Map<string, number>;
+  libraryFilesCount: number;
+  subjectLibraryFilesCount: Map<string, number>;
   totalBlockers: number;
 }
 
@@ -717,12 +719,44 @@ class DrizzlePlanImportTxContext implements PlanImportTxContext {
     };
 
     const subjectLevelReferences = new Map<string, number>();
+    const subjectLibraryFilesCount = new Map<string, number>();
     let subjectTotal = 0;
+
+    const libConditions = [eq(libraryFiles.sourcePlanId, planId)];
+    if (subjectIds.length > 0) {
+      libConditions.push(inArray(libraryFiles.subjectId, subjectIds));
+      libConditions.push(inArray(libraryFiles.sourceSubjectId, subjectIds));
+    }
+    const matchedLibRows: Array<{
+      id: string;
+      subjectId: string | null;
+      sourceSubjectId: string | null;
+    }> = await this.tx
+      .select({
+        id: libraryFiles.id,
+        subjectId: libraryFiles.subjectId,
+        sourceSubjectId: libraryFiles.sourceSubjectId,
+      })
+      .from(libraryFiles)
+      .where(libConditions.length === 1 ? libConditions[0] : or(...libConditions));
+
+    const libraryFilesCount = matchedLibRows.length;
+    const subjectIdSet = new Set(subjectIds);
+    for (const row of matchedLibRows) {
+      const matchedSubsForRow = new Set<string>();
+      if (row.subjectId && subjectIdSet.has(row.subjectId)) matchedSubsForRow.add(row.subjectId);
+      if (row.sourceSubjectId && subjectIdSet.has(row.sourceSubjectId)) {
+        matchedSubsForRow.add(row.sourceSubjectId);
+      }
+      for (const sid of matchedSubsForRow) {
+        subjectLibraryFilesCount.set(sid, (subjectLibraryFilesCount.get(sid) ?? 0) + 1);
+        subjectLevelReferences.set(sid, (subjectLevelReferences.get(sid) ?? 0) + 1);
+        subjectTotal += 1;
+      }
+    }
 
     if (subjectIds.length > 0) {
       const refTables: Array<{ table: any; col: any }> = [
-        { table: libraryFiles, col: libraryFiles.subjectId },
-        { table: libraryFiles, col: libraryFiles.sourceSubjectId },
         { table: subjectProgress, col: subjectProgress.subjectId },
         { table: electiveAssignments, col: electiveAssignments.subjectId },
         { table: userBasket, col: userBasket.subjectId },
@@ -753,7 +787,9 @@ class DrizzlePlanImportTxContext implements PlanImportTxContext {
     return {
       planLevelReferences,
       subjectLevelReferences,
-      totalBlockers: planTotal + subjectTotal,
+      libraryFilesCount,
+      subjectLibraryFilesCount,
+      totalBlockers: Math.max(planTotal + subjectTotal, libraryFilesCount),
     };
   }
 
@@ -1241,14 +1277,22 @@ export class InMemoryPlanImportStore implements PlanImportStore {
     };
     const subSet = new Set(subjectIds);
     const subjectLevelReferences = new Map<string, number>();
+    const subjectLibraryFilesCount = new Map<string, number>();
+    let libraryFilesCount = 0;
     let subTotal = 0;
 
     for (const f of this.libraryFileRefs) {
-      for (const sid of [f.subjectId, f.sourceSubjectId]) {
-        if (sid && subSet.has(sid)) {
-          subjectLevelReferences.set(sid, (subjectLevelReferences.get(sid) ?? 0) + 1);
-          subTotal += 1;
-        }
+      const matchesPlan = f.sourcePlanId === planId;
+      const matchedSubsForRow = new Set<string>();
+      if (f.subjectId && subSet.has(f.subjectId)) matchedSubsForRow.add(f.subjectId);
+      if (f.sourceSubjectId && subSet.has(f.sourceSubjectId)) matchedSubsForRow.add(f.sourceSubjectId);
+      if (matchesPlan || matchedSubsForRow.size > 0) {
+        libraryFilesCount += 1;
+      }
+      for (const sid of matchedSubsForRow) {
+        subjectLibraryFilesCount.set(sid, (subjectLibraryFilesCount.get(sid) ?? 0) + 1);
+        subjectLevelReferences.set(sid, (subjectLevelReferences.get(sid) ?? 0) + 1);
+        subTotal += 1;
       }
     }
     for (const sid of this.subjectProgressSubjectIds) {
@@ -1262,7 +1306,9 @@ export class InMemoryPlanImportStore implements PlanImportStore {
     return {
       planLevelReferences,
       subjectLevelReferences,
-      totalBlockers: planTotal + subTotal,
+      libraryFilesCount,
+      subjectLibraryFilesCount,
+      totalBlockers: Math.max(planTotal + subTotal, libraryFilesCount),
     };
   }
 
@@ -1909,15 +1955,22 @@ export async function previewPlanImport(
           targetCtx.existingPlan.id,
           toRemoveSubs.map((s) => s.id)
         );
-        blockedRemovalCodes = toRemoveSubs
-          .filter((s) => (refs.subjectLevelReferences.get(s.id) ?? 0) > 0)
-          .map((s) => s.codeInPlan);
+        const blockedSubs = toRemoveSubs.filter((s) => (refs.subjectLevelReferences.get(s.id) ?? 0) > 0);
+        blockedRemovalCodes = blockedSubs.map((s) => s.codeInPlan);
 
         if (blockedRemovalCodes.length > 0) {
+          const blockedLibFilesCount = blockedSubs.reduce(
+            (acc, s) => acc + (refs.subjectLibraryFilesCount.get(s.id) ?? 0),
+            0
+          );
+          const libDetail =
+            blockedLibFilesCount > 0
+              ? ` (${blockedLibFilesCount} archivo(s) de Biblioteca vinculados)`
+              : '';
           errors.push({
             sheet: 'Materias',
             row: 0,
-            message: `No se pueden eliminar las materias ${blockedRemovalCodes.join(', ')} porque ya tienen referencias activas (Biblioteca, cursadas, reseñas u horarios).`,
+            message: `No se pueden eliminar las materias ${blockedRemovalCodes.join(', ')} porque ya tienen referencias activas (Biblioteca, cursadas, reseñas u horarios)${libDetail}.`,
           });
         }
       }
@@ -2127,10 +2180,22 @@ export async function confirmPlanImport(params: {
         );
         const blocked = toRemoveSubs.filter((s) => (refs.subjectLevelReferences.get(s.id) ?? 0) > 0);
         if (blocked.length > 0) {
+          const blockedLibFilesCount = blocked.reduce(
+            (acc, b) => acc + (refs.subjectLibraryFilesCount.get(b.id) ?? 0),
+            0
+          );
+          const libDetail =
+            blockedLibFilesCount > 0
+              ? ` (${blockedLibFilesCount} archivo(s) de Biblioteca vinculados)`
+              : '';
           throw new PlanImportServiceError(
             409,
             'DRAFT_SUBJECT_REMOVAL_BLOCKED',
-            `No se pueden eliminar materias existentes con referencias activas: ${blocked.map((b) => b.codeInPlan).join(', ')}.`
+            `No se pueden eliminar materias existentes con referencias activas: ${blocked.map((b) => b.codeInPlan).join(', ')}${libDetail}.`,
+            {
+              blockedCodes: blocked.map((b) => b.codeInPlan),
+              libraryFilesCount: blockedLibFilesCount,
+            }
           );
         }
         await tx.deleteSubjectsByIds(toRemoveSubs.map((s) => s.id));
@@ -2380,12 +2445,17 @@ export async function deleteAdminDraftPlan(params: {
     const refs = await tx.checkPlanAndSubjectReferences(planId, subjectIds);
 
     if (refs.totalBlockers > 0) {
+      const libMessage =
+        refs.libraryFilesCount > 0
+          ? `No se puede eliminar el borrador porque existen ${refs.libraryFilesCount} archivo(s) de Biblioteca o registros asociados.`
+          : 'No se puede eliminar el borrador porque existen usuarios o registros asociados (Biblioteca, progreso, cursadas, reseñas u horarios).';
       throw new PlanImportServiceError(
         409,
         'PLAN_DELETE_HAS_REFERENCES',
-        'No se puede eliminar el borrador porque existen usuarios o registros asociados (Biblioteca, progreso, cursadas, reseñas u horarios).',
+        libMessage,
         {
           totalBlockers: refs.totalBlockers,
+          libraryFilesCount: refs.libraryFilesCount,
           planLevelReferences: refs.planLevelReferences,
           referencedSubjectIds: Array.from(refs.subjectLevelReferences.keys()),
         }
