@@ -152,7 +152,7 @@ npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
 2. **Subir `.xlsx` de Industrial y ejecutar vista previa:**
    - Seleccioná la facultad existente (donde reside Sistemas).
    - En **`Modo de destino`**, elegí **`Nueva carrera + primer plan (draft)`**.
-   - Completá **`Nombre de la carrera`** (`Ingeniería Industrial`) y **`Código de carrera`** (`IIND`).
+   - Completá **`Nombre de la carrera`** (`Ingeniería Industrial`) y **`Código de carrera`** (`IND`).
    - Cargá el archivo local `artifacts/industrial/industrial-plan-2023.xlsx`.
    - Pulsá **`Ejecutar vista previa (solo lectura)`**.
    - Verificá en el resumen de vista previa:
@@ -164,7 +164,7 @@ npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
 4. **Confirmar creación del borrador:**
    - Pulsá **`Confirmar importación en draft`**, completá la reautenticación en `AdminReauthModal` y verificá que el plan queda listado con estado `draft`.
 5. **Inspeccionar detalle solo lectura:**
-   - En el listado de planes, pulsá **`Inspeccionar`** sobre `IIND · Plan 2023` (`GET /api/admin/plans/:id`).
+   - En el listado de planes, pulsá **`Inspeccionar`** sobre `IND · Plan 2023` (`GET /api/admin/plans/:id`).
    - Confirmá la estructura por niveles (`1` a `5`), los **`10`** créditos electivos requeridos (`5` slots equivalentes), título final **`Ingeniero/a Industrial`**, ausencia de título intermedio/PPS, correlativas e integridad de materias.
 6. **Verificar aislamiento del catálogo público (sin exponer el `draft`):**
    - Copiá el UUID del plan `draft` recién creado y verificá desde PowerShell (sin cookies):
@@ -184,4 +184,24 @@ Invoke-RestMethod -Uri "http://localhost:4000/api/catalog/plans/current" | Selec
    - Confirmá en **Diferencias sobre el draft existente** que muestra: **`Crear: 0 · Actualizar: 56 · Quitar: 0`**, y confirmá la re-importación verificando que no se duplicaron materias ni correlativas.
 8. **Comprobar botón `Publicar` deshabilitado y limpiar borrador:**
    - Verificá que **`Publicar`** figura visible pero **deshabilitado** con el aviso de que se habilitará en Tramo 2C/2D.
-   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado (junto con la carrera `IIND` en estado `draft`, por ser su único plan, sin dejar carreras fantasma y dejando el código libre para reimportar) sin afectar el plan publicado de Sistemas.
+   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado (junto con la carrera `IND` en estado `draft`, por ser su único plan, sin dejar carreras fantasma y dejando el código libre para reimportar) sin afectar el plan publicado de Sistemas.
+
+---
+
+## 5. Verificación User State multi-plan (`verify:user-state-neon`) y secuencia de ensayo `0014 -> 0015`
+
+El script [`server/src/scripts/verifyUserStateNeon.ts`](../server/src/scripts/verifyUserStateNeon.ts) (**excluido de `npm test`**) verifica contra PostgreSQL/Neon real: usuario con 1 plan, usuario con 2 planes en paralelo sobre el **mismo término horario**, sincronización de `notifyLibraryEmail`, electiva en nivel `6`, `DrizzleReviewsStore.markRecommendationsSeen` sin insertar `plan_id = NULL` y `PgLibraryService.getPendingUploaderFiles()` sin filas duplicadas.
+
+```powershell
+# 1. Verificación de host sin exponer credenciales (espera salida 1 con el host detectado)
+$env:ALLOW_DESTRUCTIVE_TEST = "1"
+npm --prefix server run verify:user-state-neon
+
+# 2. Ejecución contra esquema 0014 (antes de 0015) o contra 0015 (después de 0015)
+npm --prefix server run verify:user-state-neon -- --host-ok=<host> --expect-schema=0014
+# (o con --expect-schema=0015 tras aplicar 0015)
+Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
+```
+
+> [!NOTE]
+> Para ejecutar el ensayo completo paso a paso (`2c-d1` sobre `0014` → siembra `IND` y datos `perPlan`/`no-UUID` → `2c-d2` y migración `0015` → prueba cruzada `2c-d1` sobre `0015` → `2c-d2` → rollback SQL → re-migración idempotente → `verify:import-neon`) sobre una sola rama temporal de Neon, seguí la **Sección 4** de [`docs/deploy-etapa2.md`](deploy-etapa2.md).

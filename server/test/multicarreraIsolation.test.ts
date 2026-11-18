@@ -1307,6 +1307,174 @@ async function main() {
       'Usuario con selectedPlanId=null opera /api/state (planA), /api/enrollments, /api/professors, /api/me/reviewable, POST /api/reviews y /api/library sin elegir el draft',
       `statuses=${nullStateRes.status}/${nullEnrollList.status}/${nullEnrollPut.status}/${nullProfs.status}/${nullReviewable.status}/${nullCreateRev.status}/${nullLibSubs.status}/${nullLibFiles.status}/${nullLibDraftDetail.status}, selectedPlanId=${nullStateRes.data?.data?.selectedPlanId}`
     );
+
+    // -------------------------------------------------------------------------
+    // 10. MIGRACIÓN 0015 (CLAVES COMPUESTAS, EXPANSIÓN SEGURA Y STORE COMPUESTO)
+    // -------------------------------------------------------------------------
+    console.log('\n📌 10. Migración 0015: Claves compuestas, expansión segura y filtro no-UUID');
+    const sql0015Path = path.resolve(__dirname, '../drizzle/0015_user_state_composite_keys.sql');
+    const sql0015 = fs.readFileSync(sql0015Path, 'utf-8');
+    const journal0015Path = path.resolve(__dirname, '../drizzle/meta/_journal.json');
+    const journal0015 = JSON.parse(fs.readFileSync(journal0015Path, 'utf-8'));
+    const entry0015 = (journal0015.entries || []).find(
+      (e: any) => e.tag === '0015_user_state_composite_keys'
+    );
+
+    const includeElectivesIdx = sql0015.indexOf('"include_electives_in_progress"');
+    const soundEnabledIdx = sql0015.indexOf('"sound_enabled"');
+    const includeElectivesJsonIdx = sql0015.indexOf("'includeElectivesInProgress'");
+    const soundEnabledJsonIdx = sql0015.indexOf("'soundEnabled'");
+
+    assert(
+      !sql0015.includes('\r\n') &&
+        entry0015?.idx === 15 &&
+        entry0015?.when === 1793750000000 &&
+        sql0015.includes('ALTER TABLE "user_settings" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ALTER TABLE "schedule_selections" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ALTER TABLE "schedule_proposals" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ADD CONSTRAINT "user_settings_pkey" PRIMARY KEY ("user_id", "plan_id")') &&
+        sql0015.includes('DROP CONSTRAINT IF EXISTS "uq_user_schedule_selection"') &&
+        sql0015.includes('DROP INDEX IF EXISTS "uq_user_schedule_selection"') &&
+        sql0015.includes("kv.key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'") &&
+        sql0015.includes('JOIN "study_plans" sp ON sp."id" = r."plan_uuid"') &&
+        includeElectivesIdx !== -1 &&
+        soundEnabledIdx !== -1 &&
+        includeElectivesIdx < soundEnabledIdx &&
+        includeElectivesJsonIdx !== -1 &&
+        soundEnabledJsonIdx !== -1 &&
+        includeElectivesJsonIdx < soundEnabledJsonIdx,
+      '0015_user_state_composite_keys.sql usa LF, journal when=1793750000000, PK compuesta, NOT NULL, filtro UUID regex + JOIN study_plans y orden exacto de columnas'
+    );
+
+    // Simulación sintética de Step C con claves no-UUID ("isi-old"), UUID inexistente y valores malformados
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validPlanSet = new Set([planA, planB]);
+    const simSettingsTable = new Map<string, any>();
+    simSettingsTable.set(`${multiUserId}::${planA}`, {
+      userId: multiUserId,
+      planId: planA,
+      minPassingGrade: 6,
+      includeElectivesInProgress: true,
+      soundEnabled: false,
+      notifyLibraryEmail: true,
+      extraSettings: {
+        seenRecommendationKeys: ['rec1'],
+        perPlan: {
+          [planA]: { minPassingGrade: 6, soundEnabled: false },
+          [planB]: {
+            minPassingGrade: 7,
+            includeAnalistaTrack: true,
+            includeElectivesInProgress: false,
+            soundEnabled: true,
+            tutorialCompleted: true,
+          },
+          'isi-old': { minPassingGrade: 9 },
+          '00000000-0000-4000-8000-000000000999': { minPassingGrade: 10 },
+          [plan6Id]: 'malformed-string-not-object',
+        },
+      },
+    });
+
+    function runSynthetic0015Expansion(): number {
+      let inserted = 0;
+      for (const row of Array.from(simSettingsTable.values())) {
+        const perPlan =
+          row.extraSettings?.perPlan &&
+          typeof row.extraSettings.perPlan === 'object' &&
+          !Array.isArray(row.extraSettings.perPlan)
+            ? row.extraSettings.perPlan
+            : {};
+        for (const [key, val] of Object.entries(perPlan)) {
+          if (!UUID_RE.test(key) || !validPlanSet.has(key)) continue;
+          if (!val || typeof val !== 'object' || Array.isArray(val)) continue;
+          const compKey = `${row.userId}::${key}`;
+          if (simSettingsTable.has(compKey)) continue;
+          const obj = val as Record<string, any>;
+          simSettingsTable.set(compKey, {
+            userId: row.userId,
+            planId: key,
+            includePromotionsInGPA:
+              typeof obj.includePromotionsInGPA === 'boolean' ? obj.includePromotionsInGPA : true,
+            minPassingGrade:
+              typeof obj.minPassingGrade === 'number' ? obj.minPassingGrade : 4,
+            includeAnalistaTrack:
+              typeof obj.includeAnalistaTrack === 'boolean' ? obj.includeAnalistaTrack : false,
+            allowBlockedElectivesPlanning:
+              typeof obj.allowBlockedElectivesPlanning === 'boolean'
+                ? obj.allowBlockedElectivesPlanning
+                : false,
+            includeElectivesInProgress:
+              typeof obj.includeElectivesInProgress === 'boolean'
+                ? obj.includeElectivesInProgress
+                : true,
+            soundEnabled: typeof obj.soundEnabled === 'boolean' ? obj.soundEnabled : true,
+            tutorialCompleted:
+              typeof obj.tutorialCompleted === 'boolean' ? obj.tutorialCompleted : false,
+            notifyLibraryEmail: row.notifyLibraryEmail,
+            extraSettings: {},
+          });
+          inserted++;
+        }
+      }
+      return inserted;
+    }
+
+    const expPass1 = runSynthetic0015Expansion();
+    const expPass2 = runSynthetic0015Expansion();
+    const expandedPlanB = simSettingsTable.get(`${multiUserId}::${planB}`);
+    const expandedPlanA = simSettingsTable.get(`${multiUserId}::${planA}`);
+    assert(
+      expPass1 === 1 &&
+        expPass2 === 0 &&
+        simSettingsTable.size === 2 &&
+        expandedPlanA?.soundEnabled === false &&
+        expandedPlanB?.minPassingGrade === 7 &&
+        expandedPlanB?.includeElectivesInProgress === false &&
+        expandedPlanB?.soundEnabled === true &&
+        expandedPlanB?.tutorialCompleted === true &&
+        !simSettingsTable.has(`${multiUserId}::isi-old`),
+      'Expansión 0015 materializa planes válidos, ignora clave no-UUID ("isi-old") y UUID inexistente, respeta includeElectivesInProgress vs soundEnabled y es idempotente'
+    );
+
+    // Verificar claves compuestas directas en InMemoryUserStateStore para 2 planes sobre el mismo término horario
+    const sameFacultyTerm = termA.id;
+    const planA2InFacA = crypto.randomUUID();
+    userStateStore.seedPlan({
+      id: planA2InFacA,
+      name: 'Carrera Alternativa Misma Facultad',
+      facultyId: facA,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    setUserPlanInAllStores(multiUserId, planA2InFacA);
+    const putSelPlanA2 = await api('PUT', '/api/schedule/selections', multiToken, {
+      scheduleTermId: sameFacultyTerm,
+      selections: { '101': 'ALT-K1' },
+    });
+    setUserPlanInAllStores(multiUserId, planA);
+    const statePlanAAfterSameTerm = await api('GET', '/api/state', multiToken);
+    setUserPlanInAllStores(multiUserId, planA2InFacA);
+    const statePlanA2AfterSameTerm = await api('GET', '/api/state', multiToken);
+
+    const multiSettingsKeys = Array.from(userStateStore.settings.keys()).filter((k) =>
+      k.startsWith(`${multiUserId}::`)
+    );
+    const multiSelectionKeys = Array.from(userStateStore.selections.keys()).filter((k) =>
+      k.startsWith(`${multiUserId}::`)
+    );
+    assert(
+      putSelPlanA2.status === 200 &&
+        statePlanAAfterSameTerm.data?.data?.scheduleSelections?.['101'] === '1K1' &&
+        statePlanA2AfterSameTerm.data?.data?.scheduleSelections?.['101'] === 'ALT-K1' &&
+        multiSettingsKeys.includes(`${multiUserId}::${planA}`) &&
+        multiSettingsKeys.includes(`${multiUserId}::${planB}`) &&
+        multiSelectionKeys.includes(`${multiUserId}::${planA}::${sameFacultyTerm}`) &&
+        multiSelectionKeys.includes(`${multiUserId}::${planA2InFacA}::${sameFacultyTerm}`),
+      'InMemoryUserStateStore guarda filas compuestas separadas por (userId, planId) y (userId, planId, termId) en la misma facultad'
+    );
+
+    setUserPlanInAllStores(multiUserId, planA);
   } finally {
     setCatalogStoreForTesting(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
