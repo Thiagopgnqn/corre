@@ -337,6 +337,10 @@ export const adminApi = {
     pageSize?: number;
     search?: string;
     status?: string;
+    professorId?: string;
+    subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     success: boolean;
     data: {
@@ -352,6 +356,10 @@ export const adminApi = {
     if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
     if (params?.search) qs.set('search', params.search);
     if (params?.status) qs.set('status', params.status);
+    if (params?.professorId) qs.set('professorId', params.professorId);
+    if (params?.subjectId) qs.set('subjectId', params.subjectId);
+    if (params?.careerId && params.careerId !== 'all') qs.set('careerId', params.careerId);
+    if (params?.planId && params.planId !== 'all') qs.set('planId', params.planId);
     const query = qs.toString();
     return apiFetch(`/api/admin/reviews${query ? `?${query}` : ''}`);
   },

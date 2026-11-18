@@ -16,7 +16,11 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { professorsApi } from '../../../api/professors.api';
-import { adminApi } from '../../../api/admin.api';
+import {
+  adminApi,
+  type AdminCareerItem,
+  type AdminPlanOverviewItem,
+} from '../../../api/admin.api';
 import type { AdminModerationQueueData, AdminReviewCatalogItem } from '../../../types/professor';
 import { StarRating } from '../../professors/StarRating';
 import { AdminReauthModal } from '../AdminReauthModal';
@@ -29,6 +33,32 @@ export const AdminReviewsTab: React.FC = () => {
 
   // Tab: 'queue' (moderación) vs 'catalog' (todas con autor) vs 'professors' (docentes y fusiones)
   const [subTab, setSubTab] = useState<'queue' | 'catalog' | 'professors'>('queue');
+
+  // Career/Plan multi-plan filters
+  const [adminCareers, setAdminCareers] = useState<AdminCareerItem[]>([]);
+  const [adminPlans, setAdminPlans] = useState<AdminPlanOverviewItem[]>([]);
+  const [careerFilter, setCareerFilter] = useState<string>('all');
+  const [planFilter, setPlanFilter] = useState<string>('all');
+
+  const filteredPlanOptions = useMemo(
+    () =>
+      careerFilter === 'all'
+        ? adminPlans
+        : adminPlans.filter((p) => p.careerId === careerFilter),
+    [adminPlans, careerFilter]
+  );
+
+  const formatCareerPlanBadge = (item: {
+    careerCode?: string | null;
+    careerName?: string | null;
+    planName?: string | null;
+    planYear?: number | null;
+  }): string | null => {
+    const careerPart = item.careerCode || item.careerName || '';
+    const planPart = item.planName || (item.planYear ? `Plan ${item.planYear}` : '');
+    if (careerPart && planPart) return `${careerPart} · ${planPart}`;
+    return careerPart || planPart || null;
+  };
 
   // Moderation Queue State
   const [queue, setQueue] = useState<AdminModerationQueueData>({
@@ -70,10 +100,25 @@ export const AdminReviewsTab: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  useEffect(() => {
+    adminApi
+      .listPlans()
+      .then((res) => {
+        if (res.success && res.data) {
+          setAdminCareers(res.data.careers || []);
+          setAdminPlans(res.data.plans || []);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const loadQueue = useCallback(async () => {
     setIsLoadingQueue(true);
     try {
-      const res = await professorsApi.adminGetModerationQueue();
+      const res = await professorsApi.adminGetModerationQueue({
+        careerId: careerFilter !== 'all' ? careerFilter : undefined,
+        planId: planFilter !== 'all' ? planFilter : undefined,
+      });
       if (res.success && res.data) {
         setQueue(res.data);
       }
@@ -82,7 +127,7 @@ export const AdminReviewsTab: React.FC = () => {
     } finally {
       setIsLoadingQueue(false);
     }
-  }, []);
+  }, [careerFilter, planFilter]);
 
   const loadAllReviews = useCallback(
     async (page = 1, search = reviewsSearch, status = reviewsStatus) => {
@@ -93,6 +138,8 @@ export const AdminReviewsTab: React.FC = () => {
           pageSize: 15,
           search: search.trim() || undefined,
           status: status !== 'all' ? status : undefined,
+          careerId: careerFilter !== 'all' ? careerFilter : undefined,
+          planId: planFilter !== 'all' ? planFilter : undefined,
         });
         if (res.success && res.data) {
           const data: any = res.data;
@@ -114,7 +161,7 @@ export const AdminReviewsTab: React.FC = () => {
         setIsLoadingReviews(false);
       }
     },
-    [reviewsSearch, reviewsStatus]
+    [reviewsSearch, reviewsStatus, careerFilter, planFilter]
   );
 
   const loadDuplicates = useCallback(async () => {
@@ -327,6 +374,52 @@ export const AdminReviewsTab: React.FC = () => {
           </button>
         </div>
 
+        {subTab !== 'professors' && adminPlans.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              aria-label="Filtrar por carrera"
+              value={careerFilter}
+              onChange={(e) => {
+                const nextCareer = e.target.value;
+                setCareerFilter(nextCareer);
+                setReviewsPage(1);
+                if (
+                  nextCareer !== 'all' &&
+                  planFilter !== 'all' &&
+                  !adminPlans.some((p) => p.id === planFilter && p.careerId === nextCareer)
+                ) {
+                  setPlanFilter('all');
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+            >
+              <option value="all">Todas las carreras</option>
+              {adminCareers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code} · {c.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filtrar por plan"
+              value={planFilter}
+              onChange={(e) => {
+                setPlanFilter(e.target.value);
+                setReviewsPage(1);
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+            >
+              <option value="all">Todos los planes</option>
+              {filteredPlanOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.careerCode} · {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {subTab === 'professors' && (
           <div className="flex items-center gap-2">
             <button
@@ -396,6 +489,11 @@ export const AdminReviewsTab: React.FC = () => {
                   >
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
+                        {formatCareerPlanBadge(item.review || item) && (
+                          <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold text-[10px]">
+                            {formatCareerPlanBadge(item.review || item)}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] uppercase">
                           Motivo: {item.reason}
                         </span>
@@ -483,6 +581,11 @@ export const AdminReviewsTab: React.FC = () => {
                 >
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
+                      {formatCareerPlanBadge(item) && (
+                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold text-[10px]">
+                          {formatCareerPlanBadge(item)}
+                        </span>
+                      )}
                       <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold text-[10px] uppercase">
                         Oculta
                       </span>
@@ -603,6 +706,11 @@ export const AdminReviewsTab: React.FC = () => {
                 >
                   <div className="space-y-2 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
+                      {formatCareerPlanBadge(rev) && (
+                        <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-semibold text-[10px]">
+                          {formatCareerPlanBadge(rev)}
+                        </span>
+                      )}
                       <span className={`px-2 py-0.5 rounded font-bold text-[10px] uppercase ${
                         rev.status === 'published'
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'

@@ -322,9 +322,11 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
   );
 
   // Cola de moderación: reportes abiertos + reseñas ocultas
-  router.get('/reviews/reports', async (_req: Request, res: Response, next: NextFunction) => {
+  router.get('/reviews/reports', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await service.adminGetModerationQueue();
+      const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+      const data = await service.adminGetModerationQueue({ careerId, planId });
       res.json({ success: true, data });
     } catch (err) {
       next(err);
@@ -340,6 +342,8 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
       const status = typeof req.query.status === 'string' ? req.query.status : undefined;
       const professorId = typeof req.query.professorId === 'string' ? req.query.professorId : undefined;
       const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId : undefined;
+      const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
 
       const data = await service.adminListAllReviews({
         page,
@@ -348,6 +352,8 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
         status,
         professorId,
         subjectId,
+        careerId,
+        planId,
       });
 
       res.json({ success: true, data });

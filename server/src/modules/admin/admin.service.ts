@@ -37,6 +37,7 @@ import { defaultMailer } from '../mailer/mailer.service.js';
 import { hashVerificationCode, computeCanonicalEmail } from '../auth/auth.service.js';
 import { invalidateUserStatusCache, getUserLiveStatus } from '../../middlewares/auth.middleware.js';
 import { getLibraryService } from '../library/library.service.js';
+import { getActiveReviewsStore } from '../reviews/reviews.store.js';
 import { findDefaultPublishedPlan } from '../catalog/catalog.helpers.js';
 
 // Cache de estadísticas en memoria (TTL 60 segundos) (Ajuste 2)
@@ -1605,88 +1606,24 @@ export class AdminService {
     status?: string;
     professorId?: string;
     subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }) {
-    const page = Math.max(1, options.page || 1);
-    const limit = Math.min(100, Math.max(1, options.pageSize || 20));
-    const offset = (page - 1) * limit;
-
-    const authorUsers = alias(users, 'author_users');
-    const conditions = [];
-
-    if (options.status && options.status !== 'all') {
-      conditions.push(eq(professorReviews.status, options.status));
-    }
-    if (options.professorId) {
-      conditions.push(eq(professorReviews.professorId, options.professorId));
-    }
-    if (options.subjectId) {
-      conditions.push(eq(professorReviews.subjectId, options.subjectId));
-    }
-    if (options.search && options.search.trim()) {
-      const term = `%${options.search.trim().toLowerCase()}%`;
-      conditions.push(
-        sql`(LOWER(${authorUsers.email}) LIKE ${term} OR LOWER(${professors.displayName}) LIKE ${term} OR LOWER(${professorReviews.comment}) LIKE ${term})`
-      );
-    }
-
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
-
-    const [totalRes] = await db
-      .select({ value: count() })
-      .from(professorReviews)
-      .innerJoin(professors, eq(professorReviews.professorId, professors.id))
-      .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
-      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
-      .where(whereClause);
-
-    const total = totalRes?.value || 0;
-
-    const rows = await db
-      .select({
-        id: professorReviews.id,
-        professorId: professorReviews.professorId,
-        professorName: professors.displayName,
-        subjectId: professorReviews.subjectId,
-        subjectCode: subjects.codeInPlan,
-        subjectName: subjects.name,
-        authorUserId: professorReviews.userId,
-        authorEmail: authorUsers.email,
-        overall: professorReviews.overall,
-        clarity: professorReviews.clarity,
-        treatment: professorReviews.treatment,
-        availability: professorReviews.availability,
-        difficulty: professorReviews.difficulty,
-        wouldRecommend: professorReviews.wouldRecommend,
-        comment: professorReviews.comment,
-        status: professorReviews.status,
-        helpfulCount: professorReviews.helpfulCount,
-        attendedDeclared: professorReviews.attendedDeclared,
-        academicYear: professorReviews.academicYear,
-        term: professorReviews.term,
-        createdAt: professorReviews.createdAt,
-      })
-      .from(professorReviews)
-      .innerJoin(professors, eq(professorReviews.professorId, professors.id))
-      .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
-      .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
-      .where(whereClause)
-      .orderBy(desc(professorReviews.createdAt))
-      .limit(limit)
-      .offset(offset);
-
-    const mapped = rows.map((r) => ({
-      ...r,
-      authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
-    }));
+    const data = await getActiveReviewsStore().listAllReviewsForAdmin({
+      page: options.page,
+      pageSize: options.pageSize,
+      search: options.search,
+      status: (options.status as any) || 'all',
+      professorId: options.professorId,
+      subjectId: options.subjectId,
+      careerId: options.careerId,
+      planId: options.planId,
+    });
 
     return {
+      ...data,
       // `items` es el formato que consume el panel; `reviews` se mantiene por compatibilidad
-      items: mapped,
-      reviews: mapped,
-      total,
-      page,
-      pageSize: limit,
-      totalPages: Math.ceil(total / limit),
+      reviews: data.items,
     };
   }
 

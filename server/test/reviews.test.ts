@@ -1317,6 +1317,139 @@ async function main() {
       drizzleNullResolved === null,
       'DrizzleReviewsStore.resolvePlanContext devuelve null cuando findDefaultPublishedPlan no encuentra planes publicados'
     );
+
+    // -------------------------------------------------------------------------
+    // 12. TRAMO 2C PARTE C: MODERACIÓN MULTI-PLAN EN RESEÑAS (/reports, /all, /api/admin/reviews)
+    // -------------------------------------------------------------------------
+    console.log('\n📌 12. Moderación multi-plan con contexto carrera/plan y filtros');
+    const cIsiId = crypto.randomUUID();
+    const cIndId = crypto.randomUUID();
+    const pIsiMultiId = crypto.randomUUID();
+    const pIndMultiId = crypto.randomUUID();
+    store.seedPlan(pIsiMultiId, store.defaultFacultyId, {
+      careerId: cIsiId,
+      careerCode: 'ISI',
+      careerName: 'Ingeniería en Sistemas de Información',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    store.seedPlan(pIndMultiId, store.defaultFacultyId, {
+      careerId: cIndId,
+      careerCode: 'IND',
+      careerName: 'Ingeniería Industrial',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+      year: 2023,
+      status: 'draft',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const sIsiMulti = store.seedSubject({
+      codeInPlan: 401,
+      name: 'Inteligencia Artificial',
+      planId: pIsiMultiId,
+    });
+    const sIndMulti = store.seedSubject({
+      codeInPlan: 402,
+      name: 'Estudio del Trabajo',
+      planId: pIndMultiId,
+    });
+    const profMultiMod = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Multiplan, Moderacion Docente',
+    });
+    const modStudentId = crypto.randomUUID();
+    const revIsiMulti = await store.createReview({
+      userId: modStudentId,
+      professorId: profMultiMod.id,
+      subjectId: sIsiMulti.id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 4,
+      clarity: 4,
+      treatment: 4,
+      availability: 4,
+      difficulty: 3,
+      wouldRecommend: true,
+      comment: 'Reseña ISI multiplan para moderación.',
+      attendedDeclared: true,
+    });
+    const revIndMulti = await store.createReview({
+      userId: modStudentId,
+      professorId: profMultiMod.id,
+      subjectId: sIndMulti.id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 2,
+      clarity: 2,
+      treatment: 2,
+      availability: 2,
+      difficulty: 4,
+      wouldRecommend: false,
+      comment: 'Reseña IND multiplan oculta y reportada.',
+      attendedDeclared: true,
+    });
+    await store.setReviewStatus(revIndMulti.id, 'hidden');
+    await store.createReport({
+      reviewId: revIndMulti.id,
+      reporterUserId: studentB.id,
+      reason: 'ofensiva',
+      note: 'Reporte IND multiplan',
+    });
+
+    const queueInd = await api(
+      'GET',
+      `/api/admin/reviews/reports?careerId=${cIndId}&planId=${pIndMultiId}`,
+      tokenAdmin
+    );
+    const allIndFromReviewsRoute = await api(
+      'GET',
+      `/api/admin/reviews/all?careerId=${cIndId}`,
+      tokenAdmin
+    );
+    const allIndFromAdminController = await api(
+      'GET',
+      `/api/admin/reviews?planId=${pIndMultiId}`,
+      tokenAdmin
+    );
+    const allIsiFromAdminController = await api(
+      'GET',
+      `/api/admin/reviews?careerId=${cIsiId}`,
+      tokenAdmin
+    );
+
+    const openRepInd = (queueInd.data?.data?.openReports || [])[0];
+    const hiddenInd = (queueInd.data?.data?.hiddenReviews || [])[0];
+    const catalogInd1 = (allIndFromReviewsRoute.data?.data?.items || [])[0];
+    const catalogInd2 = (allIndFromAdminController.data?.data?.items || [])[0];
+    const catalogIsi = (allIsiFromAdminController.data?.data?.items || [])[0];
+
+    assert(
+      queueInd.status === 200 &&
+        (queueInd.data?.data?.openReports || []).length === 1 &&
+        openRepInd?.careerCode === 'IND' &&
+        openRepInd?.review?.planName === 'Plan 2023' &&
+        (queueInd.data?.data?.hiddenReviews || []).length === 1 &&
+        hiddenInd?.careerCode === 'IND' &&
+        allIndFromReviewsRoute.status === 200 &&
+        (allIndFromReviewsRoute.data?.data?.items || []).length === 1 &&
+        catalogInd1?.id === revIndMulti.id &&
+        catalogInd1?.careerCode === 'IND' &&
+        allIndFromAdminController.status === 200 &&
+        (allIndFromAdminController.data?.data?.items || []).length === 1 &&
+        catalogInd2?.id === revIndMulti.id &&
+        catalogInd2?.planName === 'Plan 2023' &&
+        catalogInd2?.facultyName === 'UTN FRC' &&
+        allIsiFromAdminController.status === 200 &&
+        (allIsiFromAdminController.data?.data?.items || []).length === 1 &&
+        catalogIsi?.id === revIsiMulti.id &&
+        catalogIsi?.careerCode === 'ISI',
+      'Reviews admin (/reports, /all y /api/admin/reviews) exponen metadatos carrera/plan y filtran por careerId/planId'
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
