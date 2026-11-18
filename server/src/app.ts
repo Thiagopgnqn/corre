@@ -19,7 +19,11 @@ import {
   createReviewsRouter,
 } from './modules/reviews/reviews.routes.js';
 import { ReviewsService } from './modules/reviews/reviews.service.js';
-import { defaultReviewsStore, ReviewsStore } from './modules/reviews/reviews.store.js';
+import {
+  defaultReviewsStore,
+  ReviewsStore,
+  setActiveReviewsStore,
+} from './modules/reviews/reviews.store.js';
 import { createEnrollmentsRouter } from './modules/enrollments/enrollments.routes.js';
 import {
   dismissRecommendationBodySchema,
@@ -39,6 +43,7 @@ export function createApp(options?: {
 }) {
   const instance = express();
   const reviewsStore = options?.reviewsStore || defaultReviewsStore;
+  setActiveReviewsStore(options?.reviewsStore || null);
   const userStateStore = options?.userStateStore || defaultUserStateStore;
   const reviewsService = new ReviewsService(reviewsStore);
   const enrollmentsService = new EnrollmentsService(reviewsStore);

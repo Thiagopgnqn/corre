@@ -217,7 +217,18 @@ export interface UpdateReviewInput {
   comment?: string | null;
 }
 
-export interface AdminModerationReportItem {
+export interface ReviewCareerPlanMeta {
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planId?: string | null;
+  planName?: string | null;
+  planYear?: number | null;
+  planStatus?: string | null;
+  facultyName?: string | null;
+}
+
+export interface AdminModerationReportItem extends ReviewCareerPlanMeta {
   reportId: string;
   reviewId: string;
   reason: ReportReason;
@@ -229,7 +240,7 @@ export interface AdminModerationReportItem {
   reporterEmail?: string | null;
   authorUserId?: string | null;
   authorEmail?: string | null;
-  review: {
+  review: ReviewCareerPlanMeta & {
     id: string;
     professorId: string;
     professorName: string;
@@ -245,7 +256,7 @@ export interface AdminModerationReportItem {
   };
 }
 
-export interface AdminHiddenReviewItem {
+export interface AdminHiddenReviewItem extends ReviewCareerPlanMeta {
   id: string;
   professorId: string;
   professorName: string;
@@ -261,7 +272,7 @@ export interface AdminHiddenReviewItem {
   authorEmail?: string | null;
 }
 
-export interface AdminReviewCatalogItem {
+export interface AdminReviewCatalogItem extends ReviewCareerPlanMeta {
   id: string;
   professorId: string;
   professorName: string;

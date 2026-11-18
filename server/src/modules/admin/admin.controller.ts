@@ -693,7 +693,7 @@ export async function applyScheduleImport(req: Request, res: Response): Promise<
 
 export async function listAdminReviews(req: Request, res: Response): Promise<void> {
   try {
-    const { page, pageSize, search, status, professorId, subjectId } = req.query;
+    const { page, pageSize, search, status, professorId, subjectId, careerId, planId } = req.query;
     const data = await AdminService.listReviews({
       page: page ? parseInt(String(page), 10) : 1,
       pageSize: pageSize ? parseInt(String(pageSize), 10) : 20,
@@ -701,6 +701,8 @@ export async function listAdminReviews(req: Request, res: Response): Promise<voi
       status: typeof status === 'string' ? status : undefined,
       professorId: typeof professorId === 'string' ? professorId : undefined,
       subjectId: typeof subjectId === 'string' ? subjectId : undefined,
+      careerId: typeof careerId === 'string' ? careerId : undefined,
+      planId: typeof planId === 'string' ? planId : undefined,
     });
     res.json({ success: true, data });
   } catch (err: any) {

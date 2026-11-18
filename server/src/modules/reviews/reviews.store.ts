@@ -198,7 +198,18 @@ export interface StoredEnrollment {
   updatedAt: Date;
 }
 
-export interface AdminModerationReportItem {
+export interface ReviewHierarchyContext {
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planId?: string | null;
+  planName?: string | null;
+  planYear?: number | null;
+  planStatus?: string | null;
+  facultyName?: string | null;
+}
+
+export interface AdminModerationReportItem extends ReviewHierarchyContext {
   reportId: string;
   reviewId: string;
   reason: ReportReason;
@@ -210,7 +221,7 @@ export interface AdminModerationReportItem {
   reporterEmail?: string | null;
   authorUserId?: string | null;
   authorEmail?: string | null;
-  review: {
+  review: ReviewHierarchyContext & {
     id: string;
     professorId: string;
     professorName: string;
@@ -226,7 +237,7 @@ export interface AdminModerationReportItem {
   };
 }
 
-export interface AdminHiddenReviewItem {
+export interface AdminHiddenReviewItem extends ReviewHierarchyContext {
   id: string;
   professorId: string;
   professorName: string;
@@ -242,7 +253,7 @@ export interface AdminHiddenReviewItem {
   authorEmail?: string | null;
 }
 
-export interface AdminReviewCatalogItem {
+export interface AdminReviewCatalogItem extends ReviewHierarchyContext {
   id: string;
   professorId: string;
   professorName: string;
@@ -528,7 +539,10 @@ export interface ReviewsStore {
   getUserSeenRecommendationKeys(userId: string): Promise<Set<string>>;
   markRecommendationsSeen(userId: string, keys: string[]): Promise<void>;
 
-  listModerationQueue(): Promise<{
+  listModerationQueue(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
   }>;
@@ -537,6 +551,10 @@ export interface ReviewsStore {
     pageSize?: number;
     search?: string;
     status?: ReviewStatus | 'all';
+    professorId?: string;
+    subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -1742,12 +1760,23 @@ export class DrizzleReviewsStore implements ReviewsStore {
     });
   }
 
-  async listModerationQueue(): Promise<{
+  async listModerationQueue(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
   }> {
     const authorUsers = alias(users, 'author_users');
     const reporterUsers = alias(users, 'reporter_users');
+
+    const reportConditions = [eq(reviewReports.status, 'open')];
+    if (filters?.careerId && filters.careerId !== 'all') {
+      reportConditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      reportConditions.push(eq(studyPlans.id, filters.planId));
+    }
 
     const reportsRows = await db
       .select({
@@ -1756,6 +1785,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: authorUsers.id,
         authorEmail: authorUsers.email,
         reporterUserId: reporterUsers.id,
@@ -1765,9 +1802,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .innerJoin(professorReviews, eq(reviewReports.reviewId, professorReviews.id))
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .leftJoin(reporterUsers, eq(reviewReports.reporterUserId, reporterUsers.id))
-      .where(eq(reviewReports.status, 'open'))
+      .where(and(...reportConditions))
       .orderBy(desc(reviewReports.createdAt));
 
     const openCountByReview = new Map<string, number>();
@@ -1775,33 +1815,55 @@ export class DrizzleReviewsStore implements ReviewsStore {
       openCountByReview.set(r.review.id, (openCountByReview.get(r.review.id) || 0) + 1);
     }
 
-    const openReports: AdminModerationReportItem[] = reportsRows.map((r) => ({
-      reportId: r.report.id,
-      reviewId: r.review.id,
-      reason: r.report.reason as ReportReason,
-      note: r.report.note,
-      reportStatus: r.report.status as ReportStatus,
-      reportedMonthYear: formatYearMonth(r.report.createdAt),
-      openReportsOnReview: openCountByReview.get(r.review.id) || 1,
-      reporterUserId: r.reporterUserId || null,
-      reporterEmail: r.reporterEmail || null,
-      authorUserId: r.authorUserId || null,
-      authorEmail: r.authorEmail || null,
-      review: {
-        id: r.review.id,
-        professorId: r.review.professorId,
-        professorName: r.profName,
-        subjectId: r.review.subjectId,
-        subjectCode: r.subCode,
-        subjectName: r.subName,
-        overall: r.review.overall,
-        comment: r.review.comment,
-        status: r.review.status as ReviewStatus,
-        publishedMonthYear: formatYearMonth(r.review.createdAt),
+    const openReports: AdminModerationReportItem[] = reportsRows.map((r) => {
+      const hierarchy = {
+        careerId: r.careerId,
+        careerCode: r.careerCode,
+        careerName: r.careerName,
+        planId: r.planId,
+        planName: r.planName,
+        planYear: r.planYear,
+        planStatus: r.planStatus,
+        facultyName: r.facultyName,
+      };
+      return {
+        reportId: r.report.id,
+        reviewId: r.review.id,
+        reason: r.report.reason as ReportReason,
+        note: r.report.note,
+        reportStatus: r.report.status as ReportStatus,
+        reportedMonthYear: formatYearMonth(r.report.createdAt),
+        openReportsOnReview: openCountByReview.get(r.review.id) || 1,
+        reporterUserId: r.reporterUserId || null,
+        reporterEmail: r.reporterEmail || null,
         authorUserId: r.authorUserId || null,
         authorEmail: r.authorEmail || null,
-      },
-    }));
+        ...hierarchy,
+        review: {
+          id: r.review.id,
+          professorId: r.review.professorId,
+          professorName: r.profName,
+          subjectId: r.review.subjectId,
+          subjectCode: r.subCode,
+          subjectName: r.subName,
+          overall: r.review.overall,
+          comment: r.review.comment,
+          status: r.review.status as ReviewStatus,
+          publishedMonthYear: formatYearMonth(r.review.createdAt),
+          authorUserId: r.authorUserId || null,
+          authorEmail: r.authorEmail || null,
+          ...hierarchy,
+        },
+      };
+    });
+
+    const hiddenConditions = [eq(professorReviews.status, 'hidden')];
+    if (filters?.careerId && filters.careerId !== 'all') {
+      hiddenConditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      hiddenConditions.push(eq(studyPlans.id, filters.planId));
+    }
 
     const hiddenRows = await db
       .select({
@@ -1809,14 +1871,25 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: authorUsers.id,
         authorEmail: authorUsers.email,
       })
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
-      .where(eq(professorReviews.status, 'hidden'))
+      .where(and(...hiddenConditions))
       .orderBy(desc(professorReviews.updatedAt));
 
     const hiddenReviews: AdminHiddenReviewItem[] = hiddenRows.map((h) => ({
@@ -1826,6 +1899,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
       subjectId: h.review.subjectId,
       subjectCode: h.subCode,
       subjectName: h.subName,
+      careerId: h.careerId,
+      careerCode: h.careerCode,
+      careerName: h.careerName,
+      planId: h.planId,
+      planName: h.planName,
+      planYear: h.planYear,
+      planStatus: h.planStatus,
+      facultyName: h.facultyName,
       overall: h.review.overall,
       comment: h.review.comment,
       status: h.review.status as ReviewStatus,
@@ -1845,6 +1926,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
     status?: string;
     professorId?: string;
     subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -1868,6 +1951,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
     if (params?.subjectId) {
       conditions.push(eq(professorReviews.subjectId, params.subjectId));
     }
+    if (params?.careerId && params.careerId !== 'all') {
+      conditions.push(eq(careers.id, params.careerId));
+    }
+    if (params?.planId && params.planId !== 'all') {
+      conditions.push(eq(studyPlans.id, params.planId));
+    }
     if (params?.search && params.search.trim()) {
       const term = `%${params.search.trim().toLowerCase()}%`;
       conditions.push(
@@ -1882,6 +1971,9 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .where(whereClause);
 
@@ -1895,6 +1987,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
         subjectId: professorReviews.subjectId,
         subjectCode: subjects.codeInPlan,
         subjectName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: professorReviews.userId,
         authorEmail: authorUsers.email,
         overall: professorReviews.overall,
@@ -1914,6 +2014,9 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .where(whereClause)
       .orderBy(desc(professorReviews.createdAt))
@@ -1927,6 +2030,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
       subjectId: r.subjectId,
       subjectCode: r.subjectCode,
       subjectName: r.subjectName,
+      careerId: r.careerId,
+      careerCode: r.careerCode,
+      careerName: r.careerName,
+      planId: r.planId,
+      planName: r.planName,
+      planYear: r.planYear,
+      planStatus: r.planStatus,
+      facultyName: r.facultyName,
       authorUserId: r.authorUserId,
       authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
       overall: r.overall,
@@ -2936,7 +3047,11 @@ export interface InMemoryReviewPlanMeta {
   status: 'draft' | 'published' | 'archived';
   isActive: boolean;
   careerStatus: 'draft' | 'published' | 'archived';
+  careerId?: string;
   careerCode?: string;
+  careerName?: string;
+  planName?: string;
+  facultyName?: string;
   year?: number;
 }
 
@@ -3085,9 +3200,29 @@ export class InMemoryReviewsStore implements ReviewsStore {
       status: options?.status ?? 'published',
       isActive: options?.isActive ?? true,
       careerStatus: options?.careerStatus ?? 'published',
+      careerId: options?.careerId,
       careerCode: options?.careerCode,
+      careerName: options?.careerName,
+      planName: options?.planName,
+      facultyName: options?.facultyName,
       year: options?.year,
     });
+  }
+
+  private getSubjectHierarchy(subjectId: string) {
+    const sub = this.subjectsMap.get(subjectId);
+    const planId = sub?.planId || null;
+    const meta = planId ? this.planMetadata.get(planId) : undefined;
+    return {
+      careerId: meta?.careerId ?? null,
+      careerCode: meta?.careerCode ?? null,
+      careerName: meta?.careerName ?? null,
+      planId,
+      planName: meta?.planName ?? (meta?.year ? `Plan ${meta.year}` : null),
+      planYear: meta?.year ?? null,
+      planStatus: meta?.status ?? null,
+      facultyName: meta?.facultyName ?? null,
+    };
   }
 
   seedUserPlan(userId: string, planId: string | null) {
@@ -3799,7 +3934,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     };
   }
 
-  async listModerationQueue() {
+  async listModerationQueue(filters?: { careerId?: string; planId?: string }) {
     const openReportsRaw = this.reportsList
       .filter((rp) => rp.status === 'open')
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -3809,13 +3944,26 @@ export class InMemoryReviewsStore implements ReviewsStore {
       openCountByReview.set(rp.reviewId, (openCountByReview.get(rp.reviewId) || 0) + 1);
     }
 
+    const matchesFilter = (subjectId: string) => {
+      const hier = this.getSubjectHierarchy(subjectId);
+      if (filters?.careerId && filters.careerId !== 'all' && hier.careerId !== filters.careerId) {
+        return false;
+      }
+      if (filters?.planId && filters.planId !== 'all' && hier.planId !== filters.planId) {
+        return false;
+      }
+      return true;
+    };
+
     const openReports: AdminModerationReportItem[] = [];
     for (const rp of openReportsRaw) {
       const rev = this.reviewsMap.get(rp.reviewId);
       if (!rev) continue;
+      if (!matchesFilter(rev.subjectId)) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       if (!prof || !sub) continue;
+      const hier = this.getSubjectHierarchy(sub.id);
 
       openReports.push({
         reportId: rp.id,
@@ -3829,6 +3977,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         reportStatus: rp.status,
         reportedMonthYear: formatYearMonth(rp.createdAt),
         openReportsOnReview: openCountByReview.get(rev.id) || 1,
+        ...hier,
         review: {
           id: rev.id,
           professorId: prof.id,
@@ -3842,6 +3991,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
           comment: rev.comment,
           status: rev.status,
           publishedMonthYear: formatYearMonth(rev.createdAt),
+          ...hier,
         },
       });
     }
@@ -3849,9 +3999,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     const hiddenReviews: AdminHiddenReviewItem[] = [];
     for (const rev of this.reviewsMap.values()) {
       if (rev.status !== 'hidden') continue;
+      if (!matchesFilter(rev.subjectId)) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       if (!prof || !sub) continue;
+      const hier = this.getSubjectHierarchy(sub.id);
 
       hiddenReviews.push({
         id: rev.id,
@@ -3860,6 +4012,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         subjectId: sub.id,
         subjectCode: sub.codeInPlan,
         subjectName: sub.name,
+        ...hier,
         authorUserId: rev.userId,
         authorEmail: 'autor@stack.com',
         overall: rev.overall,
@@ -3878,6 +4031,10 @@ export class InMemoryReviewsStore implements ReviewsStore {
     pageSize?: number;
     search?: string;
     status?: ReviewStatus | 'all';
+    professorId?: string;
+    subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -3893,6 +4050,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     let all: AdminReviewCatalogItem[] = [];
     for (const rev of this.reviewsMap.values()) {
       if (status !== 'all' && rev.status !== status) continue;
+      if (params.professorId && rev.professorId !== params.professorId) continue;
+      if (params.subjectId && rev.subjectId !== params.subjectId) continue;
+      const hier = this.getSubjectHierarchy(rev.subjectId);
+      if (params.careerId && params.careerId !== 'all' && hier.careerId !== params.careerId) continue;
+      if (params.planId && params.planId !== 'all' && hier.planId !== params.planId) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       const profName = prof?.displayName || 'Profesor desconocido';
@@ -3915,6 +4077,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         subjectId: rev.subjectId,
         subjectCode: sub?.codeInPlan || 0,
         subjectName: subName,
+        ...hier,
         authorUserId: rev.userId,
         authorEmail,
         overall: rev.overall,
@@ -4456,3 +4619,13 @@ export class InMemoryReviewsStore implements ReviewsStore {
 }
 
 export const defaultReviewsStore: ReviewsStore = new DrizzleReviewsStore();
+
+let activeReviewsStore: ReviewsStore | null = null;
+
+export function getActiveReviewsStore(): ReviewsStore {
+  return activeReviewsStore || defaultReviewsStore;
+}
+
+export function setActiveReviewsStore(store: ReviewsStore | null): void {
+  activeReviewsStore = store;
+}

@@ -532,12 +532,18 @@ export class ReviewsService {
     status?: string;
     professorId?: string;
     subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }) {
     return this.store.listAllReviewsForAdmin({
       page: params?.page,
       pageSize: params?.pageSize,
       search: params?.search,
       status: (params?.status as ReviewStatus | 'all') || 'all',
+      professorId: params?.professorId,
+      subjectId: params?.subjectId,
+      careerId: params?.careerId,
+      planId: params?.planId,
     });
   }
 
@@ -1312,8 +1318,8 @@ export class ReviewsService {
     return await this.store.mergeProfessors(params.sourceProfessorId, params.targetProfessorId);
   }
 
-  async adminGetModerationQueue() {
-    return await this.store.listModerationQueue();
+  async adminGetModerationQueue(filters?: { careerId?: string; planId?: string }) {
+    return await this.store.listModerationQueue(filters);
   }
 
   async adminSetReviewStatus(params: { reviewId: string; status: ReviewStatus }) {

@@ -6,6 +6,9 @@ import {
   users,
   userSettings,
   subjects,
+  studyPlans,
+  careers,
+  faculties,
   professors,
   libraryFiles,
   libraryFileProfessors,
@@ -107,6 +110,8 @@ export interface ListLibraryFilesFilters {
 export interface ListAdminLibraryFilters {
   status?: string;
   subjectId?: string;
+  careerId?: string;
+  planId?: string;
   kind?: string;
   search?: string;
   page?: number;
@@ -127,7 +132,7 @@ export interface ILibraryService {
   listMyUploads(userId: string, markChecked?: boolean): Promise<any>;
   updateMyFile(userId: string, fileId: string, updates: any, planId?: string | null): Promise<any>;
   deleteMyFile(userId: string, fileId: string, planId?: string | null): Promise<any>;
-  listPendingFiles(): Promise<any[]>;
+  listPendingFiles(filters?: { careerId?: string; planId?: string }): Promise<any[]>;
   listAllFilesAdmin(filters: ListAdminLibraryFilters): Promise<any>;
   getPreviewUrl(fileId: string): Promise<any>;
   approveFile(fileId: string, adminUserId: string): Promise<any>;
@@ -136,7 +141,7 @@ export interface ILibraryService {
   removeFile(fileId: string, adminUserId: string, reason?: string): Promise<any>;
   getUploaderIdentity(fileId: string, adminUser: { id: string; email: string }, ip?: string): Promise<any>;
   suspendAuthor(fileId: string, adminUser: { id: string; email: string }, reason: string, ip?: string): Promise<any>;
-  listReports(status?: any): Promise<any[]>;
+  listReports(status?: any, filters?: { careerId?: string; planId?: string }): Promise<any[]>;
   updateReportStatus(reportId: string, newStatus: any): Promise<any>;
   getLibraryStats(): Promise<any>;
   testR2Connection(adminUser: { id: string; email: string }, ip?: string): Promise<StorageTestResult>;
@@ -151,6 +156,11 @@ export interface PendingUploaderRawRow {
   title: string;
   rejectionReason: string | null;
   subjectName: string | null;
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planName?: string | null;
+  facultyName?: string | null;
   userEmail: string;
   userStatus: string;
 }
@@ -181,6 +191,11 @@ export function buildPendingUploaderFileItems(
       status: r.status as 'approved' | 'rejected',
       title: r.title,
       subjectName: r.subjectName || 'Materia',
+      careerId: r.careerId ?? null,
+      careerCode: r.careerCode ?? null,
+      careerName: r.careerName ?? null,
+      planName: r.planName ?? null,
+      facultyName: r.facultyName ?? null,
       rejectionReason: r.rejectionReason,
     }));
 }
@@ -208,9 +223,17 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         mimeType: libraryFiles.mimeType,
         createdAt: libraryFiles.createdAt,
         subjectName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planName: studyPlans.name,
+        facultyName: faculties.name,
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .where(
         and(
           eq(libraryFiles.status, 'pending'),
@@ -243,11 +266,19 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         title: libraryFiles.title,
         rejectionReason: libraryFiles.rejectionReason,
         subjectName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planName: studyPlans.name,
+        facultyName: faculties.name,
         userEmail: users.email,
         userStatus: users.status,
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .innerJoin(users, eq(libraryFiles.uploaderUserId, users.id))
       .where(
         and(
@@ -1614,13 +1645,29 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     return { success: true, message: 'Archivo eliminado exitosamente.' };
   }
 
-  async listPendingFiles() {
+  async listPendingFiles(filters?: { careerId?: string; planId?: string }) {
+    const conditions = [eq(libraryFiles.status, 'pending')];
+    if (filters?.careerId && filters.careerId !== 'all') {
+      conditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      conditions.push(eq(studyPlans.id, filters.planId));
+    }
+
     const rows = await db
       .select({
         id: libraryFiles.id,
         subjectId: libraryFiles.subjectId,
         subjectName: subjects.name,
         subjectCode: subjects.codeInPlan,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         kind: libraryFiles.kind,
         academicYear: libraryFiles.academicYear,
         term: libraryFiles.term,
@@ -1639,7 +1686,10 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
-      .where(eq(libraryFiles.status, 'pending'))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+      .where(and(...conditions))
       .orderBy(asc(libraryFiles.createdAt));
 
     const fileIds = rows.map((r) => r.id);
@@ -1681,6 +1731,12 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     if (filters.subjectId && filters.subjectId !== 'all') {
       conditions.push(eq(libraryFiles.subjectId, filters.subjectId));
     }
+    if (filters.careerId && filters.careerId !== 'all') {
+      conditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters.planId && filters.planId !== 'all') {
+      conditions.push(eq(studyPlans.id, filters.planId));
+    }
     if (filters.kind && filters.kind !== 'all') {
       conditions.push(eq(libraryFiles.kind, filters.kind));
     }
@@ -1700,6 +1756,10 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     const [totalRes] = await db
       .select({ value: count() })
       .from(libraryFiles)
+      .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .where(whereClause);
 
     const total = totalRes?.value || 0;
@@ -1710,6 +1770,14 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         subjectId: libraryFiles.subjectId,
         subjectName: subjects.name,
         subjectCode: subjects.codeInPlan,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         kind: libraryFiles.kind,
         academicYear: libraryFiles.academicYear,
         term: libraryFiles.term,
@@ -1731,6 +1799,9 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .where(whereClause)
       .orderBy(desc(libraryFiles.createdAt))
       .limit(limit)
@@ -2069,10 +2140,19 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     };
   }
 
-  async listReports(status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open') {
+  async listReports(
+    status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open',
+    filters?: { careerId?: string; planId?: string }
+  ) {
     const conditions = [];
     if (status !== 'all') {
       conditions.push(eq(libraryReports.status, status));
+    }
+    if (filters?.careerId && filters.careerId !== 'all') {
+      conditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      conditions.push(eq(studyPlans.id, filters.planId));
     }
 
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -2082,8 +2162,18 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         id: libraryReports.id,
         fileId: libraryReports.fileId,
         fileTitle: libraryFiles.title,
+        fileKind: libraryFiles.kind,
         fileStatus: libraryFiles.status,
+        subjectId: libraryFiles.subjectId,
         subjectName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         reporterUserId: libraryReports.reporterUserId,
         reason: libraryReports.reason,
         note: libraryReports.note,
@@ -2093,6 +2183,9 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       .from(libraryReports)
       .innerJoin(libraryFiles, eq(libraryReports.fileId, libraryFiles.id))
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .where(whereClause)
       .orderBy(desc(libraryReports.createdAt));
   }
@@ -2274,6 +2367,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
   }>();
 
   public subjects = new Map<string, { id: string; name: string; codeInPlan: number; level: number; kind: string; planId?: string; sharedSubjectId?: string | null }>();
+  public plans = new Map<string, { id: string; name: string; year: number; status: string; careerId: string; careerCode: string; careerName: string; facultyName: string }>();
   public professors = new Map<string, { id: string; displayName: string }>();
   public files = new Map<string, any>();
   public fileProfessors = new Map<string, Set<string>>(); // fileId -> Set<professorId>
@@ -2308,11 +2402,28 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     }
   }
 
+  private getSubjectHierarchy(subjectId: string) {
+    const sub = this.subjects.get(subjectId);
+    const planId = sub?.planId || null;
+    const plan = planId ? this.plans.get(planId) : undefined;
+    return {
+      careerId: plan?.careerId ?? null,
+      careerCode: plan?.careerCode ?? null,
+      careerName: plan?.careerName ?? null,
+      planId,
+      planName: plan?.name ?? null,
+      planYear: plan?.year ?? null,
+      planStatus: plan?.status ?? null,
+      facultyName: plan?.facultyName ?? null,
+    };
+  }
+
   async getPendingAdminFiles(): Promise<LibraryFileNotificationItem[]> {
     const res: LibraryFileNotificationItem[] = [];
     for (const f of this.files.values()) {
       if (f.status === 'pending' && !f.adminNotifiedAt) {
         const sub = this.subjects.get(f.subjectId);
+        const hier = this.getSubjectHierarchy(f.subjectId);
         res.push({
           id: f.id,
           title: f.title,
@@ -2323,6 +2434,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
           mimeType: f.mimeType,
           createdAt: f.createdAt,
           subjectName: sub?.name || 'Materia',
+          careerId: hier.careerId,
+          careerCode: hier.careerCode,
+          careerName: hier.careerName,
+          planName: hier.planName,
+          facultyName: hier.facultyName,
         });
       }
     }
@@ -2348,6 +2464,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
       ) {
         const u = this.users.get(f.uploaderUserId);
         const sub = this.subjects.get(f.subjectId);
+        const hier = this.getSubjectHierarchy(f.subjectId);
         if (u) {
           res.push({
             fileId: f.id,
@@ -2358,6 +2475,11 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
             status: f.status as 'approved' | 'rejected',
             title: f.title,
             subjectName: sub?.name || 'Materia',
+            careerId: hier.careerId,
+            careerCode: hier.careerCode,
+            careerName: hier.careerName,
+            planName: hier.planName,
+            facultyName: hier.facultyName,
             rejectionReason: f.rejectionReason,
           });
         }
@@ -2376,6 +2498,27 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
   }
 
   // Métodos auxiliares de seeding para tests
+  seedPlan(plan: {
+    id: string;
+    name: string;
+    year: number;
+    status?: string;
+    careerId: string;
+    careerCode: string;
+    careerName: string;
+    facultyName?: string;
+  }) {
+    this.plans.set(plan.id, {
+      id: plan.id,
+      name: plan.name,
+      year: plan.year,
+      status: plan.status || 'published',
+      careerId: plan.careerId,
+      careerCode: plan.careerCode,
+      careerName: plan.careerName,
+      facultyName: plan.facultyName || 'UTN FRC',
+    });
+  }
   seedUser(user: { id: string; email: string; role?: 'user' | 'admin'; status?: 'active' | 'suspended'; emailVerified?: boolean; termsAccepted?: boolean; notifyLibraryEmail?: boolean }) {
     this.users.set(user.id, {
       id: user.id,
@@ -3170,12 +3313,23 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     return { success: true, message: 'Archivo eliminado exitosamente.' };
   }
 
-  async listPendingFiles() {
+  async listPendingFiles(filters?: { careerId?: string; planId?: string }) {
     return Array.from(this.files.values())
-      .filter((f) => f.status === 'pending')
+      .filter((f) => {
+        if (f.status !== 'pending') return false;
+        const hier = this.getSubjectHierarchy(f.subjectId);
+        if (filters?.careerId && filters.careerId !== 'all' && hier.careerId !== filters.careerId) {
+          return false;
+        }
+        if (filters?.planId && filters.planId !== 'all' && hier.planId !== filters.planId) {
+          return false;
+        }
+        return true;
+      })
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map((f) => {
         const sub = this.subjects.get(f.subjectId);
+        const hier = this.getSubjectHierarchy(f.subjectId);
         const profIds = Array.from(this.fileProfessors.get(f.id) || []);
         const profs = profIds.map((pid) => this.professors.get(pid)).filter(Boolean);
         return {
@@ -3183,6 +3337,7 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
           subjectId: f.subjectId,
           subjectName: sub?.name || 'Materia',
           subjectCode: sub?.codeInPlan || 0,
+          ...hier,
           kind: f.kind,
           academicYear: f.academicYear,
           term: f.term,
@@ -3207,6 +3362,12 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     let items = Array.from(this.files.values());
     if (filters.status && filters.status !== 'all') items = items.filter((f) => f.status === filters.status);
     if (filters.subjectId && filters.subjectId !== 'all') items = items.filter((f) => f.subjectId === filters.subjectId);
+    if (filters.careerId && filters.careerId !== 'all') {
+      items = items.filter((f) => this.getSubjectHierarchy(f.subjectId).careerId === filters.careerId);
+    }
+    if (filters.planId && filters.planId !== 'all') {
+      items = items.filter((f) => this.getSubjectHierarchy(f.subjectId).planId === filters.planId);
+    }
     if (filters.kind && filters.kind !== 'all') items = items.filter((f) => f.kind === filters.kind);
     if (filters.search) {
       const q = filters.search.toLowerCase();
@@ -3222,11 +3383,13 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
 
     const paged = items.slice(offset, offset + pageSize).map((f) => {
       const sub = this.subjects.get(f.subjectId);
+      const hier = this.getSubjectHierarchy(f.subjectId);
       return {
         id: f.id,
         subjectId: f.subjectId,
         subjectName: sub?.name || 'Materia',
         subjectCode: sub?.codeInPlan || 0,
+        ...hier,
         kind: f.kind,
         academicYear: f.academicYear,
         term: f.term,
@@ -3341,10 +3504,16 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
 
     f.adminNotifiedAt = null;
     const sub = this.subjects.get(f.subjectId);
+    const hier = this.getSubjectHierarchy(f.subjectId);
     const sent = await notifyAdminNewPendingFile(fileId, {
       id: f.id,
       title: f.title,
       subjectName: sub?.name || 'Materia',
+      careerId: hier.careerId,
+      careerCode: hier.careerCode,
+      careerName: hier.careerName,
+      planName: hier.planName,
+      facultyName: hier.facultyName,
       kind: f.kind,
       academicYear: f.academicYear,
       term: f.term,
@@ -3450,20 +3619,50 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     return { success: true, message: `El autor ha sido suspendido y el archivo ${f.id} fue ocultado.` };
   }
 
-  async listReports(status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open') {
+  async listReports(
+    status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open',
+    filters?: { careerId?: string; planId?: string }
+  ) {
     let repList = Array.from(this.reports.values());
     if (status !== 'all') repList = repList.filter((r) => r.status === status);
+    if (filters?.careerId && filters.careerId !== 'all') {
+      repList = repList.filter((r) => {
+        const f = this.files.get(r.fileId);
+        return f ? this.getSubjectHierarchy(f.subjectId).careerId === filters.careerId : false;
+      });
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      repList = repList.filter((r) => {
+        const f = this.files.get(r.fileId);
+        return f ? this.getSubjectHierarchy(f.subjectId).planId === filters.planId : false;
+      });
+    }
     repList.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
     return repList.map((r) => {
       const f = this.files.get(r.fileId);
       const sub = f ? this.subjects.get(f.subjectId) : null;
+      const hier = f
+        ? this.getSubjectHierarchy(f.subjectId)
+        : {
+            careerId: null,
+            careerCode: null,
+            careerName: null,
+            planId: null,
+            planName: null,
+            planYear: null,
+            planStatus: null,
+            facultyName: null,
+          };
       return {
         id: r.id,
         fileId: r.fileId,
         fileTitle: f?.title || 'Archivo',
+        fileKind: f?.kind || 'apunte',
         fileStatus: f?.status || 'desconocido',
+        subjectId: f?.subjectId || null,
         subjectName: sub?.name || 'Materia',
+        ...hier,
         reporterUserId: r.reporterUserId,
         reason: r.reason,
         note: r.note,

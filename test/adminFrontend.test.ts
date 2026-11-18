@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { adminApi } from '../src/api/admin.api';
+import { adminLibraryApi } from '../src/api/library.api';
+import { professorsApi } from '../src/api/professors.api';
 import {
   PUBLISH_DISABLED_REASON,
   arrayBufferToBase64,
@@ -530,6 +532,37 @@ console.log('\n📌 6. Identificación de Autores de Reseñas para Administrador
   );
 
   console.log('  ✅ Tramo 2B (Carreras): API, firma previewHash, matcher, visor solo lectura y botón Publicar deshabilitado verificados');
+}
+
+// 8. Tramo 2C Parte C: Filtros Multi-Plan y Badges en Biblioteca y Reseñas Admin
+console.log('📌 8. Tramo 2C Parte C: Filtros careerId/planId en clientes API y pestañas de moderación');
+{
+  assert.equal(typeof adminLibraryApi.getPendingFiles, 'function');
+  assert.equal(typeof adminLibraryApi.getReports, 'function');
+  assert.equal(typeof adminLibraryApi.getCatalog, 'function');
+  assert.equal(typeof professorsApi.adminGetModerationQueue, 'function');
+  assert.equal(typeof adminApi.listReviews, 'function');
+
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const libTabSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminLibraryTab.tsx'),
+    'utf-8'
+  );
+  const revTabSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminReviewsTab.tsx'),
+    'utf-8'
+  );
+
+  assert.match(libTabSrc, /Filtrar por carrera/);
+  assert.match(libTabSrc, /Filtrar por plan/);
+  assert.match(libTabSrc, /formatCareerPlanBadge/);
+  assert.match(libTabSrc, /adminApi\s*\n?\s*\.listPlans\(\)/);
+  assert.match(revTabSrc, /Filtrar por carrera/);
+  assert.match(revTabSrc, /Filtrar por plan/);
+  assert.match(revTabSrc, /formatCareerPlanBadge/);
+  assert.match(revTabSrc, /adminApi\s*\n?\s*\.listPlans\(\)/);
+
+  console.log('  ✅ Filtros multi-plan y badges carrera/plan verificados en AdminLibraryTab y AdminReviewsTab');
 }
 
 console.log('\n======================================================================');
