@@ -1379,11 +1379,16 @@ export class AdminService {
       .from(subjectEnrollments)
       .where(eq(subjectEnrollments.commissionId, commissionId));
 
-    // Contar en selecciones guardadas de usuarios (búsqueda JSON)
+    // Contar en selecciones guardadas de usuarios (búsqueda JSON en selections y selectionsByPlan)
     const [selectionsRes] = await db
       .select({ value: count() })
       .from(scheduleSelections)
-      .where(sql`${scheduleSelections.selections}::text LIKE ${'%' + commissionId + '%'}`);
+      .where(
+        or(
+          sql`${scheduleSelections.selections}::text LIKE ${'%' + commissionId + '%'}`,
+          sql`${scheduleSelections.selectionsByPlan}::text LIKE ${'%' + commissionId + '%'}`
+        )
+      );
 
     // Contar en propuestas guardadas
     const [proposalsRes] = await db
@@ -1448,20 +1453,38 @@ export class AdminService {
     await db.transaction(async (tx) => {
       // 1. Conservar registros históricos (Ajuste 9):
       // subjectEnrollments tiene onDelete: 'set null', pero conservamos año, cuatrimestre y datos intactos.
-      // 2. Limpiar referencias activas en scheduleSelections
+      // 2. Limpiar referencias activas en scheduleSelections (selections y selectionsByPlan)
       const selectionsWithComm = await tx
         .select()
         .from(scheduleSelections)
-        .where(sql`${scheduleSelections.selections}::text LIKE ${'%' + commissionId + '%'}`);
+        .where(
+          or(
+            sql`${scheduleSelections.selections}::text LIKE ${'%' + commissionId + '%'}`,
+            sql`${scheduleSelections.selectionsByPlan}::text LIKE ${'%' + commissionId + '%'}`
+          )
+        );
 
       for (const sel of selectionsWithComm) {
         const next = { ...(sel.selections as Record<string, string>) };
         for (const [subId, cId] of Object.entries(next)) {
           if (cId === commissionId) delete next[subId];
         }
+        const rawByPlan =
+          sel.selectionsByPlan && typeof sel.selectionsByPlan === 'object'
+            ? (sel.selectionsByPlan as Record<string, Record<string, string>>)
+            : {};
+        const nextByPlan: Record<string, Record<string, string>> = {};
+        for (const [pId, map] of Object.entries(rawByPlan)) {
+          if (!map || typeof map !== 'object') continue;
+          const cleanedPlan: Record<string, string> = {};
+          for (const [subId, cId] of Object.entries(map)) {
+            if (cId !== commissionId) cleanedPlan[subId] = cId;
+          }
+          nextByPlan[pId] = cleanedPlan;
+        }
         await tx
           .update(scheduleSelections)
-          .set({ selections: next, updatedAt: new Date() })
+          .set({ selections: next, selectionsByPlan: nextByPlan, updatedAt: new Date() })
           .where(eq(scheduleSelections.id, sel.id));
       }
 

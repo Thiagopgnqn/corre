@@ -1737,7 +1737,7 @@ describe('Paso 2 reducido: título intermedio estilo Industrial y criterio no ev
       career: {
         id: 'career-ind-mock',
         name: 'Ingeniería Industrial Mock',
-        code: 'IIND',
+        code: 'IND',
         facultyId: 'fac-frc',
       },
       subjects: [

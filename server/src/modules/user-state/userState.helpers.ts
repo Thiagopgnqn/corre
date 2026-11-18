@@ -266,3 +266,27 @@ export function mergePlanScheduleSelections(
     selectionsByPlan: nextByPlan,
   };
 }
+
+/**
+ * Calcula el nivel máximo permitido para electivas de un plan:
+ * usa `config.totalLevels` y el mayor `level` entre sus materias, con mínimo 5 por compatibilidad.
+ */
+export function resolvePlanMaxLevel(
+  totalLevels?: number | null,
+  subjects?: Array<{ level?: number | null }>
+): number {
+  let max =
+    typeof totalLevels === 'number' && Number.isFinite(totalLevels) && totalLevels >= 1
+      ? Math.floor(totalLevels)
+      : 0;
+
+  if (Array.isArray(subjects)) {
+    for (const subject of subjects) {
+      if (typeof subject?.level === 'number' && Number.isFinite(subject.level) && subject.level > max) {
+        max = Math.floor(subject.level);
+      }
+    }
+  }
+
+  return Math.max(5, max);
+}

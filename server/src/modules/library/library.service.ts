@@ -144,6 +144,47 @@ export interface ILibraryService {
   handleAccountDeletion(userId: string, deleteFiles: boolean): Promise<void>;
 }
 
+export interface PendingUploaderRawRow {
+  fileId: string;
+  uploaderUserId: string | null;
+  status: string;
+  title: string;
+  rejectionReason: string | null;
+  subjectName: string | null;
+  userEmail: string;
+  userStatus: string;
+}
+
+/**
+ * Construye los ítems de notificación al uploader sin duplicar filas aunque el usuario tenga
+ * múltiples filas en `user_settings` (una por plan): opt-out gana (`every !== false`).
+ */
+export function buildPendingUploaderFileItems(
+  rows: PendingUploaderRawRow[],
+  settingsRows: Array<{ userId: string; notifyLibraryEmail: boolean | null }>
+): PendingUploaderFileItem[] {
+  const optedOutUsers = new Set<string>();
+  for (const s of settingsRows) {
+    if (s.notifyLibraryEmail === false) {
+      optedOutUsers.add(s.userId);
+    }
+  }
+
+  return rows
+    .filter((r): r is PendingUploaderRawRow & { uploaderUserId: string } => Boolean(r.uploaderUserId))
+    .map((r) => ({
+      fileId: r.fileId,
+      uploaderUserId: r.uploaderUserId,
+      userEmail: r.userEmail,
+      userStatus: r.userStatus,
+      notifyLibraryEmail: !optedOutUsers.has(r.uploaderUserId),
+      status: r.status as 'approved' | 'rejected',
+      title: r.title,
+      subjectName: r.subjectName || 'Materia',
+      rejectionReason: r.rejectionReason,
+    }));
+}
+
 /**
  * Implementación de producción respaldada por PostgreSQL y Cloudflare R2
  */
@@ -204,12 +245,10 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         subjectName: subjects.name,
         userEmail: users.email,
         userStatus: users.status,
-        notifyLibraryEmail: userSettings.notifyLibraryEmail,
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
       .innerJoin(users, eq(libraryFiles.uploaderUserId, users.id))
-      .leftJoin(userSettings, eq(users.id, userSettings.userId))
       .where(
         and(
           sql`${libraryFiles.status} IN ('approved', 'rejected')`,
@@ -219,17 +258,22 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       )
       .orderBy(asc(libraryFiles.updatedAt));
 
-    return rows.map((r) => ({
-      fileId: r.fileId,
-      uploaderUserId: r.uploaderUserId!,
-      userEmail: r.userEmail,
-      userStatus: r.userStatus,
-      notifyLibraryEmail: r.notifyLibraryEmail !== false,
-      status: r.status as 'approved' | 'rejected',
-      title: r.title,
-      subjectName: r.subjectName || 'Materia',
-      rejectionReason: r.rejectionReason,
-    }));
+    const uploaderIds = Array.from(
+      new Set(rows.map((r) => r.uploaderUserId).filter((id): id is string => Boolean(id)))
+    );
+
+    const settingsRows =
+      uploaderIds.length > 0
+        ? await db
+            .select({
+              userId: userSettings.userId,
+              notifyLibraryEmail: userSettings.notifyLibraryEmail,
+            })
+            .from(userSettings)
+            .where(inArray(userSettings.userId, uploaderIds))
+        : [];
+
+    return buildPendingUploaderFileItems(rows, settingsRows);
   }
 
   async markUploaderNotified(fileIds: string[]): Promise<void> {

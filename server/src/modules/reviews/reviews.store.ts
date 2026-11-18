@@ -2847,16 +2847,22 @@ export class DrizzleReviewsStore implements ReviewsStore {
 
   async getUserSeenRecommendationKeys(userId: string): Promise<Set<string>> {
     try {
-      const [row] = await db
+      const rows = await db
         .select({ extraSettings: userSettings.extraSettings })
         .from(userSettings)
-        .where(eq(userSettings.userId, userId))
-        .limit(1);
-      const raw = (row?.extraSettings as Record<string, unknown> | null)?.seenRecommendationKeys;
-      if (Array.isArray(raw)) {
-        return new Set(raw.filter((x): x is string => typeof x === 'string'));
+        .where(eq(userSettings.userId, userId));
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const raw = (row?.extraSettings as Record<string, unknown> | null)?.seenRecommendationKeys;
+        if (Array.isArray(raw)) {
+          for (const item of raw) {
+            if (typeof item === 'string') {
+              seen.add(item);
+            }
+          }
+        }
       }
-      return new Set();
+      return seen;
     } catch {
       return new Set();
     }
@@ -2864,36 +2870,60 @@ export class DrizzleReviewsStore implements ReviewsStore {
 
   async markRecommendationsSeen(userId: string, keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    const [existing] = await db
+    const rows = await db
       .select()
       .from(userSettings)
-      .where(eq(userSettings.userId, userId))
-      .limit(1);
+      .where(eq(userSettings.userId, userId));
 
-    const prevExtra =
-      existing?.extraSettings && typeof existing.extraSettings === 'object'
-        ? (existing.extraSettings as Record<string, unknown>)
-        : {};
-    const prevList = Array.isArray(prevExtra.seenRecommendationKeys)
-      ? prevExtra.seenRecommendationKeys.filter((x): x is string => typeof x === 'string')
-      : [];
-    const merged = Array.from(new Set([...prevList, ...keys])).slice(-500);
-    const nextExtra = {
-      ...prevExtra,
-      seenRecommendationKeys: merged,
-    };
+    if (rows.length > 0) {
+      const target = rows[0];
+      const prevList: string[] = [];
+      for (const row of rows) {
+        const extra =
+          row.extraSettings && typeof row.extraSettings === 'object'
+            ? (row.extraSettings as Record<string, unknown>)
+            : {};
+        if (Array.isArray(extra.seenRecommendationKeys)) {
+          for (const item of extra.seenRecommendationKeys) {
+            if (typeof item === 'string') prevList.push(item);
+          }
+        }
+      }
 
-    if (existing) {
+      const targetExtra =
+        target.extraSettings && typeof target.extraSettings === 'object'
+          ? (target.extraSettings as Record<string, unknown>)
+          : {};
+      const merged = Array.from(new Set([...prevList, ...keys])).slice(-500);
+      const nextExtra = {
+        ...targetExtra,
+        seenRecommendationKeys: merged,
+      };
+      const whereClause = target.planId
+        ? and(eq(userSettings.userId, userId), eq(userSettings.planId, target.planId))
+        : eq(userSettings.userId, userId);
+
       await db
         .update(userSettings)
         .set({ extraSettings: nextExtra, updatedAt: new Date() })
-        .where(eq(userSettings.userId, userId));
-    } else {
-      await db.insert(userSettings).values({
-        userId,
-        extraSettings: nextExtra,
-      });
+        .where(whereClause);
+      return;
     }
+
+    const planCtx = await this.resolvePlanContext(userId);
+    if (!planCtx?.planId) {
+      return;
+    }
+
+    const merged = Array.from(new Set(keys)).slice(-500);
+    await db
+      .insert(userSettings)
+      .values({
+        userId,
+        planId: planCtx.planId,
+        extraSettings: { seenRecommendationKeys: merged },
+      })
+      .onConflictDoNothing();
   }
 }
 

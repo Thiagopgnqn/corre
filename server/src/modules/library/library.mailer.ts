@@ -1249,8 +1249,11 @@ export async function notifyUploaderFileApproved(
       if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
       const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
       if (!u || u.status === 'suspended') return false;
-      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
-      if (settings && settings.notifyLibraryEmail === false) return false;
+      const settingsRows = await db
+        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
+        .from(userSettings)
+        .where(eq(userSettings.userId, u.id));
+      if (settingsRows.some((s) => s.notifyLibraryEmail === false)) return false;
       const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
       title = f.title;
       subjectName = s?.name || 'Materia';
@@ -1321,8 +1324,11 @@ export async function notifyUploaderFileRejected(
       if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
       const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
       if (!u || u.status === 'suspended') return false;
-      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
-      if (settings && settings.notifyLibraryEmail === false) return false;
+      const settingsRows = await db
+        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
+        .from(userSettings)
+        .where(eq(userSettings.userId, u.id));
+      if (settingsRows.some((s) => s.notifyLibraryEmail === false)) return false;
       const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
       title = f.title;
       subjectName = s?.name || 'Materia';

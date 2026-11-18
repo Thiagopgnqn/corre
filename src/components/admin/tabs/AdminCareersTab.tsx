@@ -765,7 +765,7 @@ export const AdminCareersTab: React.FC = () => {
                   type="text"
                   value={careerCode}
                   onChange={(e) => setCareerCode(e.target.value.toUpperCase())}
-                  placeholder="Ej: IIND"
+                  placeholder="Ej: IND"
                   className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white uppercase font-mono placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
               </label>

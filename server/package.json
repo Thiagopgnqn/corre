@@ -19,6 +19,7 @@
     "merge-professors": "tsx src/scripts/mergeProfessors.ts",
     "verify-user": "tsx src/scripts/verifyUser.ts",
     "verify:import-neon": "tsx src/scripts/verifyImportNeon.ts",
+    "verify:user-state-neon": "tsx src/scripts/verifyUserStateNeon.ts",
     "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts && tsx test/library.test.ts && tsx test/multicarreraIsolation.test.ts && tsx test/catalogConfigAndSecurity.test.ts && tsx test/planImport.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },

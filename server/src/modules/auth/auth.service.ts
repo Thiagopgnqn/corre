@@ -308,18 +308,20 @@ export class AuthService {
           selectedPlanId: users.selectedPlanId,
         });
 
-      // Crear settings iniciales
-      await tx.insert(userSettings).values({
-        userId: newUser.id,
-        planId,
-        includePromotionsInGPA: true,
-        minPassingGrade: 4,
-        includeAnalistaTrack: false,
-        allowBlockedElectivesPlanning: false,
-        includeElectivesInProgress: true,
-        soundEnabled: true,
-        tutorialCompleted: false,
-      });
+      // Crear settings iniciales solo si hay plan resuelto (evita plan_id NULL en 0015+)
+      if (planId) {
+        await tx.insert(userSettings).values({
+          userId: newUser.id,
+          planId,
+          includePromotionsInGPA: true,
+          minPassingGrade: 4,
+          includeAnalistaTrack: false,
+          allowBlockedElectivesPlanning: false,
+          includeElectivesInProgress: true,
+          soundEnabled: true,
+          tutorialCompleted: false,
+        });
+      }
 
       // Guardar código hasheado
       await tx.insert(emailVerificationCodes).values({

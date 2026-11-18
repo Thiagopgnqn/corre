@@ -19,6 +19,7 @@ import {
   setCatalogStoreForTesting,
 } from '../src/modules/catalog/catalog.store.js';
 import {
+  buildPendingUploaderFileItems,
   InMemoryLibraryService,
   resetInitUploadRateLimits,
   setLibraryServiceForTesting,
@@ -29,6 +30,7 @@ import {
   extractPlanSettings,
   mergePlanScheduleSelections,
   mergePlanSettings,
+  resolvePlanMaxLevel,
 } from '../src/modules/user-state/userState.helpers.js';
 import { InMemoryUserStateStore } from '../src/modules/user-state/userState.store.js';
 import { MemoryMockR2Service } from '../src/services/r2.service.js';
@@ -748,6 +750,98 @@ async function main() {
         exportA.data.data.scheduleDrafts[0].name === 'Propuesta Plan A',
       'GET /api/export ignora ?planId= extranjero y exporta solo datos del plan activo'
     );
+
+    // 4.5 Sincronización global de notifyLibraryEmail, electivas en nivel 6 y no-duplicación de notificaciones al uploader
+    setUserPlanInAllStores(multiUserId, planB);
+    const putNotifyFalseB = await api('PUT', '/api/settings', multiToken, {
+      notifyLibraryEmail: false,
+    });
+    setUserPlanInAllStores(multiUserId, planA);
+    const stateNotifyA = await api('GET', '/api/state', multiToken);
+    const putNotifyTrueA = await api('PUT', '/api/settings', multiToken, {
+      notifyLibraryEmail: true,
+    });
+    setUserPlanInAllStores(multiUserId, planB);
+    const stateNotifyB = await api('GET', '/api/state', multiToken);
+    assert(
+      putNotifyFalseB.status === 200 &&
+        stateNotifyA.data?.data?.settings?.notifyLibraryEmail === false &&
+        stateNotifyA.data?.data?.settings?.minPassingGrade === 6 &&
+        putNotifyTrueA.status === 200 &&
+        stateNotifyB.data?.data?.settings?.notifyLibraryEmail === true &&
+        stateNotifyB.data?.data?.settings?.minPassingGrade === 4,
+      'notifyLibraryEmail se sincroniza globalmente entre planes sin pisar preferencias por plan'
+    );
+
+    const plan6Id = crypto.randomUUID();
+    userStateStore.seedPlan({
+      id: plan6Id,
+      name: 'Medicina / Plan 6 niveles',
+      facultyId: facA,
+      totalLevels: 6,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    userStateStore.seedSubject({
+      planId: plan6Id,
+      codeInPlan: 601,
+      kind: 'electiva',
+      level: 6,
+    });
+    setUserPlanInAllStores(multiUserId, plan6Id);
+    const putElec6 = await api('PUT', '/api/electives', multiToken, {
+      assignedElectives: { 6: [601] },
+    });
+    const stateElec6 = await api('GET', '/api/state', multiToken);
+    const exportElec6 = await api('GET', '/api/export', multiToken);
+    const importElec6 = await api('POST', '/api/import', multiToken, {
+      assignedElectives: { 6: [601] },
+    });
+    const stateAfterImport6 = await api('GET', '/api/state', multiToken);
+    assert(
+      resolvePlanMaxLevel(6, []) === 6 &&
+        resolvePlanMaxLevel(null, [{ level: 6 }]) === 6 &&
+        resolvePlanMaxLevel(3, []) === 5 &&
+        putElec6.status === 200 &&
+        stateElec6.data?.data?.assignedElectives?.['6']?.includes(601) &&
+        exportElec6.data?.data?.assignedElectives?.['6']?.includes(601) &&
+        importElec6.status === 200 &&
+        importElec6.data?.data?.electivesCount === 1 &&
+        stateAfterImport6.data?.data?.assignedElectives?.['6']?.includes(601),
+      'Electivas en nivel 6 funcionan en /api/electives, /api/state, /api/export y /api/import sin tope 1..5',
+      `put=${putElec6.status}, state=${JSON.stringify(stateElec6.data?.data?.assignedElectives)}, export=${JSON.stringify(exportElec6.data?.data?.assignedElectives)}, import=${JSON.stringify(importElec6.data)}`
+    );
+
+    const uploaderFileRow = [
+      {
+        fileId: crypto.randomUUID(),
+        uploaderUserId: multiUserId,
+        status: 'approved',
+        title: 'Resumen multi-plan',
+        rejectionReason: null,
+        subjectName: 'Álgebra',
+        userEmail: 'multi@frc.utn.edu.ar',
+        userStatus: 'active',
+      },
+    ];
+    const itemsBothTrue = buildPendingUploaderFileItems(uploaderFileRow, [
+      { userId: multiUserId, notifyLibraryEmail: true },
+      { userId: multiUserId, notifyLibraryEmail: true },
+    ]);
+    const itemsMixedOptOut = buildPendingUploaderFileItems(uploaderFileRow, [
+      { userId: multiUserId, notifyLibraryEmail: true },
+      { userId: multiUserId, notifyLibraryEmail: false },
+    ]);
+    assert(
+      itemsBothTrue.length === 1 &&
+        itemsBothTrue[0].notifyLibraryEmail === true &&
+        itemsMixedOptOut.length === 1 &&
+        itemsMixedOptOut[0].notifyLibraryEmail === false,
+      'buildPendingUploaderFileItems no duplica filas con múltiples user_settings y respeta opt-out global'
+    );
+
+    setUserPlanInAllStores(multiUserId, planA);
 
     // -------------------------------------------------------------------------
     // 5. AISLAMIENTO REVIEWS, PROFESSORS Y ENROLLMENTS ENTRE FACULTADES/PLANES
