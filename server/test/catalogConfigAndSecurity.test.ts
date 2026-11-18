@@ -1,5 +1,6 @@
 import './setupTestEnv.js';
 
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -858,8 +859,10 @@ async function main() {
 
   const lastJournalEntry = journal.entries[journal.entries.length - 1];
   assert(
-    lastJournalEntry?.idx === 15 && lastJournalEntry?.tag === '0015_user_state_composite_keys',
-    'meta/_journal.json registra 0015_user_state_composite_keys como última entrada'
+    lastJournalEntry?.idx === 16 &&
+      lastJournalEntry?.tag === '0016_library_files_restrict_delete' &&
+      lastJournalEntry?.when === 1793760000000,
+    'meta/_journal.json registra 0016_library_files_restrict_delete como última entrada'
   );
 
   // 1f. Integridad global de _journal.json y simulación exacta de drizzle-orm migrate
@@ -935,7 +938,7 @@ async function main() {
     return pending;
   };
 
-  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0015 en orden
+  // (c) Producción en 0007 (when = 1793670000000) -> pendientes 0008..0016 en orden
   const prod0007 = journalEntries.find((e) => e.idx === 7);
   const pendingFromProd = simulateDrizzlePending(
     journalEntries,
@@ -953,12 +956,13 @@ async function main() {
           '0013_isi_plan_intermediate_and_pps_copy',
           '0014_subject_display_code',
           '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
         ]),
-    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0015 en orden',
+    '(c) Simulación drizzle-orm desde producción en 0007 (1793670000000) aplica exactamente 0008 a 0016 en orden',
     `pendientes=${JSON.stringify(pendingFromProd)}`
   );
 
-  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0015 en orden
+  // (d) Rama de prueba en 0010 (when = 1793700000000) -> pendientes 0011..0016 en orden
   const trial0010 = journalEntries.find((e) => e.idx === 10);
   const pendingFromTrial0010 = simulateDrizzlePending(
     journalEntries,
@@ -973,12 +977,13 @@ async function main() {
           '0013_isi_plan_intermediate_and_pps_copy',
           '0014_subject_display_code',
           '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
         ]),
-    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0015 en orden',
+    '(d) Simulación drizzle-orm desde rama en 0010 (1793700000000) aplica exactamente 0011 a 0016 en orden',
     `pendientes=${JSON.stringify(pendingFromTrial0010)}`
   );
 
-  // (d2) Producción Etapa 1 en 0013 (when = 1793730000000) -> pendientes 0014 y 0015
+  // (d2) Producción Etapa 1 en 0013 (when = 1793730000000) -> pendientes 0014..0016
   const prod0013 = journalEntries.find((e) => e.idx === 13);
   const pendingFromProd0013 = simulateDrizzlePending(
     journalEntries,
@@ -992,10 +997,18 @@ async function main() {
   assert(
     prod0013?.when === 1793730000000 &&
       JSON.stringify(pendingFromProd0013) ===
-        JSON.stringify(['0014_subject_display_code', '0015_user_state_composite_keys']) &&
+        JSON.stringify([
+          '0014_subject_display_code',
+          '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
+        ]) &&
       branch0014?.when === 1793740000000 &&
-      JSON.stringify(pendingFrom0014) === JSON.stringify(['0015_user_state_composite_keys']),
-    '(d2) Simulación drizzle-orm desde 0013 aplica 0014..0015 y desde 0014 aplica únicamente 0015_user_state_composite_keys',
+      JSON.stringify(pendingFrom0014) ===
+        JSON.stringify([
+          '0015_user_state_composite_keys',
+          '0016_library_files_restrict_delete',
+        ]),
+    '(d2) Simulación drizzle-orm desde 0013 aplica 0014..0016 y desde 0014 aplica 0015 y 0016 en orden',
     `desde0013=${JSON.stringify(pendingFromProd0013)} desde0014=${JSON.stringify(pendingFrom0014)}`
   );
 
@@ -1004,8 +1017,55 @@ async function main() {
   assert(
     pendingFromEmpty.length === journalEntries.length &&
       JSON.stringify(pendingFromEmpty) === JSON.stringify(journalEntries.map((e) => e.tag)),
-    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0015)',
+    '(e) Simulación drizzle-orm con base vacía aplica todas las migraciones del journal (0000 a 0016)',
     `pendientes=${JSON.stringify(pendingFromEmpty)}`
+  );
+
+  // (f) Regla de despliegue: journal de deploy-a es PREFIJO estricto de deploy-b y HEAD (mismo orden y mismos when)
+  const repoRootDir = path.resolve(__dirname, '../..');
+  const readJournalFromGitRef = (ref: string): JournalEntry[] => {
+    const raw = execFileSync('git', ['show', `${ref}:server/drizzle/meta/_journal.json`], {
+      cwd: repoRootDir,
+      encoding: 'utf8',
+    });
+    return (JSON.parse(raw).entries ?? []) as JournalEntry[];
+  };
+  const deployAJEntries = readJournalFromGitRef('deploy-a');
+  const deployBJEntries = readJournalFromGitRef('deploy-b');
+  const headJEntries = readJournalFromGitRef('HEAD');
+
+  const isStrictlyIncreasing = (entries: JournalEntry[]) =>
+    entries.every((e, i) => e.idx === i && (i === 0 || e.when > entries[i - 1].when));
+  const isStrictPrefix = (prefixEntries: JournalEntry[], fullEntries: JournalEntry[]) =>
+    prefixEntries.length < fullEntries.length &&
+    prefixEntries.every(
+      (e, i) =>
+        e.idx === fullEntries[i]?.idx &&
+        e.tag === fullEntries[i]?.tag &&
+        e.when === fullEntries[i]?.when
+    );
+
+  // Simular por qué 0016 nunca debe desplegarse antes de 0015: si created_at = 1793760000000, drizzle saltea 0015
+  const skippedIf0016First = simulateDrizzlePending(journalEntries, { created_at: 1793760000000 });
+  assert(
+    deployAJEntries.length === 15 &&
+      deployAJEntries[deployAJEntries.length - 1]?.tag === '0014_subject_display_code' &&
+      deployAJEntries[deployAJEntries.length - 1]?.when === 1793740000000 &&
+      isStrictlyIncreasing(deployAJEntries) &&
+      isStrictlyIncreasing(deployBJEntries) &&
+      isStrictlyIncreasing(headJEntries) &&
+      isStrictPrefix(deployAJEntries, deployBJEntries) &&
+      isStrictPrefix(deployAJEntries, headJEntries) &&
+      deployBJEntries.length === 17 &&
+      deployBJEntries[15]?.tag === '0015_user_state_composite_keys' &&
+      deployBJEntries[15]?.when === 1793750000000 &&
+      deployBJEntries[16]?.tag === '0016_library_files_restrict_delete' &&
+      deployBJEntries[16]?.when === 1793760000000 &&
+      (JSON.stringify(deployBJEntries) === JSON.stringify(headJEntries) ||
+        isStrictPrefix(deployBJEntries, headJEntries)) &&
+      skippedIf0016First.length === 0,
+    '(f) Journal de deploy-a (0000..0014) es prefijo estricto de deploy-b (0000..0016) y HEAD, con when crecientes',
+    `lenA=${deployAJEntries.length}, lenB=${deployBJEntries.length}, lenHEAD=${headJEntries.length}, skippedIf0016First=${JSON.stringify(skippedIf0016First)}`
   );
 
   // 1g. Guarda runtime de migraciones (migrationGuard + demo rojo-verde c5d321f -> c04fbb9)

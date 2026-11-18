@@ -152,7 +152,7 @@ npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
 2. **Subir `.xlsx` de Industrial y ejecutar vista previa:**
    - Seleccioná la facultad existente (donde reside Sistemas).
    - En **`Modo de destino`**, elegí **`Nueva carrera + primer plan (draft)`**.
-   - Completá **`Nombre de la carrera`** (`Ingeniería Industrial`) y **`Código de carrera`** (`IIND`).
+   - Completá **`Nombre de la carrera`** (`Ingeniería Industrial`) y **`Código de carrera`** (`IND`).
    - Cargá el archivo local `artifacts/industrial/industrial-plan-2023.xlsx`.
    - Pulsá **`Ejecutar vista previa (solo lectura)`**.
    - Verificá en el resumen de vista previa:
@@ -164,7 +164,7 @@ npm --prefix server run make-admin -- --email tu-usuario-de-prueba@ejemplo.com
 4. **Confirmar creación del borrador:**
    - Pulsá **`Confirmar importación en draft`**, completá la reautenticación en `AdminReauthModal` y verificá que el plan queda listado con estado `draft`.
 5. **Inspeccionar detalle solo lectura:**
-   - En el listado de planes, pulsá **`Inspeccionar`** sobre `IIND · Plan 2023` (`GET /api/admin/plans/:id`).
+   - En el listado de planes, pulsá **`Inspeccionar`** sobre `IND · Plan 2023` (`GET /api/admin/plans/:id`).
    - Confirmá la estructura por niveles (`1` a `5`), los **`10`** créditos electivos requeridos (`5` slots equivalentes), título final **`Ingeniero/a Industrial`**, ausencia de título intermedio/PPS, correlativas e integridad de materias.
 6. **Verificar aislamiento del catálogo público (sin exponer el `draft`):**
    - Copiá el UUID del plan `draft` recién creado y verificá desde PowerShell (sin cookies):
@@ -184,4 +184,27 @@ Invoke-RestMethod -Uri "http://localhost:4000/api/catalog/plans/current" | Selec
    - Confirmá en **Diferencias sobre el draft existente** que muestra: **`Crear: 0 · Actualizar: 56 · Quitar: 0`**, y confirmá la re-importación verificando que no se duplicaron materias ni correlativas.
 8. **Comprobar botón `Publicar` deshabilitado y limpiar borrador:**
    - Verificá que **`Publicar`** figura visible pero **deshabilitado** con el aviso de que se habilitará en Tramo 2C/2D.
-   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado (junto con la carrera `IIND` en estado `draft`, por ser su único plan, sin dejar carreras fantasma y dejando el código libre para reimportar) sin afectar el plan publicado de Sistemas.
+   - Pulsá **`Eliminar`** → **`Eliminar borrador`** (`AdminReauthModal`) y confirmá que el borrador de Industrial desaparece del listado (junto con la carrera `IND` en estado `draft`, por ser su único plan, sin dejar carreras fantasma y dejando el código libre para reimportar) sin afectar el plan publicado de Sistemas.
+
+---
+
+## 5. Verificación User State multi-plan (`verify:user-state-neon`) y ensayo integral `0014 -> 0015 -> 0016`
+
+El script [`server/src/scripts/verifyUserStateNeon.ts`](../server/src/scripts/verifyUserStateNeon.ts) (**excluido de `npm test`**) verifica contra PostgreSQL/Neon real: usuario con 1 plan, usuario con 2 planes en paralelo sobre el **mismo término horario**, sincronización de `notifyLibraryEmail`, electiva en nivel `6`, `DrizzleReviewsStore.markRecommendationsSeen` sin insertar `plan_id = NULL` y `PgLibraryService.getPendingUploaderFiles()` sin filas duplicadas.
+
+```powershell
+# 1. Validación de parámetro --mode (sin --mode falla de inmediato) y host sin exponer credenciales
+$env:ALLOW_DESTRUCTIVE_TEST = "1"
+npm --prefix server run verify:user-state-neon -- --mode=verify
+
+# 2. Ejecución por modo contra la rama temporal de Neon:
+npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=seed --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=cleanup --host-ok=<host>
+Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
+```
+
+> [!NOTE]
+> Para ejecutar el ensayo completo en **11 pasos** (`deploy-a` sobre `0014` → `--mode=seed` → `deploy-b` con `db:migrate` `0015` + `0016` → `--mode=check-post-0015` y `--mode=verify` → rollback SQL controlado y re-migración → `verify:import-neon` + pruebas Partes B/C/D → `--mode=cleanup`) sobre **una única rama temporal de Neon (`>= 7 días`)**, seguí la **Sección 3** de [`docs/deploy-etapa2.md`](deploy-etapa2.md). Aprovechá la misma corrida en el navegador para verificar filtros/insignias `[IND] · [Plan 2023]` en **Biblioteca** y **Reseñas** y la creación/vinculación de docentes en **`IND`** aun con usuario posicionado en otro `selected_plan_id` (`AdminScheduleTab` sigue diferido a Etapa 3).

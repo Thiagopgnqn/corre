@@ -2141,6 +2141,29 @@ async function runTests(): Promise<void> {
         recoveryPreviewRes.status === 200,
       'Fallo inesperado (500) dentro de POST /api/admin/plans/preview libera el lock y permite importar nuevamente sin 409'
     );
+
+    // Migración 0016 y schema.ts: library_files(subject_id) -> subjects(id) con ON DELETE restrict
+    const testDirPath = path.dirname(fileURLToPath(import.meta.url));
+    const sql0016Path = path.resolve(testDirPath, '../drizzle/0016_library_files_restrict_delete.sql');
+    const sql0016 = fs.readFileSync(sql0016Path, 'utf-8');
+    const schemaSrc = fs.readFileSync(
+      path.resolve(testDirPath, '../src/db/schema.ts'),
+      'utf-8'
+    );
+    const libFilesBlockMatch = schemaSrc.match(
+      /export const libraryFiles = pgTable\([\s\S]*?\n\);/
+    );
+    const libFilesBlock = libFilesBlockMatch?.[0] ?? '';
+    assert(
+      !sql0016.includes('\r\n') &&
+        sql0016.includes('DROP CONSTRAINT') &&
+        sql0016.includes('ON DELETE restrict') &&
+        sql0016.includes('library_files_subject_id_subjects_id_fk') &&
+        /subjectId:\s*uuid\('subject_id'\)\s*\.notNull\(\)\s*\.references\(\(\)\s*=>\s*subjects\.id,\s*\{\s*onDelete:\s*'restrict'\s*\}\)/.test(
+          libFilesBlock
+        ),
+      'Migración 0016 (LF) y schema.ts protegen library_files.subject_id con ON DELETE restrict'
+    );
   } finally {
     setPlanImportStoreForTesting(null);
     setLiveUserResolverForTesting(null);

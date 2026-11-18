@@ -1112,7 +1112,7 @@ export const libraryFiles = pgTable(
     uploaderUserId: uuid('uploader_user_id').references(() => users.id, { onDelete: 'set null' }),
     subjectId: uuid('subject_id')
       .notNull()
-      .references(() => subjects.id, { onDelete: 'cascade' }),
+      .references(() => subjects.id, { onDelete: 'restrict' }),
     sharedSubjectId: uuid('shared_subject_id').references(() => sharedSubjects.id, {
       onDelete: 'set null',
     }),
