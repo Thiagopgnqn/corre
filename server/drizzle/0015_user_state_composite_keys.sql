@@ -68,9 +68,20 @@ SET
   ),
   "updated_at" = now()
 WHERE spr."plan_id" IS NULL;--> statement-breakpoint
-DELETE FROM "user_settings" WHERE "plan_id" IS NULL;--> statement-breakpoint
-DELETE FROM "schedule_selections" WHERE "plan_id" IS NULL;--> statement-breakpoint
-DELETE FROM "schedule_proposals" WHERE "plan_id" IS NULL;--> statement-breakpoint
+DO $$
+DECLARE
+  v_null_settings integer;
+  v_null_selections integer;
+  v_null_proposals integer;
+BEGIN
+  SELECT COUNT(*)::int INTO v_null_settings FROM "user_settings" WHERE "plan_id" IS NULL;
+  SELECT COUNT(*)::int INTO v_null_selections FROM "schedule_selections" WHERE "plan_id" IS NULL;
+  SELECT COUNT(*)::int INTO v_null_proposals FROM "schedule_proposals" WHERE "plan_id" IS NULL;
+  IF v_null_settings > 0 OR v_null_selections > 0 OR v_null_proposals > 0 THEN
+    RAISE EXCEPTION 'Migración 0015 abortada: quedan filas con plan_id NULL sin plan disponible (user_settings=%, schedule_selections=%, schedule_proposals=%).',
+      v_null_settings, v_null_selections, v_null_proposals;
+  END IF;
+END $$;--> statement-breakpoint
 ALTER TABLE "user_settings" ALTER COLUMN "plan_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "schedule_selections" ALTER COLUMN "plan_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "schedule_proposals" ALTER COLUMN "plan_id" SET NOT NULL;--> statement-breakpoint
