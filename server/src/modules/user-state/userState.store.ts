@@ -220,23 +220,9 @@ function pickUserSettingsRowForPlan(
 ): StoredUserSettingsLike | null {
   if (rows.length === 0) return null;
   const notifyAll = rows.every((r) => r.notifyLibraryEmail !== false);
-  const asObj = (v: unknown) =>
-    v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : {};
-
-  const matched =
-    (planId ? rows.find((r) => r.planId === planId) : undefined) ||
-    (planId
-      ? rows.find((r) => {
-          const perPlan = asObj(asObj(r.extraSettings).perPlan);
-          return perPlan[planId] && typeof perPlan[planId] === 'object';
-        })
-      : undefined);
-
+  const matched = planId ? rows.find((r) => r.planId === planId) : rows[0];
   if (matched) {
     return { ...matched, notifyLibraryEmail: notifyAll };
-  }
-  if (rows.length === 1) {
-    return { ...rows[0], notifyLibraryEmail: notifyAll };
   }
   return {
     ...DEFAULT_PLAN_SETTINGS,
@@ -244,27 +230,6 @@ function pickUserSettingsRowForPlan(
     notifyLibraryEmail: notifyAll,
     extraSettings: {},
   };
-}
-
-function pickScheduleSelectionRowForPlan(
-  rows: Array<typeof scheduleSelections.$inferSelect>,
-  planId?: string | null
-): (typeof scheduleSelections.$inferSelect) | null {
-  if (rows.length === 0) return null;
-  const matched =
-    (planId ? rows.find((r) => r.planId === planId) : undefined) ||
-    (planId
-      ? rows.find(
-          (r) =>
-            r.selectionsByPlan &&
-            typeof r.selectionsByPlan === 'object' &&
-            Object.prototype.hasOwnProperty.call(r.selectionsByPlan, planId)
-        )
-      : undefined);
-
-  if (matched) return matched;
-  if (rows.length === 1) return rows[0];
-  return null;
 }
 
 export class DrizzleUserStateStore implements UserStateStore {
@@ -388,36 +353,14 @@ export class DrizzleUserStateStore implements UserStateStore {
     userId: string,
     values: PlanSettingsValues & { planId: string | null; extraSettings: Record<string, any> }
   ): Promise<void> {
-    const rows = await executor.select().from(userSettings).where(eq(userSettings.userId, userId));
     let effectivePlanId =
-      values.planId && isValidUuid(values.planId)
-        ? values.planId
-        : rows.find((r) => r.planId && isValidUuid(r.planId))?.planId || null;
+      values.planId && isValidUuid(values.planId) ? values.planId : null;
 
     if (!effectivePlanId) {
       effectivePlanId = (await this.resolveUserActivePlan(userId))?.planId || null;
     }
 
     if (!effectivePlanId) {
-      // Sin ningún plan existente en BD: actualizar fila previa si existe sin escribir NULL en plan_id
-      if (rows.length > 0) {
-        const updateNoPlan = {
-          includePromotionsInGPA: values.includePromotionsInGPA,
-          minPassingGrade: values.minPassingGrade,
-          includeAnalistaTrack: values.includeAnalistaTrack,
-          allowBlockedElectivesPlanning: values.allowBlockedElectivesPlanning,
-          includeElectivesInProgress: values.includeElectivesInProgress,
-          soundEnabled: values.soundEnabled,
-          tutorialCompleted: values.tutorialCompleted,
-          notifyLibraryEmail: values.notifyLibraryEmail,
-          extraSettings: values.extraSettings,
-          updatedAt: new Date(),
-        };
-        await executor
-          .update(userSettings)
-          .set(updateNoPlan)
-          .where(eq(userSettings.userId, userId));
-      }
       return;
     }
 
@@ -435,27 +378,13 @@ export class DrizzleUserStateStore implements UserStateStore {
       updatedAt: new Date(),
     };
 
-    if (rows.length === 0) {
-      await executor.insert(userSettings).values({ userId, ...basePayload });
-      return;
-    }
-
-    if (rows.length === 1) {
-      // Mantiene compatibilidad estricta con esquema 0014 (PK user_id) y con 0015 (1 fila -> actualiza in-place con planId)
-      await executor.update(userSettings).set(basePayload).where(eq(userSettings.userId, userId));
-      return;
-    }
-
-    // Múltiples filas por usuario solo existen bajo esquema 0015 (PK compuesta): actualizar fila objetivo y sincronizar preferencia global
-    const hasTargetRow = rows.some((r) => r.planId === effectivePlanId);
-    if (hasTargetRow) {
-      await executor
-        .update(userSettings)
-        .set(basePayload)
-        .where(and(eq(userSettings.userId, userId), eq(userSettings.planId, effectivePlanId)));
-    } else {
-      await executor.insert(userSettings).values({ userId, ...basePayload });
-    }
+    await executor
+      .insert(userSettings)
+      .values({ userId, ...basePayload })
+      .onConflictDoUpdate({
+        target: [userSettings.userId, userSettings.planId],
+        set: basePayload,
+      });
 
     await executor
       .update(userSettings)
@@ -616,16 +545,19 @@ export class DrizzleUserStateStore implements UserStateStore {
     scheduleTermId: string,
     planId?: string | null
   ): Promise<StoredScheduleSelectionLike | null> {
-    const rows = await db
+    const conditions = [
+      eq(scheduleSelections.userId, userId),
+      eq(scheduleSelections.scheduleTermId, scheduleTermId),
+    ];
+    if (planId && isValidUuid(planId)) {
+      conditions.push(eq(scheduleSelections.planId, planId));
+    }
+    const [sel] = await db
       .select()
       .from(scheduleSelections)
-      .where(
-        and(
-          eq(scheduleSelections.userId, userId),
-          eq(scheduleSelections.scheduleTermId, scheduleTermId)
-        )
-      );
-    return pickScheduleSelectionRowForPlan(rows, planId);
+      .where(and(...conditions))
+      .limit(1);
+    return sel || null;
   }
 
   private async upsertScheduleSelectionWithDb(
@@ -638,82 +570,38 @@ export class DrizzleUserStateStore implements UserStateStore {
       selectionsByPlan: Record<string, Record<string, string>>;
     }
   ): Promise<void> {
-    const rows = await executor
-      .select()
-      .from(scheduleSelections)
-      .where(
-        and(
-          eq(scheduleSelections.userId, userId),
-          eq(scheduleSelections.scheduleTermId, scheduleTermId)
-        )
-      );
-
     let effectivePlanId =
-      payload.planId && isValidUuid(payload.planId)
-        ? payload.planId
-        : rows.find((r) => r.planId && isValidUuid(r.planId))?.planId || null;
+      payload.planId && isValidUuid(payload.planId) ? payload.planId : null;
 
     if (!effectivePlanId) {
       effectivePlanId = (await this.resolveUserActivePlan(userId))?.planId || null;
     }
 
     if (!effectivePlanId) {
-      if (rows.length > 0) {
-        await executor
-          .update(scheduleSelections)
-          .set({
-            selections: payload.selections,
-            selectionsByPlan: payload.selectionsByPlan,
-            updatedAt: new Date(),
-          })
-          .where(eq(scheduleSelections.id, rows[0].id));
-      }
       return;
     }
 
-    if (rows.length === 0) {
-      await executor.insert(scheduleSelections).values({
+    await executor
+      .insert(scheduleSelections)
+      .values({
         userId,
         planId: effectivePlanId,
         scheduleTermId,
         selections: payload.selections,
         selectionsByPlan: payload.selectionsByPlan,
-      });
-      return;
-    }
-
-    if (rows.length === 1) {
-      await executor
-        .update(scheduleSelections)
-        .set({
-          planId: effectivePlanId,
+      })
+      .onConflictDoUpdate({
+        target: [
+          scheduleSelections.userId,
+          scheduleSelections.planId,
+          scheduleSelections.scheduleTermId,
+        ],
+        set: {
           selections: payload.selections,
           selectionsByPlan: payload.selectionsByPlan,
           updatedAt: new Date(),
-        })
-        .where(eq(scheduleSelections.id, rows[0].id));
-      return;
-    }
-
-    const match = rows.find((r) => r.planId === effectivePlanId);
-    if (match) {
-      await executor
-        .update(scheduleSelections)
-        .set({
-          selections: payload.selections,
-          selectionsByPlan: payload.selectionsByPlan,
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduleSelections.id, match.id));
-    } else {
-      await executor.insert(scheduleSelections).values({
-        userId,
-        planId: effectivePlanId,
-        scheduleTermId,
-        selections: payload.selections,
-        selectionsByPlan: payload.selectionsByPlan,
+        },
       });
-    }
   }
 
   async upsertScheduleSelection(
@@ -1019,17 +907,18 @@ export class DrizzleUserStateStore implements UserStateStore {
       }
 
       if (currentTerm && input.scheduleSelections && typeof input.scheduleSelections === 'object') {
-        const existingSelRows = await tx
+        const [existingSel] = await tx
           .select()
           .from(scheduleSelections)
           .where(
             and(
               eq(scheduleSelections.userId, input.userId),
+              eq(scheduleSelections.planId, input.planId),
               eq(scheduleSelections.scheduleTermId, currentTerm.id)
             )
-          );
+          )
+          .limit(1);
 
-        const existingSel = pickScheduleSelectionRowForPlan(existingSelRows, input.planId);
         const mergedSel = mergePlanScheduleSelections(
           existingSel,
           input.planId,
@@ -1194,16 +1083,49 @@ export class InMemoryUserStateStore implements UserStateStore {
 
   async getUserSettings(
     userId: string,
-    _planId?: string | null
+    planId?: string | null
   ): Promise<StoredUserSettingsLike | null> {
-    return this.settings.get(userId) || null;
+    const prefix = `${userId}::`;
+    const userRows = Array.from(this.settings.entries())
+      .filter(([k]) => k.startsWith(prefix))
+      .map(([, v]) => v);
+    if (userRows.length === 0) return null;
+    const notifyAll = userRows.every((r) => r.notifyLibraryEmail !== false);
+    const matched = planId ? this.settings.get(`${userId}::${planId}`) : userRows[0];
+    if (matched) {
+      return { ...matched, notifyLibraryEmail: notifyAll };
+    }
+    return {
+      ...DEFAULT_PLAN_SETTINGS,
+      planId: planId ?? null,
+      notifyLibraryEmail: notifyAll,
+      extraSettings: {},
+    };
   }
 
   async upsertUserSettings(
     userId: string,
     values: PlanSettingsValues & { planId: string | null; extraSettings: Record<string, any> }
   ): Promise<void> {
-    this.settings.set(userId, { ...values, updatedAt: new Date() });
+    const effectivePlanId =
+      values.planId || (await this.resolveUserActivePlan(userId))?.planId || null;
+    if (!effectivePlanId) return;
+    const now = new Date();
+    this.settings.set(`${userId}::${effectivePlanId}`, {
+      ...values,
+      planId: effectivePlanId,
+      updatedAt: now,
+    });
+    const prefix = `${userId}::`;
+    for (const [k, v] of this.settings.entries()) {
+      if (k.startsWith(prefix)) {
+        this.settings.set(k, {
+          ...v,
+          notifyLibraryEmail: values.notifyLibraryEmail,
+          updatedAt: now,
+        });
+      }
+    }
   }
 
   async listSubjectProgress(
@@ -1316,9 +1238,19 @@ export class InMemoryUserStateStore implements UserStateStore {
   async getScheduleSelection(
     userId: string,
     scheduleTermId: string,
-    _planId?: string | null
+    planId?: string | null
   ): Promise<StoredScheduleSelectionLike | null> {
-    return this.selections.get(`${userId}::${scheduleTermId}`) || null;
+    if (planId) {
+      return this.selections.get(`${userId}::${planId}::${scheduleTermId}`) || null;
+    }
+    const prefix = `${userId}::`;
+    const suffix = `::${scheduleTermId}`;
+    for (const [k, v] of this.selections.entries()) {
+      if (k.startsWith(prefix) && k.endsWith(suffix)) {
+        return v;
+      }
+    }
+    return null;
   }
 
   async upsertScheduleSelection(
@@ -1330,8 +1262,11 @@ export class InMemoryUserStateStore implements UserStateStore {
       selectionsByPlan: Record<string, Record<string, string>>;
     }
   ): Promise<void> {
-    this.selections.set(`${userId}::${scheduleTermId}`, {
-      planId: payload.planId,
+    const effectivePlanId =
+      payload.planId || (await this.resolveUserActivePlan(userId))?.planId || null;
+    if (!effectivePlanId) return;
+    this.selections.set(`${userId}::${effectivePlanId}::${scheduleTermId}`, {
+      planId: effectivePlanId,
       selections: payload.selections,
       selectionsByPlan: payload.selectionsByPlan,
       updatedAt: new Date(),
@@ -1457,7 +1392,7 @@ export class InMemoryUserStateStore implements UserStateStore {
     let proposalsCount = 0;
 
     if (input.settingsIncoming) {
-      const existing = await this.getUserSettings(input.userId);
+      const existing = await this.getUserSettings(input.userId, input.planId);
       const merged = mergePlanSettings(existing, input.planId, input.settingsIncoming);
       await this.upsertUserSettings(input.userId, merged);
     }
@@ -1515,7 +1450,7 @@ export class InMemoryUserStateStore implements UserStateStore {
 
     const currentTerm = await this.getCurrentScheduleTerm(input.facultyId);
     if (currentTerm && input.scheduleSelections && typeof input.scheduleSelections === 'object') {
-      const existingSel = await this.getScheduleSelection(input.userId, currentTerm.id);
+      const existingSel = await this.getScheduleSelection(input.userId, currentTerm.id, input.planId);
       const mergedSel = mergePlanScheduleSelections(
         existingSel,
         input.planId,
@@ -1549,7 +1484,13 @@ export class InMemoryUserStateStore implements UserStateStore {
     }
     this.deletedUsers.add(userId);
     this.usersPlan.delete(userId);
-    this.settings.delete(userId);
+    const prefix = `${userId}::`;
+    for (const k of Array.from(this.settings.keys())) {
+      if (k.startsWith(prefix)) this.settings.delete(k);
+    }
+    for (const k of Array.from(this.selections.keys())) {
+      if (k.startsWith(prefix)) this.selections.delete(k);
+    }
   }
 }
 

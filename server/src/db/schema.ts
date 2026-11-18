@@ -492,9 +492,11 @@ export const userSettings = pgTable(
   'user_settings',
   {
     userId: uuid('user_id')
-      .primaryKey()
+      .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => studyPlans.id, { onDelete: 'cascade' }),
     includePromotionsInGPA: boolean('include_promotions_in_gpa').default(true).notNull(),
     minPassingGrade: integer('min_passing_grade').default(4).notNull(),
     includeAnalistaTrack: boolean('include_analista_track').default(false).notNull(),
@@ -509,6 +511,7 @@ export const userSettings = pgTable(
     ...timestamps,
   },
   (table) => [
+    primaryKey({ columns: [table.userId, table.planId], name: 'user_settings_pkey' }),
     uniqueIndex('uq_user_settings_user_plan').on(table.userId, table.planId),
   ]
 );
@@ -577,7 +580,9 @@ export const scheduleSelections = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => studyPlans.id, { onDelete: 'cascade' }),
     scheduleTermId: uuid('schedule_term_id')
       .notNull()
       .references(() => scheduleTerms.id, { onDelete: 'cascade' }),
@@ -592,7 +597,6 @@ export const scheduleSelections = pgTable(
     ...timestamps,
   },
   (table) => [
-    unique('uq_user_schedule_selection').on(table.userId, table.scheduleTermId),
     uniqueIndex('uq_user_schedule_selection_user_plan_term').on(
       table.userId,
       table.planId,
@@ -608,7 +612,9 @@ export const scheduleProposals = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    planId: uuid('plan_id').references(() => studyPlans.id, { onDelete: 'cascade' }),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => studyPlans.id, { onDelete: 'cascade' }),
     scheduleTermId: uuid('schedule_term_id')
       .notNull()
       .references(() => scheduleTerms.id, { onDelete: 'cascade' }),
@@ -978,10 +984,7 @@ export const usersRelations = relations(users, ({ one, many }) => ({
     fields: [users.selectedPlanId],
     references: [studyPlans.id],
   }),
-  settings: one(userSettings, {
-    fields: [users.id],
-    references: [userSettings.userId],
-  }),
+  settings: many(userSettings),
   progress: many(subjectProgress),
   electives: many(electiveAssignments),
   basket: many(userBasket),

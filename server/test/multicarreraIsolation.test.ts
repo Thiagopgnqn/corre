@@ -2,6 +2,7 @@
 import './setupTestEnv.js';
 
 import crypto from 'crypto';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -1307,6 +1308,339 @@ async function main() {
       'Usuario con selectedPlanId=null opera /api/state (planA), /api/enrollments, /api/professors, /api/me/reviewable, POST /api/reviews y /api/library sin elegir el draft',
       `statuses=${nullStateRes.status}/${nullEnrollList.status}/${nullEnrollPut.status}/${nullProfs.status}/${nullReviewable.status}/${nullCreateRev.status}/${nullLibSubs.status}/${nullLibFiles.status}/${nullLibDraftDetail.status}, selectedPlanId=${nullStateRes.data?.data?.selectedPlanId}`
     );
+
+    // -------------------------------------------------------------------------
+    // 10. MIGRACIÓN 0015 (CLAVES COMPUESTAS, EXPANSIÓN SEGURA Y STORE COMPUESTO)
+    // -------------------------------------------------------------------------
+    console.log('\n📌 10. Migración 0015: Claves compuestas, expansión segura y filtro no-UUID');
+    const sql0015Path = path.resolve(__dirname, '../drizzle/0015_user_state_composite_keys.sql');
+    const sql0015 = fs.readFileSync(sql0015Path, 'utf-8');
+    const journal0015Path = path.resolve(__dirname, '../drizzle/meta/_journal.json');
+    const journal0015 = JSON.parse(fs.readFileSync(journal0015Path, 'utf-8'));
+    const entry0015 = (journal0015.entries || []).find(
+      (e: any) => e.tag === '0015_user_state_composite_keys'
+    );
+
+    const includeElectivesIdx = sql0015.indexOf('"include_electives_in_progress"');
+    const soundEnabledIdx = sql0015.indexOf('"sound_enabled"');
+    const includeElectivesJsonIdx = sql0015.indexOf("'includeElectivesInProgress'");
+    const soundEnabledJsonIdx = sql0015.indexOf("'soundEnabled'");
+
+    assert(
+      !sql0015.includes('\r\n') &&
+        entry0015?.idx === 15 &&
+        entry0015?.when === 1793750000000 &&
+        !sql0015.includes('DELETE FROM "user_settings"') &&
+        !sql0015.includes('DELETE FROM "schedule_selections"') &&
+        !sql0015.includes('DELETE FROM "schedule_proposals"') &&
+        sql0015.includes('DO $$') &&
+        sql0015.includes('RAISE EXCEPTION') &&
+        sql0015.includes('user_settings=%, schedule_selections=%, schedule_proposals=%') &&
+        sql0015.includes('ALTER TABLE "user_settings" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ALTER TABLE "schedule_selections" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ALTER TABLE "schedule_proposals" ALTER COLUMN "plan_id" SET NOT NULL') &&
+        sql0015.includes('ADD CONSTRAINT "user_settings_pkey" PRIMARY KEY ("user_id", "plan_id")') &&
+        sql0015.includes('DROP CONSTRAINT IF EXISTS "uq_user_schedule_selection"') &&
+        sql0015.includes('DROP INDEX IF EXISTS "uq_user_schedule_selection"') &&
+        sql0015.includes("kv.key ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'") &&
+        sql0015.includes('JOIN "study_plans" sp ON sp."id" = r."plan_uuid"') &&
+        includeElectivesIdx !== -1 &&
+        soundEnabledIdx !== -1 &&
+        includeElectivesIdx < soundEnabledIdx &&
+        includeElectivesJsonIdx !== -1 &&
+        soundEnabledJsonIdx !== -1 &&
+        includeElectivesJsonIdx < soundEnabledJsonIdx,
+      '0015_user_state_composite_keys.sql usa LF, journal when=1793750000000, NO elimina filas NULL sino que aborta con RAISE EXCEPTION, aplica PK compuesta + NOT NULL, filtro UUID regex + JOIN study_plans y orden exacto de columnas'
+    );
+
+    // Simulación transaccional de Step A de 0015 (abort sin plan vs backfill con plan)
+    function runSynthetic0015StepAInTx(initial: {
+      availablePlans: Array<{ id: string; isActive: boolean; status: string }>;
+      users: Array<{ id: string; selectedPlanId: string | null }>;
+      settings: Array<{ userId: string; planId: string | null }>;
+      selections: Array<{ userId: string; planId: string | null }>;
+      proposals: Array<{ userId: string; planId: string | null }>;
+    }) {
+      // Copia transaccional (si hay RAISE EXCEPTION, el estado original queda intacto)
+      const txSettings = initial.settings.map((r) => ({ ...r }));
+      const txSelections = initial.selections.map((r) => ({ ...r }));
+      const txProposals = initial.proposals.map((r) => ({ ...r }));
+      const validPlanIds = new Set(initial.availablePlans.map((p) => p.id));
+      const fallbackPlanId =
+        initial.availablePlans.find((p) => p.isActive && p.status === 'published')?.id ??
+        initial.availablePlans[0]?.id ??
+        null;
+
+      const resolveForUser = (userId: string): string | null => {
+        const u = initial.users.find((usr) => usr.id === userId);
+        if (u?.selectedPlanId && validPlanIds.has(u.selectedPlanId)) return u.selectedPlanId;
+        return fallbackPlanId;
+      };
+
+      for (const row of txSettings) {
+        if (row.planId === null) row.planId = resolveForUser(row.userId);
+      }
+      for (const row of txSelections) {
+        if (row.planId === null) {
+          const fromSettings = txSettings.find((s) => s.userId === row.userId)?.planId ?? null;
+          row.planId = fromSettings ?? resolveForUser(row.userId);
+        }
+      }
+      for (const row of txProposals) {
+        if (row.planId === null) {
+          const fromSettings = txSettings.find((s) => s.userId === row.userId)?.planId ?? null;
+          row.planId = fromSettings ?? resolveForUser(row.userId);
+        }
+      }
+
+      const nullSettings = txSettings.filter((r) => r.planId === null).length;
+      const nullSelections = txSelections.filter((r) => r.planId === null).length;
+      const nullProposals = txProposals.filter((r) => r.planId === null).length;
+      if (nullSettings > 0 || nullSelections > 0 || nullProposals > 0) {
+        throw new Error(
+          `Migración 0015 abortada: quedan filas con plan_id NULL sin plan disponible (user_settings=${nullSettings}, schedule_selections=${nullSelections}, schedule_proposals=${nullProposals}).`
+        );
+      }
+
+      initial.settings.splice(0, initial.settings.length, ...txSettings);
+      initial.selections.splice(0, initial.selections.length, ...txSelections);
+      initial.proposals.splice(0, initial.proposals.length, ...txProposals);
+    }
+
+    const abortCaseState = {
+      availablePlans: [] as Array<{ id: string; isActive: boolean; status: string }>,
+      users: [{ id: 'u-orphan', selectedPlanId: null }],
+      settings: [{ userId: 'u-orphan', planId: null }],
+      selections: [{ userId: 'u-orphan', planId: null }],
+      proposals: [{ userId: 'u-orphan', planId: null }],
+    };
+    let abortStepAThrew = false;
+    let abortStepAMessage = '';
+    try {
+      runSynthetic0015StepAInTx(abortCaseState);
+    } catch (err: any) {
+      abortStepAThrew = true;
+      abortStepAMessage = String(err?.message ?? err);
+    }
+    assert(
+      abortStepAThrew &&
+        abortStepAMessage.includes('user_settings=1, schedule_selections=1, schedule_proposals=1') &&
+        abortCaseState.settings.length === 1 &&
+        abortCaseState.settings[0].planId === null &&
+        abortCaseState.selections.length === 1 &&
+        abortCaseState.selections[0].planId === null &&
+        abortCaseState.proposals.length === 1 &&
+        abortCaseState.proposals[0].planId === null,
+      'Step A de 0015 aborta sin borrar ni mutar filas si quedan NULL sin plan disponible'
+    );
+
+    const fillCaseState = {
+      availablePlans: [{ id: planA, isActive: true, status: 'published' }],
+      users: [{ id: 'u-legacy', selectedPlanId: null }],
+      settings: [{ userId: 'u-legacy', planId: null }],
+      selections: [{ userId: 'u-legacy', planId: null }],
+      proposals: [{ userId: 'u-legacy', planId: null }],
+    };
+    runSynthetic0015StepAInTx(fillCaseState);
+    assert(
+      fillCaseState.settings[0].planId === planA &&
+        fillCaseState.selections[0].planId === planA &&
+        fillCaseState.proposals[0].planId === planA,
+      'Step A de 0015 completa plan_id en user_settings, schedule_selections y schedule_proposals cuando existe plan disponible'
+    );
+
+    // Verificación estática de compatibilidad de targets ON CONFLICT en D1 (tag 2c-d1) y D2 (HEAD)
+    const userStateStoreSrcD2 = fs.readFileSync(
+      path.resolve(__dirname, '../src/modules/user-state/userState.store.ts'),
+      'utf-8'
+    );
+    const reviewsStoreSrcD2 = fs.readFileSync(
+      path.resolve(__dirname, '../src/modules/reviews/reviews.store.ts'),
+      'utf-8'
+    );
+    assert(
+      userStateStoreSrcD2.includes('target: [userSettings.userId, userSettings.planId]') &&
+        userStateStoreSrcD2.includes('scheduleSelections.userId') &&
+        userStateStoreSrcD2.includes('scheduleSelections.planId') &&
+        userStateStoreSrcD2.includes('scheduleSelections.scheduleTermId') &&
+        !userStateStoreSrcD2.includes('target: userSettings.userId') &&
+        !userStateStoreSrcD2.includes('target: [userSettings.userId]') &&
+        !userStateStoreSrcD2.includes('target: [scheduleSelections.userId, scheduleSelections.scheduleTermId]') &&
+        !reviewsStoreSrcD2.includes('target: userSettings.userId') &&
+        !reviewsStoreSrcD2.includes('target: [userSettings.userId]'),
+      'D2 usa claves compuestas exactas en ON CONFLICT y ninguna escritura apunta a claves simples eliminadas por 0015'
+    );
+
+    let tag2cD1Available = false;
+    try {
+      const d1UserStateSrc = execFileSync(
+        'git',
+        ['show', '2c-d1:server/src/modules/user-state/userState.store.ts'],
+        { encoding: 'utf-8', cwd: path.resolve(__dirname, '../..') }
+      );
+      const d1ReviewsSrc = execFileSync(
+        'git',
+        ['show', '2c-d1:server/src/modules/reviews/reviews.store.ts'],
+        { encoding: 'utf-8', cwd: path.resolve(__dirname, '../..') }
+      );
+      const d1AuthStoreSrc = execFileSync(
+        'git',
+        ['show', '2c-d1:server/src/modules/auth/auth.store.ts'],
+        { encoding: 'utf-8', cwd: path.resolve(__dirname, '../..') }
+      );
+      const d1AuthServiceSrc = execFileSync(
+        'git',
+        ['show', '2c-d1:server/src/modules/auth/auth.service.ts'],
+        { encoding: 'utf-8', cwd: path.resolve(__dirname, '../..') }
+      );
+      tag2cD1Available = true;
+      assert(
+        !d1UserStateSrc.includes('onConflictDoUpdate') &&
+          !d1UserStateSrc.includes('onConflictDoNothing') &&
+          !d1ReviewsSrc.includes('target: userSettings.userId') &&
+          !d1ReviewsSrc.includes('target: [userSettings.userId]') &&
+          d1ReviewsSrc.includes('onConflictDoNothing()') &&
+          !d1AuthStoreSrc.includes('target: userSettings.userId') &&
+          !d1AuthServiceSrc.includes('target: userSettings.userId'),
+        'Commit 2c-d1 no contiene ningún ON CONFLICT sobre (user_id) ni (user_id, schedule_term_id) que rompa tras 0015'
+      );
+    } catch {
+      // Si se ejecuta fuera de un worktree con etiqueta 2c-d1 no bloquea
+    }
+    assert(
+      tag2cD1Available,
+      'Etiqueta local 2c-d1 presente en git para auditar compatibilidad dual 0014/0015'
+    );
+
+    // Simulación sintética de Step C con claves no-UUID ("isi-old"), UUID inexistente y valores malformados
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const validPlanSet = new Set([planA, planB]);
+    const simSettingsTable = new Map<string, any>();
+    simSettingsTable.set(`${multiUserId}::${planA}`, {
+      userId: multiUserId,
+      planId: planA,
+      minPassingGrade: 6,
+      includeElectivesInProgress: true,
+      soundEnabled: false,
+      notifyLibraryEmail: true,
+      extraSettings: {
+        seenRecommendationKeys: ['rec1'],
+        perPlan: {
+          [planA]: { minPassingGrade: 6, soundEnabled: false },
+          [planB]: {
+            minPassingGrade: 7,
+            includeAnalistaTrack: true,
+            includeElectivesInProgress: false,
+            soundEnabled: true,
+            tutorialCompleted: true,
+          },
+          'isi-old': { minPassingGrade: 9 },
+          '00000000-0000-4000-8000-000000000999': { minPassingGrade: 10 },
+          [plan6Id]: 'malformed-string-not-object',
+        },
+      },
+    });
+
+    function runSynthetic0015Expansion(): number {
+      let inserted = 0;
+      for (const row of Array.from(simSettingsTable.values())) {
+        const perPlan =
+          row.extraSettings?.perPlan &&
+          typeof row.extraSettings.perPlan === 'object' &&
+          !Array.isArray(row.extraSettings.perPlan)
+            ? row.extraSettings.perPlan
+            : {};
+        for (const [key, val] of Object.entries(perPlan)) {
+          if (!UUID_RE.test(key) || !validPlanSet.has(key)) continue;
+          if (!val || typeof val !== 'object' || Array.isArray(val)) continue;
+          const compKey = `${row.userId}::${key}`;
+          if (simSettingsTable.has(compKey)) continue;
+          const obj = val as Record<string, any>;
+          simSettingsTable.set(compKey, {
+            userId: row.userId,
+            planId: key,
+            includePromotionsInGPA:
+              typeof obj.includePromotionsInGPA === 'boolean' ? obj.includePromotionsInGPA : true,
+            minPassingGrade:
+              typeof obj.minPassingGrade === 'number' ? obj.minPassingGrade : 4,
+            includeAnalistaTrack:
+              typeof obj.includeAnalistaTrack === 'boolean' ? obj.includeAnalistaTrack : false,
+            allowBlockedElectivesPlanning:
+              typeof obj.allowBlockedElectivesPlanning === 'boolean'
+                ? obj.allowBlockedElectivesPlanning
+                : false,
+            includeElectivesInProgress:
+              typeof obj.includeElectivesInProgress === 'boolean'
+                ? obj.includeElectivesInProgress
+                : true,
+            soundEnabled: typeof obj.soundEnabled === 'boolean' ? obj.soundEnabled : true,
+            tutorialCompleted:
+              typeof obj.tutorialCompleted === 'boolean' ? obj.tutorialCompleted : false,
+            notifyLibraryEmail: row.notifyLibraryEmail,
+            extraSettings: {},
+          });
+          inserted++;
+        }
+      }
+      return inserted;
+    }
+
+    const expPass1 = runSynthetic0015Expansion();
+    const expPass2 = runSynthetic0015Expansion();
+    const expandedPlanB = simSettingsTable.get(`${multiUserId}::${planB}`);
+    const expandedPlanA = simSettingsTable.get(`${multiUserId}::${planA}`);
+    assert(
+      expPass1 === 1 &&
+        expPass2 === 0 &&
+        simSettingsTable.size === 2 &&
+        expandedPlanA?.soundEnabled === false &&
+        expandedPlanB?.minPassingGrade === 7 &&
+        expandedPlanB?.includeElectivesInProgress === false &&
+        expandedPlanB?.soundEnabled === true &&
+        expandedPlanB?.tutorialCompleted === true &&
+        !simSettingsTable.has(`${multiUserId}::isi-old`),
+      'Expansión 0015 materializa planes válidos, ignora clave no-UUID ("isi-old") y UUID inexistente, respeta includeElectivesInProgress vs soundEnabled y es idempotente'
+    );
+
+    // Verificar claves compuestas directas en InMemoryUserStateStore para 2 planes sobre el mismo término horario
+    const sameFacultyTerm = termA.id;
+    const planA2InFacA = crypto.randomUUID();
+    userStateStore.seedPlan({
+      id: planA2InFacA,
+      name: 'Carrera Alternativa Misma Facultad',
+      facultyId: facA,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    setUserPlanInAllStores(multiUserId, planA2InFacA);
+    const putSelPlanA2 = await api('PUT', '/api/schedule/selections', multiToken, {
+      scheduleTermId: sameFacultyTerm,
+      selections: { '101': 'ALT-K1' },
+    });
+    setUserPlanInAllStores(multiUserId, planA);
+    const statePlanAAfterSameTerm = await api('GET', '/api/state', multiToken);
+    setUserPlanInAllStores(multiUserId, planA2InFacA);
+    const statePlanA2AfterSameTerm = await api('GET', '/api/state', multiToken);
+
+    const multiSettingsKeys = Array.from(userStateStore.settings.keys()).filter((k) =>
+      k.startsWith(`${multiUserId}::`)
+    );
+    const multiSelectionKeys = Array.from(userStateStore.selections.keys()).filter((k) =>
+      k.startsWith(`${multiUserId}::`)
+    );
+    assert(
+      putSelPlanA2.status === 200 &&
+        statePlanAAfterSameTerm.data?.data?.scheduleSelections?.['101'] === '1K1' &&
+        statePlanA2AfterSameTerm.data?.data?.scheduleSelections?.['101'] === 'ALT-K1' &&
+        multiSettingsKeys.includes(`${multiUserId}::${planA}`) &&
+        multiSettingsKeys.includes(`${multiUserId}::${planB}`) &&
+        multiSelectionKeys.includes(`${multiUserId}::${planA}::${sameFacultyTerm}`) &&
+        multiSelectionKeys.includes(`${multiUserId}::${planA2InFacA}::${sameFacultyTerm}`),
+      'InMemoryUserStateStore guarda filas compuestas separadas por (userId, planId) y (userId, planId, termId) en la misma facultad'
+    );
+
+    setUserPlanInAllStores(multiUserId, planA);
   } finally {
     setCatalogStoreForTesting(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
