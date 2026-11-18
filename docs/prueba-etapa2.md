@@ -67,6 +67,11 @@ ORDER BY created_at ASC;
    - El journal completo (`0000` a `0014`) contiene **`15` filas** y la última fila debe mostrar `created_at = 1793740000000`.
 3. Ejecutá una segunda vez `npm --prefix server run db:migrate` para confirmar idempotencia (debe finalizar sin aplicar cambios adicionales y mantener exactamente `15` filas).
 
+> [!NOTE]
+> **Inmutabilidad de migraciones y advertencia esperada en `0007`:**
+> - `.gitattributes` fija `server/drizzle/*.sql text eol=lf`. **Las migraciones ya aplicadas nunca se editan.**
+> - En bases ya existentes, la advertencia de diferencia de hash para `0007_enrollment_status_and_exam_attempts.sql` (originada por un único salto de línea final añadido en el commit `35a2d31` luego de haberse aplicado `c126d81` en producción) es **esperada y no bloqueante**.
+
 ---
 
 ## 3. Correr el script manual `verifyImportNeon.ts`
@@ -77,6 +82,9 @@ El script [`server/src/scripts/verifyImportNeon.ts`](../server/src/scripts/verif
 > **El script deja filas de auditoría en `admin_audit_log` por diseño: ejecutalo SOLO en ramas temporales de Neon, NUNCA en producción.**
 > - La tabla `admin_audit_log` está protegida por el trigger inmutable `trg_protect_admin_audit_log` (`prevent_audit_log_modification()`), por lo que la limpieza **nunca** intenta borrar filas de auditoría.
 > - Las filas creadas durante la prueba (`__verify_import_<runId>@verify.local`) permanecen en `admin_audit_log` y el script las informa al final como **"resto esperado por diseño"** (sin contarlo como fallo).
+
+> [!NOTE]
+> **Alcance verificado hasta ahora:** la limpieza corregida de `verifyImportNeon.ts` (`4900836`) y el borrado de carreras `draft` vacías en `deleteAdminDraftPlan` (`0c0d7d7`) solo se probaron **sin conexión y contra la base simulada en memoria** (`InMemoryPlanImportStore` + guardas offline del script). Ambos puntos se verificarán contra **PostgreSQL/Neon real** durante el ensayo final de la Etapa 2.
 
 1. Primer paso (detección segura de host sin credenciales):
 
