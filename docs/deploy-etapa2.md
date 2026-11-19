@@ -13,7 +13,7 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 | Tag / Despliegue | Última migración (`_journal.json`) | Qué contiene | Propósito en el rollout |
 | :--- | :--- | :--- | :--- |
 | **`deploy-a`** (`ed34f49`) | `0014_subject_display_code` (`idx: 14`, `when: 1793740000000`) | Importador `.xlsx` + pestaña Carreras (Tramo 2A/2B), compatibilidad dual `0014`/`0015` + tope dinámico `> 5` (`D1`), guards `409` y limpieza sin tocar R2 (Parte B sin `0016`), moderación multi-plan + mailer dinámico (Parte C), docentes desacoplados de `selected_plan_id` (Parte D) y `verify:user-state-neon` por `--mode`. | Se despliega primero para convivir con `0014` y dejar el servicio listo **antes** de endurecer el esquema. Tolerante tanto al esquema `0014` como al esquema posterior a `0015`. |
-| **`deploy-b`** (`5348f9f` + ajustes de script/doc en punta de `etapa2-deploy`) | `0016_library_files_restrict_delete` (`idx: 16`, `when: 1793760000000`) después de `0015` (`when: 1793750000000`) | Todo `deploy-a` + **`0015`** (backfill + `DO $$ RAISE EXCEPTION` si quedara `plan_id NULL` + `NOT NULL` + claves compuestas + expansión CTE de `extra_settings.perPlan` y `selections_by_plan`) + `schema.ts`/`UserStateStore` compuestos (`D2`) + **`0016`** (`ON DELETE restrict` en `library_files.subject_id`) + `schema.ts` `restrict`. Frontend `src/` **idéntico** a `deploy-a`. | Aplica `0015` y `0016` en el mismo despliegue y en orden estricto. Durante el build de backend (`db:migrate`), el servicio anterior (`deploy-a`) sigue atendiendo sobre ambos esquemas hasta el swap del nuevo contenedor. |
+| **`deploy-b`** (`5348f9f` · mismo runtime que `etapa2-deploy`) | `0016_library_files_restrict_delete` (`idx: 16`, `when: 1793760000000`) después de `0015` (`when: 1793750000000`) | Todo `deploy-a` + **`0015`** (backfill + `DO $$ RAISE EXCEPTION` si quedara `plan_id NULL` + `NOT NULL` + claves compuestas + expansión CTE de `extra_settings.perPlan` y `selections_by_plan`) + `schema.ts`/`UserStateStore` compuestos (`D2`) + **`0016`** (`ON DELETE restrict` en `library_files.subject_id`) + `schema.ts` `restrict`. Frontend `src/` **idéntico** a `deploy-a`, y todo el runtime, `schema.ts` y migraciones de `etapa2-deploy` son **idénticos** a `deploy-b`. | Aplica `0015` y `0016` en el mismo despliegue y en orden estricto. En los **Pasos 6 a 10** se usa directamente la rama `etapa2-deploy` (mismo runtime que `deploy-b` con los scripts/guía actualizados). |
 | **`deploy-c`** *(futuro Tramo 2D)* | Posterior a `0016` *(todavía sin implementar)* | Compuerta de publicación (`Publicar` / `Despublicar`) y selector multi-plan para estudiantes. | Se implementará recién cuando este ensayo en Neon esté aprobado. |
 
 ---
@@ -22,13 +22,14 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 
 1. **Respaldo previo sin expiración:** antes de migrar producción, crear en Neon un snapshot manual **sin vencimiento (sin TTL)**. Para este ensayo, crear una rama temporal en Neon clonada desde `production` con retención `>= 7 días`.
 2. **Sin archivo `server/.env` durante el ensayo:** todas las variables del ensayo se cargan únicamente en la ventana activa de PowerShell usando **comillas simples** (`'...'`, obligatorio porque las cadenas de Neon contienen `&`). Verificar siempre `Test-Path server\.env` = `False` para impedir que `db:migrate` o `env.ts` lean credenciales reales de un `.env` local. Además, `verifyUserStateNeon.ts` y `verifyImportNeon.ts` omiten `dotenv` si `DATABASE_URL` ya está definida en el entorno.
-3. **Regla explícita de `--host-ok`:** tanto `verify:user-state-neon` como `verify:import-neon` imprimen el host de `DATABASE_URL` y el de `DIRECT_URL`, y exigen que **`--host-ok` coincida exactamente con el host de `DATABASE_URL`** (`([uri]$env:DATABASE_URL).Host`). Por su parte, `db:migrate` usa `DIRECT_URL` si está definida (o `DATABASE_URL` como fallback).
-4. **Comparación obligatoria contra el host de `production`:** antes de cada comando que escriba o migre la base, se imprimen `DATABASE_URL` host, `DIRECT_URL` host y los hosts copiados de `production`, abortando si coinciden.
+3. **Regla explícita de `--host-ok` y paridad `-pooler`:** tanto `verify:user-state-neon` como `verify:import-neon` imprimen el host de `DATABASE_URL` y el de `DIRECT_URL`, **abortan si `DIRECT_URL` apunta a un endpoint distinto de `DATABASE_URL` (deben coincidir salvo por `-pooler`)**, y exigen que **`--host-ok` coincida exactamente con el host de `DATABASE_URL`** (`([uri]$env:DATABASE_URL).Host`). Por su parte, `db:migrate` usa `DIRECT_URL` si está definida (o `DATABASE_URL` como fallback).
+4. **Comparación obligatoria contra el host de `production`:** antes de cada migración o comando que escriba en la base, se verifica tanto en PowerShell como en ambos scripts que `DATABASE_URL` y `DIRECT_URL` sean iguales salvo por `-pooler`, y que **ninguno** coincida con los hostnames de `production` (copiados de la consola de Neon **sin credenciales**).
 5. **Solo lectura salvo migraciones vía `db:migrate` y excepción única del Paso 8:** ninguna migración (`0014`, `0015`, `0016`) se ejecuta con SQL manual; todas corren exclusivamente via `npm --prefix server run db:migrate`. La **única excepción** de SQL de escritura a mano en toda la guía es el rollback controlado del **Paso 8**, válido **únicamente en la rama temporal**.
 6. **Índices duplicados temporales tras `0015`:** en `user_settings` coexisten temporalmente `user_settings_pkey` (`0015`) y `uq_user_settings_user_plan` (`0008`) sobre `(user_id, plan_id)`. Su limpieza queda diferida a Etapa 3.
-7. **Sincronización explícita de scripts al hacer checkout a `deploy-a`:** los tags `deploy-a` (`ed34f49`) y `deploy-b` (`5348f9f`) no se mueven; las mejoras de `verifyUserStateNeon.ts` y `verifyImportNeon.ts` viven en `etapa2-deploy`. Por eso, al bajar a `deploy-a` se traen temporalmente ambos scripts desde `etapa2-deploy` (`git checkout etapa2-deploy -- ...`), y antes de volver a `etapa2-deploy` se descarta esa copia temporal con `git checkout -- ...` comprobando `git status --short` vacío.
-   - *Ventajas:* ejecutás exactamente el código/migraciones de `deploy-a` y `deploy-b` usando los scripts de verificación más seguros y actualizados.
-   - *Riesgo y resguardo:* olvidar `git checkout -- ...` antes de cambiar de tag haría fallar o arrastrar cambios; por eso en cada transición se verifica `git status --short`.
+7. **Sincronización de scripts solo en `deploy-a` (`Pasos 2 a 5` y `Paso 8.3`) vs uso directo de `etapa2-deploy` (`Pasos 6 a 10`):**
+   - Los tags `deploy-a` (`ed34f49`) y `deploy-b` (`5348f9f`) no se mueven. La rama **`etapa2-deploy`** tiene **exactamente el mismo runtime, `schema.ts`, dependencias y migraciones que `deploy-b`** (`git diff --stat deploy-b etapa2-deploy -- src server/src ':!server/src/scripts' server/drizzle server/package.json package.json` es **vacío**), y ya incluye `verifyUserStateNeon.ts`, `verifyImportNeon.ts` y esta guía actualizados.
+   - Por eso, **todos los pasos posteriores a `0015` (Pasos 6 a 10) usan directamente la rama `etapa2-deploy`** (sin hacer `git checkout deploy-b`), y **solo al bajar a `deploy-a`** (Pasos 2 y 8.3) se traen temporalmente los 2 scripts con `git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts`.
+   - **Limpieza obligatoria al salir de `deploy-a`:** como `git checkout etapa2-deploy -- <archivos>` deja los archivos modificados en el **index** (`M ` en `git status`), `git checkout -- <archivos>` sería un **no-op**. Antes de cambiar de tag/rama hay que ejecutar **`git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts`** para limpiar index y working tree dejando `git status --short` vacío.
 
 ---
 
@@ -41,8 +42,8 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 ### Paso 1 — Crear la rama temporal en Neon y configurar variables en PowerShell (sin `server/.env`)
 
 1. En **Neon Console**:
-   - Anotá los **hostnames** (solo el host, sin usuario ni contraseña) del endpoint `production` (pooled y direct).
-   - Creá una **rama temporal** clonada desde `production` (con retención **`>= 7 días`** o sin expiración) y copiá sus cadenas `DATABASE_URL` (pooled) y `DIRECT_URL` (direct).
+   - Anotá **ÚNICAMENTE los hostnames** (SOLO el host, p. ej. `ep-xxxx-pooler.region.aws.neon.tech` y `ep-xxxx.region.aws.neon.tech`; **nunca** copies ni pegues la cadena completa con usuario ni contraseña de producción) del endpoint `production`.
+   - Creá una **rama temporal** clonada desde `production` (con retención **`>= 7 días`** o sin expiración) y copiá sus cadenas `DATABASE_URL` (pooled) y `DIRECT_URL` (direct) para cargarlas únicamente en variables de PowerShell.
 2. Verificá que **NO** exista `server\.env` en el repositorio:
 
 ```powershell
@@ -74,20 +75,27 @@ $env:CONTACT_EMAIL = 'ensayo-ficticio@stack.local'
 
 *(Recordá: **NO** definir `EMAIL_PROVIDER`, `BREVO_*`, `RESEND_*`, `R2_*`, `GOOGLE_CLIENT_ID` ni `ADMIN_NOTIFICATION_EMAIL`. El comando `Remove-Item` anterior elimina **únicamente** esas variables por nombre explícito; **nunca** ejecutes `Remove-Item Env:*` ni comodines globales que puedan borrar `PATH`, `TEMP` u otras variables del sistema.)*
 
-4. Verificá los hosts extraídos directamente de la sesión PowerShell y comparalos contra `production`:
+4. Verificá los hosts extraídos de `DATABASE_URL` y `DIRECT_URL`, validá que ambos son **idénticos salvo por `-pooler`**, y comparalos contra `production`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host
-$directHost = ([uri]$env:DIRECT_URL).Host
+$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+$directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
+$dbBase = $dbHost -replace '-pooler(?=\.|$)', ''
+$directBase = $directHost -replace '-pooler(?=\.|$)', ''
+$prodDbBase = $prodDbHost.ToLower() -replace '-pooler(?=\.|$)', ''
+$prodDirectBase = $prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', ''
+
 Write-Host "TEMP DB     (DATABASE_URL): $dbHost"
 Write-Host "TEMP DIRECT (DIRECT_URL):   $directHost"
-Write-Host "PROD DB:                    $prodDbHost"
-Write-Host "PROD DIRECT:                $prodDirectHost"
-if ($prodDbHost -like '<*>' -or $prodDirectHost -like '<*>') { throw 'Completá $prodDbHost y $prodDirectHost con los hosts de producción de Neon Console.' }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: un host coincide con PRODUCCIÓN.' }
+Write-Host "PROD DB     (solo host):    $prodDbHost"
+Write-Host "PROD DIRECT (solo host):    $prodDirectHost"
+
+if ($prodDbHost -like '<*>' -or $prodDirectHost -like '<*>') { throw 'Completá $prodDbHost y $prodDirectHost solo con los hostnames de producción de Neon Console.' }
+if ($dbBase -ne $directBase) { throw "BLOQUEADO: DATABASE_URL ($dbHost) y DIRECT_URL ($directHost) deben ser iguales salvo por '-pooler'." }
+if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or $dbBase -eq $prodDbBase -or $directBase -eq $prodDirectBase) { throw 'BLOQUEADO: un host coincide con PRODUCCIÓN.' }
 ```
 
-**Resultado esperado:** `TEMP DB` y `TEMP DIRECT` pertenecen al endpoint de tu **rama temporal** y ambos son **distintos** de `PROD DB` y `PROD DIRECT`.
+**Resultado esperado:** `TEMP DB` y `TEMP DIRECT` comparten el mismo endpoint base (solo difieren en `-pooler`) y ambos son **distintos** de `PROD DB` y `PROD DIRECT`.
 
 **Consulta SQL de solo lectura (Neon SQL Editor sobre la rama temporal, antes de migrar):**
 
@@ -147,12 +155,13 @@ node -e "const j = require('./server/drizzle/meta/_journal.json'); const last = 
 
 La rama temporal copiada de producción parte de la migración **`0013`** (**`14` filas** en `drizzle.__drizzle_migrations`, última fila con `created_at = 1793730000000`). Por lo tanto, `db:migrate` en `deploy-a` aplica **únicamente `0014_subject_display_code`**.
 
-1. Verificar host y comparar contra producción antes de migrar:
+1. Verificar paridad `-pooler` y comparar ambos hosts contra producción antes de migrar:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
+$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
 Write-Host "TEMP DB: $dbHost | TEMP DIRECT: $directHost | PROD DB: $prodDbHost | PROD DIRECT: $prodDirectHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
+if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 ```
 
 2. Ejecutar `db:migrate` (única vía habilitada para aplicar migraciones):
@@ -278,18 +287,19 @@ WHERE u.email = '__verify_us_seed__@verify.local';
 
 ---
 
-### Paso 6 — Limpiar la copia temporal de scripts, cambiar a `etapa2-deploy` (código `deploy-b`), compilar y aplicar `0015` y `0016` via `db:migrate`
+### Paso 6 — Limpiar la copia temporal de scripts, pasar directo a `etapa2-deploy` (mismo runtime que `deploy-b`), compilar y aplicar `0015` y `0016` via `db:migrate`
 
-> *(Antes de cambiar de tag/rama, descartá la copia temporal de los 2 scripts traída en el Paso 2 para que el working tree quede limpio; al pasar a `etapa2-deploy`, todo el código de producción, `schema.ts` y migraciones coincide exactamente con `deploy-b`, y ya incluye los 2 scripts y la documentación actualizados.)*
+> *(Nota: `git checkout etapa2-deploy -- ...` dejó los 2 scripts stageados en el index, por eso debés usar **`git restore --source=HEAD --staged --worktree -- ...`** —no `git checkout --`, que no limpia el index— antes de pasar a `etapa2-deploy`. Todos los **Pasos 6 a 10** se ejecutan directamente sobre `etapa2-deploy` porque su runtime, `schema.ts` y migraciones son idénticos a `deploy-b`, ya con los scripts actualizados.)*
 
 ```powershell
-git checkout -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
 git status --short
 git checkout etapa2-deploy
 git status --short
+git diff --stat deploy-b etapa2-deploy -- src server/src ':!server/src/scripts' server/drizzle server/package.json package.json
 ```
 
-**Resultado esperado de ambos `git status --short`:** salida vacía (`0` archivos modificados).
+**Resultado esperado:** ambos `git status --short` imprimen vacío (`0` archivos modificados), y `git diff --stat ...` también imprime vacío (confirmando paridad total de runtime entre `deploy-b` y `etapa2-deploy`).
 
 Compilar backend:
 
@@ -297,12 +307,13 @@ Compilar backend:
 npm --prefix server run build
 ```
 
-Verificar hosts contra producción antes de correr `db:migrate`:
+Verificar paridad `-pooler` y comparar ambos hosts contra producción antes de correr `db:migrate`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
+$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
 Write-Host "MIGRARÁ 0015 + 0016 SOBRE -> DB: $dbHost | DIRECT: $directHost | PROD DB: $prodDbHost | PROD DIRECT: $prodDirectHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
+if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 ```
 
 Aplicar `0015` (`1793750000000`) y `0016` (`1793760000000`) exclusivamente via `db:migrate`:
@@ -558,18 +569,19 @@ git status --short
 
 **Resultado esperado de `git status --short`:** `M server/src/scripts/verifyImportNeon.ts` y `M server/src/scripts/verifyUserStateNeon.ts`.
 
-Ejecutar `--mode=verify --expect-schema=0014` sobre `deploy-a`:
+Ejecutar `--mode=verify --expect-schema=0014` sobre `deploy-a` (verificando paridad `-pooler` y host distinto de producción):
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host
-if ($dbHost -eq $prodDbHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
+if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
+if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
 ```
 
-Limpiar los 2 scripts temporales antes de volver a `etapa2-deploy`:
+Limpiar los 2 scripts temporales del index y working tree antes de volver a `etapa2-deploy`:
 
 ```powershell
-git checkout -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
 git status --short
 git checkout etapa2-deploy
 git status --short
@@ -580,8 +592,9 @@ git status --short
 Re-migrar adelante (`0015` + `0016`) y validar `--mode=check-post-0015`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
+if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
+if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 npm --prefix server run db:migrate
 $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
 ```
@@ -717,6 +730,7 @@ LIMIT 5;
 - **Referencia correcta de producción (`origin/master`):** la rama local `master` quedó atrasada `49` commits respecto de `origin/master` (`792d984` vs `7bdf590`), sin divergencia (`git log --oneline origin/master..master` vacío). Por lo tanto, todo chequeo contra producción debe tomar **`origin/master`** (no `master` local sin actualizar).
 - **(a) `origin/master` ancestro de `deploy-a` y `deploy-b`:** confirmado tras `git fetch origin` (`merge-base = 7bdf590`, salida `0`).
 - **(b) Frontend idéntico entre `deploy-a` y `deploy-b`:** `git diff --stat deploy-a deploy-b -- src` dio **vacío** (`0` archivos modificados).
+- **(c) Runtime idéntico entre `deploy-b` y `etapa2-deploy`:** `git diff --stat deploy-b etapa2-deploy -- src server/src ':!server/src/scripts' server/drizzle server/package.json package.json` dio **vacío**.
 
 Verificar explícitamente antes de desplegar en producción:
 
