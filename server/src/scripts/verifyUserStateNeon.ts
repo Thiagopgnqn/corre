@@ -49,6 +49,11 @@ function parseFlagValue(argv: string[], flagName: string): string | null {
 }
 
 function loadServerEnvWithoutConnecting(): void {
+  // Si DATABASE_URL ya viene de la sesión de PowerShell, NO leer server/.env
+  // para evitar inyectar variables externas (EMAIL_PROVIDER, R2_*, GOOGLE_*, etc.).
+  if (process.env.DATABASE_URL?.trim()) {
+    return;
+  }
   const candidateEnvPath = path.resolve(__dirname, '../../.env');
   if (fs.existsSync(candidateEnvPath)) {
     dotenv.config({ path: candidateEnvPath });
@@ -102,13 +107,14 @@ async function run(): Promise<void> {
   if (directHost) {
     console.log(`🌐 HOST detectado en DIRECT_URL:   ${directHost}`);
   }
+  console.log(`🎯 --host-ok valida exactamente el host de DATABASE_URL: ${dbHost}`);
 
   const hostOk = parseFlagValue(argv, '--host-ok');
   if (!hostOk || hostOk !== dbHost) {
-    console.error('\n❌ Confirmación de host faltante o no coincidente.');
+    console.error('\n❌ Confirmación de host faltante o no coincidente (--host-ok debe coincidir con DATABASE_URL host).');
     console.error('   Verificá que el host pertenezca a tu RAMA TEMPORAL de Neon (no producción) y confirmalo con:');
     console.error(
-      `   $env:ALLOW_DESTRUCTIVE_TEST="1"; npm --prefix server run verify:user-state-neon -- --mode=${mode} --host-ok=${dbHost}`
+      `   $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=${mode} --host-ok='${dbHost}'`
     );
     process.exit(1);
   }
@@ -354,6 +360,10 @@ async function run(): Promise<void> {
     await pool.query(`DELETE FROM subjects WHERE id = ANY($1::uuid[])`, [subjectIds]);
     await pool.query(`DELETE FROM study_plans WHERE id = ANY($1::uuid[])`, [planIds]);
     await pool.query(`DELETE FROM careers WHERE id = ANY($1::uuid[])`, [careerIds]);
+    await pool.query(
+      `DELETE FROM professors WHERE faculty_id = ANY($1::uuid[]) OR LOWER(display_name) LIKE $2 ESCAPE '!'`,
+      [facIds, patLower]
+    );
     await pool.query(`DELETE FROM faculties WHERE id = ANY($1::uuid[])`, [facIds]);
     await pool.query(`DELETE FROM institutions WHERE id = ANY($1::uuid[])`, [instIds]);
 

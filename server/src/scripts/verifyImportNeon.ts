@@ -37,6 +37,11 @@ function parseHostOkArg(argv: string[]): string | null {
 }
 
 function loadServerEnvWithoutConnecting(): void {
+  // Si DATABASE_URL ya viene de la sesión de PowerShell, NO leer server/.env
+  // para evitar inyectar variables no configuradas intencionalmente en el ensayo.
+  if (process.env.DATABASE_URL?.trim()) {
+    return;
+  }
   const candidateEnvPath = path.resolve(__dirname, '../../.env');
   if (fs.existsSync(candidateEnvPath)) {
     dotenv.config({ path: candidateEnvPath });
@@ -73,12 +78,13 @@ async function run(): Promise<void> {
   if (directHost) {
     console.log(`🌐 HOST detectado en DIRECT_URL:   ${directHost}`);
   }
+  console.log(`🎯 --host-ok valida exactamente el host de DATABASE_URL: ${dbHost}`);
 
   const hostOk = parseHostOkArg(process.argv.slice(2));
   if (!hostOk || hostOk !== dbHost) {
-    console.error('\n❌ Confirmación de host faltante o no coincidente.');
+    console.error('\n❌ Confirmación de host faltante o no coincidente (--host-ok debe coincidir con DATABASE_URL host).');
     console.error('   Verificá que el host pertenezca a tu RAMA TEMPORAL de Neon (no producción) y confirmalo con:');
-    console.error(`   ALLOW_DESTRUCTIVE_TEST=1 npm --prefix server run verify:import-neon -- --host-ok=${dbHost}`);
+    console.error(`   $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:import-neon -- --host-ok='${dbHost}'`);
     process.exit(1);
   }
 
