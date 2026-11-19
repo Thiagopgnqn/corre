@@ -8,7 +8,7 @@
 
 ## 1. Estructura de los 3 Despliegues (Rama `etapa2-deploy`)
 
-La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin reescribir. Para desplegar en producción sin corte de servicio y respetando estrictamente el orden `when` de Drizzle, el código se organiza en la rama `etapa2-deploy` (confirmado con `git merge-base --is-ancestor master deploy-a` = salida `0`, tanto para `master` como `origin/master`):
+La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin reescribir. Para desplegar en producción sin corte de servicio y respetando estrictamente el orden `when` de Drizzle, el código se organiza en la rama `etapa2-deploy` (confirmado con `git merge-base --is-ancestor origin/master deploy-a` = salida `0`):
 
 | Tag / Despliegue | Última migración (`_journal.json`) | Qué contiene | Propósito en el rollout |
 | :--- | :--- | :--- | :--- |
@@ -26,6 +26,9 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 4. **Comparación obligatoria contra el host de `production`:** antes de cada comando que escriba o migre la base, se imprimen `DATABASE_URL` host, `DIRECT_URL` host y los hosts copiados de `production`, abortando si coinciden.
 5. **Solo lectura salvo migraciones vía `db:migrate` y excepción única del Paso 8:** ninguna migración (`0014`, `0015`, `0016`) se ejecuta con SQL manual; todas corren exclusivamente via `npm --prefix server run db:migrate`. La **única excepción** de SQL de escritura a mano en toda la guía es el rollback controlado del **Paso 8**, válido **únicamente en la rama temporal**.
 6. **Índices duplicados temporales tras `0015`:** en `user_settings` coexisten temporalmente `user_settings_pkey` (`0015`) y `uq_user_settings_user_plan` (`0008`) sobre `(user_id, plan_id)`. Su limpieza queda diferida a Etapa 3.
+7. **Sincronización explícita de scripts al hacer checkout a `deploy-a`:** los tags `deploy-a` (`ed34f49`) y `deploy-b` (`5348f9f`) no se mueven; las mejoras de `verifyUserStateNeon.ts` y `verifyImportNeon.ts` viven en `etapa2-deploy`. Por eso, al bajar a `deploy-a` se traen temporalmente ambos scripts desde `etapa2-deploy` (`git checkout etapa2-deploy -- ...`), y antes de volver a `etapa2-deploy` se descarta esa copia temporal con `git checkout -- ...` comprobando `git status --short` vacío.
+   - *Ventajas:* ejecutás exactamente el código/migraciones de `deploy-a` y `deploy-b` usando los scripts de verificación más seguros y actualizados.
+   - *Riesgo y resguardo:* olvidar `git checkout -- ...` antes de cambiar de tag haría fallar o arrastrar cambios; por eso en cada transición se verifica `git status --short`.
 
 ---
 
@@ -69,7 +72,7 @@ $env:VERIFICATION_CODE_PEPPER = 'ensayo_neon_pepper_ficticio_min_16_chars'
 $env:CONTACT_EMAIL = 'ensayo-ficticio@stack.local'
 ```
 
-*(Recordá: **NO** definir `EMAIL_PROVIDER`, `BREVO_*`, `RESEND_*`, `R2_*`, `GOOGLE_CLIENT_ID` ni `ADMIN_NOTIFICATION_EMAIL`.)*
+*(Recordá: **NO** definir `EMAIL_PROVIDER`, `BREVO_*`, `RESEND_*`, `R2_*`, `GOOGLE_CLIENT_ID` ni `ADMIN_NOTIFICATION_EMAIL`. El comando `Remove-Item` anterior elimina **únicamente** esas variables por nombre explícito; **nunca** ejecutes `Remove-Item Env:*` ni comodines globales que puedan borrar `PATH`, `TEMP` u otras variables del sistema.)*
 
 4. Verificá los hosts extraídos directamente de la sesión PowerShell y comparalos contra `production`:
 
@@ -107,10 +110,21 @@ ORDER BY table_name, column_name;
 
 ---
 
-### Paso 2 — Posicionarse en `deploy-a`, compilar y verificar `_journal.json`
+### Paso 2 — Posicionarse en `deploy-a`, sincronizar los 2 scripts de ensayo, compilar y verificar `_journal.json`
+
+Cambiar al tag `deploy-a` y traer temporalmente en disco las versiones actualizadas de `verifyUserStateNeon.ts` y `verifyImportNeon.ts` desde `etapa2-deploy` (sin tocar código de producción ni migraciones, y sin hacer commit):
 
 ```powershell
 git checkout deploy-a
+git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
+```
+
+**Resultado esperado de `git status --short`:**
+
+```text
+M server/src/scripts/verifyImportNeon.ts
+M server/src/scripts/verifyUserStateNeon.ts
 ```
 
 Compilar backend en `deploy-a`:
@@ -264,13 +278,18 @@ WHERE u.email = '__verify_us_seed__@verify.local';
 
 ---
 
-### Paso 6 — Cambiar a `etapa2-deploy` (punta tras `deploy-b`), compilar y aplicar migraciones `0015` y `0016` via `db:migrate`
+### Paso 6 — Limpiar la copia temporal de scripts, cambiar a `etapa2-deploy` (código `deploy-b`), compilar y aplicar `0015` y `0016` via `db:migrate`
 
-> *(Nota: usá `git checkout etapa2-deploy` para contar con los ajustes del script/guía manteniendo el código/esquema/migraciones idénticos a `deploy-b`, o verificá `git diff --stat deploy-b etapa2-deploy`.)*
+> *(Antes de cambiar de tag/rama, descartá la copia temporal de los 2 scripts traída en el Paso 2 para que el working tree quede limpio; al pasar a `etapa2-deploy`, todo el código de producción, `schema.ts` y migraciones coincide exactamente con `deploy-b`, y ya incluye los 2 scripts y la documentación actualizados.)*
 
 ```powershell
+git checkout -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
 git checkout etapa2-deploy
+git status --short
 ```
+
+**Resultado esperado de ambos `git status --short`:** salida vacía (`0` archivos modificados).
 
 Compilar backend:
 
@@ -529,15 +548,38 @@ COMMIT;
 
 3. **Comprobar `deploy-a` contra la BD revertida y volver a `etapa2-deploy` re-migrando via `db:migrate`:**
 
+Bajar a `deploy-a`, sincronizar temporalmente los 2 scripts y verificar `git status --short`:
+
 ```powershell
 git checkout deploy-a
+git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
+```
+
+**Resultado esperado de `git status --short`:** `M server/src/scripts/verifyImportNeon.ts` y `M server/src/scripts/verifyUserStateNeon.ts`.
+
+Ejecutar `--mode=verify --expect-schema=0014` sobre `deploy-a`:
+
+```powershell
 $dbHost = ([uri]$env:DATABASE_URL).Host
 if ($dbHost -eq $prodDbHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
 ```
 
+Limpiar los 2 scripts temporales antes de volver a `etapa2-deploy`:
+
 ```powershell
+git checkout -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
 git checkout etapa2-deploy
+git status --short
+```
+
+**Resultado esperado de ambos `git status --short`:** salida vacía (`0` archivos modificados).
+
+Re-migrar adelante (`0015` + `0016`) y validar `--mode=check-post-0015`:
+
+```powershell
 $dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
 if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
 npm --prefix server run db:migrate
@@ -600,7 +642,7 @@ ROLLBACK;
 ```
 
    - **Parte C (Biblioteca y Reseñas Multi-Plan):** verificar filtros por **Carrera** y **Plan** y los badges `[careerCode] · [planName]`.
-   - **Parte D (Docentes desde admin sin `selected_plan_id`):** en `/#admin` -> `Reseñas`, crear el docente histórico de prueba y vincularlo a la **materia semilla `9901` (`__VERIFY_US_SEED__S2` del plan `__VERIFY_US_SEED__Plan2`)** —**no** a una materia de `IND`— mientras el admin mantiene `selected_plan_id = ISI`.
+   - **Parte D (Docentes desde admin sin `selected_plan_id`):** en `/#admin` -> `Reseñas`, crear el docente histórico de prueba con nombre **`__VERIFY_US_SEED__Docente`** y vincularlo a la **materia semilla `9901` (`__VERIFY_US_SEED__S2` del plan `__VERIFY_US_SEED__Plan2`)** —**no** a una materia de `IND`— mientras el admin mantiene `selected_plan_id = ISI`.
 
 **Consulta SQL de solo lectura (confirmar vínculo docente sobre materia `9901`):**
 
@@ -618,7 +660,7 @@ LIMIT 5;
 
 3. **Limpieza manual obligatoria ANTES del Paso 10:**
    - Si cargaste algún archivo de prueba en `library_files` sobre el borrador `IND`, eliminalo primero desde admin (`Biblioteca`).
-   - En `/#admin` -> **`Carreras`**, pulsá **`Eliminar`** -> **`Eliminar borrador`** sobre **`IND · Plan 2023`** y confirmá que el borrador `IND` y su carrera draft desaparecen por completo **antes de ejecutar el Paso 10**. *(El docente vinculado a la materia semilla `9901` será eliminado en cascada automáticamente por `--mode=cleanup` junto con `__VERIFY_US_SEED__Facultad` y `__VERIFY_US_SEED__S2`.)*
+   - En `/#admin` -> **`Carreras`**, pulsá **`Eliminar`** -> **`Eliminar borrador`** sobre **`IND · Plan 2023`** y confirmá que el borrador `IND` y su carrera draft desaparecen por completo **antes de ejecutar el Paso 10**. *(El docente `__VERIFY_US_SEED__Docente` será eliminado en el Paso 10 por su prefijo literal `__VERIFY_US_%` o por vínculo exclusivo a la materia semilla `9901`, sin usar nunca `faculty_id` ni tocar docentes reales.)*
 
 ---
 
@@ -638,7 +680,7 @@ Ejecutar `--mode=cleanup`:
 $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=cleanup --host-ok=$dbHost
 ```
 
-**Resultado esperado:** borra todos los registros `__VERIFY_US_%` (incluido `__VERIFY_US_SEED__`, el docente vinculado en `__VERIFY_US_SEED__Facultad`, las selecciones/configuración semilla y cualquier residuo previo) en orden FK sin tocar `admin_audit_log`, e imprime `0` residuos restantes.
+**Resultado esperado:** borra todos los registros `__VERIFY_US_%` (incluido `__VERIFY_US_SEED__`, docentes con prefijo `__VERIFY_US_%` o vinculados exclusivamente a la materia semilla `9901` sin comisiones ni reseñas ni materias reales, las selecciones/configuración semilla y cualquier residuo previo) en orden FK sin tocar `admin_audit_log` ni docentes reales, e imprime `0` residuos restantes.
 
 **Consulta SQL de solo lectura (auditoría final):**
 
@@ -671,9 +713,20 @@ LIMIT 5;
 
 ### Paso 11 — Cierre del Ensayo y Chequeos Previos a Producción (`deploy-a` -> `deploy-b` -> `deploy-c`)
 
-#### Evidencia de ramas verificada antes del ensayo
-- **(a) `master` ancestro de `deploy-a`:** `git merge-base --is-ancestor master deploy-a` salió con código **`0`** (tanto `master` como `origin/master`).
+#### Evidencia de ramas y referencia correcta de producción (`origin/master`)
+- **Referencia correcta de producción (`origin/master`):** la rama local `master` quedó atrasada `49` commits respecto de `origin/master` (`792d984` vs `7bdf590`), sin divergencia (`git log --oneline origin/master..master` vacío). Por lo tanto, todo chequeo contra producción debe tomar **`origin/master`** (no `master` local sin actualizar).
+- **(a) `origin/master` ancestro de `deploy-a` y `deploy-b`:** confirmado tras `git fetch origin` (`merge-base = 7bdf590`, salida `0`).
 - **(b) Frontend idéntico entre `deploy-a` y `deploy-b`:** `git diff --stat deploy-a deploy-b -- src` dio **vacío** (`0` archivos modificados).
+
+Verificar explícitamente antes de desplegar en producción:
+
+```powershell
+git fetch origin
+git merge-base --is-ancestor origin/master deploy-a; Write-Host "ANCESTOR_DEPLOY_A=$LASTEXITCODE"
+git merge-base --is-ancestor origin/master deploy-b; Write-Host "ANCESTOR_DEPLOY_B=$LASTEXITCODE"
+```
+
+**Resultado esperado:** ambos comandos imprimen `0` (`ANCESTOR_DEPLOY_A=0` y `ANCESTOR_DEPLOY_B=0`).
 
 #### Chequeos obligatorios antes de desplegar en producción
 1. Crear un **backup/snapshot manual en Neon SIN vencimiento (sin TTL)** antes de cualquier cambio en producción.
