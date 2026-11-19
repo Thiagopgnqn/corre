@@ -17,6 +17,39 @@ const VERIFY_CLEANUP_PREFIX = '__VERIFY_US_';
 const SEED_PREFIX = '__VERIFY_US_SEED__';
 const SEED_EMAIL = '__verify_us_seed__@verify.local';
 
+export interface ProfessorCleanupCandidate {
+  displayName: string;
+  linkedSubjectIds: string[];
+  seedSubjectIds: string[];
+  hasCommissions: boolean;
+  nonSeedReviewSubjectIds: string[];
+}
+
+export function canDeleteProfessorInCleanup(
+  candidate: ProfessorCleanupCandidate,
+  literalPrefix: string = VERIFY_CLEANUP_PREFIX
+): boolean {
+  const normalizedName = candidate.displayName.trim().toLowerCase();
+  const normalizedPrefix = literalPrefix.toLowerCase();
+  if (normalizedPrefix.length > 0 && normalizedName.startsWith(normalizedPrefix)) {
+    return true;
+  }
+
+  const seedSet = new Set(candidate.seedSubjectIds);
+  if (seedSet.size === 0 || candidate.linkedSubjectIds.length === 0) {
+    return false;
+  }
+
+  const hasSeedLink = candidate.linkedSubjectIds.some((id) => seedSet.has(id));
+  const hasNonSeedLink = candidate.linkedSubjectIds.some((id) => !seedSet.has(id));
+  return (
+    hasSeedLink &&
+    !hasNonSeedLink &&
+    !candidate.hasCommissions &&
+    candidate.nonSeedReviewSubjectIds.length === 0
+  );
+}
+
 function escapeLikePattern(literalPrefix: string): string {
   return literalPrefix.replace(/([!_%])/g, '!$1');
 }
@@ -357,13 +390,36 @@ async function run(): Promise<void> {
       `DELETE FROM subject_prerequisites WHERE subject_id = ANY($1::uuid[]) OR requires_subject_id = ANY($1::uuid[])`,
       [subjectIds]
     );
+    await pool.query(
+      `DELETE FROM professors p
+       WHERE p.display_name LIKE $1 ESCAPE '!'
+          OR LOWER(p.display_name) LIKE $2 ESCAPE '!'
+          OR (
+            EXISTS (
+              SELECT 1 FROM professor_subject_links psl
+              WHERE psl.professor_id = p.id
+                AND psl.subject_id = ANY($3::uuid[])
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM professor_subject_links psl_other
+              WHERE psl_other.professor_id = p.id
+                AND NOT (psl_other.subject_id = ANY($3::uuid[]))
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM commission_professors cp
+              WHERE cp.professor_id = p.id
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM professor_reviews pr
+              WHERE pr.professor_id = p.id
+                AND NOT (pr.subject_id = ANY($3::uuid[]))
+            )
+          )`,
+      [pat, patLower, subjectIds]
+    );
     await pool.query(`DELETE FROM subjects WHERE id = ANY($1::uuid[])`, [subjectIds]);
     await pool.query(`DELETE FROM study_plans WHERE id = ANY($1::uuid[])`, [planIds]);
     await pool.query(`DELETE FROM careers WHERE id = ANY($1::uuid[])`, [careerIds]);
-    await pool.query(
-      `DELETE FROM professors WHERE faculty_id = ANY($1::uuid[]) OR LOWER(display_name) LIKE $2 ESCAPE '!'`,
-      [facIds, patLower]
-    );
     await pool.query(`DELETE FROM faculties WHERE id = ANY($1::uuid[])`, [facIds]);
     await pool.query(`DELETE FROM institutions WHERE id = ANY($1::uuid[])`, [instIds]);
 
@@ -1202,7 +1258,15 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
-  console.error('\n❌ Falló verifyUserStateNeon.ts:', err);
-  process.exit(1);
-});
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const isMainEntry =
+  process.platform === 'win32'
+    ? entryPath.toLowerCase() === __filename.toLowerCase()
+    : entryPath === __filename;
+
+if (isMainEntry) {
+  run().catch((err) => {
+    console.error('\n❌ Falló verifyUserStateNeon.ts:', err);
+    process.exit(1);
+  });
+}

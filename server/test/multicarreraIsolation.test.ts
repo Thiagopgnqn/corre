@@ -26,6 +26,7 @@ import {
   setLibraryServiceForTesting,
 } from '../src/modules/library/library.service.js';
 import { InMemoryReviewsStore } from '../src/modules/reviews/reviews.store.js';
+import { canDeleteProfessorInCleanup } from '../src/scripts/verifyUserStateNeon.js';
 import {
   extractPlanScheduleSelections,
   extractPlanSettings,
@@ -1641,6 +1642,84 @@ async function main() {
     );
 
     setUserPlanInAllStores(multiUserId, planA);
+
+    // Seguridad de scripts Neon: limpieza de docentes acotada a prefijo o materia semilla 9901, nunca por facultad
+    const seedSubId = '11111111-1111-4000-8000-000000009901';
+    const realSubId = '22222222-2222-4000-8000-000000000001';
+    const userStateScriptSrc = fs.readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/scripts/verifyUserStateNeon.ts'),
+      'utf8'
+    );
+    const importScriptSrc = fs.readFileSync(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/scripts/verifyImportNeon.ts'),
+      'utf8'
+    );
+    const delProfIdx = userStateScriptSrc.indexOf('DELETE FROM professors p');
+    const delSubIdx = userStateScriptSrc.indexOf('DELETE FROM subjects WHERE');
+    const delProfBlock = delProfIdx >= 0 ? userStateScriptSrc.slice(delProfIdx, delProfIdx + 900) : '';
+
+    assert(
+      canDeleteProfessorInCleanup({
+        displayName: 'Juan Pérez (UTN FRC)',
+        linkedSubjectIds: [realSubId],
+        seedSubjectIds: [seedSubId],
+        hasCommissions: false,
+        nonSeedReviewSubjectIds: [],
+      }) === false &&
+        canDeleteProfessorInCleanup({
+          displayName: 'Juan Pérez (UTN FRC)',
+          linkedSubjectIds: [realSubId, seedSubId],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: false,
+          nonSeedReviewSubjectIds: [],
+        }) === false &&
+        canDeleteProfessorInCleanup({
+          displayName: 'Docente Real Con Comisión',
+          linkedSubjectIds: [seedSubId],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: true,
+          nonSeedReviewSubjectIds: [],
+        }) === false &&
+        canDeleteProfessorInCleanup({
+          displayName: 'Docente Real Sin Vínculos',
+          linkedSubjectIds: [],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: false,
+          nonSeedReviewSubjectIds: [],
+        }) === false &&
+        canDeleteProfessorInCleanup({
+          displayName: '__VERIFY_US_SEED__Docente',
+          linkedSubjectIds: [],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: false,
+          nonSeedReviewSubjectIds: [],
+        }) === true &&
+        canDeleteProfessorInCleanup({
+          displayName: 'Docente Solo Semilla 9901',
+          linkedSubjectIds: [seedSubId],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: false,
+          nonSeedReviewSubjectIds: [],
+        }) === true &&
+        delProfIdx >= 0 &&
+        delSubIdx > delProfIdx &&
+        !/\bfaculty_id\b/i.test(delProfBlock) &&
+        delProfBlock.includes(`LIKE $1 ESCAPE '!'`) &&
+        delProfBlock.includes('professor_subject_links') &&
+        delProfBlock.includes('NOT EXISTS') &&
+        delProfBlock.includes('commission_professors') &&
+        delProfBlock.includes('professor_reviews'),
+      'Limpieza de docentes en verifyUserStateNeon nunca usa faculty_id y exige prefijo __VERIFY_US_% o vínculo exclusivo a materia semilla 9901'
+    );
+
+    const touchesAuditLog = (src: string) =>
+      /\b(?:DELETE\s+FROM|UPDATE|TRUNCATE(?:\s+TABLE)?)\s+"?(?:public"\."?)?admin_audit_log\b/i.test(src) ||
+      /\bdb\.(?:delete|update)\(\s*adminAuditLog\b/.test(src);
+
+    assert(
+      !touchesAuditLog(userStateScriptSrc) && !touchesAuditLog(importScriptSrc),
+      'Ningún script de verificación Neon (verifyUserStateNeon ni verifyImportNeon) modifica o borra admin_audit_log'
+    );
   } finally {
     setCatalogStoreForTesting(null);
     await new Promise<void>((resolve) => server.close(() => resolve()));
