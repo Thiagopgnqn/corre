@@ -9,6 +9,10 @@ import type { PlanImportTxContext } from '../modules/admin/planImport.service.js
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export function normalizeNeonEndpointHost(host: string): string {
+  return host.trim().toLowerCase().replace(/-pooler(?=\.|$)/, '');
+}
+
 function extractSafeHost(connectionString: string, varName: string): string {
   try {
     const parsed = new URL(connectionString);
@@ -77,6 +81,13 @@ async function run(): Promise<void> {
   console.log(`🌐 HOST detectado en DATABASE_URL: ${dbHost}`);
   if (directHost) {
     console.log(`🌐 HOST detectado en DIRECT_URL:   ${directHost}`);
+    if (normalizeNeonEndpointHost(dbHost) !== normalizeNeonEndpointHost(directHost)) {
+      console.error('\n❌ BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos.');
+      console.error(`   DATABASE_URL host: ${dbHost}`);
+      console.error(`   DIRECT_URL host:   ${directHost}`);
+      console.error('   Ambos hosts deben ser idénticos salvo por "-pooler".');
+      process.exit(1);
+    }
   }
   console.log(`🎯 --host-ok valida exactamente el host de DATABASE_URL: ${dbHost}`);
 
@@ -999,7 +1010,16 @@ async function run(): Promise<void> {
   }
 }
 
-run().catch((err) => {
-  console.error('\n❌ Falló verifyImportNeon.ts:', err);
-  process.exit(1);
-});
+const currentScriptPath = path.normalize(fileURLToPath(import.meta.url));
+const entryPath = process.argv[1] ? path.normalize(path.resolve(process.argv[1])) : '';
+const isMainEntry =
+  process.platform === 'win32'
+    ? entryPath.toLowerCase() === currentScriptPath.toLowerCase()
+    : entryPath === currentScriptPath;
+
+if (isMainEntry) {
+  run().catch((err) => {
+    console.error('\n❌ Falló verifyImportNeon.ts:', err);
+    process.exit(1);
+  });
+}

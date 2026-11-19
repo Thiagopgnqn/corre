@@ -29,7 +29,7 @@ export function canDeleteProfessorInCleanup(
   candidate: ProfessorCleanupCandidate,
   literalPrefix: string = VERIFY_CLEANUP_PREFIX
 ): boolean {
-  const normalizedName = candidate.displayName.trim().toLowerCase();
+  const normalizedName = candidate.displayName.toLowerCase();
   const normalizedPrefix = literalPrefix.toLowerCase();
   if (normalizedPrefix.length > 0 && normalizedName.startsWith(normalizedPrefix)) {
     return true;
@@ -50,8 +50,12 @@ export function canDeleteProfessorInCleanup(
   );
 }
 
-function escapeLikePattern(literalPrefix: string): string {
+export function escapeLikePattern(literalPrefix: string): string {
   return literalPrefix.replace(/([!_%])/g, '!$1');
+}
+
+export function normalizeNeonEndpointHost(host: string): string {
+  return host.trim().toLowerCase().replace(/-pooler(?=\.|$)/, '');
 }
 
 function extractSafeHost(connectionString: string, varName: string): string {
@@ -139,6 +143,13 @@ async function run(): Promise<void> {
   console.log(`🌐 HOST detectado en DATABASE_URL: ${dbHost}`);
   if (directHost) {
     console.log(`🌐 HOST detectado en DIRECT_URL:   ${directHost}`);
+    if (normalizeNeonEndpointHost(dbHost) !== normalizeNeonEndpointHost(directHost)) {
+      console.error('\n❌ BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos.');
+      console.error(`   DATABASE_URL host: ${dbHost}`);
+      console.error(`   DIRECT_URL host:   ${directHost}`);
+      console.error('   Ambos hosts deben ser idénticos salvo por "-pooler".');
+      process.exit(1);
+    }
   }
   console.log(`🎯 --host-ok valida exactamente el host de DATABASE_URL: ${dbHost}`);
 
@@ -390,33 +401,66 @@ async function run(): Promise<void> {
       `DELETE FROM subject_prerequisites WHERE subject_id = ANY($1::uuid[]) OR requires_subject_id = ANY($1::uuid[])`,
       [subjectIds]
     );
-    await pool.query(
-      `DELETE FROM professors p
+    const profCandidatesRes = await pool.query<{
+      id: string;
+      displayName: string;
+      linkedSubjectIds: string[];
+      hasCommissions: boolean;
+      nonSeedReviewSubjectIds: string[];
+    }>(
+      `SELECT
+         p.id,
+         p.display_name AS "displayName",
+         COALESCE(
+           ARRAY(
+             SELECT psl.subject_id
+             FROM professor_subject_links psl
+             WHERE psl.professor_id = p.id
+           ),
+           ARRAY[]::uuid[]
+         ) AS "linkedSubjectIds",
+         EXISTS (
+           SELECT 1
+           FROM commission_professors cp
+           WHERE cp.professor_id = p.id
+         ) AS "hasCommissions",
+         COALESCE(
+           ARRAY(
+             SELECT pr.subject_id
+             FROM professor_reviews pr
+             WHERE pr.professor_id = p.id
+               AND NOT (pr.subject_id = ANY($3::uuid[]))
+           ),
+           ARRAY[]::uuid[]
+         ) AS "nonSeedReviewSubjectIds"
+       FROM professors p
        WHERE p.display_name LIKE $1 ESCAPE '!'
           OR LOWER(p.display_name) LIKE $2 ESCAPE '!'
-          OR (
-            EXISTS (
-              SELECT 1 FROM professor_subject_links psl
-              WHERE psl.professor_id = p.id
-                AND psl.subject_id = ANY($3::uuid[])
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM professor_subject_links psl_other
-              WHERE psl_other.professor_id = p.id
-                AND NOT (psl_other.subject_id = ANY($3::uuid[]))
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM commission_professors cp
-              WHERE cp.professor_id = p.id
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM professor_reviews pr
-              WHERE pr.professor_id = p.id
-                AND NOT (pr.subject_id = ANY($3::uuid[]))
-            )
+          OR EXISTS (
+            SELECT 1
+            FROM professor_subject_links psl
+            WHERE psl.professor_id = p.id
+              AND psl.subject_id = ANY($3::uuid[])
           )`,
       [pat, patLower, subjectIds]
     );
+    const profIdsToDelete = profCandidatesRes.rows
+      .filter((row) =>
+        canDeleteProfessorInCleanup(
+          {
+            displayName: row.displayName,
+            linkedSubjectIds: row.linkedSubjectIds,
+            seedSubjectIds: subjectIds,
+            hasCommissions: row.hasCommissions,
+            nonSeedReviewSubjectIds: row.nonSeedReviewSubjectIds,
+          },
+          literalPrefix
+        )
+      )
+      .map((row) => row.id);
+    if (profIdsToDelete.length > 0) {
+      await pool.query(`DELETE FROM professors WHERE id = ANY($1::uuid[])`, [profIdsToDelete]);
+    }
     await pool.query(`DELETE FROM subjects WHERE id = ANY($1::uuid[])`, [subjectIds]);
     await pool.query(`DELETE FROM study_plans WHERE id = ANY($1::uuid[])`, [planIds]);
     await pool.query(`DELETE FROM careers WHERE id = ANY($1::uuid[])`, [careerIds]);
@@ -1258,11 +1302,12 @@ async function run(): Promise<void> {
   }
 }
 
-const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const currentScriptPath = path.normalize(fileURLToPath(import.meta.url));
+const entryPath = process.argv[1] ? path.normalize(path.resolve(process.argv[1])) : '';
 const isMainEntry =
   process.platform === 'win32'
-    ? entryPath.toLowerCase() === __filename.toLowerCase()
-    : entryPath === __filename;
+    ? entryPath.toLowerCase() === currentScriptPath.toLowerCase()
+    : entryPath === currentScriptPath;
 
 if (isMainEntry) {
   run().catch((err) => {

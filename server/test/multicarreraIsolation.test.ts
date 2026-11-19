@@ -2,7 +2,7 @@
 import './setupTestEnv.js';
 
 import crypto from 'crypto';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
@@ -26,7 +26,11 @@ import {
   setLibraryServiceForTesting,
 } from '../src/modules/library/library.service.js';
 import { InMemoryReviewsStore } from '../src/modules/reviews/reviews.store.js';
-import { canDeleteProfessorInCleanup } from '../src/scripts/verifyUserStateNeon.js';
+import {
+  canDeleteProfessorInCleanup,
+  escapeLikePattern,
+  normalizeNeonEndpointHost,
+} from '../src/scripts/verifyUserStateNeon.js';
 import {
   extractPlanScheduleSelections,
   extractPlanSettings,
@@ -1654,9 +1658,13 @@ async function main() {
       path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/scripts/verifyImportNeon.ts'),
       'utf8'
     );
-    const delProfIdx = userStateScriptSrc.indexOf('DELETE FROM professors p');
+    const profSelIdx = userStateScriptSrc.indexOf('const profCandidatesRes');
+    const delProfIdx = userStateScriptSrc.indexOf('DELETE FROM professors WHERE id = ANY');
     const delSubIdx = userStateScriptSrc.indexOf('DELETE FROM subjects WHERE');
-    const delProfBlock = delProfIdx >= 0 ? userStateScriptSrc.slice(delProfIdx, delProfIdx + 900) : '';
+    const profFilterBlock =
+      profSelIdx >= 0 && delSubIdx > profSelIdx
+        ? userStateScriptSrc.slice(profSelIdx, delSubIdx + 40)
+        : '';
 
     assert(
       canDeleteProfessorInCleanup({
@@ -1681,6 +1689,13 @@ async function main() {
           nonSeedReviewSubjectIds: [],
         }) === false &&
         canDeleteProfessorInCleanup({
+          displayName: 'Docente Solo En 9901 Con Reseña Externa',
+          linkedSubjectIds: [seedSubId],
+          seedSubjectIds: [seedSubId],
+          hasCommissions: false,
+          nonSeedReviewSubjectIds: [realSubId],
+        }) === false &&
+        canDeleteProfessorInCleanup({
           displayName: 'Docente Real Sin Vínculos',
           linkedSubjectIds: [],
           seedSubjectIds: [seedSubId],
@@ -1701,15 +1716,16 @@ async function main() {
           hasCommissions: false,
           nonSeedReviewSubjectIds: [],
         }) === true &&
-        delProfIdx >= 0 &&
+        profSelIdx >= 0 &&
+        delProfIdx > profSelIdx &&
         delSubIdx > delProfIdx &&
-        !/\bfaculty_id\b/i.test(delProfBlock) &&
-        delProfBlock.includes(`LIKE $1 ESCAPE '!'`) &&
-        delProfBlock.includes('professor_subject_links') &&
-        delProfBlock.includes('NOT EXISTS') &&
-        delProfBlock.includes('commission_professors') &&
-        delProfBlock.includes('professor_reviews'),
-      'Limpieza de docentes en verifyUserStateNeon nunca usa faculty_id y exige prefijo __VERIFY_US_% o vínculo exclusivo a materia semilla 9901'
+        !/\bfaculty_id\b/i.test(profFilterBlock) &&
+        profFilterBlock.includes(`LIKE $1 ESCAPE '!'`) &&
+        profFilterBlock.includes('professor_subject_links') &&
+        profFilterBlock.includes('commission_professors') &&
+        profFilterBlock.includes('professor_reviews') &&
+        profFilterBlock.includes('canDeleteProfessorInCleanup('),
+      'Limpieza de docentes en verifyUserStateNeon filtra candidatos con canDeleteProfessorInCleanup, nunca usa faculty_id y exige prefijo o vínculo exclusivo a materia semilla 9901'
     );
 
     const touchesAuditLog = (src: string) =>
@@ -1719,6 +1735,37 @@ async function main() {
     assert(
       !touchesAuditLog(userStateScriptSrc) && !touchesAuditLog(importScriptSrc),
       'Ningún script de verificación Neon (verifyUserStateNeon ni verifyImportNeon) modifica o borra admin_audit_log'
+    );
+
+    // Humo CLI: invocar verifyUserStateNeon.ts sin --mode sale con código !== 0 + mensaje claro,
+    // escapeLikePattern escapa guiones bajos y ambos scripts exigen paridad de host salvo -pooler
+    const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    const tsxCliPath = path.resolve(serverDir, 'node_modules/tsx/dist/cli.mjs');
+    const verifyUserStatePath = path.resolve(serverDir, 'src/scripts/verifyUserStateNeon.ts');
+    const childNoMode = spawnSync(process.execPath, [tsxCliPath, verifyUserStatePath], {
+      cwd: serverDir,
+      env: {
+        ...process.env,
+        DATABASE_URL: '',
+        DIRECT_URL: '',
+        ALLOW_DESTRUCTIVE_TEST: '',
+      },
+      encoding: 'utf8',
+    });
+    assert(
+      childNoMode.status !== null &&
+        childNoMode.status !== 0 &&
+        String(childNoMode.stderr || '').includes('--mode') &&
+        escapeLikePattern('__VERIFY_US_') === '!_!_VERIFY!_US!_' &&
+        normalizeNeonEndpointHost('ep-test-123-pooler.us-east-2.aws.neon.tech') ===
+          'ep-test-123.us-east-2.aws.neon.tech' &&
+        normalizeNeonEndpointHost('ep-test-123.us-east-2.aws.neon.tech') ===
+          'ep-test-123.us-east-2.aws.neon.tech' &&
+        normalizeNeonEndpointHost('ep-other-999.us-east-2.aws.neon.tech') !==
+          normalizeNeonEndpointHost('ep-test-123-pooler.us-east-2.aws.neon.tech') &&
+        userStateScriptSrc.includes('normalizeNeonEndpointHost(dbHost) !== normalizeNeonEndpointHost(directHost)') &&
+        importScriptSrc.includes('normalizeNeonEndpointHost(dbHost) !== normalizeNeonEndpointHost(directHost)'),
+      'Test de humo CLI (sin --mode != 0), escape de LIKE y paridad -pooler entre DATABASE_URL y DIRECT_URL'
     );
   } finally {
     setCatalogStoreForTesting(null);
