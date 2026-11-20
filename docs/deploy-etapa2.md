@@ -1,5 +1,7 @@
 # Guía de Despliegue y Ensayo en Neon Temporal — Etapa 2 (`deploy-a` -> `deploy-b` -> `deploy-c`)
 
+> **IMPORTANTE:** Leé esta guía desde GitHub o copiala fuera del repo antes de empezar: los `git checkout` de tags cambian este archivo en disco.
+
 > **Regla crítica de orden de migraciones (`drizzle-orm`):**
 > **Ninguna migración se despliega antes que otra de menor `when`.**
 > `drizzle-orm` solo ejecuta las entradas de `server/drizzle/meta/_journal.json` cuyo `when` sea estrictamente mayor que el `created_at` de la **última** fila en `drizzle.__drizzle_migrations`. Si `0016` (`when: 1793760000000`) se aplicara antes que `0015` (`when: 1793750000000`), Drizzle registraría `1793760000000` como último `created_at` y **saltearía `0015` silenciosamente sin error**.
@@ -28,7 +30,7 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 6. **Índices duplicados temporales tras `0015`:** en `user_settings` coexisten temporalmente `user_settings_pkey` (`0015`) y `uq_user_settings_user_plan` (`0008`) sobre `(user_id, plan_id)`. Su limpieza queda diferida a Etapa 3.
 7. **Sincronización de scripts solo en `deploy-a` (`Pasos 2 a 5` y `Paso 8.3`) vs uso directo de `etapa2-deploy` (`Pasos 6 a 10`):**
    - Los tags `deploy-a` (`ed34f49`) y `deploy-b` (`5348f9f`) no se mueven. La rama **`etapa2-deploy`** tiene **exactamente el mismo runtime, `schema.ts`, dependencias y migraciones que `deploy-b`** (`git diff --stat deploy-b etapa2-deploy -- src server/src ':!server/src/scripts' server/drizzle server/package.json package.json` es **vacío**), y ya incluye `verifyUserStateNeon.ts`, `verifyImportNeon.ts` y esta guía actualizados.
-   - Por eso, **todos los pasos posteriores a `0015` (Pasos 6 a 10) usan directamente la rama `etapa2-deploy`** (sin hacer `git checkout deploy-b`), y **solo al bajar a `deploy-a`** (Pasos 2 y 8.3) se traen temporalmente los 2 scripts con `git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts`.
+   - Por eso, **todos los pasos posteriores a `0015` salvo la prueba cruzada siguen directamente en `etapa2-deploy`** (**Pasos 6, 7, 8.1–8.2, 8.4, 9 y 10**, sin hacer `git checkout deploy-b`), y **solo al bajar a `deploy-a`** (**Pasos 2 a 5**, **Paso 7b** y **Paso 8.3**) se traen temporalmente los 2 scripts con `git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts`.
    - **Limpieza obligatoria al salir de `deploy-a`:** como `git checkout etapa2-deploy -- <archivos>` deja los archivos modificados en el **index** (`M ` en `git status`), `git checkout -- <archivos>` sería un **no-op**. Antes de cambiar de tag/rama hay que ejecutar **`git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts`** para limpiar index y working tree dejando `git status --short` vacío.
 
 ---
@@ -36,7 +38,8 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 ## 3. Guía Paso a Paso del Ensayo en Neon Temporal (PowerShell)
 
 > **Convención importante:**
-> - Ejecutá todos los pasos **en la misma ventana de PowerShell** desde la raíz del repositorio (`...\corre`) para conservar las variables de sesión.
+> - Ejecutá todos los pasos **en la misma ventana de PowerShell** desde la raíz del repositorio (`...\corre`) para conservar las variables de sesión (salvo las ventanas nuevas del Paso 9, donde se vuelven a cargar explícitamente).
+> - Si `Test-TempBranchOk` imprime **`❌ BLOQUEADO`** y devuelve `False`, el comando de escritura no se ejecuta y **tenés que frenar de inmediato**.
 > - Nunca pegues secretos, contraseñas ni URLs completas de Neon en chats ni en archivos versionados.
 
 ### Paso 1 — Crear la rama temporal en Neon y configurar variables en PowerShell (sin `server/.env`)
@@ -75,27 +78,48 @@ $env:CONTACT_EMAIL = 'ensayo-ficticio@stack.local'
 
 *(Recordá: **NO** definir `EMAIL_PROVIDER`, `BREVO_*`, `RESEND_*`, `R2_*`, `GOOGLE_CLIENT_ID` ni `ADMIN_NOTIFICATION_EMAIL`. El comando `Remove-Item` anterior elimina **únicamente** esas variables por nombre explícito; **nunca** ejecutes `Remove-Item Env:*` ni comodines globales que puedan borrar `PATH`, `TEMP` u otras variables del sistema.)*
 
-4. Verificá los hosts extraídos de `DATABASE_URL` y `DIRECT_URL`, validá que ambos son **idénticos salvo por `-pooler`**, y comparalos contra `production`:
+4. Definí **una sola vez** la función `Test-TempBranchOk` en esta sesión de PowerShell y ejecutala para verificar paridad `-pooler` entre `DATABASE_URL` y `DIRECT_URL` y confirmar que ninguno coincide con `production` (devuelve `$true` o `$false` sin lanzar `throw`):
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
-$directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
-$dbBase = $dbHost -replace '-pooler(?=\.|$)', ''
-$directBase = $directHost -replace '-pooler(?=\.|$)', ''
-$prodDbBase = $prodDbHost.ToLower() -replace '-pooler(?=\.|$)', ''
-$prodDirectBase = $prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', ''
+function Test-TempBranchOk {
+  if (-not $env:DATABASE_URL -or -not $env:DIRECT_URL) {
+    Write-Host "❌ BLOQUEADO: faltan DATABASE_URL o DIRECT_URL en esta ventana de PowerShell." -ForegroundColor Red
+    return $false
+  }
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
+  $dbBase = $dbHost -replace '-pooler(?=\.|$)', ''
+  $directBase = $directHost -replace '-pooler(?=\.|$)', ''
+  $prodDb = "$prodDbHost".Trim().ToLower()
+  $prodDirect = "$prodDirectHost".Trim().ToLower()
+  $prodDbBase = $prodDb -replace '-pooler(?=\.|$)', ''
+  $prodDirectBase = $prodDirect -replace '-pooler(?=\.|$)', ''
 
-Write-Host "TEMP DB     (DATABASE_URL): $dbHost"
-Write-Host "TEMP DIRECT (DIRECT_URL):   $directHost"
-Write-Host "PROD DB     (solo host):    $prodDbHost"
-Write-Host "PROD DIRECT (solo host):    $prodDirectHost"
+  Write-Host "TEMP DB     (DATABASE_URL): $dbHost"
+  Write-Host "TEMP DIRECT (DIRECT_URL):   $directHost"
+  Write-Host "PROD DB     (solo host):    $prodDbHost"
+  Write-Host "PROD DIRECT (solo host):    $prodDirectHost"
 
-if ($prodDbHost -like '<*>' -or $prodDirectHost -like '<*>') { throw 'Completá $prodDbHost y $prodDirectHost solo con los hostnames de producción de Neon Console.' }
-if ($dbBase -ne $directBase) { throw "BLOQUEADO: DATABASE_URL ($dbHost) y DIRECT_URL ($directHost) deben ser iguales salvo por '-pooler'." }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or $dbBase -eq $prodDbBase -or $directBase -eq $prodDirectBase) { throw 'BLOQUEADO: un host coincide con PRODUCCIÓN.' }
+  if (-not $prodDb -or -not $prodDirect -or $prodDb -like '<*>' -or $prodDirect -like '<*>') {
+    Write-Host "❌ BLOQUEADO: completá `$prodDbHost y `$prodDirectHost solo con los hostnames de producción de Neon Console." -ForegroundColor Red
+    return $false
+  }
+  if ($dbBase -ne $directBase) {
+    Write-Host "❌ BLOQUEADO: DATABASE_URL ($dbHost) y DIRECT_URL ($directHost) deben ser iguales salvo por '-pooler'." -ForegroundColor Red
+    return $false
+  }
+  if ($dbHost -eq $prodDb -or $directHost -eq $prodDirect -or $dbBase -eq $prodDbBase -or $directBase -eq $prodDirectBase) {
+    Write-Host "❌ BLOQUEADO: un host coincide con el endpoint de PRODUCCIÓN." -ForegroundColor Red
+    return $false
+  }
+  Write-Host "✅ Guarda OK: rama temporal verificada y distinta de producción." -ForegroundColor Green
+  return $true
+}
+
+Test-TempBranchOk
 ```
 
-**Resultado esperado:** `TEMP DB` y `TEMP DIRECT` comparten el mismo endpoint base (solo difieren en `-pooler`) y ambos son **distintos** de `PROD DB` y `PROD DIRECT`.
+**Resultado esperado:** imprime `True` con `TEMP DB` y `TEMP DIRECT` compartiendo el mismo endpoint base (solo difieren en `-pooler`) y ambos **distintos** de `PROD DB` y `PROD DIRECT`. *(Si imprime `❌ BLOQUEADO` y `False`, frená y corregí las variables antes de seguir.)*
 
 **Consulta SQL de solo lectura (Neon SQL Editor sobre la rama temporal, antes de migrar):**
 
@@ -155,19 +179,12 @@ node -e "const j = require('./server/drizzle/meta/_journal.json'); const last = 
 
 La rama temporal copiada de producción parte de la migración **`0013`** (**`14` filas** en `drizzle.__drizzle_migrations`, última fila con `created_at = 1793730000000`). Por lo tanto, `db:migrate` en `deploy-a` aplica **únicamente `0014_subject_display_code`**.
 
-1. Verificar paridad `-pooler` y comparar ambos hosts contra producción antes de migrar:
+Ejecutar `db:migrate` (única vía habilitada para aplicar migraciones) protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
-Write-Host "TEMP DB: $dbHost | TEMP DIRECT: $directHost | PROD DB: $prodDbHost | PROD DIRECT: $prodDirectHost"
-if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-```
-
-2. Ejecutar `db:migrate` (única vía habilitada para aplicar migraciones):
-
-```powershell
-npm --prefix server run db:migrate
+if (Test-TempBranchOk) {
+  npm --prefix server run db:migrate
+}
 ```
 
 **Resultado esperado:**
@@ -207,18 +224,14 @@ ORDER BY table_name;
 
 ### Paso 4 — Ejecutar batería `verify:user-state-neon` (`--mode=verify`) contra esquema `0014` (`deploy-a`)
 
-Verificar host (`DATABASE_URL`, que es el validado por `--host-ok`) contra producción:
+Correr `--mode=verify` con `--expect-schema=0014` protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "HOST PARA --host-ok (DATABASE_URL): $dbHost | DIRECT: $directHost | PROD DB: $prodDbHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-```
-
-Correr `--mode=verify` con `--expect-schema=0014`:
-
-```powershell
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
+}
 ```
 
 **Resultado esperado:**
@@ -240,18 +253,14 @@ SELECT
 
 ### Paso 5 — Sembrar datos `0014` persistentes (`--mode=seed`) para probar el salto `0014 -> 0015`
 
-Verificar host contra producción antes de sembrar:
+Correr `--mode=seed` protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "SEMBRARÁ EN HOST (--host-ok=$dbHost) | DIRECT: $directHost | PROD DB: $prodDbHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-```
-
-Correr `--mode=seed`:
-
-```powershell
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=seed --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=seed --host-ok=$dbHost
+}
 ```
 
 **Resultado esperado:**
@@ -283,13 +292,20 @@ SELECT sp.id, sp.name, sp.plan_id
 FROM schedule_proposals sp
 JOIN users u ON u.id = sp.user_id
 WHERE u.email = '__verify_us_seed__@verify.local';
+
+-- Conteo de plan_id IS NULL previo a aplicar 0015 (en Paso 6):
+-- Esperado: al menos 1 en schedule_proposals (por __VERIFY_US_SEED__LegacyProposal) más lo que exista de datos reales; anotá estos números antes de migrar.
+SELECT
+  (SELECT COUNT(*) FROM user_settings WHERE plan_id IS NULL) AS settings_null_pre_0015,
+  (SELECT COUNT(*) FROM schedule_selections WHERE plan_id IS NULL) AS selections_null_pre_0015,
+  (SELECT COUNT(*) FROM schedule_proposals WHERE plan_id IS NULL) AS proposals_null_pre_0015;
 ```
 
 ---
 
 ### Paso 6 — Limpiar la copia temporal de scripts, pasar directo a `etapa2-deploy` (mismo runtime que `deploy-b`), compilar y aplicar `0015` y `0016` via `db:migrate`
 
-> *(Nota: `git checkout etapa2-deploy -- ...` dejó los 2 scripts stageados en el index, por eso debés usar **`git restore --source=HEAD --staged --worktree -- ...`** —no `git checkout --`, que no limpia el index— antes de pasar a `etapa2-deploy`. Todos los **Pasos 6 a 10** se ejecutan directamente sobre `etapa2-deploy` porque su runtime, `schema.ts` y migraciones son idénticos a `deploy-b`, ya con los scripts actualizados.)*
+> *(Nota: `git checkout etapa2-deploy -- ...` dejó los 2 scripts stageados en el index, por eso debés usar **`git restore --source=HEAD --staged --worktree -- ...`** —no `git checkout --`, que no limpia el index— antes de pasar a `etapa2-deploy`. Todos los **Pasos 6 a 10** —salvo la prueba cruzada del Paso 7b y 8.3— se ejecutan directamente sobre `etapa2-deploy` porque su runtime, `schema.ts` y migraciones son idénticos a `deploy-b`, ya con los scripts actualizados.)*
 
 ```powershell
 git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
@@ -307,19 +323,12 @@ Compilar backend:
 npm --prefix server run build
 ```
 
-Verificar paridad `-pooler` y comparar ambos hosts contra producción antes de correr `db:migrate`:
+Aplicar `0015` (`1793750000000`) y `0016` (`1793760000000`) exclusivamente via `db:migrate` protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
-Write-Host "MIGRARÁ 0015 + 0016 SOBRE -> DB: $dbHost | DIRECT: $directHost | PROD DB: $prodDbHost | PROD DIRECT: $prodDirectHost"
-if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-```
-
-Aplicar `0015` (`1793750000000`) y `0016` (`1793760000000`) exclusivamente via `db:migrate`:
-
-```powershell
-npm --prefix server run db:migrate
+if (Test-TempBranchOk) {
+  npm --prefix server run db:migrate
+}
 ```
 
 **Resultado esperado:** `db:migrate` aplica en orden `0015_user_state_composite_keys` (`1793750000000`) y `0016_library_files_restrict_delete` (`1793760000000`) sin errores (`17` filas totales en `drizzle.__drizzle_migrations`).
@@ -374,27 +383,62 @@ WHERE conrelid = 'public.library_files'::regclass
 
 ### Paso 7 — Validar expansión del seed (`--mode=check-post-0015`) y batería completa (`--mode=verify --expect-schema=0015`)
 
-Verificar host contra producción:
+Correr `--mode=check-post-0015` y `--mode=verify --expect-schema=0015` protegidos por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "CHECK + VERIFY POST-0015 EN HOST (--host-ok=$dbHost) | DIRECT: $directHost | PROD DB: $prodDbHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
+  npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=$dbHost
+}
 ```
 
-Correr `--mode=check-post-0015`:
+**Resultado esperado:** `--mode=check-post-0015` confirma 2 filas en `user_settings`, 2 filas en `schedule_selections`, backfill de `schedule_proposals.plan_id`, ignorado de `"isi-old"` + `...0999` y `0` filas con `plan_id IS NULL`; `--mode=verify` pasa los 6 escenarios con `diff: 0`, manteniendo intacto el `seed` para los Pasos 7b y 8.
+
+---
+
+### Paso 7b — Probar el código de `deploy-a` (servicio viejo) sobre el esquema nuevo (`0015` / `0016`)
+
+> *(Propósito: validar el escenario real de ventana de despliegue en Render donde `db:migrate` ya aplicó `0015` + `0016` pero el contenedor anterior con código **`deploy-a`** sigue atendiendo tráfico en vivo antes del swap.)*
+
+1. Bajar a `deploy-a` y sincronizar temporalmente los 2 scripts desde `etapa2-deploy`:
 
 ```powershell
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
+git checkout deploy-a
+git checkout etapa2-deploy -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
 ```
 
-Correr `--mode=verify --expect-schema=0015`:
+**Resultado esperado de `git status --short`:**
+
+```text
+M server/src/scripts/verifyImportNeon.ts
+M server/src/scripts/verifyUserStateNeon.ts
+```
+
+2. Correr `--mode=verify --expect-schema=0015` con el código de `deploy-a` protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=$dbHost
+}
 ```
 
-**Resultado esperado:** `--mode=check-post-0015` confirma 2 filas en `user_settings`, 2 filas en `schedule_selections`, backfill de `schedule_proposals.plan_id`, ignorado de `"isi-old"` + `...0999` y `0` filas con `plan_id IS NULL`; `--mode=verify` pasa los 6 escenarios con `diff: 0`, manteniendo intacto el `seed` para el Paso 8.
+**Resultado esperado:** `deploy-a` detecta esquema `0015`, pasan los **6 escenarios** contra Postgres sin errores y devuelve `diff: 0` (manteniendo `__VERIFY_US_SEED__` intacto).
+
+3. Limpiar la copia temporal de los 2 scripts y volver a `etapa2-deploy`:
+
+```powershell
+git restore --source=HEAD --staged --worktree -- server/src/scripts/verifyUserStateNeon.ts server/src/scripts/verifyImportNeon.ts
+git status --short
+git checkout etapa2-deploy
+git status --short
+```
+
+**Resultado esperado:** ambos `git status --short` imprimen vacío (`0` archivos modificados).
 
 ---
 
@@ -432,18 +476,28 @@ ORDER BY sp.name;
 
 *(Guardá o copiá ambas tablas de resultado para compararlas después de re-migrar en el punto 4.)*
 
-2. **Verificar host en PowerShell antes de ejecutar el SQL de retroceso:**
+2. **Confirmar rama temporal en PowerShell antes de copiar/ejecutar el SQL de retroceso:**
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "ATENCIÓN ROLLBACK SQL MANUAL SOLO EN RAMA TEMPORAL -> DB: $dbHost | DIRECT: $directHost | PROD DB: $prodDbHost | PROD DIRECT: $prodDirectHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
+Test-TempBranchOk
 ```
+
+*(Si imprime `❌ BLOQUEADO` y `False`, **frená** y NO pegues el SQL en Neon SQL Editor.)*
 
 SQL de retroceso (`0016` -> `0015` -> `0014`, usando únicamente columnas verificadas en `schema.ts`: `user_settings` sin `id` y con `updated_at`; `schedule_selections` con `id` y `updated_at`; `schedule_proposals` con `plan_id`):
 
 ```sql
 BEGIN;
+
+-- GUARDA OBLIGATORIA (impide ejecutar este SQL en producción por error):
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM "users" WHERE "email" = '__verify_us_seed__@verify.local'
+  ) THEN
+    RAISE EXCEPTION 'Rollback abortado: no existe el usuario semilla __verify_us_seed__@verify.local (NUNCA ejecutar sobre producción).';
+  END IF;
+END $$;
 
 -- A) Revertir 0016: library_files.subject_id vuelve a ON DELETE cascade
 ALTER TABLE "library_files" DROP CONSTRAINT IF EXISTS "library_files_subject_id_subjects_id_fk";
@@ -557,7 +611,31 @@ DELETE FROM drizzle.__drizzle_migrations WHERE created_at >= 1793750000000;
 COMMIT;
 ```
 
-3. **Comprobar `deploy-a` contra la BD revertida y volver a `etapa2-deploy` re-migrando via `db:migrate`:**
+3. **Justo después del `COMMIT` y ANTES de bajar a `deploy-a` — inspeccionar `extra_settings` y `selections_by_plan` para comparar contra el Paso 5 (`0014`):**
+
+```sql
+-- Post-rollback inmediato: verificar que la fila consolidada conserva extra_settings.perPlan y selections_by_plan del Paso 5
+SELECT us.user_id, us.plan_id, us.min_passing_grade, us.extra_settings, us.extra_settings->'perPlan' AS per_plan
+FROM user_settings us
+JOIN users u ON u.id = us.user_id
+WHERE u.email = '__verify_us_seed__@verify.local';
+
+SELECT ss.id, ss.user_id, ss.plan_id, ss.schedule_term_id, ss.selections, ss.selections_by_plan
+FROM schedule_selections ss
+JOIN users u ON u.id = ss.user_id
+WHERE u.email = '__verify_us_seed__@verify.local';
+
+SELECT sp.id, sp.name, sp.plan_id
+FROM schedule_proposals sp
+JOIN users u ON u.id = sp.user_id
+WHERE u.email = '__verify_us_seed__@verify.local';
+```
+
+**Qué es esperado al comparar contra la foto del Paso 5 (`0014`):**
+- **`user_settings` y `schedule_selections`:** `0015` **no borra** ni muta `extra_settings.perPlan` ni `selections_by_plan` de la fila original (`plan1`), e ignora sin tocar `"isi-old"` y `"00000000-0000-4000-8000-000000000999"`. Tras consolidar con el SQL del rollback, la fila única resultante en ambas tablas vuelve a tener el **mismo contenido** de `extra_settings` (`theme`, `perPlan` con las 4 claves) y `selections_by_plan` (las 4 claves) que en el Paso 5 (`updated_at` e `id` pueden diferir).
+- **`schedule_proposals` (diferencia esperada):** `__VERIFY_US_SEED__LegacyProposal` conserva **`plan_id = plan1`** (en el Paso 5 era `NULL`), porque el rollback quita el `NOT NULL` de la columna pero no vuelve a poner `NULL` en propuestas ya asignadas a un plan.
+
+4. **Comprobar `deploy-a` contra la BD revertida y volver a `etapa2-deploy` re-migrando via `db:migrate`:**
 
 Bajar a `deploy-a`, sincronizar temporalmente los 2 scripts y verificar `git status --short`:
 
@@ -569,13 +647,14 @@ git status --short
 
 **Resultado esperado de `git status --short`:** `M server/src/scripts/verifyImportNeon.ts` y `M server/src/scripts/verifyUserStateNeon.ts`.
 
-Ejecutar `--mode=verify --expect-schema=0014` sobre `deploy-a` (verificando paridad `-pooler` y host distinto de producción):
+Ejecutar `--mode=verify --expect-schema=0014` sobre `deploy-a` protegido por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
-if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
+}
 ```
 
 Limpiar los 2 scripts temporales del index y working tree antes de volver a `etapa2-deploy`:
@@ -589,17 +668,18 @@ git status --short
 
 **Resultado esperado de ambos `git status --short`:** salida vacía (`0` archivos modificados).
 
-Re-migrar adelante (`0015` + `0016`) y validar `--mode=check-post-0015`:
+Re-migrar adelante (`0015` + `0016`) y validar `--mode=check-post-0015` protegidos por `if (Test-TempBranchOk)`:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host.ToLower(); $directHost = ([uri]$env:DIRECT_URL).Host.ToLower()
-if (($dbHost -replace '-pooler(?=\.|$)', '') -ne ($directHost -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: DATABASE_URL y DIRECT_URL apuntan a endpoints distintos' }
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost -or ($dbHost -replace '-pooler(?=\.|$)', '') -eq ($prodDirectHost.ToLower() -replace '-pooler(?=\.|$)', '')) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-npm --prefix server run db:migrate
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run db:migrate
+  npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
+}
 ```
 
-4. **DESPUÉS de re-migrar — repetir los mismos `SELECT` del punto 1 y comparar:**
+5. **DESPUÉS de re-migrar — repetir los mismos `SELECT` del punto 1 y comparar:**
 
 ```sql
 -- Foto DESPUÉS de re-migrar: comparar filas y JSONB contra la captura previa al rollback
@@ -625,27 +705,88 @@ WHERE u.email = '__verify_us_seed__@verify.local'
 ORDER BY sp.name;
 ```
 
-**Resultado esperado:** `user_settings` conserva ambas filas (`plan1` y `plan2`) con idénticos valores y `extra_settings`, y `schedule_selections` conserva las selecciones de ambos planes y `selections_by_plan` completo.
+**Resultado esperado:** `user_settings` y `schedule_selections` vuelven a mostrar ambas filas (`plan1` y `plan2`) con **idénticas** columnas de negocio (`user_id`, `plan_id`, flags/notas en `user_settings`, `extra_settings`, `schedule_term_id`, `selections` y `selections_by_plan`). Es esperado que **`updated_at`** y el **`id` de filas secundarias recreadas en `schedule_selections` (`plan2`)** difieran respecto de la captura anterior al rollback.
 
 ---
 
 ### Paso 9 — Verificación de Partes B, C, D e Importador contra Postgres real
 
-1. **Verificar ausencia total de mail real, R2 real, Google real y `server\.env`**, más verificación de host contra producción:
+1. **Verificar ausencia de mail real, R2 real, Google real y `server\.env`**, y correr `verify:import-neon` protegido por `if (Test-TempBranchOk)`:
+
+> *(Advertencia: como todavía siguen creados los registros de `__VERIFY_US_SEED__`, `verify:import-neon` podría chocar con datos de la semilla o arrojar alguna diferencia temporal; si llegara a fallar aquí, **no concluyas que es un bug sin revisar primero la causa**, y podés re-ejecutarlo tras `--mode=cleanup` del Paso 10.)*
 
 ```powershell
-if (Test-Path server\.env) { throw 'Existe server/.env; retiralo antes de levantar el servidor de prueba' }
-$leakedVars = Get-ChildItem Env: | Where-Object { $_.Name -match '^(EMAIL_PROVIDER|BREVO|RESEND|R2_|GOOGLE|ADMIN_NOTIFICATION)' }
-if ($leakedVars) { $leakedVars | Format-Table Name; throw 'Hay variables de mail/R2/Google definidas; eliminálas' }
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "OK sin mail ni R2 reales. IMPORT-NEON EN HOST (--host-ok=$dbHost) | DIRECT: $directHost | PROD DB: $prodDbHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:import-neon -- --host-ok=$dbHost
+if (Test-Path server\.env) { Write-Host "❌ BLOQUEADO: existe server\.env; retiralo antes de seguir." -ForegroundColor Red }
+elseif (Get-ChildItem Env: | Where-Object { $_.Name -match '^(EMAIL_PROVIDER|BREVO|RESEND|R2_|GOOGLE|ADMIN_NOTIFICATION)' }) {
+  Get-ChildItem Env: | Where-Object { $_.Name -match '^(EMAIL_PROVIDER|BREVO|RESEND|R2_|GOOGLE|ADMIN_NOTIFICATION)' } | Format-Table Name
+  Write-Host "❌ BLOQUEADO: eliminá esas variables de mail/R2/Google antes de seguir." -ForegroundColor Red
+}
+elseif (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:import-neon -- --host-ok=$dbHost
+}
 ```
 
-2. **Levantar servidor y frontend en terminales con las mismas variables ficticias de esta sesión** (`npm --prefix server run dev` y `npm run dev`) y probar en `/#admin`:
-   - **Carreras (Tramo 2B):** importar en `draft` el `.xlsx` de Ingeniería Industrial (`IND`) e inspeccionar el visor de solo lectura sin publicar.
-   - **Parte B (409 / RESTRICT sin tocar R2):** con una materia de biblioteca que tenga registros en `library_files` (p. ej. si probaste asociar un archivo al draft o en una materia existente), validar en Neon SQL Editor que la FK `RESTRICT` bloquea el borrado físico dentro de una transacción revertida:
+2. **Cómo levantar backend y frontend de prueba (en ventanas nuevas aparte):**
+   - Una ventana nueva de PowerShell **NO hereda** las variables definidas en el Paso 1.
+   - En la **ventana nueva del Backend**, definí primero las mismas variables de sesión (sin `$prod*`), verificá `server\.env` y variables bloqueadas, y recién después levantá el servidor:
+
+```powershell
+if (Test-Path server\.env) { Write-Host "❌ Existe server\.env; retiralo." -ForegroundColor Red }
+Remove-Item Env:EMAIL_PROVIDER, Env:BREVO_API_KEY, Env:RESEND_API_KEY, Env:R2_ACCOUNT_ID, Env:R2_ACCESS_KEY_ID, Env:R2_SECRET_ACCESS_KEY, Env:R2_BUCKET, Env:GOOGLE_CLIENT_ID, Env:ADMIN_NOTIFICATION_EMAIL -ErrorAction SilentlyContinue
+if (Get-ChildItem Env: | Where-Object { $_.Name -match '^(EMAIL_PROVIDER|BREVO|RESEND|R2_|GOOGLE|ADMIN_NOTIFICATION)' }) { Write-Host "❌ Hay variables de mail/R2/Google." -ForegroundColor Red }
+
+$env:DATABASE_URL = 'postgresql://<user>:<pass>@<host-pooled-rama-temporal>/<db>?sslmode=require&channel_binding=require'
+$env:DIRECT_URL = 'postgresql://<user>:<pass>@<host-direct-rama-temporal>/<db>?sslmode=require&channel_binding=require'
+$env:NODE_ENV = 'development'
+$env:PORT = '4000'
+$env:CLIENT_ORIGIN = 'http://localhost:5173'
+$env:JWT_SECRET = 'ensayo_neon_jwt_secret_ficticio_min_16_chars'
+$env:REFRESH_SECRET = 'ensayo_neon_refresh_secret_ficticio_min_16_chars'
+$env:VERIFICATION_CODE_PEPPER = 'ensayo_neon_pepper_ficticio_min_16_chars'
+$env:CONTACT_EMAIL = 'ensayo-ficticio@stack.local'
+
+npm --prefix server run dev
+```
+
+   - En otra **ventana nueva del Frontend**, ejecutá simplemente:
+
+```powershell
+npm run dev
+```
+
+3. **Cómo entrar a `/#admin` en la copia de prueba:**
+   - Si tu cuenta (p. ej. la de Thiago) **ya tiene rol `admin`** en la copia de producción, iniciá sesión en `http://localhost:5173/#admin` con las credenciales reales contra el servidor local.
+   - Si usás una cuenta nueva (o aún no es `admin`), seguí exactamente este orden en esa ventana nueva del Backend:
+     1) Registrate desde la UI (`http://localhost:5173`): como no hay proveedor de correo configurado, **el código de verificación de email se imprime en la consola del backend**.
+     2) Cortá el backend (`Ctrl+C`), otorgale rol `admin` usando las mismas variables de sesión ya cargadas (espacio después de `--email`, sin `=`) y volvé a iniciar el backend:
+
+```powershell
+npm --prefix server run make-admin -- --email su-email@ejemplo.com
+npm --prefix server run dev
+```
+
+     3) Volvé a iniciar sesión en el frontend y entrá a `/#admin`.
+
+4. **Pruebas manuales en `/#admin` y Neon SQL Editor:**
+   - **Carreras (Tramo 2B):** verificá primero en PowerShell que existe el `.xlsx` local de Industrial antes de subirlo:
+
+```powershell
+Test-Path artifacts\industrial\industrial-plan-2023.xlsx
+```
+
+     *(Esperado: `True`.)* Importalo en **`draft`** como **`IND`**, inspeccioná el visor de solo lectura sin publicar.
+   - **Parte B (FK `RESTRICT` en `library_files.subject_id` sin tocar R2):** buscá primero en Neon SQL Editor una materia con archivos reales en `library_files`:
+
+```sql
+SELECT subject_id, COUNT(*) AS archivos
+FROM library_files
+GROUP BY subject_id
+LIMIT 3;
+```
+
+     - Si devuelve filas, usá uno de esos `subject_id` para comprobar que la FK `RESTRICT` (`0016`) bloquea el borrado físico dentro de una transacción revertida:
 
 ```sql
 BEGIN;
@@ -654,6 +795,7 @@ DELETE FROM subjects WHERE id = '<UUID_MATERIA_CON_LIBRARY_FILES>';
 ROLLBACK;
 ```
 
+     - **Si `SELECT subject_id, COUNT(*) ...` devuelve `0` filas**, anotá esta prueba SQL de Parte B como **NO probada por ausencia de archivos reales en la copia**.
    - **Parte C (Biblioteca y Reseñas Multi-Plan):** verificar filtros por **Carrera** y **Plan** y los badges `[careerCode] · [planName]`.
    - **Parte D (Docentes desde admin sin `selected_plan_id`):** en `/#admin` -> `Reseñas`, crear el docente histórico de prueba con nombre **`__VERIFY_US_SEED__Docente`** y vincularlo a la **materia semilla `9901` (`__VERIFY_US_SEED__S2` del plan `__VERIFY_US_SEED__Plan2`)** —**no** a una materia de `IND`— mientras el admin mantiene `selected_plan_id = ISI`.
 
@@ -671,26 +813,25 @@ ORDER BY psl.created_at DESC
 LIMIT 5;
 ```
 
-3. **Limpieza manual obligatoria ANTES del Paso 10:**
+5. **Limpieza manual obligatoria ANTES del Paso 10:**
    - Si cargaste algún archivo de prueba en `library_files` sobre el borrador `IND`, eliminalo primero desde admin (`Biblioteca`).
    - En `/#admin` -> **`Carreras`**, pulsá **`Eliminar`** -> **`Eliminar borrador`** sobre **`IND · Plan 2023`** y confirmá que el borrador `IND` y su carrera draft desaparecen por completo **antes de ejecutar el Paso 10**. *(El docente `__VERIFY_US_SEED__Docente` será eliminado en el Paso 10 por su prefijo literal `__VERIFY_US_%` o por vínculo exclusivo a la materia semilla `9901`, sin usar nunca `faculty_id` ni tocar docentes reales.)*
+   - Cortá el servidor backend (`Ctrl+C`) y el frontend (`Ctrl+C`), y **cerrá esas dos ventanas nuevas de PowerShell**.
 
 ---
 
 ### Paso 10 — Limpieza Final (`--mode=cleanup`) y Auditoría de Conteos Exactos
 
-Verificar host contra producción antes de limpiar:
+Ejecutar `--mode=cleanup` protegido por `if (Test-TempBranchOk)` y limpiar `ALLOW_DESTRUCTIVE_TEST` al terminar:
 
 ```powershell
-$dbHost = ([uri]$env:DATABASE_URL).Host; $directHost = ([uri]$env:DIRECT_URL).Host
-Write-Host "CLEANUP EN HOST (--host-ok=$dbHost) | DIRECT: $directHost | PROD DB: $prodDbHost"
-if ($dbHost -eq $prodDbHost -or $directHost -eq $prodDirectHost) { throw 'BLOQUEADO: host coincide con PRODUCCIÓN' }
-```
-
-Ejecutar `--mode=cleanup`:
-
-```powershell
-$env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:user-state-neon -- --mode=cleanup --host-ok=$dbHost
+if (Test-TempBranchOk) {
+  $dbHost = ([uri]$env:DATABASE_URL).Host.ToLower()
+  $env:ALLOW_DESTRUCTIVE_TEST='1'
+  npm --prefix server run verify:user-state-neon -- --mode=cleanup --host-ok=$dbHost
+}
+Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
+# Una vez completada la auditoría SQL debajo, cerrá la ventana de PowerShell.
 ```
 
 **Resultado esperado:** borra todos los registros `__VERIFY_US_%` (incluido `__VERIFY_US_SEED__`, docentes con prefijo `__VERIFY_US_%` o vinculados exclusivamente a la materia semilla `9901` sin comisiones ni reseñas ni materias reales, las selecciones/configuración semilla y cualquier residuo previo) en orden FK sin tocar `admin_audit_log` ni docentes reales, e imprime `0` residuos restantes.
@@ -744,7 +885,24 @@ git merge-base --is-ancestor origin/master deploy-b; Write-Host "ANCESTOR_DEPLOY
 
 #### Chequeos obligatorios antes de desplegar en producción
 1. Crear un **backup/snapshot manual en Neon SIN vencimiento (sin TTL)** antes de cualquier cambio en producción.
-2. Verificar en producción que hay **`0` filas con `plan_id IS NULL`** en `user_settings`, `schedule_selections` y `schedule_proposals` antes de pasar de `deploy-a` a `deploy-b`.
+2. Verificar en la rama **`production`** de Neon (ejecutando el `SELECT` abajo **en Neon SQL Editor sobre `production`, NO en la rama temporal**) que hay **`0` filas con `plan_id IS NULL`** en las 3 tablas antes de pasar de `deploy-a` a `deploy-b`:
+
+```sql
+-- Ejecutar en Neon SQL Editor seleccionando la rama PRODUCTION (solo lectura)
+SELECT
+  (SELECT COUNT(*) FROM user_settings WHERE plan_id IS NULL) AS prod_settings_null,
+  (SELECT COUNT(*) FROM schedule_selections WHERE plan_id IS NULL) AS prod_selections_null,
+  (SELECT COUNT(*) FROM schedule_proposals WHERE plan_id IS NULL) AS prod_proposals_null;
+-- Esperado antes de deploy-b: 0, 0, 0
+```
+
 3. **Orden de despliegue en producción:** desplegar **backend primero y frontend después**.
 4. Para la subida de transición **`deploy-a` -> `deploy-b`**, hacer una **primera subida que solo cambie `server/`** (dado que `src/` no cambió entre `deploy-a` y `deploy-b`).
-5. Al aprobar los Pasos 1 a 10 en la rama temporal, descartar la rama temporal de Neon Console (sin dejar credenciales persistidas en disco) y recién entonces habilitar **Tramo 2D (`deploy-c`)**.
+5. Al terminar el ensayo (Pasos 1 a 10 aprobados), limpiá `ALLOW_DESTRUCTIVE_TEST`, **cerrá la ventana de PowerShell** para descartar todas las variables de sesión y eliminá la rama temporal en Neon Console:
+
+```powershell
+Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
+# Luego cerrá esta ventana de PowerShell.
+```
+
+6. Recién tras aprobar este ensayo se habilita **Tramo 2D (`deploy-c`)**.
