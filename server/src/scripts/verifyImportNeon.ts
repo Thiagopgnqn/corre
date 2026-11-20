@@ -59,7 +59,9 @@ async function run(): Promise<void> {
   if (process.env.ALLOW_DESTRUCTIVE_TEST !== '1') {
     console.error('❌ BLOQUEADO: este script escribe y borra registros temporales en PostgreSQL/Neon.');
     console.error('   Para ejecutarlo manualmente contra una RAMA TEMPORAL (NUNCA producción):');
-    console.error('   ALLOW_DESTRUCTIVE_TEST=1 npm --prefix server run verify:import-neon -- --host-ok=<host>');
+    console.error(
+      "   $env:ALLOW_DESTRUCTIVE_TEST='1'; npm --prefix server run verify:import-neon -- --host-ok=<host>"
+    );
     process.exit(1);
   }
 
