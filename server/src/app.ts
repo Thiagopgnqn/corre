@@ -45,6 +45,9 @@ export function createApp(options?: {
   const reviewsStore = options?.reviewsStore || defaultReviewsStore;
   setActiveReviewsStore(options?.reviewsStore || null);
   const userStateStore = options?.userStateStore || defaultUserStateStore;
+  if (options?.reviewsStore && options?.userStateStore) {
+    options.reviewsStore.linkUserStateStore?.(options.userStateStore);
+  }
   const reviewsService = new ReviewsService(reviewsStore);
   const enrollmentsService = new EnrollmentsService(reviewsStore);
 

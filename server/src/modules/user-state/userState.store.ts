@@ -267,6 +267,40 @@ function pickScheduleSelectionRowForPlan(
   return null;
 }
 
+export type DbExecutor =
+  | typeof db
+  | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function upsertSubjectProgressWithDb(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  status: string,
+  grade: string | null
+): Promise<void> {
+  if (status === 'pendiente' && grade === null) {
+    await executor
+      .delete(subjectProgress)
+      .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)));
+    return;
+  }
+
+  const [existing] = await executor
+    .select({ id: subjectProgress.id })
+    .from(subjectProgress)
+    .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)))
+    .limit(1);
+
+  if (existing) {
+    await executor
+      .update(subjectProgress)
+      .set({ status, grade, updatedAt: new Date() })
+      .where(eq(subjectProgress.id, existing.id));
+  } else {
+    await executor.insert(subjectProgress).values({ userId, subjectId, status, grade });
+  }
+}
+
 export class DrizzleUserStateStore implements UserStateStore {
   async resolveUserActivePlan(
     userId: string,
@@ -487,27 +521,7 @@ export class DrizzleUserStateStore implements UserStateStore {
     status: string,
     grade: string | null
   ): Promise<void> {
-    if (status === 'pendiente' && grade === null) {
-      await db
-        .delete(subjectProgress)
-        .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)));
-      return;
-    }
-
-    const [existing] = await db
-      .select({ id: subjectProgress.id })
-      .from(subjectProgress)
-      .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)))
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(subjectProgress)
-        .set({ status, grade, updatedAt: new Date() })
-        .where(eq(subjectProgress.id, existing.id));
-    } else {
-      await db.insert(subjectProgress).values({ userId, subjectId, status, grade });
-    }
+    await upsertSubjectProgressWithDb(db, userId, subjectId, status, grade);
   }
 
   async listElectiveAssignments(
