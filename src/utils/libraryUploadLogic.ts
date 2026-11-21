@@ -322,18 +322,26 @@ export function formatUploadErrorMessage(err: any): string {
   const code = typeof err?.code === 'string' ? err.code : '';
   const rawMsg = typeof err?.message === 'string' ? err.message.trim() : '';
 
+  if (/pdf protegido/i.test(rawMsg)) {
+    return 'PDF protegido: no pudimos verificar su contenido por seguridad. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.';
+  }
+
+  if (/no pudimos verificar la seguridad de este pdf/i.test(rawMsg)) {
+    return 'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.';
+  }
+
+  if (
+    code === 'DANGEROUS_PDF_CONTENT' ||
+    /acciones autom[aá]ticas|elementos ejecutables|scripts no permitidos/i.test(rawMsg)
+  ) {
+    return 'Este PDF contiene acciones automáticas o ejecutables bloqueadas por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.';
+  }
+
   if (
     code === 'INVALID_FILE_CONTENT' ||
     /no coincide con la firma|magic number|tamañ?o real.*difiere/i.test(rawMsg)
   ) {
     return 'Este archivo no es un PDF ni una imagen válida.';
-  }
-
-  if (
-    code === 'DANGEROUS_PDF_CONTENT' ||
-    /elementos ejecutables|scripts no permitidos/i.test(rawMsg)
-  ) {
-    return 'Este archivo no es un PDF válido (contiene código o scripts bloqueados por seguridad).';
   }
 
   if (code === 'DUPLICATE_FILE') {
