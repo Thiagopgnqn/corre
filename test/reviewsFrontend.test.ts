@@ -15,7 +15,15 @@ import {
   getReviewPromptsOnRegularizeTransition,
   getActiveRecommendedReviewPairs,
   getSubjectsMissingDeclaredProfessors,
+  resolveSubjectStatusFromEnrollment,
+  getSubjectStatusRank,
+  SUBJECT_STATUS_RANK,
 } from '../src/utils/enrollmentLogic';
+import {
+  resolveSubjectStatusFromEnrollment as resolveBackendSubjectStatusFromEnrollment,
+  getSubjectStatusRank as getBackendSubjectStatusRank,
+  SUBJECT_STATUS_RANK as BACKEND_SUBJECT_STATUS_RANK,
+} from '../server/src/modules/enrollments/enrollmentStatus.helpers';
 import type { SubjectEnrollment } from '../src/types/enrollment';
 import type { Subject } from '../src/types/career';
 import type { ReviewableResponse } from '../src/types/professor';
@@ -585,6 +593,131 @@ const errorResponse = normalizeRatingsBatchResponse({ success: false, data: null
 assert(typeof errorResponse.byId === 'object' && typeof errorResponse.byNormalizedName === 'object', 'Error debe devolver mapas seguros');
 
 console.log('✅ Todos los tests de regresión de useProfessorRatings pasaron con éxito!\n');
+
+// ======================================================================
+// 🧪 TEST DE MATRIZ COMPLETA Y PARIDAD: resolveSubjectStatusFromEnrollment
+// ======================================================================
+console.log('🧪 Ejecutando tests de matriz completa estadoActual x resultadoCursada (frontend + backend)...');
+
+assert(
+  JSON.stringify(SUBJECT_STATUS_RANK) === JSON.stringify(BACKEND_SUBJECT_STATUS_RANK),
+  'SUBJECT_STATUS_RANK debe ser idéntico entre frontend y backend'
+);
+
+assert(
+  SUBJECT_STATUS_RANK.pendiente < SUBJECT_STATUS_RANK.cursando &&
+    SUBJECT_STATUS_RANK.disponible === SUBJECT_STATUS_RANK.pendiente &&
+    SUBJECT_STATUS_RANK.bloqueada === SUBJECT_STATUS_RANK.pendiente &&
+    SUBJECT_STATUS_RANK.libre === SUBJECT_STATUS_RANK.pendiente &&
+    SUBJECT_STATUS_RANK.cursando < SUBJECT_STATUS_RANK.regularizada &&
+    SUBJECT_STATUS_RANK.regularizada < SUBJECT_STATUS_RANK.aprobada &&
+    SUBJECT_STATUS_RANK.aprobada < SUBJECT_STATUS_RANK.promocionada,
+  'La jerarquía debe cumplir pendiente/disponible/bloqueada/libre (0) < cursando (1) < regularizada (2) < aprobada (3) < promocionada (4)'
+);
+
+const currentStatusCases: Array<{
+  label: string;
+  value: string | null | undefined;
+  expectedRank: number | null;
+}> = [
+  { label: 'null', value: null, expectedRank: 0 },
+  { label: 'undefined', value: undefined, expectedRank: 0 },
+  { label: 'pendiente', value: 'pendiente', expectedRank: 0 },
+  { label: 'disponible', value: 'disponible', expectedRank: 0 },
+  { label: 'bloqueada', value: 'bloqueada', expectedRank: 0 },
+  { label: 'libre', value: 'libre', expectedRank: 0 },
+  { label: 'cursando', value: 'cursando', expectedRank: 1 },
+  { label: 'regularizada', value: 'regularizada', expectedRank: 2 },
+  { label: 'aprobada', value: 'aprobada', expectedRank: 3 },
+  { label: 'promocionada', value: 'promocionada', expectedRank: 4 },
+  { label: 'desconocido', value: 'desconocido', expectedRank: null },
+  { label: 'string vacío', value: '', expectedRank: null },
+];
+
+const enrollmentStatusCases: Array<{
+  label: string;
+  value: string | null | undefined;
+  targetRank: number | null;
+}> = [
+  { label: 'null', value: null, targetRank: null },
+  { label: 'undefined', value: undefined, targetRank: null },
+  { label: 'cursando', value: 'cursando', targetRank: null },
+  { label: 'libre', value: 'libre', targetRank: null },
+  { label: 'regularizada', value: 'regularizada', targetRank: 2 },
+  { label: 'promocionada', value: 'promocionada', targetRank: 4 },
+  { label: 'aprobada (no aplica en cursada)', value: 'aprobada', targetRank: null },
+  { label: 'desconocido', value: 'desconocido', targetRank: null },
+  { label: 'string vacío', value: '', targetRank: null },
+];
+
+let matrixChecked = 0;
+for (const cur of currentStatusCases) {
+  const feRank = getSubjectStatusRank(cur.value);
+  const beRank = getBackendSubjectStatusRank(cur.value);
+  assert(
+    feRank === cur.expectedRank && beRank === cur.expectedRank,
+    `Rank para estado actual ${cur.label}: esperado ${cur.expectedRank}, obtuvo fe=${feRank}, be=${beRank}`
+  );
+
+  for (const enr of enrollmentStatusCases) {
+    const feRes = resolveSubjectStatusFromEnrollment(cur.value, enr.value);
+    const beRes = resolveBackendSubjectStatusFromEnrollment(cur.value, enr.value);
+
+    const expectedShouldUpdate =
+      enr.targetRank !== null &&
+      cur.expectedRank !== null &&
+      enr.targetRank > cur.expectedRank;
+    const expectedNextStatus = expectedShouldUpdate
+      ? (enr.value as string)
+      : (cur.value ?? null);
+
+    assert(
+      feRes.shouldUpdate === expectedShouldUpdate &&
+        feRes.nextStatus === expectedNextStatus,
+      `Frontend [${cur.label} x ${enr.label}]: esperado {shouldUpdate:${expectedShouldUpdate}, nextStatus:${String(expectedNextStatus)}}, obtuvo ${JSON.stringify(feRes)}`
+    );
+    assert(
+      beRes.shouldUpdate === expectedShouldUpdate &&
+        beRes.nextStatus === expectedNextStatus,
+      `Backend [${cur.label} x ${enr.label}]: esperado {shouldUpdate:${expectedShouldUpdate}, nextStatus:${String(expectedNextStatus)}}, obtuvo ${JSON.stringify(beRes)}`
+    );
+    assert(
+      feRes.shouldUpdate === beRes.shouldUpdate && feRes.nextStatus === beRes.nextStatus,
+      `Paridad frontend/backend [${cur.label} x ${enr.label}]`
+    );
+    matrixChecked++;
+  }
+}
+
+// Verificaciones puntuales explícitas de reglas críticas de negocio
+assert(
+  resolveSubjectStatusFromEnrollment('aprobada', 'regularizada').shouldUpdate === false &&
+    resolveSubjectStatusFromEnrollment('aprobada', 'regularizada').nextStatus === 'aprobada',
+  'Materia ya aprobada NO debe bajar a regularizada'
+);
+assert(
+  resolveSubjectStatusFromEnrollment('promocionada', 'regularizada').shouldUpdate === false &&
+    resolveSubjectStatusFromEnrollment('promocionada', 'regularizada').nextStatus === 'promocionada',
+  'Materia ya promocionada NO debe bajar a regularizada'
+);
+assert(
+  resolveSubjectStatusFromEnrollment('aprobada', 'promocionada').shouldUpdate === true &&
+    resolveSubjectStatusFromEnrollment('aprobada', 'promocionada').nextStatus === 'promocionada',
+  'Materia aprobada pasa a promocionada si se registra cursada promocionada (rank 4 > 3)'
+);
+assert(
+  resolveSubjectStatusFromEnrollment(null, 'libre').shouldUpdate === false &&
+    resolveSubjectStatusFromEnrollment('regularizada', 'libre').shouldUpdate === false &&
+    resolveSubjectStatusFromEnrollment('disponible', 'cursando').shouldUpdate === false,
+  'Cursada libre/cursando/null nunca actualiza el estado de la materia'
+);
+assert(
+  resolveSubjectStatusFromEnrollment('estado_raro', 'promocionada').shouldUpdate === false &&
+    resolveSubjectStatusFromEnrollment('estado_raro', 'promocionada').nextStatus === 'estado_raro',
+  'Estado actual desconocido no debe modificarse aunque la cursada sea promocionada'
+);
+
+console.log(`✅ Matriz completa verificada (${matrixChecked} combinaciones con paridad 100% frontend/backend)!\n`);
 
 console.log('TODAS LAS PRUEBAS DE RESEÑAS FRONTEND, INSIGNIAS, FILTROS Y ACCESIBILIDAD PASARON CON ÉXITO!');
 
