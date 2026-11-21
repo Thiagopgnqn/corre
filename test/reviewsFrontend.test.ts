@@ -18,6 +18,8 @@ import {
   resolveSubjectStatusFromEnrollment,
   applyServerSubjectStatus,
   canSaveEnrollmentInSimulation,
+  executeSaveSubjectEnrollment,
+  mergeSavedEnrollmentUserState,
   getSubjectStatusRank,
   SUBJECT_STATUS_RANK,
 } from '../src/utils/enrollmentLogic';
@@ -857,58 +859,49 @@ async function runSimulationAndSaveHarnessTests(): Promise<void> {
   };
   let localEnrollments: SubjectEnrollment[] = [];
 
-  const simulateSaveSubjectEnrollment = async (
-    isSimulationMode: boolean,
-    subjectCode: number,
-    input: UpsertEnrollmentInput,
-    serverReturnedSubjectStatus?: string | null
-  ): Promise<SubjectEnrollment> => {
-    if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
-      throw new Error('No disponible en modo simulación');
-    }
-    apiCalls += 1;
-    const saved: SubjectEnrollment = {
-      id: `enr-${apiCalls}`,
-      subjectId: `sub-${subjectCode}`,
-      subjectCode,
-      subjectName: 'Materia Test',
-      subjectShortName: 'MT',
-      subjectLevel: 1,
-      commissionId: input.commissionId ?? null,
-      commissionCode: null,
-      turno: null,
-      academicYear: input.academicYear ?? 2026,
-      term: input.term ?? '1C',
-      status: input.status ?? 'cursando',
-      subjectStatus: serverReturnedSubjectStatus,
-      source: input.source ?? 'manual',
-      professors: [],
-      createdAt: FIXED_ISO,
-      updatedAt: FIXED_ISO,
-    };
-    localEnrollments = [saved, ...localEnrollments.filter((e) => e.id !== saved.id)];
-    const updatedEntry = applyServerSubjectStatus(
-      localUserState[subjectCode],
-      saved.subjectStatus,
-      FIXED_ISO
-    );
-    if (updatedEntry) {
-      localUserState = {
-        ...localUserState,
-        [subjectCode]: updatedEntry,
+  const createMockUpsert =
+    (serverReturnedSubjectStatus?: string | null) =>
+    async (subjectCode: number, input: UpsertEnrollmentInput) => {
+      apiCalls += 1;
+      const saved: SubjectEnrollment = {
+        id: `enr-${apiCalls}`,
+        subjectId: `sub-${subjectCode}`,
+        subjectCode,
+        subjectName: 'Materia Test',
+        subjectShortName: 'MT',
+        subjectLevel: 1,
+        commissionId: input.commissionId ?? null,
+        commissionCode: null,
+        turno: null,
+        academicYear: input.academicYear ?? 2026,
+        term: input.term ?? '1C',
+        status: input.status ?? 'cursando',
+        ...(serverReturnedSubjectStatus !== undefined
+          ? { subjectStatus: serverReturnedSubjectStatus }
+          : {}),
+        source: input.source ?? 'manual',
+        professors: [],
+        createdAt: FIXED_ISO,
+        updatedAt: FIXED_ISO,
       };
-    }
-    return saved;
-  };
+      return { data: saved };
+    };
 
   let simErrorCaught = false;
   try {
-    await simulateSaveSubjectEnrollment(
-      true,
-      101,
-      { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
-      'promocionada'
-    );
+    await executeSaveSubjectEnrollment({
+      isSimulationMode: true,
+      subjectCode: 101,
+      input: { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+      upsertEnrollment: createMockUpsert('promocionada'),
+      applyEnrollmentsUpdate: (updater) => {
+        localEnrollments = updater(localEnrollments);
+      },
+      applyUserStateUpdate: (updater) => {
+        localUserState = updater(localUserState);
+      },
+      nowIso: FIXED_ISO,
+    });
   } catch (err) {
     simErrorCaught = (err as Error).message === 'No disponible en modo simulación';
   }
@@ -918,21 +911,93 @@ async function runSimulationAndSaveHarnessTests(): Promise<void> {
       apiCalls === 0 &&
       localEnrollments.length === 0 &&
       localUserState[101]?.status === 'disponible',
-    'En modo simulación, saveSubjectEnrollment debe cortar antes de llamar al servidor y no mutar cursadas ni progreso'
+    'En modo simulación, executeSaveSubjectEnrollment (usada por CareerContext) corta antes de llamar al servidor y no muta cursadas ni progreso'
   );
 
   // Fuera de simulación sí guarda y promociona el estado local sin degradar ni duplicar
-  await simulateSaveSubjectEnrollment(
-    false,
-    101,
-    { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
-    'promocionada'
-  );
+  await executeSaveSubjectEnrollment({
+    isSimulationMode: false,
+    subjectCode: 101,
+    input: { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+    upsertEnrollment: createMockUpsert('promocionada'),
+    applyEnrollmentsUpdate: (updater) => {
+      localEnrollments = updater(localEnrollments);
+    },
+    applyUserStateUpdate: (updater) => {
+      localUserState = updater(localUserState);
+    },
+    nowIso: FIXED_ISO,
+  });
   assert(
     apiCalls === 1 &&
       localEnrollments.length === 1 &&
       localUserState[101]?.status === 'promocionada',
-    'Fuera de simulación, saveSubjectEnrollment guarda la cursada y aplica subjectStatus="promocionada"'
+    'Fuera de simulación, executeSaveSubjectEnrollment guarda la cursada y aplica subjectStatus="promocionada"'
+  );
+
+  // Payload de listado GET /api/enrollments sin campo subjectStatus (omitido) no cambia nada en userState
+  const listedPayloadWithoutSubjectStatus: SubjectEnrollment[] = [
+    {
+      id: 'enr-list-1',
+      subjectId: 'sub-101',
+      subjectCode: 101,
+      subjectName: 'Materia Test',
+      subjectShortName: 'MT',
+      subjectLevel: 1,
+      commissionId: null,
+      commissionCode: null,
+      turno: null,
+      academicYear: 2026,
+      term: '1C',
+      status: 'regularizada',
+      source: 'manual',
+      professors: [],
+      createdAt: FIXED_ISO,
+      updatedAt: FIXED_ISO,
+    },
+    {
+      id: 'enr-list-2',
+      subjectId: 'sub-102',
+      subjectName: 'Materia Pendiente',
+      subjectShortName: 'MP',
+      subjectLevel: 1,
+      subjectCode: 102,
+      commissionId: null,
+      commissionCode: null,
+      turno: null,
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      source: 'manual',
+      professors: [],
+      createdAt: FIXED_ISO,
+      updatedAt: FIXED_ISO,
+    },
+  ];
+  const stateBeforeListApply: UserCareerState = {
+    101: { status: 'cursando' },
+    102: { status: 'aprobada', grade: 8 },
+  };
+  let stateAfterListApply = stateBeforeListApply;
+  for (const listedItem of listedPayloadWithoutSubjectStatus) {
+    assert(
+      !Object.prototype.hasOwnProperty.call(listedItem, 'subjectStatus') &&
+        listedItem.subjectStatus === undefined,
+      'Fixture de listado GET /api/enrollments omite subjectStatus'
+    );
+    stateAfterListApply = mergeSavedEnrollmentUserState(
+      stateAfterListApply,
+      listedItem.subjectCode,
+      listedItem.subjectStatus,
+      FIXED_ISO
+    );
+  }
+  assert(
+    stateAfterListApply === stateBeforeListApply &&
+      stateAfterListApply[101]?.status === 'cursando' &&
+      stateAfterListApply[102]?.status === 'aprobada' &&
+      stateAfterListApply[102]?.grade === 8,
+    'Un payload de listado GET /api/enrollments sin subjectStatus no modifica en absoluto userState'
   );
 }
 
@@ -1000,71 +1065,148 @@ assert(
   'Con cursada promocionada se cumple approvedPrereqs y la dependiente pasa a disponible'
 );
 
-// Flujo inverso: QuickStatusModal -> updateSubjectStatus -> EnrollmentModal -> saveSubjectEnrollment
-// Caso A: Usuario marca promocionada con nota 9 -> abre EnrollmentModal -> guarda cursada promocionada
-const quickPromoState: UserSubjectState = { status: 'promocionada', grade: 9, updatedAt: FIXED_ISO };
-const openPromptQuick = evaluateCommissionPromptOnStatusChange({
-  prevStatus: 'disponible',
-  nextStatus: 'promocionada',
-  existingSubjectEnrollments: [],
-  isSimulationMode: false,
-  source: 'status_change',
-});
-const serverDecisionQuick = resolveSubjectStatusFromEnrollment(quickPromoState.status, 'promocionada');
-const appliedAfterSaveQuick = applyServerSubjectStatus(
-  quickPromoState,
-  serverDecisionQuick.nextStatus,
-  '2026-11-21T18:05:00.000Z'
-);
-const rePromptAfterSaveQuick = evaluateCommissionPromptOnStatusChange({
-  prevStatus: 'promocionada',
-  nextStatus: 'promocionada',
-  existingSubjectEnrollments: [{ ...legacyBackendEnrollment, id: 'enr-new', status: 'promocionada' }],
-  isSimulationMode: false,
-  source: 'status_change',
-});
-assert(
-  openPromptQuick.shouldOpenModal === true &&
-    serverDecisionQuick.shouldUpdate === false &&
-    serverDecisionQuick.nextStatus === 'promocionada' &&
-    appliedAfterSaveQuick === null &&
-    quickPromoState.grade === 9 &&
-    rePromptAfterSaveQuick.shouldOpenModal === false,
-  'Flujo inverso (mismo estado promocionada + nota 9): sin doble escritura, sin pérdida de nota ni bucle de modal'
-);
+// Flujo inverso: QuickStatusModal -> updateSubjectStatus -> EnrollmentModal -> executeSaveSubjectEnrollment (misma función de CareerContext)
+async function runInverseFlowWithSharedExecutorTests(): Promise<void> {
+  // Caso A: Usuario marca promocionada con nota 9 -> abre EnrollmentModal -> guarda cursada promocionada
+  let stateQuick: UserCareerState = {
+    101: { status: 'promocionada', grade: 9, updatedAt: FIXED_ISO },
+  };
+  let enrollmentsQuick: SubjectEnrollment[] = [];
+  let updateSubjectStatusCalls = 0;
 
-// Caso B: Usuario marca cursando en QuickStatusModal -> abre EnrollmentModal -> guarda cursada promocionada
-const quickCursandoState: UserSubjectState = { status: 'cursando', updatedAt: FIXED_ISO };
-const serverDecisionUpgrade = resolveSubjectStatusFromEnrollment(quickCursandoState.status, 'promocionada');
-const appliedAfterSaveUpgrade = applyServerSubjectStatus(
-  quickCursandoState,
-  serverDecisionUpgrade.nextStatus,
-  '2026-11-21T18:06:00.000Z'
-);
-assert(
-  serverDecisionUpgrade.shouldUpdate === true &&
-    serverDecisionUpgrade.nextStatus === 'promocionada' &&
-    appliedAfterSaveUpgrade !== null &&
-    appliedAfterSaveUpgrade.status === 'promocionada',
-  'Flujo inverso (cursando -> modal cambia a promocionada): aplica actualización local directamente sin pasar por updateSubjectStatus'
-);
+  const openPromptQuick = evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'disponible',
+    nextStatus: 'promocionada',
+    existingSubjectEnrollments: enrollmentsQuick,
+    isSimulationMode: false,
+    source: 'status_change',
+  });
+  const serverDecisionQuick = resolveSubjectStatusFromEnrollment(
+    stateQuick[101].status,
+    'promocionada'
+  );
 
-// Conserva nota 9 si QuickStatusModal dejó aprobada(9) y EnrollmentModal guarda cursada promocionada
-const quickAprobadaConNota: UserSubjectState = { status: 'aprobada', grade: 9, updatedAt: FIXED_ISO };
-const serverDecisionAprobPromo = resolveSubjectStatusFromEnrollment(quickAprobadaConNota.status, 'promocionada');
-const appliedAprobPromo = applyServerSubjectStatus(
-  quickAprobadaConNota,
-  serverDecisionAprobPromo.nextStatus,
-  '2026-11-21T18:07:00.000Z'
-);
-assert(
-  serverDecisionAprobPromo.shouldUpdate === true &&
-    serverDecisionAprobPromo.nextStatus === 'promocionada' &&
-    appliedAprobPromo !== null &&
-    appliedAprobPromo.status === 'promocionada' &&
-    appliedAprobPromo.grade === 9,
-  'Si pasa de aprobada (nota 9) a promocionada al guardar cursada, conserva la nota 9 intacta'
-);
+  await executeSaveSubjectEnrollment({
+    isSimulationMode: false,
+    subjectCode: 101,
+    input: { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+    upsertEnrollment: async (_code, input) => ({
+      data: {
+        ...legacyBackendEnrollment,
+        id: 'enr-quick-a',
+        status: input.status ?? 'promocionada',
+        subjectStatus: serverDecisionQuick.nextStatus,
+      },
+    }),
+    applyEnrollmentsUpdate: (updater) => {
+      enrollmentsQuick = updater(enrollmentsQuick);
+    },
+    applyUserStateUpdate: (updater) => {
+      const next = updater(stateQuick);
+      if (next !== stateQuick) {
+        updateSubjectStatusCalls += 1;
+        stateQuick = next;
+      }
+    },
+    nowIso: '2026-11-21T18:05:00.000Z',
+  });
+
+  const rePromptAfterSaveQuick = evaluateCommissionPromptOnStatusChange({
+    prevStatus: 'promocionada',
+    nextStatus: stateQuick[101].status,
+    existingSubjectEnrollments: enrollmentsQuick,
+    isSimulationMode: false,
+    source: 'status_change',
+  });
+  assert(
+    openPromptQuick.shouldOpenModal === true &&
+      serverDecisionQuick.shouldUpdate === false &&
+      serverDecisionQuick.nextStatus === 'promocionada' &&
+      updateSubjectStatusCalls === 0 &&
+      stateQuick[101].grade === 9 &&
+      rePromptAfterSaveQuick.shouldOpenModal === false,
+    'Flujo inverso (mismo estado promocionada + nota 9) vía executeSaveSubjectEnrollment: sin doble escritura, sin pérdida de nota ni bucle de modal'
+  );
+
+  // Caso B: Usuario marca cursando en QuickStatusModal -> abre EnrollmentModal -> guarda cursada promocionada
+  let stateUpgrade: UserCareerState = {
+    101: { status: 'cursando', updatedAt: FIXED_ISO },
+  };
+  let enrollmentsUpgrade: SubjectEnrollment[] = [];
+  const serverDecisionUpgrade = resolveSubjectStatusFromEnrollment(
+    stateUpgrade[101].status,
+    'promocionada'
+  );
+
+  await executeSaveSubjectEnrollment({
+    isSimulationMode: false,
+    subjectCode: 101,
+    input: { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+    upsertEnrollment: async (_code, input) => ({
+      data: {
+        ...legacyBackendEnrollment,
+        id: 'enr-quick-b',
+        status: input.status ?? 'promocionada',
+        subjectStatus: serverDecisionUpgrade.nextStatus,
+      },
+    }),
+    applyEnrollmentsUpdate: (updater) => {
+      enrollmentsUpgrade = updater(enrollmentsUpgrade);
+    },
+    applyUserStateUpdate: (updater) => {
+      stateUpgrade = updater(stateUpgrade);
+    },
+    nowIso: '2026-11-21T18:06:00.000Z',
+  });
+  assert(
+    serverDecisionUpgrade.shouldUpdate === true &&
+      serverDecisionUpgrade.nextStatus === 'promocionada' &&
+      stateUpgrade[101]?.status === 'promocionada' &&
+      enrollmentsUpgrade.length === 1,
+    'Flujo inverso (cursando -> modal cambia a promocionada) vía executeSaveSubjectEnrollment: aplica actualización local directamente sin pasar por updateSubjectStatus'
+  );
+
+  // Caso C: Conserva nota 9 si QuickStatusModal dejó aprobada(9) y EnrollmentModal guarda cursada promocionada
+  let stateAprobNota: UserCareerState = {
+    101: { status: 'aprobada', grade: 9, updatedAt: FIXED_ISO },
+  };
+  let enrollmentsAprobNota: SubjectEnrollment[] = [];
+  const serverDecisionAprobPromo = resolveSubjectStatusFromEnrollment(
+    stateAprobNota[101].status,
+    'promocionada'
+  );
+
+  await executeSaveSubjectEnrollment({
+    isSimulationMode: false,
+    subjectCode: 101,
+    input: { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+    upsertEnrollment: async (_code, input) => ({
+      data: {
+        ...legacyBackendEnrollment,
+        id: 'enr-quick-c',
+        status: input.status ?? 'promocionada',
+        subjectStatus: serverDecisionAprobPromo.nextStatus,
+      },
+    }),
+    applyEnrollmentsUpdate: (updater) => {
+      enrollmentsAprobNota = updater(enrollmentsAprobNota);
+    },
+    applyUserStateUpdate: (updater) => {
+      stateAprobNota = updater(stateAprobNota);
+    },
+    nowIso: '2026-11-21T18:07:00.000Z',
+  });
+  assert(
+    serverDecisionAprobPromo.shouldUpdate === true &&
+      serverDecisionAprobPromo.nextStatus === 'promocionada' &&
+      stateAprobNota[101]?.status === 'promocionada' &&
+      stateAprobNota[101]?.grade === 9 &&
+      enrollmentsAprobNota.length === 1,
+    'Si pasa de aprobada (nota 9) a promocionada vía executeSaveSubjectEnrollment, conserva la nota 9 intacta'
+  );
+}
+
+await runInverseFlowWithSharedExecutorTests();
 
 console.log(`✅ Tests de applyServerSubjectStatus (${applyServerMatrixChecked} combinaciones), simulación, correlativas y flujo inverso pasaron!\n`);
 

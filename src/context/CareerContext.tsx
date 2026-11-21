@@ -35,9 +35,9 @@ import {
   getSubjectStatus,
 } from '../utils/correlativas';
 import {
-  applyServerSubjectStatus,
   canSaveEnrollmentInSimulation,
   evaluateCommissionPromptOnStatusChange,
+  executeSaveSubjectEnrollment,
   getReviewPromptsOnRegularizeTransition,
   type StatusChangeTriggerSource,
 } from '../utils/enrollmentLogic';
@@ -781,30 +781,27 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       subjectCode: number,
       input: UpsertEnrollmentInput
     ): Promise<SubjectEnrollment> => {
-      if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
-        throw new Error('No disponible en modo simulación');
-      }
-      setSyncStatus('saving');
+      let didAttemptServerSave = false;
       try {
-        const res = await enrollmentsApi.upsertEnrollment(subjectCode, input);
-        const saved = res.data;
-        setEnrollments((prev) => {
-          const filtered = prev.filter((e) => e.id !== saved.id);
-          return [saved, ...filtered];
-        });
-        setUserState((prev) => {
-          const updatedEntry = applyServerSubjectStatus(prev[subjectCode], saved.subjectStatus);
-          if (!updatedEntry) return prev;
-          return {
-            ...prev,
-            [subjectCode]: updatedEntry,
-          };
+        const saved = await executeSaveSubjectEnrollment({
+          isSimulationMode,
+          subjectCode,
+          input,
+          upsertEnrollment: (code, data) => {
+            setSyncStatus('saving');
+            didAttemptServerSave = true;
+            return enrollmentsApi.upsertEnrollment(code, data);
+          },
+          applyEnrollmentsUpdate: setEnrollments,
+          applyUserStateUpdate: setUserState,
         });
         setSyncStatus('saved');
         await refreshReviewableSummary();
         return saved;
       } catch (err) {
-        setSyncStatus('error');
+        if (didAttemptServerSave) {
+          setSyncStatus('error');
+        }
         throw err;
       }
     },
