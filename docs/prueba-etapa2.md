@@ -193,15 +193,18 @@ Invoke-RestMethod -Uri "http://localhost:4000/api/catalog/plans/current" | Selec
 El script [`server/src/scripts/verifyUserStateNeon.ts`](../server/src/scripts/verifyUserStateNeon.ts) (**excluido de `npm test`**) verifica contra PostgreSQL/Neon real: usuario con 1 plan, usuario con 2 planes en paralelo sobre el **mismo término horario**, sincronización de `notifyLibraryEmail`, electiva en nivel `6`, `DrizzleReviewsStore.markRecommendationsSeen` sin insertar `plan_id = NULL` y `PgLibraryService.getPendingUploaderFiles()` sin filas duplicadas.
 
 ```powershell
-# 1. Verificación de host sin exponer credenciales (espera salida 1 con el host detectado)
+# 1. Validación de parámetro --mode (sin --mode falla de inmediato) y host sin exponer credenciales
 $env:ALLOW_DESTRUCTIVE_TEST = "1"
-npm --prefix server run verify:user-state-neon
+npm --prefix server run verify:user-state-neon -- --mode=verify
 
-# 2. Ejecución contra esquema 0014 (antes de 0015) o contra 0015/0016 (después de aplicar 0015 y 0016)
-npm --prefix server run verify:user-state-neon -- --host-ok=<host> --expect-schema=0014
-# (o con --expect-schema=0015 tras aplicar 0015 y 0016)
+# 2. Ejecución por modo contra la rama temporal de Neon:
+npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=seed --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=<host>
+npm --prefix server run verify:user-state-neon -- --mode=cleanup --host-ok=<host>
 Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
 ```
 
 > [!NOTE]
-> Para ejecutar el ensayo completo en **10 pasos** (`2c-d1` sobre `0014` → siembra `IND` + `perPlan`/`no-UUID` → `etapa2` final con `0015` & `0016` → verificación SQL `RESTRICT` y PK compuesta → prueba cruzada `2c-d1` sobre `0015` + `etapa2` sobre `0015` → rollback SQL controlado → re-migración idempotente → `verify:import-neon`) sobre **una única rama temporal de Neon (`>= 7 días`)**, seguí la **Sección 4** de [`docs/deploy-etapa2.md`](deploy-etapa2.md). Aprovechá la misma corrida en el navegador para verificar filtros/insignias `[IND] · [Plan 2023]` en **Biblioteca** y **Reseñas** y la creación/vinculación de docentes en **`IND`** aun con usuario posicionado en otro `selected_plan_id` (`AdminScheduleTab` sigue diferido a Etapa 3).
+> Para ejecutar el ensayo completo en **11 pasos** (`deploy-a` sobre `0014` → `--mode=seed` → `deploy-b` con `db:migrate` `0015` + `0016` → `--mode=check-post-0015` y `--mode=verify` → rollback SQL controlado y re-migración → `verify:import-neon` + pruebas Partes B/C/D → `--mode=cleanup`) sobre **una única rama temporal de Neon (`>= 7 días`)**, seguí la **Sección 3** de [`docs/deploy-etapa2.md`](deploy-etapa2.md). Aprovechá la misma corrida en el navegador para verificar filtros/insignias `[IND] · [Plan 2023]` en **Biblioteca** y **Reseñas** y la creación/vinculación de docentes en **`IND`** aun con usuario posicionado en otro `selected_plan_id` (`AdminScheduleTab` sigue diferido a Etapa 3).
