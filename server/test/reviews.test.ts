@@ -11,7 +11,15 @@ async function main() {
   const { DrizzleReviewsStore, InMemoryReviewsStore, setActiveReviewsStore } = await import(
     '../src/modules/reviews/reviews.store.js'
   );
-  const { InMemoryUserStateStore } = await import('../src/modules/user-state/userState.store.js');
+  const { db } = await import('../src/db/index.js');
+  const { InMemoryUserStateStore, buildUpgradeSubjectProgressQuery } = await import(
+    '../src/modules/user-state/userState.store.js'
+  );
+  const {
+    SUBJECT_STATUS_RANK,
+    getSubjectStatusRank,
+    resolveSubjectStatusFromEnrollment,
+  } = await import('../src/modules/enrollments/enrollmentStatus.helpers.js');
   const {
     parseProfessorName,
     compareProfessorParsed,
@@ -2069,6 +2077,163 @@ async function main() {
       await new Promise<void>((resolve) => atomicServer.close(() => resolve()));
       setActiveReviewsStore(store);
     }
+
+    // 14.12 GET /api/enrollments omite subjectStatus cuando no lo calcula; PUT sí lo devuelve siempre
+    const listEnrollmentsRes = await api('GET', '/api/enrollments', tokenEnroll);
+    const listedEnrollments = (listEnrollmentsRes.data?.data?.enrollments || []) as Array<
+      Record<string, unknown>
+    >;
+    const listOmitsSubjectStatus =
+      listedEnrollments.length >= 4 &&
+      listedEnrollments.every(
+        (item) =>
+          !Object.prototype.hasOwnProperty.call(item, 'subjectStatus') &&
+          item.subjectStatus === undefined
+      );
+    assert(
+      listEnrollmentsRes.status === 200 &&
+        listOmitsSubjectStatus &&
+        Object.prototype.hasOwnProperty.call(resPromoNew.data?.data || {}, 'subjectStatus') &&
+        typeof resPromoNew.data?.data?.subjectStatus === 'string',
+      'GET /api/enrollments omite subjectStatus cuando no se calculó; PUT /api/enrollments/:subjectId lo incluye siempre'
+    );
+
+    // 14.13 Verificación pura de SQL generado por upgradeSubjectProgressWithDb vs SUBJECT_STATUS_RANK
+    const compiledUpgrade = buildUpgradeSubjectProgressQuery(
+      db,
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      'promocionada',
+      new Date('2026-11-21T18:00:00.000Z')
+    ).toSQL();
+
+    const lowerSql = compiledUpgrade.sql.toLowerCase();
+    const doUpdateIdx = lowerSql.indexOf('do update set');
+    const returningIdx = lowerSql.indexOf('returning');
+    const doUpdateClause =
+      doUpdateIdx >= 0
+        ? compiledUpgrade.sql.slice(doUpdateIdx, returningIdx > doUpdateIdx ? returningIdx : undefined)
+        : '';
+
+    const updatedAtMarker = ', "updated_at" = ';
+    const updatedAtIdx = doUpdateClause.indexOf(updatedAtMarker);
+    const statusUpdateBranch =
+      updatedAtIdx >= 0 ? doUpdateClause.slice(0, updatedAtIdx) : doUpdateClause;
+    const updatedAtBranch =
+      updatedAtIdx >= 0 ? doUpdateClause.slice(updatedAtIdx + updatedAtMarker.length) : '';
+
+    const extractCaseRankMap = (sqlSlice: string, columnRegexPart: string) => {
+      const nullRegex = new RegExp(
+        `WHEN ${columnRegexPart} IS NULL THEN CAST\\(\\$(\\d+) AS integer\\)`
+      );
+      const nullMatch = sqlSlice.match(nullRegex);
+      const nullRank = nullMatch ? Number(compiledUpgrade.params[Number(nullMatch[1]) - 1]) : NaN;
+
+      const pairRegex = new RegExp(
+        `WHEN ${columnRegexPart} = \\$(\\d+) THEN CAST\\(\\$(\\d+) AS integer\\)`,
+        'g'
+      );
+      const pairs: Array<[string, number]> = [];
+      let m: RegExpExecArray | null;
+      while ((m = pairRegex.exec(sqlSlice)) !== null) {
+        const statusKey = String(compiledUpgrade.params[Number(m[1]) - 1]);
+        const rankValue = Number(compiledUpgrade.params[Number(m[2]) - 1]);
+        pairs.push([statusKey, rankValue]);
+      }
+      return { nullRank, pairs };
+    };
+
+    const existingCaseStatus = extractCaseRankMap(statusUpdateBranch, '"subject_progress"\\."status"');
+    const excludedCaseStatus = extractCaseRankMap(statusUpdateBranch, 'excluded\\.status');
+    const existingCaseUpdatedAt = extractCaseRankMap(updatedAtBranch, '"subject_progress"\\."status"');
+    const excludedCaseUpdatedAt = extractCaseRankMap(updatedAtBranch, 'excluded\\.status');
+    const expectedEntries = Object.entries(SUBJECT_STATUS_RANK);
+
+    const matchesEntries = (extracted: typeof existingCaseStatus) =>
+      extracted.nullRank === getSubjectStatusRank(null) &&
+      extracted.pairs.length === expectedEntries.length &&
+      expectedEntries.every(
+        ([k, v], idx) => extracted.pairs[idx][0] === k && extracted.pairs[idx][1] === v
+      );
+
+    const casePairsMatchExpected =
+      matchesEntries(existingCaseStatus) &&
+      matchesEntries(excludedCaseStatus) &&
+      matchesEntries(existingCaseUpdatedAt) &&
+      matchesEntries(excludedCaseUpdatedAt);
+
+    const sqlRankLookup = (val: string | null | undefined, extracted: typeof existingCaseStatus): number | null => {
+      if (val === null || val === undefined) return extracted.nullRank;
+      const found = extracted.pairs.find(([k]) => k === val);
+      return found ? found[1] : null;
+    };
+
+    const allTestCurrentStatuses = [
+      null,
+      undefined,
+      'pendiente',
+      'disponible',
+      'bloqueada',
+      'libre',
+      'cursando',
+      'regularizada',
+      'aprobada',
+      'promocionada',
+      'desconocido',
+      '',
+    ];
+    const allTestEnrollmentStatuses = [
+      null,
+      undefined,
+      'cursando',
+      'libre',
+      'regularizada',
+      'promocionada',
+      'aprobada',
+      'desconocido',
+      '',
+    ];
+
+    let sqlParityChecked = 0;
+    let sqlParityOk = true;
+    for (const cur of allTestCurrentStatuses) {
+      for (const enr of allTestEnrollmentStatuses) {
+        const helperRes = resolveSubjectStatusFromEnrollment(cur, enr);
+        const wouldInvokeSqlUpgrade = enr === 'regularizada' || enr === 'promocionada';
+        let sqlWouldUpdate = false;
+        let sqlNextStatus = cur ?? null;
+        if (wouldInvokeSqlUpgrade) {
+          const exRank = sqlRankLookup(cur, existingCaseStatus);
+          const newRank = sqlRankLookup(enr, excludedCaseStatus);
+          if (exRank !== null && newRank !== null && newRank > exRank) {
+            sqlWouldUpdate = true;
+            sqlNextStatus = enr;
+          }
+        }
+        if (
+          sqlWouldUpdate !== helperRes.shouldUpdate ||
+          sqlNextStatus !== helperRes.nextStatus
+        ) {
+          sqlParityOk = false;
+        }
+        sqlParityChecked++;
+      }
+    }
+
+    assert(
+      lowerSql.includes('insert into "subject_progress"') &&
+        /on conflict \("user_id",\s*"subject_id"\) do update set/.test(lowerSql) &&
+        statusUpdateBranch.includes('"status" = CASE') &&
+        statusUpdateBranch.includes('THEN excluded.status ELSE "subject_progress"."status" END') &&
+        updatedAtBranch.startsWith('CASE ') &&
+        updatedAtBranch.includes('THEN excluded.updated_at ELSE "subject_progress"."updated_at" END') &&
+        !doUpdateClause.includes('"grade"') &&
+        lowerSql.includes('returning "status"') &&
+        casePairsMatchExpected &&
+        sqlParityChecked === 12 * 9 &&
+        sqlParityOk,
+      'SQL generado por upgradeSubjectProgressWithDb respeta SUBJECT_STATUS_RANK, preserva grade, condiciona updated_at y tiene paridad 108/108 con el helper puro'
+    );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

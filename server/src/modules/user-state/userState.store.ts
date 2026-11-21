@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   careers,
@@ -17,6 +17,10 @@ import {
 } from '../../db/schema.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
 import { findDefaultPublishedPlan, isValidUuid } from '../catalog/catalog.helpers.js';
+import {
+  SUBJECT_STATUS_RANK,
+  getSubjectStatusRank,
+} from '../enrollments/enrollmentStatus.helpers.js';
 import { getActiveLibraryService, getLibraryService } from '../library/library.service.js';
 import { defaultReviewsStore } from '../reviews/reviews.store.js';
 import {
@@ -299,6 +303,74 @@ export async function upsertSubjectProgressWithDb(
   } else {
     await executor.insert(subjectProgress).values({ userId, subjectId, status, grade });
   }
+}
+
+/**
+ * Construye dinámicamente el `CASE` de rango SQL a partir de `SUBJECT_STATUS_RANK`
+ * sin números hardcodeados a mano, para garantizar paridad exacta con el helper puro.
+ */
+export function buildSubjectStatusRankSqlCase(statusColumnOrExpr: SQL | AnyColumn): SQL {
+  const nullRank = getSubjectStatusRank(null) ?? 0;
+  const whenClauses: SQL[] = [
+    sql`WHEN ${statusColumnOrExpr} IS NULL THEN CAST(${nullRank} AS integer)`,
+    ...Object.entries(SUBJECT_STATUS_RANK).map(
+      ([statusKey, rankValue]) =>
+        sql`WHEN ${statusColumnOrExpr} = ${statusKey} THEN CAST(${rankValue} AS integer)`
+    ),
+  ];
+  return sql`CASE ${sql.join(whenClauses, sql` `)} ELSE NULL END`;
+}
+
+/**
+ * Genera la consulta atómica `INSERT ... ON CONFLICT (user_id, subject_id) DO UPDATE`
+ * que solo promueve el estado si `rank(nuevo) > rank(existente)`, conserva `grade`
+ * existente intacta y actualiza `updated_at` únicamente cuando cambia el estado.
+ */
+export function buildUpgradeSubjectProgressQuery(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  targetStatus: string,
+  now: Date = new Date()
+) {
+  const existingRankSql = buildSubjectStatusRankSqlCase(subjectProgress.status);
+  const excludedRankSql = buildSubjectStatusRankSqlCase(sql`excluded.status`);
+  const shouldReplaceSql = sql`(${excludedRankSql}) > (${existingRankSql})`;
+
+  return executor
+    .insert(subjectProgress)
+    .values({
+      userId,
+      subjectId,
+      status: targetStatus,
+      grade: null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [subjectProgress.userId, subjectProgress.subjectId],
+      set: {
+        status: sql`CASE WHEN ${shouldReplaceSql} THEN excluded.status ELSE ${subjectProgress.status} END`,
+        updatedAt: sql`CASE WHEN ${shouldReplaceSql} THEN excluded.updated_at ELSE ${subjectProgress.updatedAt} END`,
+      },
+    })
+    .returning({
+      status: subjectProgress.status,
+    });
+}
+
+export async function upgradeSubjectProgressWithDb(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  targetStatus: string
+): Promise<string> {
+  const [row] = await buildUpgradeSubjectProgressQuery(
+    executor,
+    userId,
+    subjectId,
+    targetStatus
+  );
+  return row?.status ?? targetStatus;
 }
 
 export class DrizzleUserStateStore implements UserStateStore {
