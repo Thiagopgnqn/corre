@@ -512,7 +512,18 @@ ORDER BY psl.created_at DESC
 LIMIT 5;
 ```
 
-*(Si creaste datos manuales de prueba en el punto 2 —p. ej. borrador de Industrial o un docente ficticio—, borralos o deshacé esos registros antes de cerrar el ensayo; el plan `IND` solo se conserva si decidís mantener el borrador para el Tramo 2D, nunca en producción todavía).*
+3. **Verificación del fix de cursadas (`fix-cursada-estado`) contra Postgres real en la rama TEMPORAL:**
+   - **a)** Con el backend apuntando a la rama **TEMPORAL** de Neon, ejecutar `PUT /api/enrollments/:subjectId` (o usar **"Agregar cursada"** en la UI) con `status: "promocionada"` sobre una materia sin estado previo, y comprobar con `SELECT` en el SQL Editor de Neon que `subject_progress` quedó en `'promocionada'`:
+     ```sql
+     SELECT status, grade, updated_at
+     FROM subject_progress
+     WHERE user_id = '<user_uuid>' AND subject_id = '<subject_uuid>';
+     ```
+   - **b)** Repetir con `PUT /api/enrollments/:subjectId` y `status: "regularizada"` sobre una materia ya en estado `'aprobada'` con nota (p. ej. `8` o `9`), y comprobar con el mismo `SELECT` que `subject_progress.status` sigue en `'aprobada'` y conserva su `grade` intacta.
+   - **c)** Comprobar en ambos casos que el campo `subjectStatus` devuelto en la respuesta JSON del `PUT /api/enrollments/:subjectId` coincide exactamente con el `status` persistido en `subject_progress` (y que `GET /api/enrollments` omite `subjectStatus`).
+   - **d)** *(Opcional — concurrencia `ON CONFLICT DO UPDATE`)*: disparar dos `PUT /api/enrollments/:subjectId` simultáneos (`Promise.all` o doble petición concurrente con `'regularizada'` y `'promocionada'`) sobre una materia sin fila previa en `subject_progress`, y comprobar que ninguna falla con error `500` / `23505`, no queda ninguna cursada perdida y `subject_progress.status` queda en `'promocionada'`.
+
+*(Si creaste datos manuales de prueba en los puntos 2 o 3 —p. ej. borrador de Industrial, un docente ficticio o cursadas de prueba—, borralos o deshacé esos registros antes de cerrar el ensayo; el plan `IND` solo se conserva si decidís mantener el borrador para el Tramo 2D, nunca en producción todavía).*
 
 ---
 
