@@ -39,7 +39,7 @@ import {
 } from '../catalog/catalog.helpers.js';
 import { resolveSubjectStatusFromEnrollment } from '../enrollments/enrollmentStatus.helpers.js';
 import {
-  upsertSubjectProgressWithDb,
+  upgradeSubjectProgressWithDb,
   type UserStateStore,
 } from '../user-state/userState.store.js';
 
@@ -2948,7 +2948,6 @@ export class DrizzleReviewsStore implements ReviewsStore {
       const [existingProgress] = await tx
         .select({
           status: subjectProgress.status,
-          grade: subjectProgress.grade,
         })
         .from(subjectProgress)
         .where(
@@ -2960,7 +2959,6 @@ export class DrizzleReviewsStore implements ReviewsStore {
         .for('update');
 
       const currentSubjectStatus = existingProgress?.status ?? 'pendiente';
-      const existingGrade = existingProgress?.grade ?? null;
       const resolution = resolveSubjectStatusFromEnrollment(
         currentSubjectStatus,
         params.status
@@ -2968,14 +2966,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
       let finalSubjectStatus = currentSubjectStatus;
 
       if (resolution.shouldUpdate && resolution.nextStatus) {
-        await upsertSubjectProgressWithDb(
+        finalSubjectStatus = await upgradeSubjectProgressWithDb(
           tx,
           params.userId,
           params.subjectId,
-          resolution.nextStatus,
-          existingGrade
+          resolution.nextStatus
         );
-        finalSubjectStatus = resolution.nextStatus;
       }
 
       return { chosenId: chosenId!, finalSubjectStatus };

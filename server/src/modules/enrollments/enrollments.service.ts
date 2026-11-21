@@ -27,7 +27,7 @@ export interface PublicEnrollmentPayload {
   term: EnrollmentTerm | null;
   source: EnrollmentSource;
   status: string | null;
-  subjectStatus: string;
+  subjectStatus?: string;
   professors: Array<{
     professorId: string;
     displayName: string;
@@ -51,7 +51,7 @@ export function serializeEnrollment(enr: StoredEnrollment): PublicEnrollmentPayl
     term: enr.term,
     source: enr.source,
     status: enr.status ?? 'cursando',
-    subjectStatus: enr.subjectStatus ?? 'pendiente',
+    ...(typeof enr.subjectStatus === 'string' ? { subjectStatus: enr.subjectStatus } : {}),
     professors: enr.professors.map((p) => ({
       professorId: p.professorId,
       displayName: p.displayName,

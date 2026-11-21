@@ -4,6 +4,7 @@ import type {
   PendingReviewPromptItem,
   SubjectCommissionOption,
   SubjectEnrollment,
+  UpsertEnrollmentInput,
 } from '../types/enrollment';
 import type { ReviewableData, ReviewablePair } from '../types/professor';
 
@@ -174,6 +175,65 @@ export function applyServerSubjectStatus(
  */
 export function canSaveEnrollmentInSimulation(isSimulationMode?: boolean | null): boolean {
   return !isSimulationMode;
+}
+
+export function mergeSavedEnrollmentList(
+  prevEnrollments: SubjectEnrollment[],
+  saved: SubjectEnrollment
+): SubjectEnrollment[] {
+  const filtered = prevEnrollments.filter((e) => e.id !== saved.id);
+  return [saved, ...filtered];
+}
+
+export function mergeSavedEnrollmentUserState(
+  prevUserState: UserCareerState,
+  subjectCode: number,
+  serverSubjectStatus?: string | null,
+  nowIso?: string
+): UserCareerState {
+  const updatedEntry = applyServerSubjectStatus(
+    prevUserState[subjectCode],
+    serverSubjectStatus,
+    nowIso
+  );
+  if (!updatedEntry) return prevUserState;
+  return {
+    ...prevUserState,
+    [subjectCode]: updatedEntry,
+  };
+}
+
+/**
+ * Orquestación compartida por `CareerContext.saveSubjectEnrollment` y los tests frontend:
+ * corta antes de llamar al servidor o tocar estado si está activo el modo simulación,
+ * y al guardar aplica monotónicamente `saved.subjectStatus` sobre `userState[subjectCode]`.
+ */
+export async function executeSaveSubjectEnrollment(params: {
+  isSimulationMode?: boolean | null;
+  subjectCode: number;
+  input: UpsertEnrollmentInput;
+  upsertEnrollment: (
+    subjectCode: number,
+    input: UpsertEnrollmentInput
+  ) => Promise<{ data: SubjectEnrollment }>;
+  applyEnrollmentsUpdate: (
+    updater: (prev: SubjectEnrollment[]) => SubjectEnrollment[]
+  ) => void;
+  applyUserStateUpdate: (
+    updater: (prev: UserCareerState) => UserCareerState
+  ) => void;
+  nowIso?: string;
+}): Promise<SubjectEnrollment> {
+  if (!canSaveEnrollmentInSimulation(params.isSimulationMode)) {
+    throw new Error('No disponible en modo simulación');
+  }
+  const res = await params.upsertEnrollment(params.subjectCode, params.input);
+  const saved = res.data;
+  params.applyEnrollmentsUpdate((prev) => mergeSavedEnrollmentList(prev, saved));
+  params.applyUserStateUpdate((prev) =>
+    mergeSavedEnrollmentUserState(prev, params.subjectCode, saved.subjectStatus, params.nowIso)
+  );
+  return saved;
 }
 
 export type StatusChangeTriggerSource =
