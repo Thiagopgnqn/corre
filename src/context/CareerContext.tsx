@@ -35,6 +35,8 @@ import {
   getSubjectStatus,
 } from '../utils/correlativas';
 import {
+  applyServerSubjectStatus,
+  canSaveEnrollmentInSimulation,
   evaluateCommissionPromptOnStatusChange,
   getReviewPromptsOnRegularizeTransition,
   type StatusChangeTriggerSource,
@@ -752,6 +754,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editingEnrollment?: SubjectEnrollment | null;
       }
     ) => {
+      if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
+        return;
+      }
       const sub = subjectsById.get(subjectCode);
       const currentStatus =
         options?.targetStatus ||
@@ -764,7 +769,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setKanbanEnrollmentHint(null);
     },
-    [activeState, subjectsById]
+    [activeState, isSimulationMode, subjectsById]
   );
 
   const dismissKanbanEnrollmentHint = useCallback(() => {
@@ -776,6 +781,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       subjectCode: number,
       input: UpsertEnrollmentInput
     ): Promise<SubjectEnrollment> => {
+      if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
+        throw new Error('No disponible en modo simulación');
+      }
       setSyncStatus('saving');
       try {
         const res = await enrollmentsApi.upsertEnrollment(subjectCode, input);
@@ -783,6 +791,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setEnrollments((prev) => {
           const filtered = prev.filter((e) => e.id !== saved.id);
           return [saved, ...filtered];
+        });
+        setUserState((prev) => {
+          const updatedEntry = applyServerSubjectStatus(prev[subjectCode], saved.subjectStatus);
+          if (!updatedEntry) return prev;
+          return {
+            ...prev,
+            [subjectCode]: updatedEntry,
+          };
         });
         setSyncStatus('saved');
         await refreshReviewableSummary();
@@ -792,7 +808,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         throw err;
       }
     },
-    [refreshReviewableSummary]
+    [isSimulationMode, refreshReviewableSummary]
   );
 
   const deleteSubjectEnrollment = useCallback(

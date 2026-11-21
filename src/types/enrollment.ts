@@ -22,6 +22,7 @@ export interface SubjectEnrollment {
   academicYear: number | null;
   term: EnrollmentTerm | null;
   status?: SubjectEnrollmentStatus | null;
+  subjectStatus?: SubjectStatus | string | null;
   source: EnrollmentSource;
   professors: EnrollmentProfessorBrief[];
   createdAt: string;
