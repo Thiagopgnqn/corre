@@ -1226,7 +1226,7 @@ await test('20.1 Lote de 3 archivos con rechazo en el medio (completeUpload): 2 
   assert.equal(lastProgress?.isFinished, true, 'El estado final debe marcar isFinished = true');
   assert.equal(lastProgress?.settledCount, 3);
 
-  // También verifica traducción sin code explícito para firma inválida y JS peligroso
+  // También verifica traducción sin code explícito para firma inválida, JS peligroso, PDF protegido y no verificable
   assert.equal(
     formatUploadErrorMessage(
       new Error('El contenido real del archivo no coincide con la firma requerida para application/pdf.')
@@ -1236,9 +1236,34 @@ await test('20.1 Lote de 3 archivos con rechazo en el medio (completeUpload): 2 
   assert.equal(
     formatUploadErrorMessage({
       code: 'DANGEROUS_PDF_CONTENT',
-      message: 'El documento PDF contiene elementos ejecutables o scripts no permitidos (/JavaScript).',
+      message:
+        'Este PDF contiene acciones automáticas o ejecutables bloqueadas por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
     }),
-    'Este archivo no es un PDF válido (contiene código o scripts bloqueados por seguridad).'
+    'Este PDF contiene acciones automáticas o ejecutables bloqueadas por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'INVALID_FILE_CONTENT',
+      message:
+        'PDF protegido: no pudimos verificar su contenido por seguridad. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'PDF protegido: no pudimos verificar su contenido por seguridad. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'INVALID_FILE_CONTENT',
+      message:
+        'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'DANGEROUS_PDF_CONTENT',
+      message:
+        'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.'
   );
 });
 
