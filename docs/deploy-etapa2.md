@@ -249,3 +249,14 @@ Esta prueba integral ejercita la transición completa `0013/0014` → `2c-d1` �
     Remove-Item Env:ALLOW_DESTRUCTIVE_TEST -ErrorAction SilentlyContinue
     ```
     Confirmar limpieza completa de `verify:import-neon` (`diff: 0`, salvo filas inmutables de `admin_audit_log`), eliminar el borrador temporal de `IND` desde `/#admin` → **Carreras** si se desea dejar conteos iguales a producción, y regresar localmente con `git checkout etapa2` (conservando o eliminando la rama temporal al vencer la ventana de prueba).
+11. **[Ensayo del fix de cursadas (`fix-cursada-estado`) contra Postgres real en la rama TEMPORAL]**
+    - **a)** Con el backend apuntando a la rama **TEMPORAL** de Neon, ejecutar `PUT /api/enrollments/:subjectId` (o usar **"Agregar cursada"** en la UI) con `status: "promocionada"` sobre una materia sin estado previo, y comprobar con `SELECT` que `subject_progress` quedó en `'promocionada'`:
+      ```sql
+      SELECT status, grade, updated_at
+      FROM subject_progress
+      WHERE user_id = '<user_uuid>' AND subject_id = '<subject_uuid>';
+      ```
+    - **b)** Repetir con `PUT /api/enrollments/:subjectId` y `status: "regularizada"` sobre una materia ya en `'aprobada'` con nota (p. ej. `8` o `9`): comprobar que `subject_progress.status` sigue en `'aprobada'` y conserva su nota intacta.
+    - **c)** Comprobar en ambos casos que el `subjectStatus` devuelto por `PUT /api/enrollments/:subjectId` coincide exactamente con el `status` persistido en `subject_progress` (y que `GET /api/enrollments` omite `subjectStatus`).
+    - **d)** *(Opcional — concurrencia `ON CONFLICT DO UPDATE`)*: enviar dos `PUT /api/enrollments/:subjectId` simultáneos (p. ej. con `'regularizada'` y `'promocionada'`) sobre una materia sin fila previa en `subject_progress`, y comprobar que ninguno devuelve error `500` / `23505`, no queda una cursada perdida y `subject_progress.status` termina en `'promocionada'`.
+    - *(Eliminar o revertir las cursadas/progresos sintéticos creados en este punto antes de cerrar el ensayo).*
