@@ -2294,6 +2294,247 @@ async function main() {
     `statuses=${draftDetailBlocked.status}/${draftSubFilesBlocked.status}/${draftDownloadBlocked.status}/${draftHelpfulBlocked.status}/${draftReportBlocked.status}/${draftUploadBlocked.status}/${pubDetailAllowed.status}/${adminGlobalDetail.status}`
   );
 
+  // ---------------------------------------------------------------------------
+  // 22. RECHAZOS AUTOMÁTICOS EN /complete: CÓDIGOS, LIMPIEZA R2, SIN MAIL/MIS APORTES Y ANTI-SPAM
+  // ---------------------------------------------------------------------------
+  console.log('\n📌 22. Rechazos automáticos en /complete: código 400, huérfanos R2, Mis Aportes y TOO_MANY_REJECTIONS');
+
+  setCatalogStoreForTesting(new InMemoryCatalogStore());
+  resetInitUploadRateLimits();
+  clearMockSentNotifications();
+
+  const autoRejectUserId = 'aaaa1111-2222-4333-8444-555566667777';
+  libraryStore.seedUser({
+    id: autoRejectUserId,
+    email: 'autoreject@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const autoRejectToken = signToken({
+    id: autoRejectUserId,
+    email: 'autoreject@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+
+  // 22.1 Archivo JS disfrazado de PDF -> 400 INVALID_FILE_CONTENT
+  const fakeJsBuf = Buffer.from('console.log("no soy un pdf");');
+  const fakeInitRes = await api('POST', '/api/library/uploads/init', autoRejectToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'JS disfrazado de PDF',
+    originalFilename: 'disfrazado.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: fakeJsBuf.length,
+    acceptTerms: true,
+  });
+  assert(fakeInitRes.status === 201, 'Init para archivo disfrazado devuelve 201');
+  const fakeFileId = fakeInitRes.data.data.fileId;
+  const fakeStorageKey = fakeInitRes.data.data.storageKey;
+  await mockR2.putObjectDirect(fakeStorageKey, fakeJsBuf, 'application/pdf');
+
+  const fakeCompleteRes = await api('POST', `/api/library/uploads/${fakeFileId}/complete`, autoRejectToken);
+  assert(
+    fakeCompleteRes.status === 400 && fakeCompleteRes.data.code === 'INVALID_FILE_CONTENT',
+    'JS disfrazado de PDF recibe 400 INVALID_FILE_CONTENT en /complete'
+  );
+  assert(!mockR2.hasObjectDirect(fakeStorageKey), 'El archivo inválido es borrado de inmediato de R2');
+
+  const fakeDbRow = libraryStore.files.get(fakeFileId);
+  assert(
+    fakeDbRow?.status === 'rejected' &&
+      !fakeDbRow?.reviewedAt &&
+      Boolean(fakeDbRow?.uploaderNotifiedAt),
+    'La fila se conserva con status rejected, reviewedAt null y uploaderNotifiedAt seteado'
+  );
+
+  // 22.2 PDF con /JavaScript -> 400 DANGEROUS_PDF_CONTENT
+  const jsPdfBuf = Buffer.from('%PDF-1.4\n<< /S /JavaScript /JS (app.alert(1)) >>\n%%EOF');
+  const jsPdfInitRes = await api('POST', '/api/library/uploads/init', autoRejectToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'PDF con JavaScript embebido',
+    originalFilename: 'script_pdf.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: jsPdfBuf.length,
+    acceptTerms: true,
+  });
+  const jsPdfFileId = jsPdfInitRes.data.data.fileId;
+  const jsPdfStorageKey = jsPdfInitRes.data.data.storageKey;
+  await mockR2.putObjectDirect(jsPdfStorageKey, jsPdfBuf, 'application/pdf');
+
+  const jsPdfCompleteRes = await api('POST', `/api/library/uploads/${jsPdfFileId}/complete`, autoRejectToken);
+  assert(
+    jsPdfCompleteRes.status === 400 && jsPdfCompleteRes.data.code === 'DANGEROUS_PDF_CONTENT',
+    'PDF con /JavaScript recibe 400 DANGEROUS_PDF_CONTENT en /complete'
+  );
+  assert(!mockR2.hasObjectDirect(jsPdfStorageKey), 'El PDF peligroso es borrado de R2');
+
+  // 22.3 (a) No genera mail de moderación ni aparece en Mis Aportes ni en hasStatusUpdates
+  await processPendingUploaderNotifications({ force: true });
+  const autoRejectEmails = mockSentNotifications.filter((n) =>
+    n.to.includes('autoreject@frc.utn.edu.ar')
+  );
+  assert(
+    autoRejectEmails.length === 0,
+    'Rechazo automático en /complete NO genera mail de rechazo de moderación'
+  );
+
+  const autoRejectMyUploads = await api('GET', '/api/library/my-uploads', autoRejectToken);
+  assert(
+    autoRejectMyUploads.status === 200 &&
+      autoRejectMyUploads.data.data.uploads.length === 0 &&
+      autoRejectMyUploads.data.data.hasStatusUpdates === false &&
+      autoRejectMyUploads.data.data.quota.pendingCount === 0 &&
+      autoRejectMyUploads.data.data.quota.usedBytes === 0,
+    'Rechazos automáticos de /complete NO aparecen en Mis Aportes, no activan novedades ni consumen cupo/cuota'
+  );
+
+  // 22.4 Si r2.deleteObject falla (retorna false) al rechazar en /complete, encola en orphanDeletions
+  const orphanTestInit = await api('POST', '/api/library/uploads/init', autoRejectToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Falla borrado R2 en complete',
+    originalFilename: 'orphan_complete.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: fakeJsBuf.length,
+    acceptTerms: true,
+  });
+  const orphanTestFileId = orphanTestInit.data.data.fileId;
+  const orphanTestKey = orphanTestInit.data.data.storageKey;
+  await mockR2.putObjectDirect(orphanTestKey, fakeJsBuf, 'application/pdf');
+
+  const origDeleteObject = mockR2.deleteObject.bind(mockR2);
+  (mockR2 as any).deleteObject = async () => false;
+  const orphanCompleteRes = await api(
+    'POST',
+    `/api/library/uploads/${orphanTestFileId}/complete`,
+    autoRejectToken
+  );
+  delete (mockR2 as any).deleteObject;
+  await origDeleteObject(orphanTestKey);
+
+  assert(orphanCompleteRes.status === 400, 'Rechazo en /complete sigue respondiendo 400 cuando falla deleteObject');
+  const queuedOrphan = Array.from(libraryStore.orphanDeletions.values()).find(
+    (o) => o.storageKey === orphanTestKey
+  );
+  assert(
+    Boolean(queuedOrphan),
+    'Si r2.deleteObject retorna false en /complete, el objeto queda encolado en orphanDeletions'
+  );
+
+  // 22.5 (b) Comportamiento de TOO_MANY_REJECTIONS:
+  // Los rechazos automáticos de /complete tienen reviewedAt = null, por lo que NO cuentan para TOO_MANY_REJECTIONS.
+  // Ya hubo 3 rechazos automáticos para autoRejectUserId; agregamos 17 más (total 20) y verificamos que NO bloquea.
+  for (let i = 4; i <= 20; i++) {
+    const badBuf = Buffer.from(`not-a-pdf-${i}`);
+    const badInit = await api('POST', '/api/library/uploads/init', autoRejectToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'apunte',
+      title: `Rechazo auto ${i}`,
+      originalFilename: `bad_${i}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: badBuf.length,
+      acceptTerms: true,
+    });
+    await mockR2.putObjectDirect(badInit.data.data.storageKey, badBuf, 'application/pdf');
+    await api('POST', `/api/library/uploads/${badInit.data.data.fileId}/complete`, autoRejectToken);
+  }
+
+  const after20AutoRejectsInit = await api('POST', '/api/library/uploads/init', autoRejectToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Subida 21 tras rechazos automáticos',
+    originalFilename: 'valid_after_auto.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: validPdfBuffer.length,
+    acceptTerms: true,
+  });
+  assert(
+    after20AutoRejectsInit.status === 201,
+    'TOO_MANY_REJECTIONS: 20 rechazos automáticos en /complete (reviewedAt null) NO bloquean nuevas subidas'
+  );
+
+  // En contraste, 20 rechazos de moderación (reviewedAt seteado vía admin /reject) SÍ activan 429 TOO_MANY_REJECTIONS
+  const modAdminId = '99999999-2222-4999-8999-999999999999';
+  libraryStore.seedUser({
+    id: modAdminId,
+    email: 'admin-mod-lib@stack.com',
+    role: 'admin',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const modAdminToken = signToken({
+    id: modAdminId,
+    email: 'admin-mod-lib@stack.com',
+    role: 'admin',
+    emailVerified: true,
+  });
+
+  const modRejUserId = 'bbbb1111-2222-4333-8444-555566667777';
+  libraryStore.seedUser({
+    id: modRejUserId,
+    email: 'modreject@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+    termsAccepted: true,
+  });
+  const modRejToken = signToken({
+    id: modRejUserId,
+    email: 'modreject@frc.utn.edu.ar',
+    role: 'user',
+    emailVerified: true,
+  });
+  let modReject200Count = 0;
+  for (let i = 1; i <= 20; i++) {
+    const okPdf = Buffer.from(`%PDF-1.4 %%EOF mod-rej-${i}-${Date.now()}`);
+    const initMod = await api('POST', '/api/library/uploads/init', modRejToken, {
+      subjectId: 'sub-sintaxis',
+      kind: 'apunte',
+      title: `Aporte moderado ${i}`,
+      originalFilename: `mod_${i}.pdf`,
+      mimeType: 'application/pdf',
+      sizeBytes: okPdf.length,
+      acceptTerms: true,
+    });
+    await mockR2.putObjectDirect(initMod.data.data.storageKey, okPdf, 'application/pdf');
+    await api('POST', `/api/library/uploads/${initMod.data.data.fileId}/complete`, modRejToken);
+    const rejRes = await api(
+      'PATCH',
+      `/api/admin/library/files/${initMod.data.data.fileId}/reject`,
+      modAdminToken,
+      { reason: 'Material repetido de otra materia' }
+    );
+    if (rejRes.status === 200) modReject200Count++;
+  }
+  assert(
+    modReject200Count === 20,
+    `Los 20 rechazos de moderación respondieron 200 OK [obt: ${modReject200Count}]`
+  );
+
+  const modMyUploadsRes = await api('GET', '/api/library/my-uploads?peek=1', modRejToken);
+  assert(
+    modMyUploadsRes.status === 200 &&
+      modMyUploadsRes.data.data.uploads.length === 20 &&
+      modMyUploadsRes.data.data.hasStatusUpdates === true,
+    'Los rechazos de moderación reales (con reviewedAt) SÍ siguen apareciendo en Mis Aportes y activan hasStatusUpdates'
+  );
+
+  const after20ModRejectsInit = await api('POST', '/api/library/uploads/init', modRejToken, {
+    subjectId: 'sub-sintaxis',
+    kind: 'apunte',
+    title: 'Intento 21 tras 20 rechazos de moderación',
+    originalFilename: 'blocked_after_mod.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1024,
+    acceptTerms: true,
+  });
+  assert(
+    after20ModRejectsInit.status === 429 && after20ModRejectsInit.data.code === 'TOO_MANY_REJECTIONS',
+    'TOO_MANY_REJECTIONS: 20 rechazos de moderación reales SÍ bloquean con 429 TOO_MANY_REJECTIONS'
+  );
+
   setCatalogStoreForTesting(null);
   server.close();
 

@@ -214,7 +214,8 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         and(
           sql`${libraryFiles.status} IN ('approved', 'rejected')`,
           isNull(libraryFiles.uploaderNotifiedAt),
-          isNotNull(libraryFiles.uploaderUserId)
+          isNotNull(libraryFiles.uploaderUserId),
+          sql`NOT (${libraryFiles.status} = 'rejected' AND ${libraryFiles.reviewedAt} IS NULL)`
         )
       )
       .orderBy(asc(libraryFiles.updatedAt));
@@ -593,6 +594,35 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     });
   }
 
+  private async deleteFromR2OrQueueOrphan(storageKey: string, errorContext: string): Promise<void> {
+    let deleted = false;
+    let lastError = errorContext;
+    try {
+      deleted = await this.r2.deleteObject(storageKey);
+    } catch (err: any) {
+      lastError = `${errorContext}: ${err?.message || String(err)}`;
+    }
+    if (!deleted) {
+      await db
+        .insert(libraryOrphanDeletions)
+        .values({ storageKey, lastError })
+        .onConflictDoNothing();
+    }
+  }
+
+  private async markAutoRejectedUpload(fileId: string, rejectionReason: string): Promise<void> {
+    const now = new Date();
+    await db
+      .update(libraryFiles)
+      .set({
+        status: 'rejected',
+        rejectionReason,
+        uploaderNotifiedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(libraryFiles.id, fileId));
+  }
+
   async completeUpload(userId: string, fileId: string, planId?: string | null) {
     if (!isValidUuid(fileId)) {
       throw Object.assign(
@@ -643,10 +673,7 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     const head = await this.r2.headObject(file.storageKey);
     if (!head.exists) {
       await this.r2.deleteObject(file.storageKey);
-      await db
-        .update(libraryFiles)
-        .set({ status: 'rejected', rejectionReason: 'El archivo no fue recibido en el almacenamiento.' })
-        .where(eq(libraryFiles.id, fileId));
+      await this.markAutoRejectedUpload(fileId, 'El archivo no fue recibido en el almacenamiento.');
       throw Object.assign(
         new Error('No se encontró el archivo en el almacenamiento. Por favor reintentá la subida.'),
         { status: 400 }
@@ -654,17 +681,17 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     }
 
     if (head.sizeBytes !== file.sizeBytes) {
-      await this.r2.deleteObject(file.storageKey);
-      await db
-        .update(libraryFiles)
-        .set({
-          status: 'rejected',
-          rejectionReason: `Tamaño transferido (${head.sizeBytes}) no coincide con lo declarado (${file.sizeBytes}).`,
-        })
-        .where(eq(libraryFiles.id, fileId));
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo por tamaño en completeUpload'
+      );
+      await this.markAutoRejectedUpload(
+        fileId,
+        `Tamaño transferido (${head.sizeBytes}) no coincide con lo declarado (${file.sizeBytes}).`
+      );
       throw Object.assign(
         new Error('El tamaño real del archivo difiere del declarado. Subida rechazada por seguridad.'),
-        { status: 400 }
+        { status: 400, code: 'INVALID_FILE_CONTENT' }
       );
     }
 
@@ -678,13 +705,14 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
     });
 
     if (!validation.isValid) {
-      await this.r2.deleteObject(file.storageKey);
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo de validación en completeUpload'
+      );
       const reason = validation.error || 'Fallo en la validación de seguridad del archivo.';
-      await db
-        .update(libraryFiles)
-        .set({ status: 'rejected', rejectionReason: reason })
-        .where(eq(libraryFiles.id, fileId));
-      throw Object.assign(new Error(reason), { status: 400 });
+      await this.markAutoRejectedUpload(fileId, reason);
+      const code = validation.hasDangerousPdfMarks ? 'DANGEROUS_PDF_CONTENT' : 'INVALID_FILE_CONTENT';
+      throw Object.assign(new Error(reason), { status: 400, code });
     }
 
     const dupScopeCond = file.sharedSubjectId
@@ -706,12 +734,12 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       .limit(1);
 
     if (existingDuplicate) {
-      await this.r2.deleteObject(file.storageKey);
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo por duplicado en completeUpload'
+      );
       const reason = `Ya existe un archivo idéntico en el sistema ("${existingDuplicate.title}").`;
-      await db
-        .update(libraryFiles)
-        .set({ status: 'rejected', rejectionReason: reason })
-        .where(eq(libraryFiles.id, fileId));
+      await this.markAutoRejectedUpload(fileId, reason);
       throw Object.assign(new Error(reason), { status: 409, code: 'DUPLICATE_FILE' });
     }
 
@@ -742,12 +770,12 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
         dbErr.message?.includes('uq_lib_files_sha256_active') ||
         dbErr.message?.includes('duplicate key')
       ) {
-        await this.r2.deleteObject(file.storageKey);
+        await this.deleteFromR2OrQueueOrphan(
+          file.storageKey,
+          'Error al borrar objeto de R2 tras rechazo por duplicado concurrente en completeUpload'
+        );
         const reason = 'Ya existe un archivo idéntico en el sistema.';
-        await db
-          .update(libraryFiles)
-          .set({ status: 'rejected', rejectionReason: reason })
-          .where(eq(libraryFiles.id, fileId));
+        await this.markAutoRejectedUpload(fileId, reason);
         throw Object.assign(new Error(reason), { status: 409, code: 'DUPLICATE_FILE' });
       }
       throw dbErr;
@@ -1382,7 +1410,13 @@ export class PgLibraryService implements ILibraryService, IMailerDataSource {
       })
       .from(libraryFiles)
       .innerJoin(subjects, eq(libraryFiles.subjectId, subjects.id))
-      .where(and(eq(libraryFiles.uploaderUserId, userId), sql`${libraryFiles.status} NOT IN ('removed', 'uploading')`))
+      .where(
+        and(
+          eq(libraryFiles.uploaderUserId, userId),
+          sql`${libraryFiles.status} NOT IN ('removed', 'uploading')`,
+          sql`NOT (${libraryFiles.status} = 'rejected' AND ${libraryFiles.reviewedAt} IS NULL)`
+        )
+      )
       .orderBy(desc(libraryFiles.createdAt));
 
     const hasStatusUpdates = uploads.some(
@@ -2300,7 +2334,8 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
       if (
         (f.status === 'approved' || f.status === 'rejected') &&
         !f.uploaderNotifiedAt &&
-        f.uploaderUserId
+        f.uploaderUserId &&
+        !(f.status === 'rejected' && !f.reviewedAt)
       ) {
         const u = this.users.get(f.uploaderUserId);
         const sub = this.subjects.get(f.subjectId);
@@ -2606,6 +2641,34 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     });
   }
 
+  private async deleteFromR2OrQueueOrphan(storageKey: string, errorContext: string): Promise<void> {
+    let deleted = false;
+    let lastError = errorContext;
+    try {
+      deleted = await this.r2.deleteObject(storageKey);
+    } catch (err: any) {
+      lastError = `${errorContext}: ${err?.message || String(err)}`;
+    }
+    if (!deleted) {
+      const orphanId = crypto.randomUUID();
+      this.orphanDeletions.set(orphanId, {
+        id: orphanId,
+        storageKey,
+        attempts: 0,
+        lastError,
+        createdAt: new Date(),
+      });
+    }
+  }
+
+  private markAutoRejectedUpload(file: any, rejectionReason: string): void {
+    const now = new Date();
+    file.status = 'rejected';
+    file.rejectionReason = rejectionReason;
+    file.uploaderNotifiedAt = now;
+    file.updatedAt = now;
+  }
+
   async completeUpload(userId: string, fileId: string, planId?: string | null) {
     const file = this.files.get(fileId);
     if (!file || file.uploaderUserId !== userId || !this.isFileAccessibleInPlanInMemory(file, planId)) {
@@ -2644,16 +2707,23 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     const head = await this.r2.headObject(file.storageKey);
     if (!head.exists) {
       await this.r2.deleteObject(file.storageKey);
-      file.status = 'rejected';
-      file.rejectionReason = 'El archivo no fue recibido en el almacenamiento.';
+      this.markAutoRejectedUpload(file, 'El archivo no fue recibido en el almacenamiento.');
       throw Object.assign(new Error('No se encontró el archivo en el almacenamiento. Por favor reintentá la subida.'), { status: 400 });
     }
 
     if (head.sizeBytes !== file.sizeBytes) {
-      await this.r2.deleteObject(file.storageKey);
-      file.status = 'rejected';
-      file.rejectionReason = `Tamaño transferido (${head.sizeBytes}) no coincide con lo declarado (${file.sizeBytes}).`;
-      throw Object.assign(new Error('El tamaño real del archivo difiere del declarado. Subida rechazada por seguridad.'), { status: 400 });
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo por tamaño en completeUpload'
+      );
+      this.markAutoRejectedUpload(
+        file,
+        `Tamaño transferido (${head.sizeBytes}) no coincide con lo declarado (${file.sizeBytes}).`
+      );
+      throw Object.assign(new Error('El tamaño real del archivo difiere del declarado. Subida rechazada por seguridad.'), {
+        status: 400,
+        code: 'INVALID_FILE_CONTENT',
+      });
     }
 
     const validation = await validationSemaphore.runWithLock(async () => {
@@ -2662,11 +2732,14 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     });
 
     if (!validation.isValid) {
-      await this.r2.deleteObject(file.storageKey);
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo de validación en completeUpload'
+      );
       const reason = validation.error || 'Fallo en la validación de seguridad del archivo.';
-      file.status = 'rejected';
-      file.rejectionReason = reason;
-      throw Object.assign(new Error(reason), { status: 400 });
+      this.markAutoRejectedUpload(file, reason);
+      const code = validation.hasDangerousPdfMarks ? 'DANGEROUS_PDF_CONTENT' : 'INVALID_FILE_CONTENT';
+      throw Object.assign(new Error(reason), { status: 400, code });
     }
 
     // Comprobación de duplicados por SHA-256 (agrupado por sharedSubjectId cuando existe)
@@ -2681,10 +2754,12 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     );
 
     if (existingDuplicate || this.simulateSha256CollisionOnComplete) {
-      await this.r2.deleteObject(file.storageKey);
+      await this.deleteFromR2OrQueueOrphan(
+        file.storageKey,
+        'Error al borrar objeto de R2 tras rechazo por duplicado en completeUpload'
+      );
       const reason = 'Ya existe un archivo idéntico en el sistema.';
-      file.status = 'rejected';
-      file.rejectionReason = reason;
+      this.markAutoRejectedUpload(file, reason);
       throw Object.assign(new Error(reason), { status: 409, code: 'DUPLICATE_FILE' });
     }
 
@@ -2999,7 +3074,13 @@ export class InMemoryLibraryService implements ILibraryService, IMailerDataSourc
     const lastChecked = u?.libraryLastCheckedAt || new Date(0);
 
     const uploads = Array.from(this.files.values())
-      .filter((f) => f.uploaderUserId === userId && f.status !== 'removed' && f.status !== 'uploading')
+      .filter(
+        (f) =>
+          f.uploaderUserId === userId &&
+          f.status !== 'removed' &&
+          f.status !== 'uploading' &&
+          !(f.status === 'rejected' && !f.reviewedAt)
+      )
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .map((f) => {
         const sub = this.subjects.get(f.subjectId);
