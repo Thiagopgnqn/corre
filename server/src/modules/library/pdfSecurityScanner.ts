@@ -16,7 +16,7 @@ export const PDF_SCANNER_LIMITS = Object.freeze({
   MAX_OBJSTM_COMPRESSED_BYTES: 2 * 1024 * 1024,
   MAX_OBJSTM_INFLATED_BYTES: 4 * 1024 * 1024,
   MAX_OBJSTM_TOTAL_INFLATED_BYTES: 8 * 1024 * 1024,
-  MAX_OBJSTM_COUNT: 256,
+  MAX_EMBEDDED_FILES: 10,
   MAX_SCAN_DURATION_MS: 10_000,
 });
 
@@ -38,6 +38,9 @@ const USER_MESSAGES: Record<PdfRejectionCategory, string> = {
   unverifiable:
     'No pudimos verificar la seguridad de este PDF. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
 };
+
+const MAX_EMBEDDED_FILES_USER_MESSAGE =
+  'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.';
 
 interface PdfNameValue {
   kind: 'name';
@@ -137,6 +140,12 @@ const ALWAYS_FORBIDDEN_ACTION_TYPES = new Set([
   '/GoToR',
   '/GoToE',
   '/RichMediaExecute',
+  '/Rendition',
+  '/Movie',
+  '/Sound',
+  '/GoToDp',
+  '/GoTo3DView',
+  '/EmbeddedFile',
 ]);
 
 const ALWAYS_FORBIDDEN_DICT_KEYS = [
@@ -159,17 +168,11 @@ const DANGEROUS_NAMED_DESTINATIONS = new Set([
   '/EmbeddedFile',
 ]);
 
-const AA_FORBIDDEN_ACTION_TYPES = new Set([
-  '/Launch',
-  '/SubmitForm',
-  '/ImportData',
-  '/GoToR',
-  '/GoToE',
-  '/RichMediaExecute',
-  '/URI',
-  '/Rendition',
-  '/Sound',
-  '/Movie',
+const SAFE_NAMED_ACTIONS = new Set([
+  '/NextPage',
+  '/PrevPage',
+  '/FirstPage',
+  '/LastPage',
 ]);
 
 const VALID_FORM_FT = new Set(['/Tx', '/Btn', '/Ch', '/Sig']);
@@ -323,14 +326,15 @@ function dictAllEntries(dict: PdfDict): Array<[string, PdfValue]> {
 function makeFailure(
   category: PdfRejectionCategory,
   reasonCode: string,
-  technicalDetail?: string
+  technicalDetail?: string,
+  customUserMessage?: string
 ): PdfScanResult {
   return {
     isSafe: false,
     category,
     reasonCode,
     technicalDetail,
-    userMessage: USER_MESSAGES[category],
+    userMessage: customUserMessage ?? USER_MESSAGES[category],
   };
 }
 
@@ -380,10 +384,11 @@ export class PdfSecurityScanner {
   private fail(
     category: PdfRejectionCategory,
     reasonCode: string,
-    technicalDetail?: string
+    technicalDetail?: string,
+    customUserMessage?: string
   ): void {
     if (!this.failure) {
-      this.failure = makeFailure(category, reasonCode, technicalDetail);
+      this.failure = makeFailure(category, reasonCode, technicalDetail, customUserMessage);
     }
   }
 
@@ -511,7 +516,24 @@ export class PdfSecurityScanner {
       this.fail('unverifiable', 'PARSER_EXCEPTION', msg);
       this.finishedResult = this.failure!;
       return this.finishedResult;
+    } finally {
+      this.releaseParsedMemory();
     }
+  }
+
+  private releaseParsedMemory(): void {
+    this.tokenBytes = [];
+    this.containerStack = [];
+    this.topPendingInts = [];
+    this.currentObjValues = [];
+    this.lastCompletedDict = null;
+    this.allDicts = [];
+    this.objectVersions.clear();
+    this.currentObjStmDict = null;
+    this.objStmChunks = [];
+    this.capturedObjStms = [];
+    this.streamTail = EMPTY_BUF;
+    this.objStmValues = [];
   }
 
   private processByte(byte: number): void {
@@ -723,10 +745,6 @@ export class PdfSecurityScanner {
     this.objStmByteCount = 0;
 
     if (dictHasNameValue(dict, '/Type', '/ObjStm')) {
-      if (this.capturedObjStms.length >= PDF_SCANNER_LIMITS.MAX_OBJSTM_COUNT) {
-        this.fail('unverifiable', 'MAX_OBJSTM_COUNT', 'Too many /ObjStm streams');
-        return;
-      }
       this.capturingObjStm = true;
       this.currentObjStmDict = dict;
     } else {
@@ -1333,14 +1351,39 @@ export class PdfSecurityScanner {
     return false;
   }
 
-  private resolveScalarInt(val: PdfValue): number | null {
-    const resolved = this.resolveValues(val, new Set(), 0);
-    if (resolved === null || resolved.unresolved || resolved.values.length === 0) return null;
-    const first = resolved.values[0];
-    if (first.kind === 'number' && Number.isInteger(first.value)) {
-      return first.value;
+  private resolveObjStmLength(lengthVals: PdfValue[]): number | null {
+    const resolvedInts: number[] = [];
+    for (const lv of lengthVals) {
+      const resolved = this.resolveValues(lv, new Set(), 0);
+      if (!resolved) return null;
+      if (resolved.unresolved || resolved.values.length === 0) {
+        this.fail('unverifiable', 'UNRESOLVED_OBJSTM_LENGTH', '/ObjStm /Length unresolved');
+        return null;
+      }
+      for (const item of resolved.values) {
+        if (item.kind !== 'number' || !Number.isInteger(item.value) || item.value < 0) {
+          this.fail('unverifiable', 'INVALID_OBJSTM_LENGTH', 'Invalid /ObjStm /Length value');
+          return null;
+        }
+        resolvedInts.push(item.value);
+      }
     }
-    return null;
+    if (resolvedInts.length === 0) {
+      this.fail('unverifiable', 'INVALID_OBJSTM_LENGTH', 'Missing /ObjStm /Length value');
+      return null;
+    }
+    const first = resolvedInts[0];
+    for (let i = 1; i < resolvedInts.length; i++) {
+      if (resolvedInts[i] !== first) {
+        this.fail(
+          'unverifiable',
+          'CONFLICTING_OBJSTM_LENGTH',
+          '/ObjStm /Length has conflicting incremental versions'
+        );
+        return null;
+      }
+    }
+    return first;
   }
 
   private processObjStms(hasEncrypt: boolean): void {
@@ -1365,14 +1408,13 @@ export class PdfSecurityScanner {
       let compressedSlice = stm.rawData;
       const lengthVals = getDictNonNullValues(stm.dict, '/Length');
       if (lengthVals.length > 0) {
-        const declaredLen = this.resolveScalarInt(lengthVals[0]);
-        if (declaredLen !== null) {
-          if (declaredLen < 0 || declaredLen > stm.rawData.length) {
-            this.fail('unverifiable', 'OBJSTM_LENGTH_MISMATCH', 'Invalid /ObjStm /Length');
-            return;
-          }
-          compressedSlice = stm.rawData.subarray(0, declaredLen);
+        const declaredLen = this.resolveObjStmLength(lengthVals);
+        if (this.failure || declaredLen === null) return;
+        if (declaredLen > stm.rawData.length) {
+          this.fail('unverifiable', 'OBJSTM_LENGTH_MISMATCH', 'Invalid /ObjStm /Length');
+          return;
         }
+        compressedSlice = stm.rawData.subarray(0, declaredLen);
       }
 
       let inflated: Buffer;
@@ -1648,57 +1690,414 @@ export class PdfSecurityScanner {
     return false;
   }
 
-  private isFormFieldDict(dict: PdfDict): boolean {
-    if (this.hasForbiddenContainerType(dict)) return false;
-
+  private hasDirectValidFt(dict: PdfDict): boolean {
     for (const ft of getDictNonNullValues(dict, '/FT')) {
       if (ft.kind === 'name' && VALID_FORM_FT.has(ft.value)) {
-        return !this.hasForbiddenAncestor(dict);
+        return true;
       }
     }
-
-    if (dictHasNameValue(dict, '/Subtype', '/Widget')) {
-      return !this.hasForbiddenAncestor(dict);
-    }
-
-    // Verificar herencia de /FT por /Parent
-    let current: PdfDict = dict;
-    const seen = new Set<PdfDict>([current]);
-    for (let hop = 0; hop < 5; hop++) {
-      const parentVals = getDictNonNullValues(current, '/Parent');
-      if (parentVals.length !== 1) break;
-      const resolved = this.resolveValues(parentVals[0], new Set(), 0);
-      if (!resolved || resolved.unresolved || resolved.values.length !== 1) break;
-      const parent = resolved.values[0];
-      if (parent.kind !== 'dict' || seen.has(parent)) break;
-      seen.add(parent);
-      if (this.hasForbiddenContainerType(parent)) return false;
-      for (const ft of getDictNonNullValues(parent, '/FT')) {
-        if (ft.kind === 'name' && VALID_FORM_FT.has(ft.value)) {
-          return true;
-        }
-      }
-      current = parent;
-    }
-
     return false;
   }
 
-  private hasForbiddenAncestor(dict: PdfDict): boolean {
-    let current: PdfDict = dict;
-    const seen = new Set<PdfDict>([current]);
-    for (let hop = 0; hop < 5; hop++) {
-      const parentVals = getDictNonNullValues(current, '/Parent');
-      if (parentVals.length !== 1) break;
-      const resolved = this.resolveValues(parentVals[0], new Set(), 0);
-      if (!resolved || resolved.unresolved || resolved.values.length !== 1) break;
-      const parent = resolved.values[0];
-      if (parent.kind !== 'dict' || seen.has(parent)) break;
-      seen.add(parent);
-      if (this.hasForbiddenContainerType(parent)) return true;
-      current = parent;
+  private isSafeNamedAction(dict: PdfDict): boolean {
+    const nVals = getDictNonNullValues(dict, '/N');
+    if (nVals.length === 0) return false;
+    for (const nv of nVals) {
+      if (nv.kind !== 'name' || !SAFE_NAMED_ACTIONS.has(nv.value)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private isFilespecOrEmbeddedFileDict(dict: PdfDict): boolean {
+    return (
+      dictHasNameValue(dict, '/Type', '/Filespec') ||
+      dictHasNameValue(dict, '/Type', '/EmbeddedFile') ||
+      dictHasNameValue(dict, '/Subtype', '/FileAttachment') ||
+      getDictNonNullValues(dict, '/EF').length > 0
+    );
+  }
+
+  private valueTouchesEmbeddedTarget(
+    val: PdfValue,
+    embeddedTargets: Set<PdfDict>,
+    visitedRefs: Set<string>,
+    visitedDicts: Set<PdfDict>,
+    depth: number
+  ): boolean {
+    if (depth > PDF_SCANNER_LIMITS.MAX_REFERENCE_DEPTH) return true;
+    if (val.kind === 'ref') {
+      const key = `${val.obj} ${val.gen}`;
+      if (visitedRefs.has(key)) return true;
+      const targets = this.objectVersions.get(key);
+      if (!targets || targets.length === 0) return false;
+      visitedRefs.add(key);
+      try {
+        for (const t of targets) {
+          if (this.valueTouchesEmbeddedTarget(t, embeddedTargets, visitedRefs, visitedDicts, depth + 1)) {
+            return true;
+          }
+        }
+      } finally {
+        visitedRefs.delete(key);
+      }
+      return false;
+    }
+    if (val.kind === 'array') {
+      for (const el of val.items) {
+        if (this.valueTouchesEmbeddedTarget(el, embeddedTargets, visitedRefs, visitedDicts, depth + 1)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    if (val.kind === 'dict') {
+      if (embeddedTargets.has(val) || this.isFilespecOrEmbeddedFileDict(val)) {
+        return true;
+      }
+      if (visitedDicts.has(val)) return false;
+      visitedDicts.add(val);
+      try {
+        for (const key of ['/F', '/FS', '/T', '/Target', '/D']) {
+          for (const sub of getDictNonNullValues(val, key)) {
+            if (this.valueTouchesEmbeddedTarget(sub, embeddedTargets, visitedRefs, visitedDicts, depth + 1)) {
+              return true;
+            }
+          }
+        }
+      } finally {
+        visitedDicts.delete(val);
+      }
     }
     return false;
+  }
+
+  private inspectParentChain(dict: PdfDict): {
+    hasForbiddenAncestor: boolean;
+    hasValidParentFt: boolean;
+  } {
+    const queue: Array<{ dict: PdfDict; depth: number }> = [{ dict, depth: 0 }];
+    const visitedDicts = new Set<PdfDict>([dict]);
+    let hasValidParentFt = false;
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const parentVals = getDictNonNullValues(current.dict, '/Parent');
+      if (parentVals.length === 0) continue;
+
+      if (current.depth >= PDF_SCANNER_LIMITS.MAX_REFERENCE_DEPTH) {
+        return { hasForbiddenAncestor: true, hasValidParentFt: false };
+      }
+
+      for (const pv of parentVals) {
+        const resolved = this.resolveValues(pv, new Set(), 0);
+        if (!resolved || resolved.unresolved) {
+          return { hasForbiddenAncestor: true, hasValidParentFt: false };
+        }
+        for (const p of resolved.values) {
+          if (p.kind === 'null') continue;
+          if (p.kind !== 'dict') {
+            return { hasForbiddenAncestor: true, hasValidParentFt: false };
+          }
+          if (this.hasForbiddenContainerType(p)) {
+            return { hasForbiddenAncestor: true, hasValidParentFt: false };
+          }
+          if (visitedDicts.has(p)) {
+            return { hasForbiddenAncestor: true, hasValidParentFt: false };
+          }
+          visitedDicts.add(p);
+          if (this.hasDirectValidFt(p)) {
+            hasValidParentFt = true;
+          }
+          queue.push({ dict: p, depth: current.depth + 1 });
+        }
+      }
+    }
+
+    return { hasForbiddenAncestor: false, hasValidParentFt };
+  }
+
+  private collectAcroFormContext(): {
+    connectedFields: Set<PdfDict>;
+    fieldsWithValidFt: Set<PdfDict>;
+    hasNeedAppearancesTrue: boolean;
+  } | null {
+    const connectedFields = new Set<PdfDict>();
+    const fieldsWithValidFt = new Set<PdfDict>();
+    let hasNeedAppearancesTrue = false;
+
+    const checkNeedAppearances = (acroDict: PdfDict): boolean => {
+      for (const naVal of getDictNonNullValues(acroDict, '/NeedAppearances')) {
+        const resolvedNa = this.resolveValues(naVal, new Set(), 0);
+        if (!resolvedNa) return false;
+        if (resolvedNa.unresolved) {
+          this.fail('unverifiable', 'UNRESOLVED_NEED_APPEARANCES', '/NeedAppearances(unresolved)');
+          return false;
+        }
+        for (const item of resolvedNa.values) {
+          if (item.kind === 'bool' && item.value === true) {
+            hasNeedAppearancesTrue = true;
+          }
+        }
+      }
+      return true;
+    };
+
+    const visitedWithFt = new Map<PdfDict, Set<boolean>>();
+    const walkFieldValue = (val: PdfValue, inheritedFt: boolean, depth: number): boolean => {
+      if (depth > PDF_SCANNER_LIMITS.MAX_REFERENCE_DEPTH) {
+        this.fail('unverifiable', 'MAX_REFERENCE_DEPTH', '/AcroForm /Fields too deep');
+        return false;
+      }
+      const resolved = this.resolveValues(val, new Set(), 0);
+      if (!resolved) return false;
+      if (resolved.unresolved) return true;
+
+      for (const item of resolved.values) {
+        if (item.kind === 'null') continue;
+        if (item.kind === 'array') {
+          for (const el of item.items) {
+            if (!walkFieldValue(el, inheritedFt, depth + 1)) return false;
+          }
+          continue;
+        }
+        if (item.kind !== 'dict') continue;
+        if (this.hasForbiddenContainerType(item)) continue;
+
+        let seenSet = visitedWithFt.get(item);
+        if (!seenSet) {
+          seenSet = new Set();
+          visitedWithFt.set(item, seenSet);
+        }
+        if (seenSet.has(inheritedFt)) continue;
+        seenSet.add(inheritedFt);
+
+        const effectiveFt = inheritedFt || this.hasDirectValidFt(item);
+        connectedFields.add(item);
+        if (effectiveFt) {
+          fieldsWithValidFt.add(item);
+        }
+
+        for (const kidsVal of getDictNonNullValues(item, '/Kids')) {
+          if (!walkFieldValue(kidsVal, effectiveFt, depth + 1)) return false;
+        }
+      }
+      return true;
+    };
+
+    for (const dict of this.allDicts) {
+      if (getDictNonNullValues(dict, '/NeedAppearances').length > 0) {
+        if (!checkNeedAppearances(dict)) return null;
+      }
+      if (!dictHasNameValue(dict, '/Type', '/Catalog')) continue;
+
+      for (const afVal of getDictNonNullValues(dict, '/AcroForm')) {
+        const resolvedAf = this.resolveValues(afVal, new Set(), 0);
+        if (!resolvedAf) return null;
+        if (resolvedAf.unresolved) {
+          this.fail('unverifiable', 'UNRESOLVED_ACROFORM', '/AcroForm(unresolved)');
+          return null;
+        }
+        for (const afObj of resolvedAf.values) {
+          if (afObj.kind === 'null') continue;
+          if (afObj.kind !== 'dict') continue;
+          if (!checkNeedAppearances(afObj)) return null;
+          for (const fieldsVal of getDictNonNullValues(afObj, '/Fields')) {
+            if (!walkFieldValue(fieldsVal, false, 0)) return null;
+          }
+        }
+      }
+    }
+
+    return { connectedFields, fieldsWithValidFt, hasNeedAppearancesTrue };
+  }
+
+  private isFormFieldDict(
+    dict: PdfDict,
+    acroFormCtx: {
+      connectedFields: Set<PdfDict>;
+      fieldsWithValidFt: Set<PdfDict>;
+    }
+  ): boolean {
+    if (!acroFormCtx.connectedFields.has(dict)) return false;
+    if (this.hasForbiddenContainerType(dict)) return false;
+
+    const parentInfo = this.inspectParentChain(dict);
+    if (parentInfo.hasForbiddenAncestor) return false;
+
+    return (
+      this.hasDirectValidFt(dict) ||
+      acroFormCtx.fieldsWithValidFt.has(dict) ||
+      parentInfo.hasValidParentFt
+    );
+  }
+
+  private validateEmbeddedFiles(): Set<PdfDict> | null {
+    const countedTargets = new Set<PdfDict>();
+    const allTargets = new Set<PdfDict>();
+
+    const walkEmbeddedFilesNameTree = (
+      val: PdfValue,
+      visitedDicts: Set<PdfDict>,
+      depth: number
+    ): boolean => {
+      if (depth > PDF_SCANNER_LIMITS.MAX_REFERENCE_DEPTH) {
+        this.fail('unverifiable', 'MAX_REFERENCE_DEPTH', '/EmbeddedFiles tree too deep');
+        return false;
+      }
+      const resolved = this.resolveValues(val, new Set(), 0);
+      if (!resolved) return false;
+      if (resolved.unresolved) {
+        this.fail('unverifiable', 'UNRESOLVED_EMBEDDED_FILES', '/EmbeddedFiles(unresolved)');
+        return false;
+      }
+      for (const item of resolved.values) {
+        if (item.kind === 'null') continue;
+        if (item.kind === 'array') {
+          for (const el of item.items) {
+            if (!walkEmbeddedFilesNameTree(el, visitedDicts, depth + 1)) return false;
+          }
+          continue;
+        }
+        if (item.kind !== 'dict') {
+          this.fail('unverifiable', 'INVALID_EMBEDDED_FILES', '/EmbeddedFiles(non-dict)');
+          return false;
+        }
+        if (visitedDicts.has(item)) continue;
+        visitedDicts.add(item);
+
+        for (const kidsVal of getDictNonNullValues(item, '/Kids')) {
+          if (!walkEmbeddedFilesNameTree(kidsVal, visitedDicts, depth + 1)) return false;
+        }
+        for (const namesArrVal of getDictNonNullValues(item, '/Names')) {
+          const resolvedArr = this.resolveValues(namesArrVal, new Set(), 0);
+          if (!resolvedArr) return false;
+          if (resolvedArr.unresolved) {
+            this.fail('unverifiable', 'UNRESOLVED_EMBEDDED_FILES', '/EmbeddedFiles /Names(unresolved)');
+            return false;
+          }
+          for (const arrObj of resolvedArr.values) {
+            if (arrObj.kind !== 'array') continue;
+            for (let idx = 1; idx < arrObj.items.length; idx += 2) {
+              const entryResolved = this.resolveValues(arrObj.items[idx], new Set(), 0);
+              if (!entryResolved) return false;
+              if (entryResolved.unresolved) {
+                this.fail('unverifiable', 'UNRESOLVED_EMBEDDED_FILES', '/EmbeddedFiles entry(unresolved)');
+                return false;
+              }
+              for (const fsObj of entryResolved.values) {
+                if (fsObj.kind === 'null') continue;
+                if (fsObj.kind !== 'dict') {
+                  this.fail('unverifiable', 'INVALID_EMBEDDED_FILES', '/EmbeddedFiles entry(non-dict)');
+                  return false;
+                }
+                allTargets.add(fsObj);
+                if (getDictNonNullValues(fsObj, '/EF').length === 0) {
+                  countedTargets.add(fsObj);
+                }
+              }
+            }
+          }
+        }
+      }
+      return true;
+    };
+
+    for (const dict of this.allDicts) {
+      if (!this.checkDeadline()) return null;
+
+      if (dictHasNameValue(dict, '/Type', '/EmbeddedFile')) {
+        countedTargets.add(dict);
+        allTargets.add(dict);
+      }
+
+      if (dictHasNameValue(dict, '/Type', '/Filespec')) {
+        allTargets.add(dict);
+      }
+
+      for (const efVal of getDictNonNullValues(dict, '/EF')) {
+        const resolvedEf = this.resolveValues(efVal, new Set(), 0);
+        if (!resolvedEf) return null;
+        if (resolvedEf.unresolved) {
+          this.fail('unverifiable', 'UNRESOLVED_EMBEDDED_FILE', '/EF(unresolved)');
+          return null;
+        }
+        for (const efObj of resolvedEf.values) {
+          if (efObj.kind === 'null') continue;
+          if (efObj.kind !== 'dict') {
+            this.fail('unverifiable', 'INVALID_EMBEDDED_FILE', '/EF(non-dict)');
+            return null;
+          }
+          for (const [efKey, targetVal] of dictAllEntries(efObj)) {
+            if (targetVal.kind === 'null') continue;
+            const resolvedTarget = this.resolveValues(targetVal, new Set(), 0);
+            if (!resolvedTarget) return null;
+            if (resolvedTarget.unresolved) {
+              this.fail('unverifiable', 'UNRESOLVED_EMBEDDED_FILE', `/EF(${efKey})(unresolved)`);
+              return null;
+            }
+            for (const tv of resolvedTarget.values) {
+              if (tv.kind === 'null') continue;
+              if (tv.kind !== 'dict') {
+                this.fail('unverifiable', 'INVALID_EMBEDDED_FILE', `/EF(${efKey})(non-dict)`);
+                return null;
+              }
+              countedTargets.add(tv);
+              allTargets.add(tv);
+            }
+          }
+        }
+      }
+
+      if (dictHasNameValue(dict, '/Subtype', '/FileAttachment')) {
+        allTargets.add(dict);
+        const fsVals = getDictNonNullValues(dict, '/FS');
+        if (fsVals.length === 0) {
+          countedTargets.add(dict);
+        } else {
+          let hasEfTarget = false;
+          for (const fsVal of fsVals) {
+            const resolvedFs = this.resolveValues(fsVal, new Set(), 0);
+            if (!resolvedFs) return null;
+            if (resolvedFs.unresolved) {
+              this.fail('unverifiable', 'UNRESOLVED_FILE_ATTACHMENT', '/FileAttachment /FS(unresolved)');
+              return null;
+            }
+            for (const fsObj of resolvedFs.values) {
+              if (fsObj.kind === 'dict') {
+                allTargets.add(fsObj);
+                if (
+                  getDictNonNullValues(fsObj, '/EF').length > 0 ||
+                  dictHasNameValue(fsObj, '/Type', '/EmbeddedFile')
+                ) {
+                  hasEfTarget = true;
+                }
+              }
+            }
+          }
+          if (!hasEfTarget) {
+            countedTargets.add(dict);
+          }
+        }
+      }
+
+      for (const efTreeVal of getDictNonNullValues(dict, '/EmbeddedFiles')) {
+        if (!walkEmbeddedFilesNameTree(efTreeVal, new Set(), 0)) return null;
+      }
+    }
+
+    if (countedTargets.size > PDF_SCANNER_LIMITS.MAX_EMBEDDED_FILES) {
+      this.fail(
+        'dangerous',
+        'MAX_EMBEDDED_FILES',
+        `embedded_files=${countedTargets.size}`,
+        MAX_EMBEDDED_FILES_USER_MESSAGE
+      );
+      return null;
+    }
+
+    return allTargets;
   }
 
   private evaluatePolicy(): void {
@@ -1720,14 +2119,8 @@ export class PdfSecurityScanner {
         }
       }
 
-      if (
-        dictHasNameValue(dict, '/Type', '/EmbeddedFile') ||
-        dictHasNameValue(dict, '/S', '/EmbeddedFile') ||
-        dictHasNameValue(dict, '/Subtype', '/FileAttachment') ||
-        getDictNonNullValues(dict, '/EmbeddedFiles').length > 0 ||
-        getDictNonNullValues(dict, '/EF').length > 0
-      ) {
-        this.fail('dangerous', 'EMBEDDED_FILE', '/EmbeddedFile');
+      if (getDictNonNullValues(dict, '/XFA').length > 0) {
+        this.fail('dangerous', 'XFA_FORBIDDEN', '/XFA');
         return;
       }
 
@@ -1737,7 +2130,11 @@ export class PdfSecurityScanner {
       }
     }
 
-    // 2. /Names << /JavaScript ... >> y /Names << /EmbeddedFiles ... >>
+    // 2. Validar adjuntos embebidos pasivos (opción E3: resueltos y dentro del cap)
+    const embeddedTargets = this.validateEmbeddedFiles();
+    if (!embeddedTargets || this.failure) return;
+
+    // 3. /Names << /JavaScript ... >> bloqueado siempre
     for (const dict of this.allDicts) {
       for (const namesVal of getDictNonNullValues(dict, '/Names')) {
         const resolved = this.resolveValues(namesVal, new Set(), 0);
@@ -1752,38 +2149,49 @@ export class PdfSecurityScanner {
               this.fail('dangerous', 'NAMES_JAVASCRIPT', '/Names->/JavaScript');
               return;
             }
-            if (getDictNonNullValues(item, '/EmbeddedFiles').length > 0) {
-              this.fail('dangerous', 'NAMES_EMBEDDED_FILES', '/Names->/EmbeddedFiles');
-              return;
-            }
           }
         }
       }
     }
 
-    // 3. /OpenAction (solo permite destinos de navegación GoTo o [página /Fit] / nombre / string)
+    // 4. /OpenAction (solo destinos de navegación GoTo o [página /Fit] / nombre / string, nunca a Filespec)
     for (const dict of this.allDicts) {
       for (const oaVal of getDictNonNullValues(dict, '/OpenAction')) {
-        this.validateOpenAction(oaVal);
+        this.validateOpenAction(oaVal, embeddedTargets);
         if (this.failure) return;
       }
     }
 
-    // 4. Acción /A (botones / links): nunca permite JS
-    for (const dict of this.allDicts) {
-      for (const aVal of getDictNonNullValues(dict, '/A')) {
-        this.validateActionA(aVal, new Set(), new Set(), 0);
+    // 5. Acción /A (lista blanca /GoTo, /URI, /Named seguro; /Type /StructElem permite atributos de layout)
+    for (const owner of this.allDicts) {
+      const aVals = getDictNonNullValues(owner, '/A');
+      if (aVals.length === 0) continue;
+
+      const isStructElemOwner =
+        dictHasNameValue(owner, '/Type', '/StructElem') &&
+        !dictHasNameValue(owner, '/Type', '/Annot') &&
+        getDictNonNullValues(owner, '/Subtype').length === 0;
+
+      for (const aVal of aVals) {
+        if (isStructElemOwner) {
+          this.validateStructElemAttrA(aVal, embeddedTargets, new Set(), new Set(), 0);
+        } else {
+          this.validateActionA(aVal, embeddedTargets, new Set(), new Set(), 0);
+        }
         if (this.failure) return;
       }
     }
 
-    // 5. /AA (Additional Actions): JS permitido SOLO en /FT o /Widget con triggers /C, /F, /K, /V
+    // 6. /AA (Additional Actions): lista blanca /GoTo, /Named seguro, y /JavaScript SOLO en campos válidos sin /NeedAppearances true
+    const acroFormCtx = this.collectAcroFormContext();
+    if (!acroFormCtx || this.failure) return;
+
     const allowedFormJsDicts = new Set<PdfDict>();
     for (const owner of this.allDicts) {
       const aaVals = getDictNonNullValues(owner, '/AA');
       if (aaVals.length === 0) continue;
 
-      const isField = this.isFormFieldDict(owner);
+      const isField = this.isFormFieldDict(owner, acroFormCtx);
       for (const aaVal of aaVals) {
         const resolved = this.resolveValues(aaVal, new Set(), 0);
         if (!resolved) return;
@@ -1799,11 +2207,16 @@ export class PdfSecurityScanner {
           }
           for (const [triggerKey, actionVal] of dictAllEntries(aaObj)) {
             if (actionVal.kind === 'null') continue;
-            const allowJs = isField && SAFE_FORM_AA_TRIGGERS.has(triggerKey);
+            const allowJs =
+              isField &&
+              SAFE_FORM_AA_TRIGGERS.has(triggerKey) &&
+              !acroFormCtx.hasNeedAppearancesTrue;
             this.validateAaAction(
               actionVal,
               triggerKey,
               allowJs,
+              acroFormCtx.hasNeedAppearancesTrue,
+              embeddedTargets,
               allowedFormJsDicts,
               new Set(),
               new Set(),
@@ -1815,16 +2228,20 @@ export class PdfSecurityScanner {
       }
     }
 
-    // 6. Barrido final fail-closed: cualquier diccionario JS fuera de campos autorizados se rechaza
+    // 7. Barrido final fail-closed: todo JS no autorizado y todo /Type /Action fuera de lista blanca
     for (const dict of this.allDicts) {
       if (this.hasJsAction(dict) && !allowedFormJsDicts.has(dict)) {
         this.fail('dangerous', 'UNAUTHORIZED_JAVASCRIPT', '/JavaScript');
         return;
       }
+      if (dictHasNameValue(dict, '/Type', '/Action') && !allowedFormJsDicts.has(dict)) {
+        this.validateActionA(dict, embeddedTargets, new Set(), new Set(), 0);
+        if (this.failure) return;
+      }
     }
   }
 
-  private validateOpenAction(oaVal: PdfValue): void {
+  private validateOpenAction(oaVal: PdfValue, embeddedTargets: Set<PdfDict>): void {
     const resolved = this.resolveValues(oaVal, new Set(), 0);
     if (!resolved) return;
     if (resolved.unresolved) {
@@ -1849,12 +2266,16 @@ export class PdfSecurityScanner {
             this.fail('dangerous', 'OPENACTION_DISALLOWED_ACTION', '/OpenAction([dict])');
             return;
           }
+          if (this.valueTouchesEmbeddedTarget(item, embeddedTargets, new Set(), new Set(), 0)) {
+            this.fail('dangerous', 'OPENACTION_EMBEDDED_FILE', '/OpenAction->/Filespec');
+            return;
+          }
         }
         continue;
       }
 
       if (target.kind === 'dict') {
-        this.validateOpenActionDictChain(target, new Set(), new Set(), 0);
+        this.validateOpenActionDictChain(target, embeddedTargets, new Set(), new Set(), 0);
         if (this.failure) return;
         continue;
       }
@@ -1866,6 +2287,7 @@ export class PdfSecurityScanner {
 
   private validateOpenActionDictChain(
     val: PdfValue,
+    embeddedTargets: Set<PdfDict>,
     visitedRefs: Set<string>,
     visitedDicts: Set<PdfDict>,
     depth: number
@@ -1886,7 +2308,7 @@ export class PdfSecurityScanner {
       if (item.kind === 'null') continue;
       if (item.kind === 'array') {
         for (const el of item.items) {
-          this.validateOpenActionDictChain(el, visitedRefs, visitedDicts, depth + 1);
+          this.validateOpenActionDictChain(el, embeddedTargets, visitedRefs, visitedDicts, depth + 1);
           if (this.failure) return;
         }
         continue;
@@ -1897,6 +2319,11 @@ export class PdfSecurityScanner {
       }
       if (visitedDicts.has(item)) {
         this.fail('unverifiable', 'CIRCULAR_ACTION', '/OpenAction(cycle)');
+        return;
+      }
+
+      if (this.valueTouchesEmbeddedTarget(item, embeddedTargets, new Set(), new Set(), 0)) {
+        this.fail('dangerous', 'OPENACTION_EMBEDDED_FILE', '/OpenAction->/Filespec');
         return;
       }
 
@@ -1925,7 +2352,13 @@ export class PdfSecurityScanner {
       visitedDicts.add(item);
       try {
         for (const nextVal of getDictNonNullValues(item, '/Next')) {
-          this.validateOpenActionDictChain(nextVal, visitedRefs, visitedDicts, depth + 1);
+          this.validateOpenActionDictChain(
+            nextVal,
+            embeddedTargets,
+            visitedRefs,
+            visitedDicts,
+            depth + 1
+          );
           if (this.failure) return;
         }
       } finally {
@@ -1934,8 +2367,59 @@ export class PdfSecurityScanner {
     }
   }
 
+  private validateStructElemAttrA(
+    val: PdfValue,
+    embeddedTargets: Set<PdfDict>,
+    visitedRefs: Set<string>,
+    visitedDicts: Set<PdfDict>,
+    depth: number
+  ): void {
+    if (depth > PDF_SCANNER_LIMITS.MAX_REFERENCE_DEPTH) {
+      this.fail('unverifiable', 'MAX_REFERENCE_DEPTH', '/StructElem /A too deep');
+      return;
+    }
+
+    const resolved = this.resolveValues(val, visitedRefs, depth);
+    if (!resolved) return;
+    if (resolved.unresolved) {
+      this.fail('unverifiable', 'UNRESOLVED_ACTION_A', '/A(unresolved)');
+      return;
+    }
+
+    for (const item of resolved.values) {
+      if (item.kind === 'null') continue;
+      if (item.kind === 'array') {
+        for (const el of item.items) {
+          this.validateStructElemAttrA(el, embeddedTargets, visitedRefs, visitedDicts, depth + 1);
+          if (this.failure) return;
+        }
+        continue;
+      }
+      if (item.kind !== 'dict') {
+        this.fail('unverifiable', 'INVALID_ACTION_A', '/StructElem /A(non-dict)');
+        return;
+      }
+      if (visitedDicts.has(item)) {
+        this.fail('unverifiable', 'CIRCULAR_ACTION', '/StructElem /A(cycle)');
+        return;
+      }
+
+      if (
+        dictHasNameValue(item, '/Type', '/Action') ||
+        getDictNonNullValues(item, '/S').length > 0 ||
+        getDictNonNullValues(item, '/Next').length > 0 ||
+        this.hasJsAction(item) ||
+        this.valueTouchesEmbeddedTarget(item, embeddedTargets, new Set(), new Set(), 0)
+      ) {
+        this.validateActionA(item, embeddedTargets, visitedRefs, visitedDicts, depth);
+        if (this.failure) return;
+      }
+    }
+  }
+
   private validateActionA(
     val: PdfValue,
+    embeddedTargets: Set<PdfDict>,
     visitedRefs: Set<string>,
     visitedDicts: Set<PdfDict>,
     depth: number
@@ -1956,15 +2440,23 @@ export class PdfSecurityScanner {
       if (item.kind === 'null') continue;
       if (item.kind === 'array') {
         for (const el of item.items) {
-          this.validateActionA(el, visitedRefs, visitedDicts, depth + 1);
+          this.validateActionA(el, embeddedTargets, visitedRefs, visitedDicts, depth + 1);
           if (this.failure) return;
         }
         continue;
       }
-      if (item.kind !== 'dict') continue;
+      if (item.kind !== 'dict') {
+        this.fail('unverifiable', 'INVALID_ACTION_A', '/A(non-dict)');
+        return;
+      }
 
       if (visitedDicts.has(item)) {
         this.fail('unverifiable', 'CIRCULAR_ACTION', '/A(cycle)');
+        return;
+      }
+
+      if (this.valueTouchesEmbeddedTarget(item, embeddedTargets, new Set(), new Set(), 0)) {
+        this.fail('dangerous', 'ACTION_A_EMBEDDED_FILE', '/A->/Filespec');
         return;
       }
 
@@ -1973,10 +2465,32 @@ export class PdfSecurityScanner {
         return;
       }
 
+      const sVals = getDictNonNullValues(item, '/S');
+      if (sVals.length === 0) {
+        this.fail('unverifiable', 'ACTION_A_MISSING_TYPE', '/A(missing /S)');
+        return;
+      }
+      for (const sv of sVals) {
+        if (sv.kind !== 'name') {
+          this.fail('dangerous', 'ACTION_A_DISALLOWED_ACTION', `/A->${sv.kind}`);
+          return;
+        }
+        if (sv.value === '/GoTo' || sv.value === '/URI') continue;
+        if (sv.value === '/Named') {
+          if (!this.isSafeNamedAction(item)) {
+            this.fail('dangerous', 'ACTION_A_DISALLOWED_NAMED', '/A->/Named');
+            return;
+          }
+          continue;
+        }
+        this.fail('dangerous', 'ACTION_A_DISALLOWED_ACTION', `/A->${sv.value}`);
+        return;
+      }
+
       visitedDicts.add(item);
       try {
         for (const nextVal of getDictNonNullValues(item, '/Next')) {
-          this.validateActionA(nextVal, visitedRefs, visitedDicts, depth + 1);
+          this.validateActionA(nextVal, embeddedTargets, visitedRefs, visitedDicts, depth + 1);
           if (this.failure) return;
         }
       } finally {
@@ -1989,6 +2503,8 @@ export class PdfSecurityScanner {
     val: PdfValue,
     triggerKey: string,
     allowJs: boolean,
+    hasNeedAppearancesTrue: boolean,
+    embeddedTargets: Set<PdfDict>,
     allowedFormJsDicts: Set<PdfDict>,
     visitedRefs: Set<string>,
     visitedDicts: Set<PdfDict>,
@@ -2014,6 +2530,8 @@ export class PdfSecurityScanner {
             el,
             triggerKey,
             allowJs,
+            hasNeedAppearancesTrue,
+            embeddedTargets,
             allowedFormJsDicts,
             visitedRefs,
             visitedDicts,
@@ -2032,23 +2550,59 @@ export class PdfSecurityScanner {
         return;
       }
 
+      if (this.valueTouchesEmbeddedTarget(item, embeddedTargets, new Set(), new Set(), 0)) {
+        this.fail('dangerous', 'AA_EMBEDDED_FILE', `/AA(${triggerKey})->/Filespec`);
+        return;
+      }
+
       if (getDictNonNullValues(item, '/URI').length > 0) {
         this.fail('dangerous', 'AA_URI', `/AA(${triggerKey})->/URI`);
         return;
       }
-      for (const sv of getDictNonNullValues(item, '/S')) {
-        if (sv.kind === 'name' && AA_FORBIDDEN_ACTION_TYPES.has(sv.value)) {
-          this.fail('dangerous', 'AA_FORBIDDEN_ACTION', `/AA(${triggerKey})->${sv.value}`);
-          return;
-        }
-      }
 
       if (this.hasJsAction(item)) {
+        if (hasNeedAppearancesTrue) {
+          this.fail(
+            'dangerous',
+            'AA_JS_NEED_APPEARANCES',
+            `/AcroForm(/NeedAppearances)+/AA(${triggerKey})->/JavaScript`
+          );
+          return;
+        }
         if (!allowJs) {
           this.fail('dangerous', 'AA_JAVASCRIPT', `/AA(${triggerKey})->/JavaScript`);
           return;
         }
+        for (const sv of getDictNonNullValues(item, '/S')) {
+          if (sv.kind !== 'name' || sv.value !== '/JavaScript') {
+            const detail = sv.kind === 'name' ? sv.value : sv.kind;
+            this.fail('dangerous', 'AA_DISALLOWED_ACTION', `/AA(${triggerKey})->${detail}`);
+            return;
+          }
+        }
         allowedFormJsDicts.add(item);
+      } else {
+        const sVals = getDictNonNullValues(item, '/S');
+        if (sVals.length === 0) {
+          this.fail('unverifiable', 'AA_MISSING_TYPE', `/AA(${triggerKey})(missing /S)`);
+          return;
+        }
+        for (const sv of sVals) {
+          if (sv.kind !== 'name') {
+            this.fail('dangerous', 'AA_DISALLOWED_ACTION', `/AA(${triggerKey})->${sv.kind}`);
+            return;
+          }
+          if (sv.value === '/GoTo') continue;
+          if (sv.value === '/Named') {
+            if (!this.isSafeNamedAction(item)) {
+              this.fail('dangerous', 'AA_DISALLOWED_NAMED', `/AA(${triggerKey})->/Named`);
+              return;
+            }
+            continue;
+          }
+          this.fail('dangerous', 'AA_DISALLOWED_ACTION', `/AA(${triggerKey})->${sv.value}`);
+          return;
+        }
       }
 
       visitedDicts.add(item);
@@ -2058,6 +2612,8 @@ export class PdfSecurityScanner {
             nextVal,
             triggerKey,
             allowJs,
+            hasNeedAppearancesTrue,
+            embeddedTargets,
             allowedFormJsDicts,
             visitedRefs,
             visitedDicts,
