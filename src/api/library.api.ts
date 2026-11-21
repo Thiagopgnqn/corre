@@ -80,7 +80,10 @@ function toMyUploads(raw: any): LibraryMyUploadsResponse {
     maxBytes: Number(raw?.quota?.maxBytes || 0),
     hasStatusUpdates: Boolean(raw?.hasStatusUpdates),
     pendingCount: Number(raw?.quota?.pendingCount ?? raw?.quota?.pendingFiles ?? 0),
-    maxPending: Number(raw?.quota?.maxPending ?? 30),
+    maxPending:
+      raw?.quota?.maxPending !== undefined && raw?.quota?.maxPending !== null
+        ? Number(raw.quota.maxPending)
+        : undefined,
   };
 }
 
@@ -215,15 +218,23 @@ export const libraryApi = {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
 
+      const onAbort = () => {
+        xhr.abort();
+        reject(new ApiError('Subida cancelada por el usuario.', 0, 'UPLOAD_ABORTED'));
+      };
+
+      const cleanupSignal = () => {
+        if (signal) {
+          signal.removeEventListener('abort', onAbort);
+        }
+      };
+
       if (signal) {
         if (signal.aborted) {
           reject(new ApiError('Subida cancelada por el usuario.', 0, 'UPLOAD_ABORTED'));
           return;
         }
-        signal.addEventListener('abort', () => {
-          xhr.abort();
-          reject(new ApiError('Subida cancelada por el usuario.', 0, 'UPLOAD_ABORTED'));
-        });
+        signal.addEventListener('abort', onAbort);
       }
 
       xhr.open('PUT', uploadUrl, true);
@@ -238,6 +249,7 @@ export const libraryApi = {
       }
 
       xhr.onload = () => {
+        cleanupSignal();
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve();
         } else {
@@ -252,6 +264,7 @@ export const libraryApi = {
       };
 
       xhr.onerror = () => {
+        cleanupSignal();
         reject(
           new ApiError(
             'Error de red o CORS al transferir el archivo al almacenamiento.',

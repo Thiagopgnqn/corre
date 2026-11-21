@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen,
   Search,
@@ -65,6 +65,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   // Upload modal
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [uploadTargetSubjectId, setUploadTargetSubjectId] = useState<string | undefined>(undefined);
+  const [libraryRefreshKey, setLibraryRefreshKey] = useState<number>(0);
 
   // Cartel de bienvenida comunitario (C1)
   const { user } = useAuth();
@@ -106,7 +107,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   };
 
   // Load subjects summary & novelty check
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
@@ -128,11 +129,16 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
+
+  const handleUploadSuccess = useCallback(() => {
+    setLibraryRefreshKey((prev) => prev + 1);
+    void loadData();
+  }, [loadData]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   // Listen to initialSubjectId or URL changes
   useEffect(() => {
@@ -226,13 +232,12 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
         <MyUploadsView
           onBack={handleBackToCatalog}
           onOpenUpload={() => handleOpenUpload()}
+          refreshKey={libraryRefreshKey}
         />
         <UploadMaterialModal
           isOpen={isUploadOpen}
           onClose={() => setIsUploadOpen(false)}
-          onSuccess={() => {
-            loadData();
-          }}
+          onSuccess={handleUploadSuccess}
           initialSubjectId={uploadTargetSubjectId}
           subjects={subjects}
           onOpenTerms={handleOpenTerms}
@@ -255,6 +260,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
             subject={selectedSubject}
             onBack={handleBackToCatalog}
             onOpenUpload={() => handleOpenUpload(selectedSubject.id)}
+            refreshKey={libraryRefreshKey}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-12 text-slate-400">
@@ -264,9 +270,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
         <UploadMaterialModal
           isOpen={isUploadOpen}
           onClose={() => setIsUploadOpen(false)}
-          onSuccess={() => {
-            loadData();
-          }}
+          onSuccess={handleUploadSuccess}
           initialSubjectId={selectedSubject?.id}
           subjects={subjects}
           onOpenTerms={handleOpenTerms}
@@ -463,9 +467,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
       <UploadMaterialModal
         isOpen={isUploadOpen}
         onClose={() => setIsUploadOpen(false)}
-        onSuccess={() => {
-          loadData();
-        }}
+        onSuccess={handleUploadSuccess}
         initialSubjectId={uploadTargetSubjectId}
         subjects={subjects}
         onOpenTerms={handleOpenTerms}
