@@ -31,6 +31,7 @@ export const KanbanBoard: React.FC = () => {
     getSubjectEnrollments,
     coreSubjects,
     planConfig,
+    isSimulationMode,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -208,14 +209,16 @@ export const KanbanBoard: React.FC = () => {
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
+              disabled={isSimulationMode}
+              title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
               onClick={() =>
                 openEnrollmentModal(kanbanEnrollmentHint.subjectCode, {
                   targetStatus: kanbanEnrollmentHint.status,
                 })
               }
-              className="min-h-[44px] px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-sm transition-colors cursor-pointer flex items-center"
+              className="min-h-[44px] px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold shadow-sm transition-colors cursor-pointer flex items-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
             >
-              Indicar comisión
+              {isSimulationMode ? 'No disponible en modo simulación' : 'Indicar comisión'}
             </button>
             <button
               type="button"
@@ -340,15 +343,21 @@ export const KanbanBoard: React.FC = () => {
                                 <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                                   <button
                                     type="button"
+                                    disabled={isSimulationMode}
+                                    title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
                                     onClick={() =>
                                       openEnrollmentModal(subject.id, {
                                         targetStatus: status,
                                       })
                                     }
-                                    className="min-h-[44px] sm:min-h-0 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/25 text-indigo-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+                                    className="min-h-[44px] sm:min-h-0 text-[11px] font-semibold px-2.5 py-1 rounded-xl bg-indigo-500/10 hover:bg-indigo-500/25 border border-indigo-500/25 text-indigo-300 flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-500/10"
                                   >
                                     <Users className="w-3 h-3" />
-                                    <span>Indicar comisión</span>
+                                    <span>
+                                      {isSimulationMode
+                                        ? 'No disponible en modo simulación'
+                                        : 'Indicar comisión'}
+                                    </span>
                                   </button>
                                 </div>
                               )}

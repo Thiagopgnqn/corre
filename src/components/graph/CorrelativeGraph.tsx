@@ -602,15 +602,22 @@ const CorrelativeGraphContent: React.FC = () => {
           <div className="py-1">
             <button
               type="button"
+              disabled={isSimulationMode}
+              title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
               onClick={() => {
+                if (isSimulationMode) return;
                 const subId = contextMenu.subjectId;
                 setContextMenu(null);
                 openEnrollmentModal(subId);
               }}
-              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-indigo-300 font-semibold flex items-center gap-2 cursor-pointer"
+              className="w-full px-3 py-1.5 text-left hover:bg-slate-800 text-indigo-300 font-semibold flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent"
             >
               <Users className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Indicar comisión / docentes</span>
+              <span>
+                {isSimulationMode
+                  ? 'Comisión (No disponible en modo simulación)'
+                  : 'Indicar comisión / docentes'}
+              </span>
             </button>
             <button
               type="button"

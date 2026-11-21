@@ -48,6 +48,7 @@ export const ProfessorsDirectory: React.FC = () => {
     refreshReviewableSummary,
     isTutorialOpen,
     allSubjects,
+    isSimulationMode,
   } = useCareer();
   const { reloadRatings } = useProfessorRatings(true);
   const shouldReduceMotion = useReducedMotion();
@@ -453,10 +454,16 @@ export const ProfessorsDirectory: React.FC = () => {
               <button
                 key={item.subjectId}
                 type="button"
+                disabled={isSimulationMode}
+                title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
                 onClick={() => openEnrollmentModal(item.subjectCode)}
-                className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-indigo-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/30 text-indigo-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600/20"
               >
-                <span>+ {item.subjectName}</span>
+                <span>
+                  {isSimulationMode
+                    ? `+ ${item.subjectName} (No disponible en modo simulación)`
+                    : `+ ${item.subjectName}`}
+                </span>
               </button>
             ))}
           </div>

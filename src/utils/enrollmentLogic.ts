@@ -1,4 +1,4 @@
-import type { Subject, SubjectStatus, UserCareerState } from '../types/career';
+import type { Subject, SubjectStatus, UserCareerState, UserSubjectState } from '../types/career';
 import type {
   EnrollmentTerm,
   PendingReviewPromptItem,
@@ -100,6 +100,80 @@ export function resolveSubjectStatusFromEnrollment(
     shouldUpdate: false,
     nextStatus: preservedStatus,
   };
+}
+
+const VALID_SUBJECT_STATUSES: ReadonlySet<string> = new Set<SubjectStatus>([
+  'bloqueada',
+  'disponible',
+  'cursando',
+  'regularizada',
+  'aprobada',
+  'promocionada',
+  'libre',
+]);
+
+/**
+ * Aplica de forma monotónica el `subjectStatus` devuelto por el servidor tras guardar una cursada
+ * sobre la entrada local `userState[subjectCode]`.
+ *
+ * - Si `serverSubjectStatus` es `undefined`, `null` o desconocido -> `null` (sin cambio).
+ * - Si el estado local actual es desconocido -> `null` (sin cambio).
+ * - Solo devuelve una nueva entrada si `rank(serverSubjectStatus) > rank(estado local actual)`.
+ * - Nunca baja de estado y conserva `grade` local si existía.
+ */
+export function applyServerSubjectStatus(
+  currentEntry: UserSubjectState | null | undefined,
+  serverSubjectStatus?: string | null,
+  nowIso?: string
+): UserSubjectState | null {
+  if (
+    serverSubjectStatus === null ||
+    serverSubjectStatus === undefined ||
+    typeof serverSubjectStatus !== 'string' ||
+    serverSubjectStatus.trim() === ''
+  ) {
+    return null;
+  }
+
+  if (!VALID_SUBJECT_STATUSES.has(serverSubjectStatus)) {
+    return null;
+  }
+
+  const targetRank = getSubjectStatusRank(serverSubjectStatus);
+  if (targetRank === null) {
+    return null;
+  }
+
+  const currentRank = getSubjectStatusRank(currentEntry?.status);
+  if (currentRank === null) {
+    return null;
+  }
+
+  if (targetRank <= currentRank) {
+    return null;
+  }
+
+  const nextEntry: UserSubjectState = {
+    ...(currentEntry ?? {}),
+    status: serverSubjectStatus as SubjectStatus,
+    updatedAt: nowIso ?? new Date().toISOString(),
+  };
+
+  if (currentEntry?.grade !== undefined) {
+    nextEntry.grade = currentEntry.grade;
+  } else {
+    delete nextEntry.grade;
+  }
+
+  return nextEntry;
+}
+
+/**
+ * Indica si está permitido abrir o guardar una cursada en el contexto actual.
+ * En modo simulación queda bloqueado para evitar tocar el estado real o el servidor.
+ */
+export function canSaveEnrollmentInSimulation(isSimulationMode?: boolean | null): boolean {
+  return !isSimulationMode;
 }
 
 export type StatusChangeTriggerSource =
