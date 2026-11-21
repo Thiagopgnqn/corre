@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Readable } from 'stream';
 import { LIBRARY_CONFIG, AllowedMimeType } from '../../config/library.config.js';
+import { PdfSecurityScanner, type PdfScanResult } from './pdfSecurityScanner.js';
 
 export interface StreamValidationResult {
   sha256: string;
@@ -8,6 +9,7 @@ export interface StreamValidationResult {
   detectedMimeType: AllowedMimeType | null;
   hasDangerousPdfMarks: boolean;
   dangerousMarkFound?: string;
+  technicalReason?: string;
   isValid: boolean;
   error?: string;
 }
@@ -33,18 +35,9 @@ const MAGIC_SIGNATURES: Record<AllowedMimeType, (header: Buffer) => boolean> = {
     buf.subarray(8, 12).toString('ascii') === 'WEBP',
 };
 
-/** Marcas y acciones potencialmente peligrosas en especificación PDF */
-const DANGEROUS_PDF_MARKS = [
-  '/JavaScript',
-  '/JS',
-  '/Launch',
-  '/EmbeddedFile',
-  '/OpenAction',
-] as const;
-
 /**
  * Valida un archivo leyendo su flujo en partes (streaming) con límite de tiempo y bajo consumo de memoria.
- * Calcula el hash SHA-256 en tiempo real y detecta firmas maliciosas en documentos PDF.
+ * Calcula el hash SHA-256 en tiempo real e inspecciona estructuralmente documentos PDF (fail-closed).
  */
 export async function validateFileStream(
   stream: NodeJS.ReadableStream,
@@ -54,11 +47,12 @@ export async function validateFileStream(
   const hash = crypto.createHash('sha256');
   let totalBytes = 0;
   let headerBuffer = Buffer.alloc(0);
-  let tailBuffer = Buffer.alloc(0);
-  let hasDangerousPdfMarks = false;
-  let dangerousMarkFound: string | undefined;
 
   const isPdf = declaredMimeType === 'application/pdf';
+  const pdfScanner = isPdf ? new PdfSecurityScanner() : null;
+  let pendingMagicChunks: Buffer[] = [];
+  let pendingMagicBytes = 0;
+  let pdfHeaderVerified: boolean | null = null;
 
   return new Promise<StreamValidationResult>((resolve, reject) => {
     let completed = false;
@@ -93,22 +87,29 @@ export async function validateFileStream(
         headerBuffer = Buffer.from(Buffer.concat([headerBuffer, buf]).subarray(0, 64));
       }
 
-      // Si es PDF, escanear en streaming buscando marcas peligrosas
-      if (isPdf) {
-        // Concatenar el remanente del chunk anterior para no perder palabras cortadas entre chunks
-        const combined = tailBuffer.length > 0 ? Buffer.concat([tailBuffer, buf]) : buf;
-        const combinedStr = combined.toString('latin1');
-
-        for (const mark of DANGEROUS_PDF_MARKS) {
-          if (combinedStr.includes(mark)) {
-            hasDangerousPdfMarks = true;
-            dangerousMarkFound = mark;
-            break;
+      // Si es PDF y tiene firma válida, alimentar el escáner estructural en streaming
+      if (isPdf && pdfScanner) {
+        if (pdfHeaderVerified === true) {
+          pdfScanner.feed(buf);
+        } else if (pdfHeaderVerified === null) {
+          if (pendingMagicChunks.length === 0 && buf.length >= 5) {
+            pdfHeaderVerified = MAGIC_SIGNATURES['application/pdf'](buf);
+            if (pdfHeaderVerified) {
+              pdfScanner.feed(buf);
+            }
+          } else if (buf.length > 0) {
+            pendingMagicChunks.push(buf);
+            pendingMagicBytes += buf.length;
+            if (pendingMagicBytes >= 5) {
+              const initial = Buffer.concat(pendingMagicChunks);
+              pendingMagicChunks = [];
+              pdfHeaderVerified = MAGIC_SIGNATURES['application/pdf'](initial);
+              if (pdfHeaderVerified) {
+                pdfScanner.feed(initial);
+              }
+            }
           }
         }
-
-        // Mantener últimos 64 bytes para el siguiente chunk
-        tailBuffer = Buffer.from(buf.subarray(Math.max(0, buf.length - 64)));
       }
     });
 
@@ -126,23 +127,61 @@ export async function validateFileStream(
           sha256: calculatedSha256,
           totalBytes,
           detectedMimeType: null,
-          hasDangerousPdfMarks,
+          hasDangerousPdfMarks: false,
           isValid: false,
           error: `El contenido real del archivo no coincide con la firma requerida para ${declaredMimeType}.`,
         });
       }
 
-      // 2. Validar marcas peligrosas en PDF
-      if (isPdf && hasDangerousPdfMarks) {
-        return resolve({
-          sha256: calculatedSha256,
-          totalBytes,
-          detectedMimeType: declaredMimeType,
-          hasDangerousPdfMarks: true,
-          dangerousMarkFound,
-          isValid: false,
-          error: `El documento PDF contiene elementos ejecutables o scripts no permitidos (${dangerousMarkFound}).`,
-        });
+      // 2. Validar seguridad estructural en PDF (fail-closed)
+      if (isPdf) {
+        let scanResult: PdfScanResult;
+        try {
+          scanResult = pdfScanner
+            ? pdfScanner.finish()
+            : {
+                isSafe: false,
+                category: 'unverifiable',
+                reasonCode: 'MISSING_SCANNER',
+                userMessage:
+                  'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+              };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Unexpected validator error';
+          scanResult = {
+            isSafe: false,
+            category: 'unverifiable',
+            reasonCode: 'VALIDATOR_EXCEPTION',
+            technicalDetail: msg,
+            userMessage:
+              'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+          };
+        }
+
+        if (!scanResult.isSafe) {
+          const reasonCode = scanResult.reasonCode ?? 'UNVERIFIABLE_PDF';
+          const technicalDetail = scanResult.technicalDetail;
+          const technicalReason = technicalDetail
+            ? `${reasonCode} (${technicalDetail})`
+            : reasonCode;
+
+          console.warn(
+            `[LibraryValidator] PDF rechazado: categoria=${scanResult.category ?? 'unverifiable'} motivo=${reasonCode} detalle=${technicalDetail ?? 'n/a'} bytes=${totalBytes}`
+          );
+
+          return resolve({
+            sha256: calculatedSha256,
+            totalBytes,
+            detectedMimeType: declaredMimeType,
+            hasDangerousPdfMarks: scanResult.category === 'dangerous',
+            dangerousMarkFound: technicalDetail,
+            technicalReason,
+            isValid: false,
+            error:
+              scanResult.userMessage ||
+              'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+          });
+        }
       }
 
       // 3. Validar coincidencia de tamaño
@@ -151,7 +190,7 @@ export async function validateFileStream(
           sha256: calculatedSha256,
           totalBytes,
           detectedMimeType: declaredMimeType,
-          hasDangerousPdfMarks,
+          hasDangerousPdfMarks: false,
           isValid: false,
           error: `El tamaño real transferido (${totalBytes} bytes) difiere del declarado (${declaredSizeBytes} bytes).`,
         });
