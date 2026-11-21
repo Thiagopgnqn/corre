@@ -330,6 +330,10 @@ export function formatUploadErrorMessage(err: any): string {
     return 'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.';
   }
 
+  if (/demasiados archivos adjuntos embebidos/i.test(rawMsg)) {
+    return 'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.';
+  }
+
   if (
     code === 'DANGEROUS_PDF_CONTENT' ||
     /acciones autom[aá]ticas|elementos ejecutables|scripts no permitidos/i.test(rawMsg)
