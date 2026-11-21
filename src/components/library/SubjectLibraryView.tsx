@@ -32,12 +32,14 @@ interface SubjectLibraryViewProps {
   subject: SubjectInfo;
   onBack: () => void;
   onOpenUpload: () => void;
+  refreshKey?: number;
 }
 
 export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
   subject,
   onBack,
   onOpenUpload,
+  refreshKey = 0,
 }) => {
   const [files, setFiles] = useState<LibraryFilePublic[]>([]);
   const [total, setTotal] = useState<number>(0);
@@ -88,7 +90,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
 
   useEffect(() => {
     fetchFiles();
-  }, [subject.id, activeKindTab, search, sort, onlyWithSolution]);
+  }, [subject.id, activeKindTab, search, sort, onlyWithSolution, refreshKey]);
 
   const handleDownload = async (file: LibraryFilePublic, e?: React.MouseEvent<HTMLButtonElement>) => {
     const clickedBtn = e?.currentTarget ?? null;

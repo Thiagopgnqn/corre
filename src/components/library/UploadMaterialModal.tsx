@@ -24,6 +24,8 @@ import {
 } from '../../types/library';
 import {
   type BatchFileItem,
+  type UploadOverallStats,
+  type BatchUploadSummary,
   parseFilenameSuggestions,
   applyDefaultYearTerm,
   validateBatchItem,
@@ -74,19 +76,24 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
 
   // Cupos y cuota
   const [pendingCount, setPendingCount] = useState<number>(0);
-  const [maxPending, setMaxPending] = useState<number>(30);
+  const [maxPending, setMaxPending] = useState<number | null>(null);
   const [usedBytes, setUsedBytes] = useState<number>(0);
   const [maxBytes, setMaxBytes] = useState<number>(LIBRARY_CONFIG.MAX_USER_QUOTA_BYTES);
 
   // Coordinador y estado de subida
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [overallStats, setOverallStats] = useState({
+  const [overallStats, setOverallStats] = useState<UploadOverallStats>({
     totalBytes: 0,
     uploadedBytes: 0,
     percent: 0,
     completedCount: 0,
+    failedCount: 0,
+    cancelledCount: 0,
+    settledCount: 0,
     totalCount: 0,
+    isFinished: false,
   });
+  const [batchSummary, setBatchSummary] = useState<BatchUploadSummary | null>(null);
   const [isSuccessAll, setIsSuccessAll] = useState<boolean>(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
@@ -95,7 +102,40 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addMoreInputRef = useRef<HTMLInputElement>(null);
-  const coordinatorRef = useRef<UploadQueueCoordinator | null>(null);
+  const onSuccessRef = useRef(onSuccess);
+  const isOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  const [coordinator] = useState(
+    () =>
+      new UploadQueueCoordinator({
+        maxConcurrentPuts: 3,
+        maxConcurrentCompletes: 2,
+        maxRetries: 4,
+        backoffDelays: [1000, 2000, 4000, 8000],
+      })
+  );
+
+  const refreshQuota = useCallback(async () => {
+    try {
+      const res = await libraryApi.peekMyUploads();
+      if (res.success && res.data) {
+        if (res.data.pendingCount !== undefined) setPendingCount(res.data.pendingCount);
+        if (res.data.maxPending !== undefined) setMaxPending(res.data.maxPending);
+        if (res.data.usedBytes !== undefined) setUsedBytes(res.data.usedBytes);
+        if (res.data.maxBytes !== undefined) setMaxBytes(res.data.maxBytes);
+      }
+    } catch {
+      // Ignorar errores transitorios al consultar cupos
+    }
+  }, []);
 
   // 1. Cargar términos y cuotas al abrir
   useEffect(() => {
@@ -110,19 +150,9 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
         })
         .catch(() => {});
 
-      libraryApi
-        .peekMyUploads()
-        .then((res) => {
-          if (res.success && res.data) {
-            if (res.data.pendingCount !== undefined) setPendingCount(res.data.pendingCount);
-            if (res.data.maxPending !== undefined) setMaxPending(res.data.maxPending);
-            if (res.data.usedBytes !== undefined) setUsedBytes(res.data.usedBytes);
-            if (res.data.maxBytes !== undefined) setMaxBytes(res.data.maxBytes);
-          }
-        })
-        .catch(() => {});
+      void refreshQuota();
     }
-  }, [isOpen]);
+  }, [isOpen, refreshQuota]);
 
   // 2. Preselección de materia si se pasa initialSubjectId
   useEffect(() => {
@@ -142,57 +172,39 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
     }
   }, [initialSubjectId, subjects, selectedSubjectId]);
 
-  // Manejo de ítems en el coordinador
+  // Manejo de ítems en el coordinador (handlers desacoplados para no reinstanciar el coordinador)
   const handleItemCoordinatorChange = useCallback((updatedItem: BatchFileItem) => {
     setItems((prev) => prev.map((it) => (it.id === updatedItem.id ? updatedItem : it)));
   }, []);
 
-  const handleOverallProgress = useCallback(
-    (stats: {
-      totalBytes: number;
-      uploadedBytes: number;
-      percent: number;
-      completedCount: number;
-      totalCount: number;
-    }) => {
-      setOverallStats(stats);
-      if (stats.totalCount > 0 && stats.completedCount === stats.totalCount) {
-        setIsSuccessAll(true);
-        setIsUploading(false);
-        if (onSuccess) onSuccess();
-      }
-    },
-    [onSuccess]
-  );
+  const handleOverallProgress = useCallback((stats: UploadOverallStats) => {
+    setOverallStats(stats);
+  }, []);
 
-  // Instanciar coordinador
   useEffect(() => {
-    coordinatorRef.current = new UploadQueueCoordinator({
-      maxConcurrentPuts: 3,
-      maxConcurrentCompletes: 2,
-      maxRetries: 4,
-      backoffDelays: [1000, 2000, 4000, 8000],
+    coordinator.setHandlers({
       onItemChange: handleItemCoordinatorChange,
       onOverallProgress: handleOverallProgress,
     });
-  }, [handleItemCoordinatorChange, handleOverallProgress]);
+  }, [coordinator, handleItemCoordinatorChange, handleOverallProgress]);
 
-  // Cupo restante de subidas pendientes
-  const availableSlots = Math.max(0, maxPending - pendingCount);
+  // Cupo restante de subidas pendientes (leído desde el servidor)
+  const availableSlots = maxPending !== null ? Math.max(0, maxPending - pendingCount) : null;
 
   // Agregar archivos con sugerencias inteligentes
   const processFilesToAdd = (files: FileList | File[]) => {
     setGlobalError(null);
+    setBatchSummary(null);
     const newItems: BatchFileItem[] = [];
 
     const fileArray = Array.from(files);
     // Verificamos si supera el cupo de moderación
     const currentTotal = items.length + fileArray.length;
-    if (currentTotal > availableSlots) {
+    if (availableSlots !== null && maxPending !== null && currentTotal > availableSlots) {
       setGlobalError(
         `Solo podés subir hasta ${availableSlots} archivo${
           availableSlots === 1 ? '' : 's'
-        } más (cupo de moderación: 30 aportes pendientes).`
+        } más (cupo de moderación: ${maxPending} aportes pendientes).`
       );
     }
 
@@ -255,9 +267,17 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
   };
 
   const removeItem = (id: string) => {
-    if (isUploading && coordinatorRef.current) {
-      coordinatorRef.current.cancelItem(id);
+    const target = items.find((it) => it.id === id) || coordinator.getItem(id);
+    if (target?.status === 'completing') {
+      return;
     }
+
+    if (isUploading) {
+      void coordinator.cancelItem(id);
+      return;
+    }
+
+    coordinator.removeItem(id);
     setItems((prev) => prev.filter((it) => it.id !== id));
     setExpandedCards((prev) => {
       const next = new Set(prev);
@@ -329,6 +349,30 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
 
   const validTotalSizeMb = (validTotalSizeBytes / (1024 * 1024)).toFixed(1);
 
+  const handleBatchFinished = useCallback(
+    (summary: BatchUploadSummary) => {
+      if (summary.completedCount > 0) {
+        onSuccessRef.current?.();
+        void refreshQuota();
+      }
+      if (!isOpenRef.current) return;
+
+      setOverallStats(coordinator.getOverallStats());
+      if (
+        summary.totalCount > 0 &&
+        summary.failedCount === 0 &&
+        summary.cancelledCount === 0 &&
+        summary.completedCount === summary.totalCount
+      ) {
+        setBatchSummary(null);
+        setIsSuccessAll(true);
+      } else {
+        setBatchSummary(summary);
+      }
+    },
+    [coordinator, refreshQuota]
+  );
+
   // Iniciar subida con el coordinador
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -343,35 +387,65 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
 
     setIsUploading(true);
     setGlobalError(null);
+    setBatchSummary(null);
 
-    // Si aún no aceptó términos en perfil, registramos en backend
-    if (!hasAcceptedTermsInProfile) {
-      try {
-        await libraryApi.acceptTerms();
-        setHasAcceptedTermsInProfile(true);
-      } catch (termsErr) {
-        console.warn('Aviso al registrar términos:', termsErr);
+    try {
+      // Si aún no aceptó términos en perfil, registramos en backend
+      if (!hasAcceptedTermsInProfile) {
+        try {
+          await libraryApi.acceptTerms();
+          setHasAcceptedTermsInProfile(true);
+        } catch (termsErr) {
+          console.warn('Aviso al registrar términos:', termsErr);
+        }
       }
-    }
 
-    if (coordinatorRef.current) {
-      coordinatorRef.current.setQueue(items, selectedSubjectId);
-      coordinatorRef.current.start();
+      const preparedItems = items.map((it) =>
+        it.status === 'error'
+          ? {
+              ...it,
+              status: 'idle' as const,
+              progress: 0,
+              error: undefined,
+              errorCode: undefined,
+              retryCount: 0,
+              fileId: undefined,
+            }
+          : it
+      );
+      setItems(preparedItems);
+      coordinator.setQueue(preparedItems, selectedSubjectId);
+      const summary = await coordinator.start();
+      handleBatchFinished(summary);
+    } catch (err: any) {
+      setGlobalError(err?.message || 'Ocurrió un error inesperado al subir el lote.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
-  const handleRetryFailed = () => {
-    if (coordinatorRef.current) {
-      coordinatorRef.current.retryFailed();
-      setIsUploading(true);
+  const handleRetryFailed = async () => {
+    if (isUploading) return;
+    setIsUploading(true);
+    setGlobalError(null);
+    setBatchSummary(null);
+    try {
+      coordinator.syncItemsMetadata(items, selectedSubjectId);
+      const summary = await coordinator.retryFailed();
+      handleBatchFinished(summary);
+    } catch (err: any) {
+      setGlobalError(err?.message || 'Ocurrió un error inesperado al reintentar los archivos.');
+    } finally {
+      setIsUploading(false);
     }
   };
 
   const resetAll = () => {
-    if (isUploading && coordinatorRef.current) {
-      coordinatorRef.current.cancelAll();
+    if (!coordinator.isBusy()) {
+      coordinator.setQueue([], '');
     }
     setItems([]);
+    setBatchSummary(null);
     setIsSuccessAll(false);
     setIsUploading(false);
     setGlobalError(null);
@@ -380,25 +454,28 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
       uploadedBytes: 0,
       percent: 0,
       completedCount: 0,
+      failedCount: 0,
+      cancelledCount: 0,
+      settledCount: 0,
       totalCount: 0,
+      isFinished: false,
     });
   };
 
-  const handleClose = () => {
+  const handleClose = async () => {
     if (isUploading) {
       const confirmClose = window.confirm(
-        'Hay subidas en curso. Si cerrás el modal se cancelarán las transferencias activas. ¿Deseás salir?'
+        'Hay subidas en curso. Si cerrás el modal se cancelarán las transferencias pendientes (las que ya están validándose terminarán). ¿Deseás salir?'
       );
       if (!confirmClose) return;
-      if (coordinatorRef.current) {
-        coordinatorRef.current.cancelAll();
-      }
+      await coordinator.cancelAll();
     }
     resetAll();
     onClose();
   };
 
-  const hasFailedItems = items.some((it) => it.status === 'error');
+  const failedItems = items.filter((it) => it.status === 'error');
+  const hasFailedItems = failedItems.length > 0;
   const allDoneCount = items.filter((it) => it.status === 'done').length;
 
   if (!isOpen) return null;
@@ -442,9 +519,13 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
             <Info className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
             <span>
               Cupo de moderación:{' '}
-              <strong className={availableSlots <= 5 ? 'text-amber-400' : 'text-slate-100'}>
-                {availableSlots} de {maxPending} disponibles
-              </strong>
+              {maxPending !== null && availableSlots !== null ? (
+                <strong className={availableSlots <= 5 ? 'text-amber-400' : 'text-slate-100'}>
+                  {availableSlots} de {maxPending} disponibles
+                </strong>
+              ) : (
+                <strong className="text-slate-400">Consultando cupo...</strong>
+              )}
             </span>
           </div>
           <div className="text-slate-400">
@@ -709,8 +790,20 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                           <button
                             type="button"
                             onClick={() => removeItem(item.id)}
-                            aria-label={`Quitar archivo ${item.file.name}`}
-                            className="p-2 min-h-[44px] min-w-[44px] rounded-xl text-slate-500 hover:text-rose-400 hover:bg-slate-900 transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                            disabled={item.status === 'completing' || (isUploading && item.status === 'done')}
+                            aria-label={
+                              isUploading
+                                ? `Cancelar archivo ${item.file.name}`
+                                : `Quitar archivo ${item.file.name}`
+                            }
+                            title={
+                              item.status === 'completing'
+                                ? 'No podés cancelar un archivo que ya está validándose'
+                                : isUploading
+                                ? 'Cancelar subida de este archivo'
+                                : 'Quitar archivo del lote'
+                            }
+                            className="p-2 min-h-[44px] min-w-[44px] rounded-xl text-slate-500 hover:text-rose-400 hover:bg-slate-900 transition-colors flex items-center justify-center shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-slate-500"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -886,45 +979,57 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                         )}
 
                         {/* Estado y Progreso del Ítem */}
-                        {item.status !== 'idle' && (
+                        {(item.status !== 'idle' || isUploading) && (
                           <div className="mt-2.5 pt-2 border-t border-slate-800/60" aria-live="polite">
-                            <div className="flex items-center justify-between text-[11px] mb-1">
-                              <span className="flex items-center gap-1.5 text-slate-300">
+                            <div className="flex items-center justify-between gap-2 text-[11px] mb-1">
+                              <span className="flex items-center gap-1.5 text-slate-300 min-w-0">
+                                {item.status === 'idle' && isUploading && (
+                                  <>
+                                    <Loader2 className="w-3 h-3 animate-spin text-slate-400 shrink-0" />
+                                    En cola...
+                                  </>
+                                )}
                                 {item.status === 'init' && (
                                   <>
-                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
                                     Preparando subida...
                                   </>
                                 )}
                                 {item.status === 'uploading' && (
                                   <>
-                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+                                    <Loader2 className="w-3 h-3 animate-spin text-indigo-400 shrink-0" />
                                     Transfiriendo archivo...
                                   </>
                                 )}
                                 {item.status === 'completing' && (
                                   <>
-                                    <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                                    <Loader2 className="w-3 h-3 animate-spin text-amber-400 shrink-0" />
                                     Validando seguridad...
                                   </>
                                 )}
                                 {item.status === 'done' && (
                                   <span className="text-emerald-400 font-semibold flex items-center gap-1">
-                                    <Check className="w-3.5 h-3.5" />
+                                    <Check className="w-3.5 h-3.5 shrink-0" />
                                     Subido a moderación
                                   </span>
                                 )}
                                 {item.status === 'error' && (
-                                  <span className="text-rose-400 font-semibold flex items-center gap-1">
-                                    <AlertTriangle className="w-3.5 h-3.5" />
-                                    {item.error || 'Error'}
+                                  <span className="text-rose-400 font-semibold flex items-start gap-1">
+                                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                    <span>{item.error || 'Error al procesar el archivo.'}</span>
                                   </span>
                                 )}
                                 {item.status === 'cancelled' && (
                                   <span className="text-slate-400">Cancelado</span>
                                 )}
                               </span>
-                              <span className="font-mono text-slate-400">{item.progress}%</span>
+                              <span className="font-mono text-slate-400 shrink-0">
+                                {item.status === 'error'
+                                  ? 'Error'
+                                  : item.status === 'cancelled'
+                                  ? 'Cancelado'
+                                  : `${item.progress}%`}
+                              </span>
                             </div>
 
                             <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
@@ -934,9 +1039,17 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
                                     ? 'bg-emerald-500'
                                     : item.status === 'error'
                                     ? 'bg-rose-500'
+                                    : item.status === 'cancelled'
+                                    ? 'bg-slate-600'
                                     : 'bg-indigo-500'
                                 }`}
-                                style={{ width: `${item.progress}%` }}
+                                style={{
+                                  width: `${
+                                    item.status === 'error' || item.status === 'cancelled'
+                                      ? 100
+                                      : item.progress
+                                  }%`,
+                                }}
                               />
                             </div>
                           </div>
@@ -984,15 +1097,21 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               )}
             </div>
 
-            {/* BARRA DE PROGRESO GLOBAL DURANTE SUBIDA */}
-            {isUploading && (
+            {/* BARRA DE PROGRESO GLOBAL DURANTE O AL FINALIZAR SUBIDA */}
+            {(isUploading || batchSummary) && (
               <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2" aria-live="polite">
-                <div className="flex items-center justify-between text-xs text-slate-200">
+                <div className="flex items-center justify-between text-xs text-slate-200 gap-2">
                   <span className="font-semibold flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
-                    Subiendo lote ({overallStats.completedCount}/{overallStats.totalCount} completados)
+                    {isUploading ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    )}
+                    {isUploading
+                      ? `Subiendo lote (${overallStats.settledCount}/${overallStats.totalCount} procesados)`
+                      : `Lote finalizado (${overallStats.settledCount}/${overallStats.totalCount})`}
                   </span>
-                  <span className="font-mono font-bold text-indigo-300">
+                  <span className="font-mono font-bold text-indigo-300 shrink-0">
                     {overallStats.percent}%
                   </span>
                 </div>
@@ -1005,7 +1124,7 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               </div>
             )}
 
-            {/* ERROR GLOBAL O FALLIDOS */}
+            {/* ERROR GLOBAL O RESUMEN DE FALLIDOS */}
             {globalError && (
               <div className="p-3 rounded-xl bg-rose-950/40 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
@@ -1013,32 +1132,70 @@ export const UploadMaterialModal: React.FC<UploadMaterialModalProps> = ({
               </div>
             )}
 
-            {hasFailedItems && !isUploading && (
-              <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/40 flex items-center justify-between gap-3">
-                <div className="text-xs text-amber-300 flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                  <span>Algunos archivos fallaron durante la subida.</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRetryFailed}
-                  className="px-3 py-1.5 min-h-[44px] rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+            {!isUploading &&
+              batchSummary &&
+              (batchSummary.failedCount > 0 || batchSummary.cancelledCount > 0) && (
+                <div
+                  className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-500/40 space-y-2.5"
+                  aria-live="polite"
                 >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Reintentar fallidos
-                </button>
-              </div>
-            )}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>
+                          {batchSummary.completedCount}{' '}
+                          {batchSummary.completedCount === 1 ? 'subido' : 'subidos'},{' '}
+                          {batchSummary.failedCount} con error
+                          {batchSummary.cancelledCount > 0
+                            ? `, ${batchSummary.cancelledCount} ${
+                                batchSummary.cancelledCount === 1 ? 'cancelado' : 'cancelados'
+                              }`
+                            : ''}
+                        </span>
+                      </p>
+                      <p className="text-[11px] text-amber-300/80">
+                        {batchSummary.completedCount > 0
+                          ? 'Los archivos válidos ya entraron en la cola de moderación.'
+                          : 'Ningún archivo pudo enviarse a moderación.'}
+                      </p>
+                    </div>
+                    {hasFailedItems && (
+                      <button
+                        type="button"
+                        onClick={handleRetryFailed}
+                        className="px-3 py-1.5 min-h-[44px] rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" />
+                        Reintentar fallidos
+                      </button>
+                    )}
+                  </div>
+
+                  {failedItems.length > 0 && (
+                    <ul className="space-y-1 pt-2 border-t border-amber-500/20 text-[11px] text-rose-200">
+                      {failedItems.map((failedItem) => (
+                        <li key={failedItem.id} className="flex items-start gap-1.5 break-words">
+                          <span className="text-rose-400 font-bold shrink-0">&bull;</span>
+                          <span>
+                            <strong className="text-white">{failedItem.file.name}:</strong>{' '}
+                            {failedItem.error || 'Ocurrió un error al procesar el archivo.'}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
 
             {/* ACCIONES FIJAS AL PIE CON SAFE AREA */}
             <div className="sticky bottom-0 bg-slate-900/95 backdrop-blur-md flex items-center justify-end gap-3 p-3.5 sm:p-4 -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 border-t border-slate-800 shadow-lg pb-[calc(0.875rem+env(safe-area-inset-bottom,0px))]">
               <button
                 type="button"
                 onClick={handleClose}
-                disabled={isUploading}
-                className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer disabled:opacity-40 flex items-center justify-center"
+                className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
               >
-                Cancelar
+                {isUploading ? 'Cancelar subida' : 'Cancelar'}
               </button>
               <button
                 type="submit"
