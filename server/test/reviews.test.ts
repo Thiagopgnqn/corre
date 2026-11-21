@@ -8,9 +8,10 @@ import jwt from 'jsonwebtoken';
 async function main() {
   const { env } = await import('../src/config/env.js');
   const { createApp } = await import('../src/app.js');
-  const { DrizzleReviewsStore, InMemoryReviewsStore } = await import(
+  const { DrizzleReviewsStore, InMemoryReviewsStore, setActiveReviewsStore } = await import(
     '../src/modules/reviews/reviews.store.js'
   );
+  const { InMemoryUserStateStore } = await import('../src/modules/user-state/userState.store.js');
   const {
     parseProfessorName,
     compareProfessorParsed,
@@ -1570,6 +1571,504 @@ async function main() {
       'POST /subjects vincula en planB, GET /professors?planId filtra por facultad y rechaza con 400 mismatch plan/materia, numérico sin planId o cruce de facultades',
       `statuses=${linkCrossPlan.status}/${profListPlanB.status}/${createPlanMismatch.status}/${linkPlanMismatch.status}/${linkNumericNoPlan.status}/${linkCrossFaculty.status}`
     );
+
+    // -------------------------------------------------------------------------
+    // 14. ACTUALIZACIÓN ATÓMICA DE ESTADO DE MATERIA AL GUARDAR CURSADA
+    // -------------------------------------------------------------------------
+    console.log('\n📌 14. Actualización automática y atómica del estado al guardar cursada');
+
+    const enrollStudent = {
+      id: crypto.randomUUID(),
+      email: 'cursada.estado@frc.utn.edu.ar',
+      role: 'user' as const,
+    };
+    testUsersMap.set(enrollStudent.id, {
+      ...enrollStudent,
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: store.defaultPlanId,
+    });
+    const tokenEnroll = makeToken(enrollStudent);
+
+    const subPromo = store.seedSubject({
+      codeInPlan: 701,
+      name: 'Materia Promo Directa',
+      shortName: 'MPD',
+      level: 2,
+    });
+    const subReg = store.seedSubject({
+      codeInPlan: 702,
+      name: 'Materia Regular Directa',
+      shortName: 'MRD',
+      level: 2,
+    });
+    const subAprob = store.seedSubject({
+      codeInPlan: 703,
+      name: 'Materia Ya Aprobada',
+      shortName: 'MYA',
+      level: 2,
+    });
+    const subLibreCheck = store.seedSubject({
+      codeInPlan: 704,
+      name: 'Materia Cursando y Libre',
+      shortName: 'MCL',
+      level: 2,
+    });
+    const subEditCycle = store.seedSubject({
+      codeInPlan: 705,
+      name: 'Materia Edición y Borrado',
+      shortName: 'MEB',
+      level: 2,
+    });
+    const subRevGate = store.seedSubject({
+      codeInPlan: 706,
+      name: 'Materia Habilitación Reseña',
+      shortName: 'MHR',
+      level: 3,
+    });
+    const subRevPromo = store.seedSubject({
+      codeInPlan: 707,
+      name: 'Materia Habilitación Promo',
+      shortName: 'MHP',
+      level: 3,
+    });
+
+    const profEnrollGate = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Docente Gate Reseñas, Lucía',
+    });
+    store.seedCommissionTeaching({
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      termLabel: '2026 1C',
+      isCurrent: true,
+    });
+    store.seedCommissionTeaching({
+      professorId: profEnrollGate.id,
+      subjectId: subRevPromo.id,
+      termLabel: '2026 1C',
+      isCurrent: true,
+    });
+
+    // 14.1 Promoción sobre materia sin estado -> promocionada
+    const resPromoNew = await api('PUT', `/api/enrollments/${subPromo.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const progPromoNew = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subPromo.id);
+    assert(
+      resPromoNew.status === 200 &&
+        resPromoNew.data?.data?.subjectStatus === 'promocionada' &&
+        progPromoNew?.status === 'promocionada',
+      'Promoción sobre materia sin estado actualiza progreso a "promocionada" e incluye subjectStatus'
+    );
+
+    // 14.2 Regularización sobre materia sin estado -> regularizada
+    const resRegNew = await api('PUT', `/api/enrollments/${subReg.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progRegNew = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subReg.id);
+    assert(
+      resRegNew.status === 200 &&
+        resRegNew.data?.data?.subjectStatus === 'regularizada' &&
+        progRegNew?.status === 'regularizada',
+      'Regularización sobre materia sin estado actualiza progreso a "regularizada" e incluye subjectStatus'
+    );
+
+    // 14.3 Materia ya aprobada (nota 9) + cursada regularizada -> sigue aprobada (nota intacta)
+    store.seedUserProgress(enrollStudent.id, subAprob.id, 'aprobada', 9);
+    const resAprobPlusReg = await api('PUT', `/api/enrollments/${subAprob.id}`, tokenEnroll, {
+      academicYear: 2024,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progAfterAprobReg = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subAprob.id);
+    assert(
+      resAprobPlusReg.status === 200 &&
+        resAprobPlusReg.data?.data?.subjectStatus === 'aprobada' &&
+        progAfterAprobReg?.status === 'aprobada' &&
+        progAfterAprobReg?.grade === 9,
+      'Materia ya aprobada + cursada regularizada NO baja de estado y conserva nota 9'
+    );
+
+    // 14.4 Materia ya aprobada (nota 9) + cursada promocionada -> pasa a promocionada (nota conservada)
+    const resAprobPlusPromo = await api('PUT', `/api/enrollments/${subAprob.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const progAfterAprobPromo = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subAprob.id);
+    assert(
+      resAprobPlusPromo.status === 200 &&
+        resAprobPlusPromo.data?.data?.subjectStatus === 'promocionada' &&
+        progAfterAprobPromo?.status === 'promocionada' &&
+        progAfterAprobPromo?.grade === 9,
+      'Materia aprobada + cursada promocionada sube a "promocionada" conservando nota 9'
+    );
+
+    // 14.5 Cursada cursando o libre -> estado sin cambios
+    const resCursandoOnly = await api('PUT', `/api/enrollments/${subLibreCheck.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'cursando',
+      professorIds: [],
+    });
+    const resLibreOnly = await api('PUT', `/api/enrollments/${subLibreCheck.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '2C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const progLibreCheck = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subLibreCheck.id);
+    assert(
+      resCursandoOnly.status === 200 &&
+        resCursandoOnly.data?.data?.subjectStatus === 'pendiente' &&
+        resLibreOnly.status === 200 &&
+        resLibreOnly.data?.data?.subjectStatus === 'pendiente' &&
+        progLibreCheck === undefined,
+      'Cursada cursando y cursada libre sobre materia sin estado devuelven subjectStatus="pendiente" sin modificar progreso'
+    );
+
+    // 14.6 Editar cursada existente de cursando a regularizada -> sube el estado
+    const resCreateCursando = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'cursando',
+      professorIds: [],
+    });
+    const editEnrollmentId = resCreateCursando.data?.data?.id as string;
+    const resEditToReg = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      enrollmentId: editEnrollmentId,
+      academicYear: 2026,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progAfterEditToReg = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subEditCycle.id);
+    assert(
+      resCreateCursando.status === 200 &&
+        resCreateCursando.data?.data?.subjectStatus === 'pendiente' &&
+        resEditToReg.status === 200 &&
+        resEditToReg.data?.data?.subjectStatus === 'regularizada' &&
+        progAfterEditToReg?.status === 'regularizada',
+      'Editar cursada existente de cursando a regularizada sube el estado de la materia a regularizada'
+    );
+
+    // 14.7 Editar cursada hacia libre o borrar cursada -> estado NO se revierte
+    const resEditToLibre = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      enrollmentId: editEnrollmentId,
+      academicYear: 2026,
+      term: '1C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const resDeleteEnrKeepState = await api('DELETE', `/api/enrollments/${editEnrollmentId}`, tokenEnroll);
+    const progAfterDel = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subEditCycle.id);
+    assert(
+      resEditToLibre.status === 200 &&
+        resEditToLibre.data?.data?.subjectStatus === 'regularizada' &&
+        resDeleteEnrKeepState.status === 200 &&
+        progAfterDel?.status === 'regularizada',
+      'Editar cursada existente a libre o borrarla NO revierte el estado ya alcanzado'
+    );
+
+    // 14.8 Materia de otro plan -> 404 y no escribe ni cursada ni progreso
+    const enrollmentsCountBeforeOther = Array.from(store.enrollmentsMap.values()).filter(
+      (e) => e.userId === enrollStudent.id && e.subjectId === sIndMulti.id
+    ).length;
+    const resOtherPlan = await api('PUT', `/api/enrollments/${sIndMulti.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const enrollmentsCountAfterOther = Array.from(store.enrollmentsMap.values()).filter(
+      (e) => e.userId === enrollStudent.id && e.subjectId === sIndMulti.id
+    ).length;
+    const progOtherPlan = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(sIndMulti.id);
+    assert(
+      resOtherPlan.status === 404 &&
+        enrollmentsCountBeforeOther === 0 &&
+        enrollmentsCountAfterOther === 0 &&
+        progOtherPlan === undefined,
+      'Materia de otro plan devuelve 404 y no escribe ni cursada ni progreso'
+    );
+
+    // 14.9 Efecto en reseñas: cursada libre NO habilita; regularizada/promocionada SÍ habilitan
+    const resGateLibre = await api('PUT', `/api/enrollments/${subRevGate.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const revbleAfterLibre = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterLibre = (revbleAfterLibre.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevGate.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterLibre = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      overall: 4,
+    });
+    assert(
+      resGateLibre.status === 200 &&
+        resGateLibre.data?.data?.subjectStatus === 'pendiente' &&
+        !isEligibleAfterLibre &&
+        postRevAfterLibre.status === 403 &&
+        postRevAfterLibre.data?.code === 'SUBJECT_NOT_COMPLETED',
+      'Con cursada "libre" (sin docente), la materia NO aparece en /api/me/reviewable y POST /api/reviews rechaza con 403'
+    );
+
+    const resGateReg = await api('PUT', `/api/enrollments/${subRevGate.id}`, tokenEnroll, {
+      enrollmentId: resGateLibre.data?.data?.id,
+      academicYear: 2025,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const revbleAfterReg = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterReg = (revbleAfterReg.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevGate.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterReg = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      overall: 5,
+      comment: 'Habilitado por regularizar la cursada.',
+    });
+
+    const resGatePromo = await api('PUT', `/api/enrollments/${subRevPromo.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const revbleAfterPromo = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterPromo = (revbleAfterPromo.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevPromo.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterPromo = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevPromo.id,
+      overall: 5,
+      comment: 'Habilitado por promocionar la cursada.',
+    });
+    assert(
+      resGateReg.status === 200 &&
+        resGateReg.data?.data?.subjectStatus === 'regularizada' &&
+        isEligibleAfterReg &&
+        postRevAfterReg.status === 201 &&
+        resGatePromo.status === 200 &&
+        resGatePromo.data?.data?.subjectStatus === 'promocionada' &&
+        isEligibleAfterPromo &&
+        postRevAfterPromo.status === 201,
+      'Tras regularizar o promocionar cursada, la materia aparece en /api/me/reviewable y POST /api/reviews acepta (201)'
+    );
+
+    // 14.10 Integración con ambos almacenes inyectados (GET /api/state refleja nuevo estado)
+    const pairedReviewsStore = new InMemoryReviewsStore();
+    const pairedUserStateStore = new InMemoryUserStateStore();
+    const pairedPlanId = pairedReviewsStore.defaultPlanId;
+    const pairedFacId = pairedReviewsStore.defaultFacultyId;
+    pairedUserStateStore.seedPlan({
+      id: pairedPlanId,
+      name: 'Plan Integrado',
+      facultyId: pairedFacId,
+      totalLevels: 5,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const pSub1 = pairedReviewsStore.seedSubject({
+      codeInPlan: 801,
+      name: 'Integrada Promo',
+      planId: pairedPlanId,
+    });
+    const pSub2 = pairedReviewsStore.seedSubject({
+      codeInPlan: 802,
+      name: 'Integrada Aprobada',
+      planId: pairedPlanId,
+    });
+    pairedUserStateStore.seedSubject({
+      id: pSub1.id,
+      planId: pairedPlanId,
+      codeInPlan: 801,
+    });
+    pairedUserStateStore.seedSubject({
+      id: pSub2.id,
+      planId: pairedPlanId,
+      codeInPlan: 802,
+    });
+
+    const pairedUserId = crypto.randomUUID();
+    pairedReviewsStore.seedUserPlan(pairedUserId, pairedPlanId);
+    pairedUserStateStore.seedUser(pairedUserId, pairedPlanId);
+    testUsersMap.set(pairedUserId, {
+      id: pairedUserId,
+      email: 'paired.stores@frc.utn.edu.ar',
+      role: 'user',
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: pairedPlanId,
+    });
+    const pairedToken = makeToken({
+      id: pairedUserId,
+      email: 'paired.stores@frc.utn.edu.ar',
+      role: 'user',
+      selectedPlanId: pairedPlanId,
+    });
+    await pairedUserStateStore.upsertSubjectProgress(pairedUserId, pSub2.id, 'aprobada', '8');
+
+    const pairedApp = createApp({
+      reviewsStore: pairedReviewsStore,
+      userStateStore: pairedUserStateStore,
+    });
+    const pairedServer = http.createServer(pairedApp);
+    await new Promise<void>((resolve) => pairedServer.listen(0, resolve));
+    const pairedPort = (pairedServer.address() as { port: number }).port;
+    const pairedApi = async (method: string, ep: string, body?: any) => {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'XMLHttpRequest',
+        Cookie: `accessToken=${pairedToken}`,
+      };
+      const opts: RequestInit = { method, headers };
+      if (body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(`http://localhost:${pairedPort}${ep}`, opts);
+      const t = await r.text();
+      return { status: r.status, data: t ? JSON.parse(t) : null };
+    };
+
+    try {
+      const putPairedPromo = await pairedApi('PUT', `/api/enrollments/${pSub1.id}`, {
+        academicYear: 2026,
+        term: '1C',
+        status: 'promocionada',
+        professorIds: [],
+      });
+      const putPairedRegOnAprob = await pairedApi('PUT', `/api/enrollments/${pSub2.id}`, {
+        academicYear: 2025,
+        term: '1C',
+        status: 'regularizada',
+        professorIds: [],
+      });
+      const statePaired = await pairedApi('GET', '/api/state');
+      assert(
+        putPairedPromo.status === 200 &&
+          putPairedPromo.data?.data?.subjectStatus === 'promocionada' &&
+          putPairedRegOnAprob.status === 200 &&
+          putPairedRegOnAprob.data?.data?.subjectStatus === 'aprobada' &&
+          statePaired.status === 200 &&
+          statePaired.data?.data?.progress?.['801']?.status === 'promocionada' &&
+          statePaired.data?.data?.progress?.['802']?.status === 'aprobada' &&
+          statePaired.data?.data?.progress?.['802']?.grade === 8,
+        'Con reviewsStore + userStateStore inyectados, GET /api/state refleja promocionada y respeta aprobada (nota 8) sin bajar'
+      );
+    } finally {
+      await new Promise<void>((resolve) => pairedServer.close(() => resolve()));
+      setActiveReviewsStore(store);
+    }
+
+    // 14.11 Atomicidad en memoria: si falla upsertSubjectProgress, no queda la cursada ni cambia el progreso
+    const atomicReviewsStore = new InMemoryReviewsStore();
+    const failingUserStateStore = new InMemoryUserStateStore();
+    const atomicPlanId = atomicReviewsStore.defaultPlanId;
+    const atomicFacId = atomicReviewsStore.defaultFacultyId;
+    failingUserStateStore.seedPlan({
+      id: atomicPlanId,
+      name: 'Plan Atómico',
+      facultyId: atomicFacId,
+      totalLevels: 5,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const aSub = atomicReviewsStore.seedSubject({
+      codeInPlan: 901,
+      name: 'Materia Atomicidad',
+      planId: atomicPlanId,
+    });
+    failingUserStateStore.seedSubject({
+      id: aSub.id,
+      planId: atomicPlanId,
+      codeInPlan: 901,
+    });
+    const atomicUserId = crypto.randomUUID();
+    atomicReviewsStore.seedUserPlan(atomicUserId, atomicPlanId);
+    failingUserStateStore.seedUser(atomicUserId, atomicPlanId);
+    testUsersMap.set(atomicUserId, {
+      id: atomicUserId,
+      email: 'atomic.fail@frc.utn.edu.ar',
+      role: 'user',
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: atomicPlanId,
+    });
+    const atomicToken = makeToken({
+      id: atomicUserId,
+      email: 'atomic.fail@frc.utn.edu.ar',
+      role: 'user',
+      selectedPlanId: atomicPlanId,
+    });
+
+    await failingUserStateStore.upsertSubjectProgress(atomicUserId, aSub.id, 'cursando', null);
+    failingUserStateStore.upsertSubjectProgress = async () => {
+      throw new Error('Falla simulada al guardar subject_progress');
+    };
+
+    const atomicApp = createApp({
+      reviewsStore: atomicReviewsStore,
+      userStateStore: failingUserStateStore,
+    });
+    const atomicServer = http.createServer(atomicApp);
+    await new Promise<void>((resolve) => atomicServer.listen(0, resolve));
+    const atomicPort = (atomicServer.address() as { port: number }).port;
+    const atomicApi = async (method: string, ep: string, body?: any) => {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'XMLHttpRequest',
+        Cookie: `accessToken=${atomicToken}`,
+      };
+      const opts: RequestInit = { method, headers };
+      if (body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(`http://localhost:${atomicPort}${ep}`, opts);
+      const t = await r.text();
+      return { status: r.status, data: t ? JSON.parse(t) : null };
+    };
+
+    try {
+      const resAtomicFail = await atomicApi('PUT', `/api/enrollments/${aSub.id}`, {
+        academicYear: 2026,
+        term: '1C',
+        status: 'promocionada',
+        professorIds: [],
+      });
+      const enrListAfterFail = await atomicApi('GET', '/api/enrollments');
+      const stateAfterFail = await atomicApi('GET', '/api/state');
+      const revProgAfterFail = (await atomicReviewsStore.getUserSubjectProgressMap(atomicUserId)).get(aSub.id);
+      assert(
+        resAtomicFail.status === 500 &&
+          atomicReviewsStore.enrollmentsMap.size === 0 &&
+          (enrListAfterFail.data?.data?.enrollments || []).length === 0 &&
+          stateAfterFail.data?.data?.progress?.['901']?.status === 'cursando' &&
+          revProgAfterFail?.status === 'cursando',
+        'Atomicidad: si falla el guardado del progreso (500), hace rollback de la cursada y no cambia el progreso'
+      );
+    } finally {
+      await new Promise<void>((resolve) => atomicServer.close(() => resolve()));
+      setActiveReviewsStore(store);
+    }
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
