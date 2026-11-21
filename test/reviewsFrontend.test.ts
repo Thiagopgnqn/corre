@@ -16,6 +16,8 @@ import {
   getActiveRecommendedReviewPairs,
   getSubjectsMissingDeclaredProfessors,
   resolveSubjectStatusFromEnrollment,
+  applyServerSubjectStatus,
+  canSaveEnrollmentInSimulation,
   getSubjectStatusRank,
   SUBJECT_STATUS_RANK,
 } from '../src/utils/enrollmentLogic';
@@ -24,8 +26,9 @@ import {
   getSubjectStatusRank as getBackendSubjectStatusRank,
   SUBJECT_STATUS_RANK as BACKEND_SUBJECT_STATUS_RANK,
 } from '../server/src/modules/enrollments/enrollmentStatus.helpers';
-import type { SubjectEnrollment } from '../src/types/enrollment';
-import type { Subject } from '../src/types/career';
+import { checkEligibility, getSubjectStatus } from '../src/utils/correlativas';
+import type { SubjectEnrollment, UpsertEnrollmentInput } from '../src/types/enrollment';
+import type { Subject, SubjectStatus, UserCareerState, UserSubjectState } from '../src/types/career';
 import type { ReviewableResponse } from '../src/types/professor';
 import { generateScheduleCombinations } from '../src/utils/scheduleLogic';
 import type { ProfessorBatchRating } from '../src/types/professor';
@@ -689,6 +692,11 @@ for (const cur of currentStatusCases) {
   }
 }
 
+assert(
+  matrixChecked === 12 * 9 && matrixChecked === 108,
+  `La matriz completa debe ejecutar 12 x 9 = 108 combinaciones (obtuvo ${matrixChecked})`
+);
+
 // Verificaciones puntuales explícitas de reglas críticas de negocio
 assert(
   resolveSubjectStatusFromEnrollment('aprobada', 'regularizada').shouldUpdate === false &&
@@ -718,6 +726,347 @@ assert(
 );
 
 console.log(`✅ Matriz completa verificada (${matrixChecked} combinaciones con paridad 100% frontend/backend)!\n`);
+
+// ======================================================================
+// 🧪 TESTS COMMIT 3: applyServerSubjectStatus, simulación, correlativas y flujo inverso
+// ======================================================================
+console.log('🧪 Ejecutando tests de applyServerSubjectStatus, modo simulación, correlativas y flujo inverso...');
+
+const FIXED_ISO = '2026-11-21T18:00:00.000Z';
+
+const localEntryCases: Array<{
+  label: string;
+  entry: UserSubjectState | undefined;
+  rank: number | null;
+}> = [
+  { label: 'undefined', entry: undefined, rank: 0 },
+  { label: 'disponible', entry: { status: 'disponible' }, rank: 0 },
+  { label: 'bloqueada', entry: { status: 'bloqueada' }, rank: 0 },
+  { label: 'libre', entry: { status: 'libre' }, rank: 0 },
+  { label: 'cursando', entry: { status: 'cursando' }, rank: 1 },
+  { label: 'regularizada', entry: { status: 'regularizada' }, rank: 2 },
+  { label: 'aprobada(9)', entry: { status: 'aprobada', grade: 9 }, rank: 3 },
+  { label: 'promocionada(10)', entry: { status: 'promocionada', grade: 10 }, rank: 4 },
+  { label: 'desconocido', entry: { status: 'desconocido' as SubjectStatus }, rank: null },
+];
+
+const serverStatusCases: Array<{
+  label: string;
+  value: string | null | undefined;
+  targetRank: number | null;
+  isValidFrontendStatus: boolean;
+}> = [
+  { label: 'undefined', value: undefined, targetRank: null, isValidFrontendStatus: false },
+  { label: 'null', value: null, targetRank: null, isValidFrontendStatus: false },
+  { label: 'vacío', value: '', targetRank: null, isValidFrontendStatus: false },
+  { label: 'desconocido', value: 'desconocido', targetRank: null, isValidFrontendStatus: false },
+  { label: 'pendiente', value: 'pendiente', targetRank: 0, isValidFrontendStatus: false },
+  { label: 'disponible', value: 'disponible', targetRank: 0, isValidFrontendStatus: true },
+  { label: 'bloqueada', value: 'bloqueada', targetRank: 0, isValidFrontendStatus: true },
+  { label: 'libre', value: 'libre', targetRank: 0, isValidFrontendStatus: true },
+  { label: 'cursando', value: 'cursando', targetRank: 1, isValidFrontendStatus: true },
+  { label: 'regularizada', value: 'regularizada', targetRank: 2, isValidFrontendStatus: true },
+  { label: 'aprobada', value: 'aprobada', targetRank: 3, isValidFrontendStatus: true },
+  { label: 'promocionada', value: 'promocionada', targetRank: 4, isValidFrontendStatus: true },
+];
+
+let applyServerMatrixChecked = 0;
+for (const localCase of localEntryCases) {
+  for (const srvCase of serverStatusCases) {
+    const result = applyServerSubjectStatus(localCase.entry, srvCase.value, FIXED_ISO);
+    const shouldChange =
+      srvCase.isValidFrontendStatus &&
+      srvCase.targetRank !== null &&
+      localCase.rank !== null &&
+      srvCase.targetRank > localCase.rank;
+
+    if (!shouldChange) {
+      assert(
+        result === null,
+        `applyServerSubjectStatus [${localCase.label} x ${srvCase.label}] debía devolver null, obtuvo ${JSON.stringify(result)}`
+      );
+    } else {
+      assert(
+        result !== null &&
+          result.status === srvCase.value &&
+          result.grade === localCase.entry?.grade &&
+          result.updatedAt === FIXED_ISO,
+        `applyServerSubjectStatus [${localCase.label} x ${srvCase.label}] debía actualizar a ${srvCase.value} preservando grade=${String(localCase.entry?.grade)}, obtuvo ${JSON.stringify(result)}`
+      );
+    }
+    applyServerMatrixChecked++;
+  }
+}
+
+assert(
+  applyServerMatrixChecked === 9 * 12 && applyServerMatrixChecked === 108,
+  `La tabla de applyServerSubjectStatus debe verificar 9 x 12 = 108 combinaciones (obtuvo ${applyServerMatrixChecked})`
+);
+
+// Compatibilidad hacia atrás: payload sin campo subjectStatus (backend anterior) no cambia nada local
+const legacyBackendEnrollment: SubjectEnrollment = {
+  id: 'enr-legacy',
+  subjectId: 'sub-101',
+  subjectCode: 101,
+  subjectName: 'Materia Genérica I',
+  subjectShortName: 'MG1',
+  subjectLevel: 1,
+  commissionId: null,
+  commissionCode: null,
+  turno: null,
+  academicYear: 2025,
+  term: '1C',
+  status: 'promocionada',
+  source: 'manual',
+  professors: [],
+  createdAt: FIXED_ISO,
+  updatedAt: FIXED_ISO,
+};
+assert(
+  applyServerSubjectStatus({ status: 'cursando' }, legacyBackendEnrollment.subjectStatus, FIXED_ISO) === null,
+  'Payload sin campo subjectStatus (backend viejo) no debe alterar el estado local ni fallar'
+);
+
+// Conservación explícita de nota local al subir aprobada -> promocionada
+const upgradedWithGrade = applyServerSubjectStatus(
+  { status: 'aprobada', grade: 9, updatedAt: '2025-01-01T00:00:00.000Z' },
+  'promocionada',
+  FIXED_ISO
+);
+assert(
+  upgradedWithGrade !== null &&
+    upgradedWithGrade.status === 'promocionada' &&
+    upgradedWithGrade.grade === 9 &&
+    upgradedWithGrade.updatedAt === FIXED_ISO,
+  'applyServerSubjectStatus debe conservar la nota local (9) al pasar de aprobada a promocionada'
+);
+
+// Regla canSaveEnrollmentInSimulation y corte antes de llamar API / mutar estado en simulación
+assert(
+  canSaveEnrollmentInSimulation(true) === false &&
+    canSaveEnrollmentInSimulation(false) === true &&
+    canSaveEnrollmentInSimulation(undefined) === true &&
+    canSaveEnrollmentInSimulation(null) === true,
+  'canSaveEnrollmentInSimulation debe devolver false en modo simulación y true fuera de él'
+);
+
+async function runSimulationAndSaveHarnessTests(): Promise<void> {
+  let apiCalls = 0;
+  let localUserState: UserCareerState = {
+    101: { status: 'disponible' },
+  };
+  let localEnrollments: SubjectEnrollment[] = [];
+
+  const simulateSaveSubjectEnrollment = async (
+    isSimulationMode: boolean,
+    subjectCode: number,
+    input: UpsertEnrollmentInput,
+    serverReturnedSubjectStatus?: string | null
+  ): Promise<SubjectEnrollment> => {
+    if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
+      throw new Error('No disponible en modo simulación');
+    }
+    apiCalls += 1;
+    const saved: SubjectEnrollment = {
+      id: `enr-${apiCalls}`,
+      subjectId: `sub-${subjectCode}`,
+      subjectCode,
+      subjectName: 'Materia Test',
+      subjectShortName: 'MT',
+      subjectLevel: 1,
+      commissionId: input.commissionId ?? null,
+      commissionCode: null,
+      turno: null,
+      academicYear: input.academicYear ?? 2026,
+      term: input.term ?? '1C',
+      status: input.status ?? 'cursando',
+      subjectStatus: serverReturnedSubjectStatus,
+      source: input.source ?? 'manual',
+      professors: [],
+      createdAt: FIXED_ISO,
+      updatedAt: FIXED_ISO,
+    };
+    localEnrollments = [saved, ...localEnrollments.filter((e) => e.id !== saved.id)];
+    const updatedEntry = applyServerSubjectStatus(
+      localUserState[subjectCode],
+      saved.subjectStatus,
+      FIXED_ISO
+    );
+    if (updatedEntry) {
+      localUserState = {
+        ...localUserState,
+        [subjectCode]: updatedEntry,
+      };
+    }
+    return saved;
+  };
+
+  let simErrorCaught = false;
+  try {
+    await simulateSaveSubjectEnrollment(
+      true,
+      101,
+      { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+      'promocionada'
+    );
+  } catch (err) {
+    simErrorCaught = (err as Error).message === 'No disponible en modo simulación';
+  }
+
+  assert(
+    simErrorCaught &&
+      apiCalls === 0 &&
+      localEnrollments.length === 0 &&
+      localUserState[101]?.status === 'disponible',
+    'En modo simulación, saveSubjectEnrollment debe cortar antes de llamar al servidor y no mutar cursadas ni progreso'
+  );
+
+  // Fuera de simulación sí guarda y promociona el estado local sin degradar ni duplicar
+  await simulateSaveSubjectEnrollment(
+    false,
+    101,
+    { academicYear: 2026, term: '1C', status: 'promocionada', professorIds: [] },
+    'promocionada'
+  );
+  assert(
+    apiCalls === 1 &&
+      localEnrollments.length === 1 &&
+      localUserState[101]?.status === 'promocionada',
+    'Fuera de simulación, saveSubjectEnrollment guarda la cursada y aplica subjectStatus="promocionada"'
+  );
+}
+
+await runSimulationAndSaveHarnessTests();
+
+// Efecto real en motor de correlativas (multi-carrera, sin datos fijos de Sistemas)
+const syntheticBaseSub: Subject = {
+  id: 101,
+  code: '101',
+  name: 'Materia Base Genérica',
+  level: 1,
+  modality: '1C',
+  weeklyHours: 4,
+  regularPrereqs: [],
+  approvedPrereqs: [],
+};
+const syntheticRegDepSub: Subject = {
+  id: 102,
+  code: '102',
+  name: 'Dependiente por Regularizada',
+  level: 2,
+  modality: '1C',
+  weeklyHours: 4,
+  regularPrereqs: [101],
+  approvedPrereqs: [],
+};
+const syntheticAprobDepSub: Subject = {
+  id: 103,
+  code: '103',
+  name: 'Dependiente por Aprobada',
+  level: 3,
+  modality: '1C',
+  weeklyHours: 4,
+  regularPrereqs: [],
+  approvedPrereqs: [101],
+};
+
+let correlativeState: UserCareerState = {};
+assert(
+  getSubjectStatus(syntheticBaseSub, correlativeState) === 'disponible' &&
+    getSubjectStatus(syntheticRegDepSub, correlativeState) === 'bloqueada' &&
+    getSubjectStatus(syntheticAprobDepSub, correlativeState) === 'bloqueada',
+  'Base arranca disponible y ambas dependientes bloqueadas cuando la materia base no tiene estado'
+);
+
+const baseAfterReg = applyServerSubjectStatus(correlativeState[101], 'regularizada', FIXED_ISO);
+assert(baseAfterReg !== null && baseAfterReg.status === 'regularizada', 'Regularizar base via cursada actualiza a regularizada');
+correlativeState = { ...correlativeState, 101: baseAfterReg! };
+
+assert(
+  checkEligibility(syntheticRegDepSub, correlativeState).eligible === true &&
+    getSubjectStatus(syntheticRegDepSub, correlativeState) === 'disponible' &&
+    checkEligibility(syntheticAprobDepSub, correlativeState).eligible === false &&
+    getSubjectStatus(syntheticAprobDepSub, correlativeState) === 'bloqueada',
+  'Con cursada regularizada se destraba dependiente regular y sigue bloqueada la dependiente aprobada'
+);
+
+const baseAfterPromo = applyServerSubjectStatus(correlativeState[101], 'promocionada', FIXED_ISO);
+assert(baseAfterPromo !== null && baseAfterPromo.status === 'promocionada', 'Promocionar base via cursada sube a promocionada');
+correlativeState = { ...correlativeState, 101: baseAfterPromo! };
+
+assert(
+  checkEligibility(syntheticAprobDepSub, correlativeState).eligible === true &&
+    getSubjectStatus(syntheticAprobDepSub, correlativeState) === 'disponible',
+  'Con cursada promocionada se cumple approvedPrereqs y la dependiente pasa a disponible'
+);
+
+// Flujo inverso: QuickStatusModal -> updateSubjectStatus -> EnrollmentModal -> saveSubjectEnrollment
+// Caso A: Usuario marca promocionada con nota 9 -> abre EnrollmentModal -> guarda cursada promocionada
+const quickPromoState: UserSubjectState = { status: 'promocionada', grade: 9, updatedAt: FIXED_ISO };
+const openPromptQuick = evaluateCommissionPromptOnStatusChange({
+  prevStatus: 'disponible',
+  nextStatus: 'promocionada',
+  existingSubjectEnrollments: [],
+  isSimulationMode: false,
+  source: 'status_change',
+});
+const serverDecisionQuick = resolveSubjectStatusFromEnrollment(quickPromoState.status, 'promocionada');
+const appliedAfterSaveQuick = applyServerSubjectStatus(
+  quickPromoState,
+  serverDecisionQuick.nextStatus,
+  '2026-11-21T18:05:00.000Z'
+);
+const rePromptAfterSaveQuick = evaluateCommissionPromptOnStatusChange({
+  prevStatus: 'promocionada',
+  nextStatus: 'promocionada',
+  existingSubjectEnrollments: [{ ...legacyBackendEnrollment, id: 'enr-new', status: 'promocionada' }],
+  isSimulationMode: false,
+  source: 'status_change',
+});
+assert(
+  openPromptQuick.shouldOpenModal === true &&
+    serverDecisionQuick.shouldUpdate === false &&
+    serverDecisionQuick.nextStatus === 'promocionada' &&
+    appliedAfterSaveQuick === null &&
+    quickPromoState.grade === 9 &&
+    rePromptAfterSaveQuick.shouldOpenModal === false,
+  'Flujo inverso (mismo estado promocionada + nota 9): sin doble escritura, sin pérdida de nota ni bucle de modal'
+);
+
+// Caso B: Usuario marca cursando en QuickStatusModal -> abre EnrollmentModal -> guarda cursada promocionada
+const quickCursandoState: UserSubjectState = { status: 'cursando', updatedAt: FIXED_ISO };
+const serverDecisionUpgrade = resolveSubjectStatusFromEnrollment(quickCursandoState.status, 'promocionada');
+const appliedAfterSaveUpgrade = applyServerSubjectStatus(
+  quickCursandoState,
+  serverDecisionUpgrade.nextStatus,
+  '2026-11-21T18:06:00.000Z'
+);
+assert(
+  serverDecisionUpgrade.shouldUpdate === true &&
+    serverDecisionUpgrade.nextStatus === 'promocionada' &&
+    appliedAfterSaveUpgrade !== null &&
+    appliedAfterSaveUpgrade.status === 'promocionada',
+  'Flujo inverso (cursando -> modal cambia a promocionada): aplica actualización local directamente sin pasar por updateSubjectStatus'
+);
+
+// Conserva nota 9 si QuickStatusModal dejó aprobada(9) y EnrollmentModal guarda cursada promocionada
+const quickAprobadaConNota: UserSubjectState = { status: 'aprobada', grade: 9, updatedAt: FIXED_ISO };
+const serverDecisionAprobPromo = resolveSubjectStatusFromEnrollment(quickAprobadaConNota.status, 'promocionada');
+const appliedAprobPromo = applyServerSubjectStatus(
+  quickAprobadaConNota,
+  serverDecisionAprobPromo.nextStatus,
+  '2026-11-21T18:07:00.000Z'
+);
+assert(
+  serverDecisionAprobPromo.shouldUpdate === true &&
+    serverDecisionAprobPromo.nextStatus === 'promocionada' &&
+    appliedAprobPromo !== null &&
+    appliedAprobPromo.status === 'promocionada' &&
+    appliedAprobPromo.grade === 9,
+  'Si pasa de aprobada (nota 9) a promocionada al guardar cursada, conserva la nota 9 intacta'
+);
+
+console.log(`✅ Tests de applyServerSubjectStatus (${applyServerMatrixChecked} combinaciones), simulación, correlativas y flujo inverso pasaron!\n`);
 
 console.log('TODAS LAS PRUEBAS DE RESEÑAS FRONTEND, INSIGNIAS, FILTROS Y ACCESIBILIDAD PASARON CON ÉXITO!');
 

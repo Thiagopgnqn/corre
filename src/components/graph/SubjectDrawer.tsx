@@ -51,6 +51,7 @@ export const SubjectDrawer: React.FC = () => {
     activePlan,
     allSubjects,
     subjectsById,
+    isSimulationMode,
   } = useCareer();
 
   const isMobile = useIsMobile();
@@ -174,17 +175,23 @@ export const SubjectDrawer: React.FC = () => {
 
         <button
           type="button"
+          disabled={isSimulationMode}
+          title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
           onClick={() =>
             openEnrollmentModal(selectedSubject.id, {
               targetStatus: status,
               editingEnrollment: null,
             })
           }
-          className="min-h-[44px] px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/35 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95"
+          className="min-h-[44px] px-3 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/35 text-indigo-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-indigo-600/20 disabled:active:scale-100"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>
-            {subjectEnrollments.length > 0 ? 'Agregar cursada' : 'Indicar comisión'}
+            {isSimulationMode
+              ? 'No disponible en modo simulación'
+              : subjectEnrollments.length > 0
+              ? 'Agregar cursada'
+              : 'Indicar comisión'}
           </span>
         </button>
       </div>
@@ -248,14 +255,15 @@ export const SubjectDrawer: React.FC = () => {
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
+                    disabled={isSimulationMode}
                     onClick={() =>
                       openEnrollmentModal(selectedSubject.id, {
                         targetStatus: status,
                         editingEnrollment: enr,
                       })
                     }
-                    title="Editar cursada"
-                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title={isSimulationMode ? 'No disponible en modo simulación' : 'Editar cursada'}
+                    className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
