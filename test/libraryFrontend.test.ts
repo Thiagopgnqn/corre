@@ -1257,6 +1257,14 @@ await test('20.1 Lote de 3 archivos con rechazo en el medio (completeUpload): 2 
     }),
     'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.'
   );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'DANGEROUS_PDF_CONTENT',
+      message:
+        'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
 });
 
 await test('20.2 Lote donde TODOS los archivos fallan llega a 100% y cierra sin trabarse', async () => {

