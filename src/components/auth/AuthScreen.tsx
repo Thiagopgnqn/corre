@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { Lock, Mail, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
 import { GoogleLoginButton } from './GoogleLoginButton';
@@ -15,21 +15,24 @@ export const AuthScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleGoogleSuccess = async (credential: string) => {
+  const loginWithGoogleRef = useRef(loginWithGoogle);
+  loginWithGoogleRef.current = loginWithGoogle;
+
+  const handleGoogleSuccess = useCallback(async (credential: string) => {
     setError(null);
     setIsSubmitting(true);
     try {
-      await loginWithGoogle(credential);
+      await loginWithGoogleRef.current(credential);
     } catch (err: any) {
       setError(err?.message || 'Error al iniciar sesión con Google.');
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, []);
 
-  const handleGoogleError = (errorMsg: string) => {
+  const handleGoogleError = useCallback((errorMsg: string) => {
     setError(errorMsg);
-  };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
