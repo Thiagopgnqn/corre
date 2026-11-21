@@ -37,6 +37,11 @@ import {
   findDefaultPublishedPlan,
   type PublishedPlanWithCareer,
 } from '../catalog/catalog.helpers.js';
+import { resolveSubjectStatusFromEnrollment } from '../enrollments/enrollmentStatus.helpers.js';
+import {
+  upsertSubjectProgressWithDb,
+  type UserStateStore,
+} from '../user-state/userState.store.js';
 
 export type ReviewStatus = 'published' | 'hidden' | 'removed';
 export type ReportReason = 'ofensiva' | 'datos personales' | 'falsa o spam' | 'otra';
@@ -190,6 +195,7 @@ export interface StoredEnrollment {
   term: EnrollmentTerm | null;
   source: EnrollmentSource;
   status: string | null;
+  subjectStatus?: string | null;
   professors: Array<{
     professorId: string;
     displayName: string;
@@ -584,6 +590,7 @@ export interface ReviewsStore {
 
   getAffectedProfessorIdsByUser(userId: string): Promise<string[]>;
   recalculateProfessorStats(professorId: string): Promise<void>;
+  linkUserStateStore?(userStateStore: UserStateStore): void;
 }
 
 function mapDbStatsRow(row: {
@@ -2760,7 +2767,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
   }): Promise<StoredEnrollment> {
     const uniqueProfIds = Array.from(new Set(params.professorIds));
 
-    const targetId = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const existingRows = await tx
         .select()
         .from(subjectEnrollments)
@@ -2867,7 +2874,10 @@ export class DrizzleReviewsStore implements ReviewsStore {
         if (placeholder) {
           await tx
             .update(subjectEnrollments)
-            .set({ updatedAt: new Date() })
+            .set({
+              status: params.status || placeholder.status || 'cursando',
+              updatedAt: new Date(),
+            })
             .where(eq(subjectEnrollments.id, placeholder.id));
           chosenId = placeholder.id;
           skipProfReplace = true;
@@ -2935,12 +2945,48 @@ export class DrizzleReviewsStore implements ReviewsStore {
         }
       }
 
-      return chosenId!;
+      const [existingProgress] = await tx
+        .select({
+          status: subjectProgress.status,
+          grade: subjectProgress.grade,
+        })
+        .from(subjectProgress)
+        .where(
+          and(
+            eq(subjectProgress.userId, params.userId),
+            eq(subjectProgress.subjectId, params.subjectId)
+          )
+        )
+        .for('update');
+
+      const currentSubjectStatus = existingProgress?.status ?? 'pendiente';
+      const existingGrade = existingProgress?.grade ?? null;
+      const resolution = resolveSubjectStatusFromEnrollment(
+        currentSubjectStatus,
+        params.status
+      );
+      let finalSubjectStatus = currentSubjectStatus;
+
+      if (resolution.shouldUpdate && resolution.nextStatus) {
+        await upsertSubjectProgressWithDb(
+          tx,
+          params.userId,
+          params.subjectId,
+          resolution.nextStatus,
+          existingGrade
+        );
+        finalSubjectStatus = resolution.nextStatus;
+      }
+
+      return { chosenId: chosenId!, finalSubjectStatus };
     });
 
     await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
-    const saved = await this.getEnrollmentById(targetId);
-    return saved!;
+    const saved = await this.getEnrollmentById(result.chosenId);
+    return {
+      ...saved!,
+      subjectStatus: result.finalSubjectStatus,
+    };
   }
 
   async deleteUserEnrollment(
@@ -3125,6 +3171,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     adminUserId: string | null;
   }> = [];
   public userProgress = new Map<string, Map<string, { status: string; grade: number | null }>>();
+  private linkedUserStateStore: UserStateStore | null = null;
   public reviewsMap = new Map<string, StoredReview>();
   public helpfulVotes = new Set<string>(); // `${reviewId}::${userId}`
   public reportsList: Array<{
@@ -3502,10 +3549,51 @@ export class InMemoryReviewsStore implements ReviewsStore {
     return false;
   }
 
+  linkUserStateStore(userStateStore: UserStateStore): void {
+    this.linkedUserStateStore = userStateStore;
+  }
+
+  private async getEffectiveSubjectProgress(
+    userId: string,
+    subjectId: string
+  ): Promise<{ status: string; grade: number | null }> {
+    if (this.linkedUserStateStore) {
+      const rows = await this.linkedUserStateStore.listSubjectProgress(userId, [subjectId]);
+      if (rows.length > 0) {
+        return {
+          status: rows[0].status,
+          grade: rows[0].grade !== null ? Number(rows[0].grade) : null,
+        };
+      }
+    }
+    const local = this.userProgress.get(userId)?.get(subjectId);
+    if (local) {
+      return { status: local.status, grade: local.grade };
+    }
+    return { status: 'pendiente', grade: null };
+  }
+
   async getUserSubjectProgressMap(
     userId: string
   ): Promise<Map<string, { status: string; grade: number | null }>> {
-    return this.userProgress.get(userId) || new Map();
+    const map = new Map<string, { status: string; grade: number | null }>();
+    const local = this.userProgress.get(userId);
+    if (local) {
+      for (const [sid, val] of local.entries()) {
+        map.set(sid, { ...val });
+      }
+    }
+    if (this.linkedUserStateStore) {
+      const allSubjectIds = Array.from(this.subjectsMap.keys());
+      const linkedRows = await this.linkedUserStateStore.listSubjectProgress(userId, allSubjectIds);
+      for (const r of linkedRows) {
+        map.set(r.subjectId, {
+          status: r.status,
+          grade: r.grade !== null ? Number(r.grade) : null,
+        });
+      }
+    }
+    return map;
   }
 
   async getGlobalPublishedSummary(
@@ -4522,24 +4610,57 @@ export class InMemoryReviewsStore implements ReviewsStore {
       r.commissionId === null &&
       r.professorIds.length === 0;
 
+    const enrollmentsSnapshot = new Map(
+      Array.from(this.enrollmentsMap.entries(), ([k, v]) => [
+        k,
+        { ...v, professorIds: [...v.professorIds] },
+      ])
+    );
+    const prevUserProg = this.userProgress.get(params.userId);
+    const userProgSnapshot = prevUserProg
+      ? new Map(Array.from(prevUserProg.entries(), ([k, v]) => [k, { ...v }]))
+      : undefined;
+
     const now = new Date();
     let targetId: string;
 
-    if (params.enrollmentId) {
-      const target = existingRows.find((r) => r.id === params.enrollmentId);
-      if (!target) {
-        const err = new Error('Cursada no encontrada');
-        (err as any).status = 404;
-        throw err;
-      }
-      if (params.academicYear !== null && params.term !== null) {
-        const conflict = existingRows.find(
-          (r) =>
-            r.id !== params.enrollmentId &&
-            r.academicYear === params.academicYear &&
-            r.term === params.term
+    try {
+      if (params.enrollmentId) {
+        const target = existingRows.find((r) => r.id === params.enrollmentId);
+        if (!target) {
+          const err = new Error('Cursada no encontrada');
+          (err as any).status = 404;
+          throw err;
+        }
+        if (params.academicYear !== null && params.term !== null) {
+          const conflict = existingRows.find(
+            (r) =>
+              r.id !== params.enrollmentId &&
+              r.academicYear === params.academicYear &&
+              r.term === params.term
+          );
+          if (conflict) {
+            const err = new Error(
+              'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
+            );
+            (err as any).status = 409;
+            (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
+            throw err;
+          }
+        }
+        target.commissionId = params.commissionId;
+        target.academicYear = params.academicYear;
+        target.term = params.term;
+        target.source = params.source;
+        target.status = params.status || 'cursando';
+        target.professorIds = uniqueProfIds;
+        target.updatedAt = now;
+        targetId = target.id;
+      } else if (params.academicYear !== null && params.term !== null) {
+        const samePeriod = existingRows.find(
+          (r) => r.academicYear === params.academicYear && r.term === params.term
         );
-        if (conflict) {
+        if (samePeriod) {
           const err = new Error(
             'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
           );
@@ -4547,107 +4668,122 @@ export class InMemoryReviewsStore implements ReviewsStore {
           (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
           throw err;
         }
-      }
-      target.commissionId = params.commissionId;
-      target.academicYear = params.academicYear;
-      target.term = params.term;
-      target.source = params.source;
-      target.status = params.status || 'cursando';
-      target.professorIds = uniqueProfIds;
-      target.updatedAt = now;
-      targetId = target.id;
-    } else if (params.academicYear !== null && params.term !== null) {
-      const samePeriod = existingRows.find(
-        (r) => r.academicYear === params.academicYear && r.term === params.term
-      );
-      if (samePeriod) {
-        const err = new Error(
-          'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
-        );
-        (err as any).status = 409;
-        (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
-        throw err;
-      }
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.commissionId = params.commissionId;
-        placeholder.academicYear = params.academicYear;
-        placeholder.term = params.term;
-        placeholder.source = params.source;
-        placeholder.status = params.status || 'cursando';
-        placeholder.professorIds = uniqueProfIds;
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.commissionId = params.commissionId;
+          placeholder.academicYear = params.academicYear;
+          placeholder.term = params.term;
+          placeholder.source = params.source;
+          placeholder.status = params.status || 'cursando';
+          placeholder.professorIds = uniqueProfIds;
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: params.commissionId,
+            academicYear: params.academicYear,
+            term: params.term,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: uniqueProfIds,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      } else if (params.commissionId === null && uniqueProfIds.length === 0) {
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.status = params.status || placeholder.status || 'cursando';
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else if (existingRows.length > 0) {
+          targetId = existingRows[0].id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: null,
+            academicYear: null,
+            term: null,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: [],
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: params.commissionId,
-          academicYear: params.academicYear,
-          term: params.term,
-          source: params.source,
-          status: params.status || 'cursando',
-          professorIds: uniqueProfIds,
-          createdAt: now,
-          updatedAt: now,
-        });
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.commissionId = params.commissionId;
+          placeholder.academicYear = params.academicYear;
+          placeholder.term = params.term;
+          placeholder.source = params.source;
+          placeholder.status = params.status || 'cursando';
+          placeholder.professorIds = uniqueProfIds;
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: params.commissionId,
+            academicYear: params.academicYear,
+            term: params.term,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: uniqueProfIds,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
-    } else if (params.commissionId === null && uniqueProfIds.length === 0) {
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.status = params.status || placeholder.status || 'cursando';
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
-      } else if (existingRows.length > 0) {
-        targetId = existingRows[0].id;
-      } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: null,
-          academicYear: null,
-          term: null,
-          source: params.source,
-          status: params.status || 'cursando',
-          professorIds: [],
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    } else {
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.commissionId = params.commissionId;
-        placeholder.academicYear = params.academicYear;
-        placeholder.term = params.term;
-        placeholder.source = params.source;
-        placeholder.status = params.status || 'cursando';
-        placeholder.professorIds = uniqueProfIds;
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
-      } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: params.commissionId,
-          academicYear: params.academicYear,
-          term: params.term,
-          source: params.source,
-          professorIds: uniqueProfIds,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    }
 
-    await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
-    return this.hydrateInMemoryEnrollment(this.enrollmentsMap.get(targetId)!);
+      const currentProg = await this.getEffectiveSubjectProgress(params.userId, params.subjectId);
+      const resolution = resolveSubjectStatusFromEnrollment(currentProg.status, params.status);
+      let finalSubjectStatus = currentProg.status;
+
+      if (resolution.shouldUpdate && resolution.nextStatus) {
+        if (this.linkedUserStateStore) {
+          await this.linkedUserStateStore.upsertSubjectProgress(
+            params.userId,
+            params.subjectId,
+            resolution.nextStatus,
+            currentProg.grade !== null ? String(currentProg.grade) : null
+          );
+        }
+        const userMap = this.userProgress.get(params.userId) || new Map();
+        userMap.set(params.subjectId, {
+          status: resolution.nextStatus,
+          grade: currentProg.grade,
+        });
+        this.userProgress.set(params.userId, userMap);
+        finalSubjectStatus = resolution.nextStatus;
+      }
+
+      await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+      return {
+        ...this.hydrateInMemoryEnrollment(this.enrollmentsMap.get(targetId)!),
+        subjectStatus: finalSubjectStatus,
+      };
+    } catch (err) {
+      this.enrollmentsMap = enrollmentsSnapshot;
+      if (userProgSnapshot) {
+        this.userProgress.set(params.userId, userProgSnapshot);
+      } else {
+        this.userProgress.delete(params.userId);
+      }
+      await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+      throw err;
+    }
   }
 
   async deleteUserEnrollment(
