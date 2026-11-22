@@ -35,7 +35,9 @@ import {
   getSubjectStatus,
 } from '../utils/correlativas';
 import {
+  canSaveEnrollmentInSimulation,
   evaluateCommissionPromptOnStatusChange,
+  executeSaveSubjectEnrollment,
   getReviewPromptsOnRegularizeTransition,
   type StatusChangeTriggerSource,
 } from '../utils/enrollmentLogic';
@@ -752,6 +754,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editingEnrollment?: SubjectEnrollment | null;
       }
     ) => {
+      if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
+        return;
+      }
       const sub = subjectsById.get(subjectCode);
       const currentStatus =
         options?.targetStatus ||
@@ -764,7 +769,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setKanbanEnrollmentHint(null);
     },
-    [activeState, subjectsById]
+    [activeState, isSimulationMode, subjectsById]
   );
 
   const dismissKanbanEnrollmentHint = useCallback(() => {
@@ -776,23 +781,31 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       subjectCode: number,
       input: UpsertEnrollmentInput
     ): Promise<SubjectEnrollment> => {
-      setSyncStatus('saving');
+      let didAttemptServerSave = false;
       try {
-        const res = await enrollmentsApi.upsertEnrollment(subjectCode, input);
-        const saved = res.data;
-        setEnrollments((prev) => {
-          const filtered = prev.filter((e) => e.id !== saved.id);
-          return [saved, ...filtered];
+        const saved = await executeSaveSubjectEnrollment({
+          isSimulationMode,
+          subjectCode,
+          input,
+          upsertEnrollment: (code, data) => {
+            setSyncStatus('saving');
+            didAttemptServerSave = true;
+            return enrollmentsApi.upsertEnrollment(code, data);
+          },
+          applyEnrollmentsUpdate: setEnrollments,
+          applyUserStateUpdate: setUserState,
         });
         setSyncStatus('saved');
         await refreshReviewableSummary();
         return saved;
       } catch (err) {
-        setSyncStatus('error');
+        if (didAttemptServerSave) {
+          setSyncStatus('error');
+        }
         throw err;
       }
     },
-    [refreshReviewableSummary]
+    [isSimulationMode, refreshReviewableSummary]
   );
 
   const deleteSubjectEnrollment = useCallback(

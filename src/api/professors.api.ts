@@ -159,11 +159,18 @@ export const professorsApi = {
   },
 
   // ── Endpoints exclusivos para rol admin ──
-  async adminGetModerationQueue(): Promise<{
+  async adminGetModerationQueue(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{
     success: boolean;
     data: AdminModerationQueueData;
   }> {
-    return apiFetch('/api/admin/reviews/reports');
+    const qs = new URLSearchParams();
+    if (filters?.careerId && filters.careerId !== 'all') qs.set('careerId', filters.careerId);
+    if (filters?.planId && filters.planId !== 'all') qs.set('planId', filters.planId);
+    const query = qs.toString();
+    return apiFetch(`/api/admin/reviews/reports${query ? `?${query}` : ''}`);
   },
 
   async adminSetReviewStatus(

@@ -1,5 +1,21 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { adminApi } from '../src/api/admin.api';
+import { adminLibraryApi } from '../src/api/library.api';
+import { professorsApi } from '../src/api/professors.api';
+import {
+  PUBLISH_DISABLED_REASON,
+  arrayBufferToBase64,
+  buildPreviewStateSignature,
+  formatModalityLabel,
+  formatSubjectCodeLabel,
+  getPlanStatusBadgeStyle,
+  groupCatalogSubjectsByLevel,
+  normalizeSharedDecisionMap,
+  serializeSharedDecisionsForApi,
+} from '../src/components/admin/tabs/adminCareersHelpers';
 
 console.log('======================================================================');
 console.log(' 🧪 TESTS FRONTEND: PANEL DE ADMINISTRACIÓN, SEGURIDAD Y PRIVACIDAD');
@@ -254,6 +270,305 @@ console.log('\n📌 6. Identificación de Autores de Reseñas para Administrador
   );
 
   console.log('  ✅ Panel de administración y perfiles docentes exponen la identidad del autor de forma exclusiva a administradores');
+}
+
+// =========================================================================
+// 7. TRAMO 2B — PANEL CARRERAS, HELPERS DE PREVIEW Y GUARDAS DE SOLO LECTURA
+// =========================================================================
+{
+  console.log('[7] Validando contratos API, helpers y guardas estructurales de Tramo 2B...');
+
+  // 7.1 Contratos API de administración de planes e importación
+  assert.equal(typeof adminApi.listPlans, 'function', 'adminApi.listPlans debe existir');
+  assert.equal(typeof adminApi.getPlanDetail, 'function', 'adminApi.getPlanDetail debe existir');
+  assert.equal(
+    typeof adminApi.getPlanTemplateDownloadUrl,
+    'function',
+    'adminApi.getPlanTemplateDownloadUrl debe existir'
+  );
+  assert.equal(
+    adminApi.getPlanTemplateDownloadUrl(),
+    '/api/admin/plans/template',
+    'La URL de descarga de plantilla debe apuntar al endpoint esperado'
+  );
+  assert.equal(
+    typeof adminApi.downloadPlanTemplate,
+    'function',
+    'adminApi.downloadPlanTemplate debe existir'
+  );
+  assert.equal(
+    typeof adminApi.previewPlanImport,
+    'function',
+    'adminApi.previewPlanImport debe existir'
+  );
+  assert.equal(
+    typeof adminApi.confirmPlanImport,
+    'function',
+    'adminApi.confirmPlanImport debe existir'
+  );
+  assert.equal(
+    typeof adminApi.deleteDraftPlan,
+    'function',
+    'adminApi.deleteDraftPlan debe existir'
+  );
+
+  // 7.2 Codificación Base64 binaria sin corrupción de bytes ZIP (.xlsx)
+  const zipMagicBytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff]);
+  const encoded = arrayBufferToBase64(zipMagicBytes.buffer);
+  assert.deepEqual(
+    Array.from(Buffer.from(encoded, 'base64')),
+    [0x50, 0x4b, 0x03, 0x04, 0x00, 0xff],
+    'arrayBufferToBase64 debe preservar bytes binarios exactos'
+  );
+
+  // 7.3 Matcher compartido: nunca auto-vincula en planes nuevos y conserva selecciones del borrador
+  const decisionMap = normalizeSharedDecisionMap([
+    {
+      subjectCode: 1,
+      name: 'Análisis Matemático I',
+      normalizedName: 'analisis matematico i',
+      confidence: 'high',
+      selectedDecision: null,
+      candidates: [
+        {
+          sharedSubjectId: 'shared-am1',
+          code: 'AM1',
+          displayName: 'Análisis Matemático I',
+          confidence: 'high',
+          score: 1,
+          usageCount: 1,
+        },
+      ],
+    },
+    {
+      subjectCode: 2,
+      name: 'Álgebra y Geometría Analítica',
+      normalizedName: 'algebra y geometria analitica',
+      confidence: 'low',
+      selectedDecision: {
+        subjectCode: 2,
+        action: 'link_existing',
+        sharedSubjectId: 'shared-aga',
+      },
+      candidates: [
+        {
+          sharedSubjectId: 'shared-aga',
+          code: 'AGA',
+          displayName: 'Álgebra y Geometría Analítica',
+          confidence: 'low',
+          score: 0.72,
+          usageCount: 1,
+        },
+      ],
+    },
+  ]);
+
+  assert.equal(
+    decisionMap[1],
+    null,
+    'Sugerencia high/exact en plan nuevo debe permanecer sin auto-vinculación'
+  );
+  assert.deepEqual(decisionMap[2], {
+    subjectCode: 2,
+    action: 'link_existing',
+    sharedSubjectId: 'shared-aga',
+  });
+
+  const serializedDecisions = serializeSharedDecisionsForApi({
+    ...decisionMap,
+    1: { subjectCode: 1, action: 'create_new', sharedSubjectId: 'ignored-id' },
+  });
+  assert.deepEqual(serializedDecisions, [
+    { subjectCode: 1, action: 'create_new' },
+    { subjectCode: 2, action: 'link_existing', sharedSubjectId: 'shared-aga' },
+  ]);
+
+  // 7.4 Sincronización de previewHash: cualquier cambio en archivo, metadata o decisiones invalida firma
+  const baseSigParams = {
+    fileBase64: encoded,
+    facultyId: 'fac-frc',
+    targetMode: 'new_career_and_plan' as const,
+    careerId: '',
+    careerName: 'Ingeniería Industrial',
+    careerCode: 'ind',
+    planId: '',
+    decisions: serializedDecisions,
+  };
+  const sigInitial = buildPreviewStateSignature(baseSigParams);
+  assert.equal(
+    sigInitial,
+    buildPreviewStateSignature({ ...baseSigParams, careerCode: ' IND ' }),
+    'La firma normaliza espacios y mayúsculas de careerCode'
+  );
+  assert.notEqual(
+    sigInitial,
+    buildPreviewStateSignature({ ...baseSigParams, fileBase64: encoded + 'AA==' }),
+    'Cambiar el archivo debe invalidar la firma de vista previa'
+  );
+  assert.notEqual(
+    sigInitial,
+    buildPreviewStateSignature({ ...baseSigParams, careerCode: 'MEC' }),
+    'Cambiar código de carrera debe invalidar la firma de vista previa'
+  );
+  assert.notEqual(
+    sigInitial,
+    buildPreviewStateSignature({
+      ...baseSigParams,
+      decisions: [{ subjectCode: 1, action: 'create_new' }],
+    }),
+    'Cambiar decisiones de materias compartidas debe invalidar la firma de vista previa'
+  );
+
+  // 7.5 Agrupación por nivel y formateo en visor solo lectura
+  const inputSubjects = [
+    {
+      id: 20,
+      code: 'IND-20',
+      name: 'Estudio del Trabajo',
+      shortName: 'Est. Trabajo',
+      level: 3,
+      modality: '2C' as const,
+      weeklyHours: 4,
+      regularPrereqs: [10],
+      approvedPrereqs: [],
+      isElective: false,
+      credits: 0,
+    },
+    {
+      id: 2,
+      code: 'IND-2',
+      name: 'Química General',
+      shortName: 'Química',
+      level: 1,
+      modality: 'A' as const,
+      weeklyHours: 5,
+      regularPrereqs: [],
+      approvedPrereqs: [],
+      isElective: false,
+      credits: 0,
+    },
+    {
+      id: 1,
+      code: 'IND-1',
+      name: 'Análisis Matemático I',
+      shortName: 'AM I',
+      level: 1,
+      modality: '1C-CC' as const,
+      weeklyHours: 5,
+      regularPrereqs: [],
+      approvedPrereqs: [],
+      isElective: false,
+      credits: 0,
+    },
+  ];
+  const grouped = groupCatalogSubjectsByLevel(inputSubjects);
+  assert.deepEqual(
+    grouped.map((g) => ({ level: g.level, ids: g.subjects.map((s) => s.id) })),
+    [
+      { level: 1, ids: [1, 2] },
+      { level: 3, ids: [20] },
+    ],
+    'groupCatalogSubjectsByLevel debe ordenar niveles e IDs sin mutar la entrada'
+  );
+  assert.equal(inputSubjects[0].id, 20);
+  const codeMap = new Map(inputSubjects.map((s) => [s.id, s]));
+  assert.equal(formatSubjectCodeLabel(1, codeMap), 'IND-1');
+  assert.equal(formatSubjectCodeLabel(999, codeMap), '999');
+  assert.equal(formatModalityLabel('A'), 'Anual');
+  assert.equal(formatModalityLabel('1C'), '1° Cuatrimestre');
+  assert.equal(formatModalityLabel('1C-CC'), '1° Cuat. / Contracuat.');
+  assert.match(getPlanStatusBadgeStyle('draft'), /amber/);
+
+  // 7.6 Guardas estáticas de UI Tramo 2B (sin CorrelativeGraph, Publicar deshabilitado, Reauth correcto)
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const viewerSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminPlanReadOnlyViewer.tsx'),
+    'utf-8'
+  );
+  const careersTabSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminCareersTab.tsx'),
+    'utf-8'
+  );
+  const dashboardSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/AdminDashboard.tsx'),
+    'utf-8'
+  );
+
+  assert.equal(
+    /CorrelativeGraph/.test(viewerSrc),
+    false,
+    'AdminPlanReadOnlyViewer no debe importar ni referenciar CorrelativeGraph'
+  );
+  assert.match(
+    careersTabSrc,
+    /import\s*\{\s*AdminPlanReadOnlyViewer\s*\}/,
+    'AdminCareersTab debe usar AdminPlanReadOnlyViewer para la vista de solo lectura'
+  );
+  assert.match(
+    careersTabSrc,
+    /<button[^>]*disabled[\s\S]{0,120}title=\{PUBLISH_DISABLED_REASON\}[\s\S]{0,400}Publicar[\s\S]{0,60}<\/button>/,
+    'El botón Publicar debe permanecer deshabilitado con el motivo Tramo 2C/2D'
+  );
+  assert.ok(PUBLISH_DISABLED_REASON.includes('Tramo 2C/2D'));
+  assert.match(
+    careersTabSrc,
+    /isPreviewStale/,
+    'AdminCareersTab debe bloquear confirmación si el archivo, destino o decisiones cambiaron desde el último preview'
+  );
+  assert.match(
+    careersTabSrc,
+    /<AdminReauthModal[\s\S]*actionTitle=\{reauthTitle\}/,
+    'AdminCareersTab debe pasar actionTitle (no title) a AdminReauthModal'
+  );
+  assert.match(
+    dashboardSrc,
+    /id:\s*'careers'[\s\S]*label:\s*'Carreras'/,
+    'AdminDashboard debe exponer la pestaña Carreras'
+  );
+  assert.match(
+    dashboardSrc,
+    /activeTab\s*===\s*'careers'\s*&&\s*<AdminCareersTab\s*\/>/,
+    'AdminDashboard debe renderizar AdminCareersTab cuando activeTab es careers'
+  );
+
+  console.log('  ✅ Tramo 2B (Carreras): API, firma previewHash, matcher, visor solo lectura y botón Publicar deshabilitado verificados');
+}
+
+// 8. Tramo 2C Parte C: Filtros Multi-Plan y Badges en Biblioteca y Reseñas Admin
+console.log('📌 8. Tramo 2C Parte C: Filtros careerId/planId en clientes API y pestañas de moderación');
+{
+  assert.equal(typeof adminLibraryApi.getPendingFiles, 'function');
+  assert.equal(typeof adminLibraryApi.getReports, 'function');
+  assert.equal(typeof adminLibraryApi.getCatalog, 'function');
+  assert.equal(typeof professorsApi.adminGetModerationQueue, 'function');
+  assert.equal(typeof adminApi.listReviews, 'function');
+  assert.equal(typeof adminApi.listProfessors, 'function');
+  assert.equal(typeof adminApi.linkProfessorToSubject, 'function');
+
+  const testDir = path.dirname(fileURLToPath(import.meta.url));
+  const libTabSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminLibraryTab.tsx'),
+    'utf-8'
+  );
+  const revTabSrc = fs.readFileSync(
+    path.resolve(testDir, '../src/components/admin/tabs/AdminReviewsTab.tsx'),
+    'utf-8'
+  );
+
+  assert.match(libTabSrc, /Filtrar por carrera/);
+  assert.match(libTabSrc, /Filtrar por plan/);
+  assert.match(libTabSrc, /formatCareerPlanBadge/);
+  assert.match(libTabSrc, /adminApi\s*\n?\s*\.listPlans\(\)/);
+  assert.match(revTabSrc, /Filtrar por carrera/);
+  assert.match(revTabSrc, /Filtrar por plan/);
+  assert.match(revTabSrc, /formatCareerPlanBadge/);
+  assert.match(revTabSrc, /adminApi\s*\n?\s*\.listPlans\(\)/);
+  assert.match(revTabSrc, /Vincular Docente a Materia/);
+  assert.match(revTabSrc, /adminApi\.getPlanDetail/);
+  assert.match(revTabSrc, /adminApi\.linkProfessorToSubject/);
+  assert.match(revTabSrc, /adminApi\.listProfessors/);
+
+  console.log('  ✅ Filtros multi-plan, badges y gestión docente desacoplada de selectedPlanId verificados');
 }
 
 console.log('\n======================================================================');

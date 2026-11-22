@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   BookOpen,
   CheckCircle2,
@@ -17,6 +17,11 @@ import {
   X,
 } from 'lucide-react';
 import { adminLibraryApi } from '../../../api/library.api';
+import {
+  adminApi,
+  type AdminCareerItem,
+  type AdminPlanOverviewItem,
+} from '../../../api/admin.api';
 import { AdminReauthModal } from '../AdminReauthModal';
 import type {
   AdminLibraryFile,
@@ -26,6 +31,20 @@ import type {
 
 export const AdminLibraryTab: React.FC = () => {
   const [subTab, setSubTab] = useState<'pending' | 'reports' | 'catalog'>('pending');
+
+  // Career/Plan multi-plan filters
+  const [adminCareers, setAdminCareers] = useState<AdminCareerItem[]>([]);
+  const [adminPlans, setAdminPlans] = useState<AdminPlanOverviewItem[]>([]);
+  const [careerFilter, setCareerFilter] = useState<string>('all');
+  const [planFilter, setPlanFilter] = useState<string>('all');
+
+  const filteredPlanOptions = useMemo(
+    () =>
+      careerFilter === 'all'
+        ? adminPlans
+        : adminPlans.filter((p) => p.careerId === careerFilter),
+    [adminPlans, careerFilter]
+  );
 
   // Pending queue
   const [pendingFiles, setPendingFiles] = useState<AdminLibraryFile[]>([]);
@@ -112,11 +131,28 @@ export const AdminLibraryTab: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    adminApi
+      .listPlans()
+      .then((res) => {
+        if (res.success && res.data) {
+          setAdminCareers(res.data.careers || []);
+          setAdminPlans(res.data.plans || []);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const currentHierarchyFilter = {
+    careerId: careerFilter !== 'all' ? careerFilter : undefined,
+    planId: planFilter !== 'all' ? planFilter : undefined,
+  };
+
   // Fetch pending files
   const fetchPending = async () => {
     setIsLoadingPending(true);
     try {
-      const res = await adminLibraryApi.getPendingFiles();
+      const res = await adminLibraryApi.getPendingFiles(currentHierarchyFilter);
       if (res.success && res.data) {
         setPendingFiles(res.data.files);
       }
@@ -131,7 +167,7 @@ export const AdminLibraryTab: React.FC = () => {
   const fetchReports = async () => {
     setIsLoadingReports(true);
     try {
-      const res = await adminLibraryApi.getReports('open');
+      const res = await adminLibraryApi.getReports('open', currentHierarchyFilter);
       if (res.success && res.data) {
         setReports(res.data.reports);
       }
@@ -148,6 +184,8 @@ export const AdminLibraryTab: React.FC = () => {
     try {
       const res = await adminLibraryApi.getCatalog({
         status: catalogStatusFilter !== 'all' ? catalogStatusFilter : undefined,
+        careerId: careerFilter !== 'all' ? careerFilter : undefined,
+        planId: planFilter !== 'all' ? planFilter : undefined,
         search: catalogSearch.trim() || undefined,
       });
       if (res.success && res.data) {
@@ -165,7 +203,19 @@ export const AdminLibraryTab: React.FC = () => {
     if (subTab === 'pending') fetchPending();
     else if (subTab === 'reports') fetchReports();
     else if (subTab === 'catalog') fetchCatalog();
-  }, [subTab, catalogStatusFilter, catalogSearch]);
+  }, [subTab, catalogStatusFilter, catalogSearch, careerFilter, planFilter]);
+
+  const formatCareerPlanBadge = (item: {
+    careerCode?: string | null;
+    careerName?: string | null;
+    planName?: string | null;
+    planYear?: number | null;
+  }): string | null => {
+    const careerPart = item.careerCode || item.careerName || '';
+    const planPart = item.planName || (item.planYear ? `Plan ${item.planYear}` : '');
+    if (careerPart && planPart) return `${careerPart} · ${planPart}`;
+    return careerPart || planPart || null;
+  };
 
   // Test Storage Action
   const handleTestStorage = async () => {
@@ -431,6 +481,48 @@ export const AdminLibraryTab: React.FC = () => {
           <BookOpen className="w-4 h-4" />
           <span>Catálogo Completo</span>
         </button>
+
+        {adminPlans.length > 0 && (
+          <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <select
+              aria-label="Filtrar por carrera"
+              value={careerFilter}
+              onChange={(e) => {
+                const nextCareer = e.target.value;
+                setCareerFilter(nextCareer);
+                if (
+                  nextCareer !== 'all' &&
+                  planFilter !== 'all' &&
+                  !adminPlans.some((p) => p.id === planFilter && p.careerId === nextCareer)
+                ) {
+                  setPlanFilter('all');
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+            >
+              <option value="all">Todas las carreras</option>
+              {adminCareers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.code} · {c.name}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filtrar por plan"
+              value={planFilter}
+              onChange={(e) => setPlanFilter(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200"
+            >
+              <option value="all">Todos los planes</option>
+              {filteredPlanOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.careerCode} · {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* 1. COLA DE MODERACIÓN */}
@@ -470,6 +562,11 @@ export const AdminLibraryTab: React.FC = () => {
                 >
                   <div className="space-y-2 flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
+                      {formatCareerPlanBadge(file) && (
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                          {formatCareerPlanBadge(file)}
+                        </span>
+                      )}
                       <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 uppercase">
                         {file.kind}
                       </span>
@@ -631,7 +728,12 @@ export const AdminLibraryTab: React.FC = () => {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {formatCareerPlanBadge(report) && (
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                            {formatCareerPlanBadge(report)}
+                          </span>
+                        )}
                         <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-500/20 text-rose-300 uppercase border border-rose-500/30">
                           {report.reason.replace(/_/g, ' ')}
                         </span>
@@ -761,7 +863,12 @@ export const AdminLibraryTab: React.FC = () => {
                   className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {formatCareerPlanBadge(file) && (
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                          {formatCareerPlanBadge(file)}
+                        </span>
+                      )}
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${
                           file.status === 'approved'

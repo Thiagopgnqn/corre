@@ -70,6 +70,14 @@ function toAdminFile(raw: any): AdminLibraryFile {
     adminNotifiedAt: raw.adminNotifiedAt ?? null,
     uploaderNotifiedAt: raw.uploaderNotifiedAt ?? null,
     subjectName: raw.subjectName,
+    careerId: raw.careerId ?? null,
+    careerCode: raw.careerCode ?? null,
+    careerName: raw.careerName ?? null,
+    planId: raw.planId ?? null,
+    planName: raw.planName ?? null,
+    planYear: raw.planYear ?? null,
+    planStatus: raw.planStatus ?? null,
+    facultyName: raw.facultyName ?? null,
   };
 }
 
@@ -354,8 +362,17 @@ export const adminLibraryApi = {
     return apiFetch('/api/admin/library/stats');
   },
 
-  async getPendingFiles(): Promise<{ success: boolean; data: { files: AdminLibraryFile[]; total: number } }> {
-    const res = await apiFetch<{ success: boolean; data: any[] }>('/api/admin/library/pending');
+  async getPendingFiles(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{ success: boolean; data: { files: AdminLibraryFile[]; total: number } }> {
+    const qs = new URLSearchParams();
+    if (filters?.careerId && filters.careerId !== 'all') qs.set('careerId', filters.careerId);
+    if (filters?.planId && filters.planId !== 'all') qs.set('planId', filters.planId);
+    const query = qs.toString();
+    const res = await apiFetch<{ success: boolean; data: any[] }>(
+      `/api/admin/library/pending${query ? `?${query}` : ''}`
+    );
     const files = (res.data || []).map(toAdminFile);
     return { success: res.success, data: { files, total: files.length } };
   },
@@ -387,12 +404,20 @@ export const adminLibraryApi = {
     });
   },
 
-  async getReports(status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open'): Promise<{
+  async getReports(
+    status: 'open' | 'dismissed' | 'actioned' | 'all' = 'open',
+    filters?: { careerId?: string; planId?: string }
+  ): Promise<{
     success: boolean;
     data: { reports: AdminLibraryReport[]; total: number };
   }> {
+    const qs = new URLSearchParams();
+    qs.set('status', status);
+    if (filters?.careerId && filters.careerId !== 'all') qs.set('careerId', filters.careerId);
+    if (filters?.planId && filters.planId !== 'all') qs.set('planId', filters.planId);
+    const query = qs.toString();
     const res = await apiFetch<{ success: boolean; data: any[] }>(
-      `/api/admin/library/reports?status=${encodeURIComponent(status)}`
+      `/api/admin/library/reports${query ? `?${query}` : ''}`
     );
     const reports: AdminLibraryReport[] = (res.data || []).map((r) => ({
       id: r.id,
@@ -402,6 +427,15 @@ export const adminLibraryApi = {
       note: r.note ?? null,
       status: r.status,
       createdAt: String(r.createdAt),
+      subjectName: r.subjectName,
+      careerId: r.careerId ?? null,
+      careerCode: r.careerCode ?? null,
+      careerName: r.careerName ?? null,
+      planId: r.planId ?? null,
+      planName: r.planName ?? null,
+      planYear: r.planYear ?? null,
+      planStatus: r.planStatus ?? null,
+      facultyName: r.facultyName ?? null,
       file: {
         id: r.fileId,
         title: r.fileTitle,
@@ -444,6 +478,8 @@ export const adminLibraryApi = {
   async getCatalog(params?: {
     status?: string;
     subjectId?: string;
+    careerId?: string;
+    planId?: string;
     kind?: string;
     search?: string;
     page?: number;
@@ -455,6 +491,8 @@ export const adminLibraryApi = {
     const qs = new URLSearchParams();
     if (params?.status) qs.set('status', params.status);
     if (params?.subjectId) qs.set('subjectId', params.subjectId);
+    if (params?.careerId && params.careerId !== 'all') qs.set('careerId', params.careerId);
+    if (params?.planId && params.planId !== 'all') qs.set('planId', params.planId);
     if (params?.kind) qs.set('kind', params.kind);
     if (params?.search) qs.set('search', params.search);
     if (params?.page) qs.set('page', String(params.page));

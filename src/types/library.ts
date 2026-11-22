@@ -105,7 +105,18 @@ export interface LibraryFilterParams {
   pageSize?: number;
 }
 
-export interface AdminLibraryFile extends LibraryFileUser {
+export interface LibraryCareerPlanMeta {
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planId?: string | null;
+  planName?: string | null;
+  planYear?: number | null;
+  planStatus?: string | null;
+  facultyName?: string | null;
+}
+
+export interface AdminLibraryFile extends LibraryFileUser, LibraryCareerPlanMeta {
   storageKey: string;
   sha256: string | null;
   uploaderUserId: string | null;
@@ -117,7 +128,7 @@ export interface AdminLibraryFile extends LibraryFileUser {
   subjectName?: string;
 }
 
-export interface AdminLibraryReport {
+export interface AdminLibraryReport extends LibraryCareerPlanMeta {
   id: string;
   fileId: string;
   reporterUserId: string;
@@ -125,6 +136,7 @@ export interface AdminLibraryReport {
   note: string | null;
   status: 'open' | 'dismissed' | 'actioned';
   createdAt: string;
+  subjectName?: string;
   file?: {
     id: string;
     title: string;
