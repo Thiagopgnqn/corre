@@ -13,8 +13,10 @@ import {
   parseFilenameSuggestions,
   applyDefaultYearTerm,
   validateBatchItem,
+  formatUploadErrorMessage,
   UploadQueueCoordinator,
   type BatchFileItem,
+  type UploadOverallStats,
 } from '../src/utils/libraryUploadLogic';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1114,6 +1116,538 @@ await test('19.1 UploadMaterialModal soporta múltiples archivos sin capture, in
 
   // 5. Región aria-live para lecturas accesibles
   assert.match(code, /aria-live="polite"/, 'Debe incluir aria-live polite para accesibilidad de pantalla');
+});
+
+// ---------------------------------------------------------------------
+// 20. Regresión: Subida múltiple independiente ante fallos y cierre garantizado
+// ---------------------------------------------------------------------
+function makeMockBatchItem(
+  id: string,
+  name: string,
+  size = 1024,
+  type = 'application/pdf'
+): BatchFileItem {
+  return {
+    id,
+    file: { name, size, type } as any,
+    title: `Material ${name}`,
+    kind: 'apunte',
+    academicYear: null,
+    term: null,
+    examInstance: null,
+    hasSolution: false,
+    description: '',
+    status: 'idle',
+    progress: 0,
+    retryCount: 0,
+  };
+}
+
+await test('20.1 Lote de 3 archivos con rechazo en el medio (completeUpload): 2 terminan bien, progreso llega a 100%, no queda trabado y muestra mensaje claro', async () => {
+  const progressSnapshots: UploadOverallStats[] = [];
+
+  const mockApi = {
+    initUpload: async (payload: any) => ({
+      success: true,
+      data: {
+        fileId: `fid_${payload.originalFilename}`,
+        uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+        storageKey: `key_${payload.originalFilename}`,
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async (
+      _url: string,
+      _file: any,
+      _ct: string,
+      onProgress?: (pct: number) => void
+    ) => {
+      if (onProgress) onProgress(100);
+      await new Promise((r) => setTimeout(r, 10));
+    },
+    completeUpload: async (fileId: string) => {
+      if (fileId === 'fid_disfrazado.pdf') {
+        const err: any = new Error(
+          'El contenido real del archivo no coincide con la firma requerida para application/pdf.'
+        );
+        err.status = 400;
+        err.code = 'INVALID_FILE_CONTENT';
+        throw err;
+      }
+      return { success: true, data: { status: 'pending' } };
+    },
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    maxConcurrentCompletes: 2,
+    maxRetries: 2,
+    backoffDelays: [0, 0],
+    api: mockApi as any,
+    onOverallProgress: (stats) => {
+      progressSnapshots.push(stats);
+    },
+  });
+
+  const items = [
+    makeMockBatchItem('it_1', 'bueno1.pdf', 2000),
+    makeMockBatchItem('it_2', 'disfrazado.pdf', 2000),
+    makeMockBatchItem('it_3', 'bueno2.pdf', 2000),
+  ];
+
+  coordinator.setQueue(items, 'sub-mock');
+  const summary = await coordinator.start();
+
+  assert.equal(coordinator.isBusy(), false, 'El coordinador no debe quedar ocupado al terminar el lote');
+  assert.equal(summary.totalCount, 3);
+  assert.equal(summary.completedCount, 2, 'Los otros 2 archivos válidos deben terminar bien');
+  assert.equal(summary.failedCount, 1, 'Solo el archivo rechazado debe contar como error');
+  assert.equal(summary.cancelledCount, 0);
+
+  const it1 = coordinator.getItem('it_1');
+  const it2 = coordinator.getItem('it_2');
+  const it3 = coordinator.getItem('it_3');
+  assert.equal(it1?.status, 'done');
+  assert.equal(it1?.progress, 100);
+  assert.equal(it2?.status, 'error');
+  assert.equal(it2?.errorCode, 'INVALID_FILE_CONTENT');
+  assert.equal(
+    it2?.error,
+    'Este archivo no es un PDF ni una imagen válida.',
+    'El mensaje de error debe estar en español rioplatense claro'
+  );
+  assert.equal(it3?.status, 'done');
+  assert.equal(it3?.progress, 100);
+
+  const lastProgress = progressSnapshots[progressSnapshots.length - 1];
+  assert.equal(lastProgress?.percent, 100, 'El porcentaje global debe llegar al 100%');
+  assert.equal(lastProgress?.isFinished, true, 'El estado final debe marcar isFinished = true');
+  assert.equal(lastProgress?.settledCount, 3);
+
+  // También verifica traducción sin code explícito para firma inválida, JS peligroso, PDF protegido y no verificable
+  assert.equal(
+    formatUploadErrorMessage(
+      new Error('El contenido real del archivo no coincide con la firma requerida para application/pdf.')
+    ),
+    'Este archivo no es un PDF ni una imagen válida.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'DANGEROUS_PDF_CONTENT',
+      message:
+        'Este PDF contiene acciones automáticas o ejecutables bloqueadas por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'Este PDF contiene acciones automáticas o ejecutables bloqueadas por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'INVALID_FILE_CONTENT',
+      message:
+        'PDF protegido: no pudimos verificar su contenido por seguridad. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'PDF protegido: no pudimos verificar su contenido por seguridad. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'INVALID_FILE_CONTENT',
+      message:
+        'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'No pudimos verificar la seguridad de este PDF. Volvé a exportarlo o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+  assert.equal(
+    formatUploadErrorMessage({
+      code: 'DANGEROUS_PDF_CONTENT',
+      message:
+        'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.',
+    }),
+    'Este PDF contiene demasiados archivos adjuntos embebidos y fue bloqueado por seguridad. Volvé a exportar el PDF o imprimilo a PDF desde tu navegador y subilo de nuevo.'
+  );
+});
+
+await test('20.2 Lote donde TODOS los archivos fallan llega a 100% y cierra sin trabarse', async () => {
+  let latestStats: UploadOverallStats | null = null;
+
+  const mockApi = {
+    initUpload: async (payload: any) => {
+      if (payload.originalFilename === 'falla_init.pdf') {
+        const err: any = new Error('Superaste tu cuota disponible.');
+        err.status = 429;
+        err.code = 'LIMIT_STORAGE_QUOTA';
+        throw err;
+      }
+      return {
+        success: true,
+        data: {
+          fileId: `fid_${payload.originalFilename}`,
+          uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+          storageKey: `key_${payload.originalFilename}`,
+          maxSizeBytes: 25 * 1024 * 1024,
+          headers: {},
+        },
+      };
+    },
+    uploadDirectToR2: async (_url: string, file: any) => {
+      if (file.name === 'falla_put.pdf') {
+        const err: any = new Error('Storage error');
+        err.status = 403;
+        throw err;
+      }
+    },
+    completeUpload: async () => {
+      const err: any = new Error(
+        'El documento PDF contiene elementos ejecutables o scripts no permitidos (/JavaScript).'
+      );
+      err.status = 400;
+      err.code = 'DANGEROUS_PDF_CONTENT';
+      throw err;
+    },
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    maxRetries: 1,
+    backoffDelays: [0],
+    api: mockApi as any,
+    onOverallProgress: (s) => {
+      latestStats = s;
+    },
+  });
+
+  const items = [
+    makeMockBatchItem('all_1', 'falla_init.pdf', 1500),
+    makeMockBatchItem('all_2', 'falla_put.pdf', 1500),
+    makeMockBatchItem('all_3', 'falla_complete.pdf', 1500),
+  ];
+
+  coordinator.setQueue(items, 'sub-mock');
+  const summary = await coordinator.start();
+
+  assert.equal(coordinator.isBusy(), false);
+  assert.equal(summary.completedCount, 0);
+  assert.equal(summary.failedCount, 3);
+  assert.equal(summary.totalCount, 3);
+  assert.equal(latestStats?.percent, 100);
+  assert.equal(latestStats?.isFinished, true);
+  for (const it of coordinator.getAllItems()) {
+    assert.equal(it.status, 'error');
+    assert.ok(Boolean(it.error));
+  }
+});
+
+await test('20.3 Error de red en un archivo: limpia fila uploading tras PUT fallido, no corta al resto y llega a 100%', async () => {
+  const cleanedIds: string[] = [];
+  let completeNetAttempts = 0;
+
+  const mockApi = {
+    initUpload: async (payload: any) => ({
+      success: true,
+      data: {
+        fileId: `fid_${payload.originalFilename}`,
+        uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+        storageKey: `key_${payload.originalFilename}`,
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async (url: string) => {
+      if (url.includes('red_put.pdf')) {
+        const err: any = new Error('Error de red o CORS al transferir el archivo al almacenamiento.');
+        err.status = 0;
+        err.code = 'STORAGE_NETWORK_ERROR';
+        throw err;
+      }
+    },
+    completeUpload: async (fileId: string) => {
+      if (fileId === 'fid_red_complete_recupera.pdf') {
+        completeNetAttempts++;
+        if (completeNetAttempts === 1) {
+          const err: any = new Error('Error de conexión con el servidor');
+          err.status = 0;
+          err.code = 'NETWORK_ERROR';
+          throw err;
+        }
+      }
+      return { success: true, data: {} };
+    },
+    deleteMyUpload: async (fileId: string) => {
+      cleanedIds.push(fileId);
+      return { success: true, data: {} };
+    },
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    maxRetries: 2,
+    backoffDelays: [0, 0],
+    api: mockApi as any,
+  });
+
+  const items = [
+    makeMockBatchItem('n1', 'red_put.pdf', 1000),
+    makeMockBatchItem('n2', 'ok.pdf', 1000),
+    makeMockBatchItem('n3', 'red_complete_recupera.pdf', 1000),
+  ];
+
+  coordinator.setQueue(items, 'sub-mock');
+  const summary = await coordinator.start();
+
+  assert.equal(coordinator.isBusy(), false);
+  assert.equal(summary.completedCount, 2);
+  assert.equal(summary.failedCount, 1);
+  assert.equal(coordinator.getOverallStats().percent, 100);
+  assert.equal(coordinator.getItem('n1')?.status, 'error');
+  assert.ok(
+    coordinator.getItem('n1')?.error?.includes('problema de conexión'),
+    'Debe mostrar mensaje amigable de error de conexión'
+  );
+  assert.ok(
+    cleanedIds.includes('fid_red_put.pdf'),
+    'Debe limpiar en el backend el fileId creado cuando falla el PUT a R2'
+  );
+  assert.equal(coordinator.getItem('n2')?.status, 'done');
+  assert.equal(coordinator.getItem('n3')?.status, 'done');
+  assert.equal(completeNetAttempts, 2, 'NETWORK_ERROR en completeUpload debe reintentar sin repetir PUT');
+});
+
+await test('20.4 Error en initUpload (429 LIMIT_PENDING_UPLOADS sin reintentos) vs error en completeUpload y retryFailed()', async () => {
+  let initCallsFile2 = 0;
+  let pendingLimitActive = true;
+  let completeCallsByFile: Record<string, number> = {};
+
+  const mockApi = {
+    initUpload: async (payload: any) => {
+      if (payload.originalFilename === 'bloqueado_cupo.pdf') {
+        initCallsFile2++;
+        if (pendingLimitActive) {
+          const err: any = new Error(
+            'Tenés 30 archivos pendientes de revisión (máximo 30). Esperá a que se aprueben para subir más.'
+          );
+          err.status = 429;
+          err.code = 'LIMIT_PENDING_UPLOADS';
+          throw err;
+        }
+      }
+      return {
+        success: true,
+        data: {
+          fileId: `fid_${payload.originalFilename}`,
+          uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+          storageKey: `key_${payload.originalFilename}`,
+          maxSizeBytes: 25 * 1024 * 1024,
+          headers: {},
+        },
+      };
+    },
+    uploadDirectToR2: async () => {},
+    completeUpload: async (fileId: string) => {
+      completeCallsByFile[fileId] = (completeCallsByFile[fileId] || 0) + 1;
+      if (fileId === 'fid_error_complete.pdf' && completeCallsByFile[fileId] === 1) {
+        const err: any = new Error('Duplicado');
+        err.status = 409;
+        err.code = 'DUPLICATE_FILE';
+        throw err;
+      }
+      return { success: true, data: {} };
+    },
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 3,
+    maxRetries: 4,
+    backoffDelays: [0, 0, 0, 0],
+    api: mockApi as any,
+  });
+
+  const items = [
+    makeMockBatchItem('f1', 'valido.pdf', 1000),
+    makeMockBatchItem('f2', 'bloqueado_cupo.pdf', 1000),
+    makeMockBatchItem('f3', 'error_complete.pdf', 1000),
+  ];
+
+  coordinator.setQueue(items, 'sub-mock');
+  const summary1 = await coordinator.start();
+
+  assert.equal(initCallsFile2, 1, 'LIMIT_PENDING_UPLOADS NO debe disparar reintentos inútiles');
+  assert.equal(summary1.completedCount, 1);
+  assert.equal(summary1.failedCount, 2);
+  assert.equal(coordinator.getOverallStats().percent, 100);
+  assert.equal(coordinator.getItem('f1')?.status, 'done');
+  assert.equal(coordinator.getItem('f2')?.status, 'error');
+  assert.equal(coordinator.getItem('f3')?.status, 'error');
+
+  // Liberamos cupo y reintentamos solo los fallidos
+  pendingLimitActive = false;
+  const summary2 = await coordinator.retryFailed();
+  assert.equal(summary2.completedCount, 3, 'retryFailed debe reintentar los fallidos y preservar f1 done');
+  assert.equal(summary2.failedCount, 0);
+  assert.equal(completeCallsByFile['fid_valido.pdf'], 1, 'f1 ya done NO debe re-subirse en retryFailed');
+  assert.equal(initCallsFile2, 2);
+});
+
+await test('20.5 No permite cancelar un archivo que ya está en estado completing', async () => {
+  let deleteCalled = false;
+  let releaseComplete!: () => void;
+  const completeGate = new Promise<void>((r) => {
+    releaseComplete = r;
+  });
+
+  const mockApi = {
+    initUpload: async () => ({
+      success: true,
+      data: {
+        fileId: 'fid_completing',
+        uploadUrl: 'https://r2.mock/completing',
+        storageKey: 'key_completing',
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async () => {},
+    completeUpload: async () => {
+      await completeGate;
+      return { success: true, data: {} };
+    },
+    deleteMyUpload: async () => {
+      deleteCalled = true;
+      return { success: true, data: {} };
+    },
+  };
+
+  const coordinator = new UploadQueueCoordinator({
+    maxConcurrentPuts: 1,
+    api: mockApi as any,
+  });
+
+  coordinator.setQueue([makeMockBatchItem('it_c', 'validando.pdf', 1000)], 'sub-mock');
+  const startPromise = coordinator.start();
+
+  while (coordinator.getItem('it_c')?.status !== 'completing') {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+
+  const cancelled = await coordinator.cancelItem('it_c');
+  assert.equal(cancelled, false, 'cancelItem debe retornar false cuando el archivo está en completing');
+  assert.equal(deleteCalled, false, 'NO debe llamar a deleteMyUpload si ya está en completing');
+  assert.equal(coordinator.getItem('it_c')?.status, 'completing');
+
+  releaseComplete();
+  const summary = await startPromise;
+  assert.equal(summary.completedCount, 1);
+  assert.equal(coordinator.getItem('it_c')?.status, 'done');
+  assert.equal(coordinator.isBusy(), false);
+});
+
+await test('20.6 Estabilidad del coordinador ante re-renders, cierre con finally, resumen de lote y sin límite 30 hardcodeado', async () => {
+  // 1. Prueba runtime de setHandlers manteniendo la misma instancia y cola
+  let shouldFail = true;
+  const mockApi = {
+    initUpload: async (payload: any) => ({
+      success: true,
+      data: {
+        fileId: `fid_${payload.originalFilename}`,
+        uploadUrl: `https://r2.mock/${payload.originalFilename}`,
+        storageKey: `key_${payload.originalFilename}`,
+        maxSizeBytes: 25 * 1024 * 1024,
+        headers: {},
+      },
+    }),
+    uploadDirectToR2: async () => {},
+    completeUpload: async () => {
+      if (shouldFail) {
+        const err: any = new Error('Bad content');
+        err.status = 400;
+        err.code = 'INVALID_FILE_CONTENT';
+        throw err;
+      }
+      return { success: true, data: {} };
+    },
+    deleteMyUpload: async () => ({ success: true, data: {} }),
+  };
+
+  let firstHandlerCalls = 0;
+  let secondHandlerCalls = 0;
+  const coordinator = new UploadQueueCoordinator({
+    maxRetries: 0,
+    api: mockApi as any,
+    onItemChange: () => {
+      firstHandlerCalls++;
+    },
+  });
+
+  coordinator.setQueue([makeMockBatchItem('stab_1', 'archivo.pdf', 1000)], 'sub-mock');
+  await coordinator.start();
+  assert.ok(firstHandlerCalls > 0);
+
+  // Simular actualización de callbacks tras re-render del padre sin recrear la instancia
+  coordinator.setHandlers({
+    onItemChange: () => {
+      secondHandlerCalls++;
+    },
+  });
+  shouldFail = false;
+  const retrySummary = await coordinator.retryFailed();
+  assert.equal(retrySummary.completedCount, 1);
+  assert.ok(secondHandlerCalls > 0, 'Debe notificar a los nuevos handlers sin perder el estado de la cola');
+
+  // 2. Verificación estructural en UploadMaterialModal y módulos de biblioteca
+  const modalPath = path.resolve(__dirname, '../src/components/library/UploadMaterialModal.tsx');
+  const modalCode = fs.readFileSync(modalPath, 'utf8');
+  const logicPath = path.resolve(__dirname, '../src/utils/libraryUploadLogic.ts');
+  const logicCode = fs.readFileSync(logicPath, 'utf8');
+  const apiPath = path.resolve(__dirname, '../src/api/library.api.ts');
+  const apiCode = fs.readFileSync(apiPath, 'utf8');
+  const typesPath = path.resolve(__dirname, '../src/types/library.ts');
+  const typesCode = fs.readFileSync(typesPath, 'utf8');
+  const homePath = path.resolve(__dirname, '../src/components/library/LibraryHome.tsx');
+  const homeCode = fs.readFileSync(homePath, 'utf8');
+
+  assert.match(
+    modalCode,
+    /useState\(\s*\(\)\s*=>\s*new UploadQueueCoordinator/,
+    'UploadMaterialModal debe instanciar UploadQueueCoordinator una sola vez en useState'
+  );
+  assert.match(
+    modalCode,
+    /coordinator\.setHandlers/,
+    'UploadMaterialModal debe actualizar handlers con setHandlers sin reinstanciar el coordinador'
+  );
+  assert.match(
+    modalCode,
+    /finally\s*\{\s*setIsUploading\(false\);\s*\}/,
+    'UploadMaterialModal debe cerrar isUploading dentro de un bloque finally'
+  );
+  assert.match(
+    modalCode,
+    /item\.status === 'completing'/,
+    'UploadMaterialModal debe bloquear cancelación mientras el archivo está en completing'
+  );
+  assert.match(
+    modalCode,
+    /failedItems\.map/,
+    'UploadMaterialModal debe listar los errores por archivo al finalizar el lote'
+  );
+  assert.match(
+    modalCode,
+    /con error/,
+    'UploadMaterialModal debe mostrar el resumen de subidos y errores al terminar el lote'
+  );
+  assert.match(
+    homeCode,
+    /refreshKey=\{libraryRefreshKey\}/,
+    'LibraryHome debe pasar refreshKey para refrescar vistas al terminar el lote'
+  );
+
+  // Sin límite de pendientes (30) hardcodeado en el frontend
+  assert.ok(!typesCode.includes('MAX_PENDING_UPLOADS'), 'types/library.ts no debe hardcodear MAX_PENDING_UPLOADS');
+  assert.ok(!apiCode.includes('maxPending ?? 30'), 'library.api.ts no debe fallbackear maxPending a 30');
+  assert.ok(!logicCode.includes('30 aportes'), 'libraryUploadLogic.ts no debe hardcodear 30 aportes');
+  assert.ok(!modalCode.includes('useState<number>(30)'), 'UploadMaterialModal.tsx no debe inicializar maxPending en 30');
+  assert.ok(!modalCode.includes('30 aportes pendientes'), 'UploadMaterialModal.tsx no debe hardcodear 30 aportes pendientes');
 });
 
 console.log('\n======================================================================');

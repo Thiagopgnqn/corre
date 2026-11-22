@@ -20,9 +20,14 @@ import type { LibraryFileUser, LibraryMyUploadsResponse } from '../../types/libr
 interface MyUploadsViewProps {
   onBack: () => void;
   onOpenUpload: () => void;
+  refreshKey?: number;
 }
 
-export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUpload }) => {
+export const MyUploadsView: React.FC<MyUploadsViewProps> = ({
+  onBack,
+  onOpenUpload,
+  refreshKey = 0,
+}) => {
   const [data, setData] = useState<LibraryMyUploadsResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +61,7 @@ export const MyUploadsView: React.FC<MyUploadsViewProps> = ({ onBack, onOpenUplo
 
   useEffect(() => {
     fetchMyUploads();
-  }, []);
+  }, [refreshKey]);
 
   const handleStartEdit = (file: LibraryFileUser) => {
     setEditingFile(file);
