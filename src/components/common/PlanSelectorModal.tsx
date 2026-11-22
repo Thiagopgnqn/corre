@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { catalogApi, type Institution } from '../../api/catalog.api';
 import { useCareer } from '../../context/CareerContext';
 import { isPlanSelected } from '../../utils/planViewSelectors';
@@ -6,47 +7,71 @@ import { GraduationCap, Check, Building2, BookOpen, Loader2, X } from 'lucide-re
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from './BottomSheet';
 
-interface PlanSelectorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
+export const PLAN_SELECTOR_DIALOG_LABEL = 'Catálogo de Carreras y Planes';
+
+export function shouldCloseOnPlanSelectorKeyDown(key: string, canClose: boolean): boolean {
+  return canClose && key === 'Escape';
 }
 
-export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, onClose }) => {
-  const { activePlan, reloadServerState } = useCareer();
-  const isMobile = useIsMobile();
-  const [institutions, setInstitutions] = useState<Institution[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [switchingId, setSwitchingId] = useState<string | null>(null);
+export function shouldCloseOnPlanSelectorOverlayClick(
+  target: unknown,
+  currentTarget: unknown,
+  canClose: boolean
+): boolean {
+  return canClose && target === currentTarget;
+}
 
-  useEffect(() => {
-    if (isOpen) {
-      setLoading(true);
-      catalogApi
-        .getCareers()
-        .then((res) => {
-          if (res.success && res.data) {
-            setInstitutions(res.data);
-          }
-        })
-        .catch((err) => console.error('Error fetching careers:', err))
-        .finally(() => setLoading(false));
-    }
-  }, [isOpen]);
+export async function executePlanSelection(params: {
+  planId: string;
+  currentPlanId?: string | null;
+  updateSelectedPlan: (planId: string) => Promise<{ success: boolean }>;
+  reloadServerState: () => Promise<void>;
+  onClose: () => void;
+}): Promise<'same-plan-closed' | 'switched' | 'failed'> {
+  const { planId, currentPlanId, updateSelectedPlan, reloadServerState, onClose } = params;
+  if (isPlanSelected(planId, currentPlanId)) {
+    onClose();
+    return 'same-plan-closed';
+  }
+  const res = await updateSelectedPlan(planId);
+  if (res.success) {
+    await reloadServerState();
+    onClose();
+    return 'switched';
+  }
+  return 'failed';
+}
 
-  if (!isOpen) return null;
+export interface PlanSelectorModalViewProps {
+  isOpen: boolean;
+  isMobile: boolean;
+  institutions: Institution[];
+  loading: boolean;
+  switchingId: string | null;
+  currentPlanId?: string | null;
+  canClose?: boolean;
+  subtitle?: string;
+  onClose: () => void;
+  onSelectPlan: (planId: string) => void;
+  dialogRef?: React.RefObject<HTMLDivElement | null>;
+}
 
-  const handleSelectPlan = async (planId: string) => {
-    setSwitchingId(planId);
-    try {
-      const res = await catalogApi.updateSelectedPlan(planId);
-      if (res.success) {
-        await reloadServerState();
-        onClose();
-      }
-    } catch (e) {
-      console.error('Error selecting plan:', e);
-    } finally {
-      setSwitchingId(null);
+export const PlanSelectorModalView: React.FC<PlanSelectorModalViewProps> = ({
+  isOpen,
+  isMobile,
+  institutions,
+  loading,
+  switchingId,
+  currentPlanId,
+  canClose = true,
+  subtitle = 'Seleccioná tu plan de estudios activo',
+  onClose,
+  onSelectPlan,
+  dialogRef,
+}) => {
+  const handleRequestClose = () => {
+    if (canClose) {
+      onClose();
     }
   };
 
@@ -69,7 +94,7 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
     }
 
     return (
-      <div className={`space-y-4 ${isMobileView ? 'pb-6' : 'max-h-[60vh] overflow-y-auto pr-1'}`}>
+      <div className={`space-y-4 ${isMobileView ? 'pb-6' : 'pr-1'}`}>
         {institutions.map((inst) => (
           <div key={inst.id} className="space-y-3">
             {inst.faculties.map((fac) => (
@@ -95,7 +120,7 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
 
                     <div className="space-y-2 pt-1">
                       {career.plans.map((p) => {
-                        const isCurrent = isPlanSelected(p.id, activePlan?.plan.id);
+                        const isCurrent = isPlanSelected(p.id, currentPlanId);
                         return (
                           <div
                             key={p.id}
@@ -130,7 +155,7 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
                               {!isCurrent ? (
                                 <button
                                   type="button"
-                                  onClick={() => handleSelectPlan(p.id)}
+                                  onClick={() => onSelectPlan(p.id)}
                                   disabled={switchingId === p.id}
                                   className={`w-full sm:w-auto ${
                                     isMobileView ? 'min-h-[48px] px-4' : 'px-3 py-1.5'
@@ -140,9 +165,15 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
                                   <span>Elegir plan</span>
                                 </button>
                               ) : (
-                                <span className="text-xs font-semibold text-indigo-400 px-2 py-1">
+                                <button
+                                  type="button"
+                                  onClick={() => onSelectPlan(p.id)}
+                                  className={`w-full sm:w-auto ${
+                                    isMobileView ? 'min-h-[48px] px-4' : 'min-h-[36px] px-3 py-1.5'
+                                  } text-xs font-semibold rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 transition-colors flex items-center justify-center cursor-pointer active:scale-95`}
+                                >
                                   Seleccionado
-                                </span>
+                                </button>
                               )}
                             </div>
                           </div>
@@ -159,44 +190,190 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
     );
   };
 
-  // Mobile Render: BottomSheet
+  // Mobile Render: BottomSheet (portalizado fuera de header)
   if (isMobile) {
-    return (
+    const sheetNode = (
       <BottomSheet
         isOpen={isOpen}
-        onClose={onClose}
-        title="Catálogo de Carreras y Planes"
-        subtitle="Seleccioná tu plan de estudios activo"
-        maxHeightDvh={90}
+        onClose={handleRequestClose}
+        title={PLAN_SELECTOR_DIALOG_LABEL}
+        subtitle={subtitle}
+        maxHeightDvh={88}
+        footer={
+          canClose ? (
+            <button
+              type="button"
+              onClick={handleRequestClose}
+              className="w-full min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold text-white transition-colors flex items-center justify-center cursor-pointer active:scale-95"
+            >
+              Cancelar
+            </button>
+          ) : undefined
+        }
       >
         <div className="pt-2">{renderPlansList(true)}</div>
       </BottomSheet>
     );
+
+    if (typeof document !== 'undefined' && document.body) {
+      return createPortal(sheetNode, document.body);
+    }
+    return sheetNode;
   }
 
-  // Desktop Render: Centered Modal
-  return (
-    <div className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full p-6 text-slate-100 shadow-2xl relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-        >
-          <X className="w-4 h-4" />
-        </button>
+  if (!isOpen) return null;
 
-        <div className="flex items-center gap-3 mb-5">
-          <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-            <GraduationCap className="w-6 h-6" />
+  // Desktop Render: Centered Modal (portalizado en document.body)
+  const modalNode = (
+    <div
+      data-testid="plan-selector-overlay"
+      onClick={(e) => {
+        if (shouldCloseOnPlanSelectorOverlayClick(e.target, e.currentTarget, canClose)) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={PLAN_SELECTOR_DIALOG_LABEL}
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-lg w-full max-h-[calc(100dvh-2rem)] flex flex-col text-slate-100 shadow-2xl relative outline-none overflow-hidden"
+      >
+        <div className="flex items-start justify-between gap-3 px-6 pt-5 pb-4 border-b border-slate-800/80 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 shrink-0">
+              <GraduationCap className="w-6 h-6" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-base font-bold text-white">{PLAN_SELECTOR_DIALOG_LABEL}</h3>
+              <p className="text-xs text-slate-400">{subtitle}</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-bold text-white">Catálogo de Carreras y Planes</h3>
-            <p className="text-xs text-slate-400">Seleccioná tu plan de estudios activo</p>
-          </div>
+
+          {canClose && (
+            <button
+              type="button"
+              onClick={handleRequestClose}
+              aria-label="Cerrar selector de carreras y planes"
+              className="w-11 h-11 min-w-[44px] min-h-[44px] -mr-1.5 -mt-1 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors flex items-center justify-center cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
-        {renderPlansList(false)}
+        <div className="px-6 py-4 flex-1 min-h-0 overflow-y-auto">{renderPlansList(false)}</div>
+
+        {canClose && (
+          <div className="px-6 py-3.5 border-t border-slate-800/80 bg-slate-950/50 flex justify-end shrink-0">
+            <button
+              type="button"
+              onClick={handleRequestClose}
+              className="min-h-[44px] px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-white transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
       </div>
     </div>
+  );
+
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(modalNode, document.body);
+  }
+  return modalNode;
+};
+
+interface PlanSelectorModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, onClose }) => {
+  const { activePlan, reloadServerState } = useCareer();
+  const isMobile = useIsMobile();
+  const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    setLoading(true);
+    catalogApi
+      .getCareers()
+      .then((res) => {
+        if (!cancelled && res.success && res.data) {
+          setInstitutions(res.data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Error fetching careers:', err);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || isMobile) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (shouldCloseOnPlanSelectorKeyDown(e.key, true)) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isMobile, onClose]);
+
+  const handleSelectPlan = async (planId: string) => {
+    if (isPlanSelected(planId, activePlan?.plan.id)) {
+      onClose();
+      return;
+    }
+    setSwitchingId(planId);
+    try {
+      await executePlanSelection({
+        planId,
+        currentPlanId: activePlan?.plan.id,
+        updateSelectedPlan: catalogApi.updateSelectedPlan,
+        reloadServerState: async () => {
+          await reloadServerState();
+        },
+        onClose,
+      });
+    } catch (e) {
+      console.error('Error selecting plan:', e);
+    } finally {
+      setSwitchingId(null);
+    }
+  };
+
+  return (
+    <PlanSelectorModalView
+      isOpen={isOpen}
+      isMobile={isMobile}
+      institutions={institutions}
+      loading={loading}
+      switchingId={switchingId}
+      currentPlanId={activePlan?.plan.id}
+      canClose={true}
+      onClose={onClose}
+      onSelectPlan={handleSelectPlan}
+    />
   );
 };

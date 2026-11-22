@@ -580,7 +580,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             />
           </div>
         </div>
-        <PlanSelectorModal isOpen={isPlanSelectorOpen} onClose={() => setIsPlanSelectorOpen(false)} />
       </header>
 
       {/* MOBILE BOTTOM NAVIGATION BAR (Fixed at bottom on < md, exactly 5 thumb-friendly items) */}
@@ -943,6 +942,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
       />
+
+      {/* Selector de Carrera y Plan de Estudios (fuera de header para evitar containing block de backdrop-blur) */}
+      <PlanSelectorModal isOpen={isPlanSelectorOpen} onClose={() => setIsPlanSelectorOpen(false)} />
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (
