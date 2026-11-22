@@ -16,6 +16,16 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 | **`deploy-b`** | `0016_library_files_restrict_delete` (`idx: 16`, `when: 1793760000000`) después de `0015` (`when: 1793750000000`) | Todo `deploy-a` + **`0015`** (backfill + `DO $$ RAISE EXCEPTION` si quedara `plan_id NULL` + `NOT NULL` + claves compuestas + expansión CTE de `extra_settings.perPlan` y `selections_by_plan`) + `schema.ts`/`UserStateStore` compuestos (`D2`) + **`0016`** (`ON DELETE restrict` en `library_files.subject_id`) + `schema.ts` `restrict`. | Aplica `0015` y `0016` en el mismo despliegue y en orden estricto. Durante el build de Render (`db:migrate`), el servicio anterior (`deploy-a`) sigue atendiendo sobre ambos esquemas hasta el swap del nuevo contenedor. |
 | **`deploy-c`** *(futuro Tramo 2D)* | Posterior a `0016` *(todavía sin implementar)* | Compuerta de publicación (`Publicar` / `Despublicar`) y selector multi-plan para estudiantes. | Se implementará y etiquetará recién cuando este ensayo en Neon esté aprobado. |
 
+### 1.1. Mapa de servicios e infraestructura (`render.yaml`, `vercel.json`, Neon) y orden de despliegue
+
+Secuencia de despliegue en producción: **Render primero, Vercel después**.
+
+| Capa / Consola | Configuración real verificada | Ventana crítica en despliegue | Qué revisar manualmente en consola |
+| :--- | :--- | :--- | :--- |
+| **Base de datos (Neon)** | PostgreSQL gestionado con `DATABASE_URL` (`-pooler`) y `DIRECT_URL` (conexión directa para DDL en `db:migrate`). | Al aplicar DDL de `0015` (`NOT NULL`, nueva `PK(user_id, plan_id)`, drop de `uq_user_schedule_selection`) y `0016` (`library_files.subject_id` → `ON DELETE RESTRICT`). | Rama snapshot **sin expiración** (*Never expire*) creada antes de migrar; verificar endpoint (`ep-...`) antes de cualquier comando. |
+| **Backend API (Render)** (`render.yaml`) | `rootDir: server`<br>`buildCommand: npm install && npm run build && npm run db:migrate`<br>`startCommand: npm run start`<br>`healthCheckPath: /api/health` | Durante el `buildCommand` de **`deploy-b`**, `db:migrate` aplica **`0015`** y **`0016`** sobre Neon **mientras el contenedor previo (`deploy-a`) sigue atendiendo tráfico en producción** hasta pasar `/api/health`. | Confirmar `Auto-Deploy`, variables `DATABASE_URL`, `DIRECT_URL`, `CLIENT_ORIGIN`, secretos JWT/Refresh/Pepper, `R2_*` y estado de `/api/health`. |
+| **Frontend SPA (Vercel)** (`vercel.json`) | Build raíz: `npm run build` (`tsc -b && vite build`), rewrites `/api/:path*` → Render backend. | Si se publica frontend de Etapa 2 antes que su backend correspondiente, endpoints nuevos (`/api/admin/plans/*`, filtros `careerId`/`planId`) responderán `404` o incompletos. | Verificar `Production Branch`, variables `VITE_*` y mantener deploy frontend posterior a Render. |
+
 ---
 
 ## 2. Garantías de Seguridad, Rollback e Índices
@@ -25,6 +35,8 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 3. **Advertencia sobre `DELETE FROM drizzle.__drizzle_migrations`:** nunca borrar filas de `drizzle.__drizzle_migrations` en producción ni sin backup sin TTL verificado. El único lugar donde se utiliza es en el **Paso 8** de este ensayo (en la rama temporal) para simular un rollback controlado de `0016` + `0015` y luego re-migrar con `db:migrate`.
 4. **Índices duplicados temporales tras `0015`:** en `user_settings` coexisten temporalmente `user_settings_pkey` (`0015`) y `uq_user_settings_user_plan` (`0008`) sobre `(user_id, plan_id)`. Es intencional durante Etapa 2; su limpieza queda diferida a Etapa 3.
 5. **Solo lectura y scripts por modo:** ninguna migración (`0008`..`0016`) se aplica mediante SQL manual; todas corren exclusivamente con `npm --prefix server run db:migrate`. Todos los chequeos SQL intermedios son estrictamente `SELECT` de solo lectura.
+6. **Inmutabilidad de migraciones y fin de línea LF (`.gitattributes`):** `.gitattributes` impone `server/drizzle/*.sql text eol=lf`. Nunca editar una migración ya aplicada (`0000`–`0014`); la advertencia de checksum distinto en `0007` por EOL histórico es esperada y no bloqueante.
+7. **Protección R2 (`0016` + guards `409`) y alternativa de rollback en producción sin pérdida:** `0016` impone `ON DELETE RESTRICT` en `library_files.subject_id`, y ningún bloqueo `409` en administración ni cancelación de registro llama a `r2.deleteObject`. En producción, cualquier rollback debe revertir **primero** el servicio en Render a **`deploy-a`** (compatible dual `0014`/`0015`) antes de tocar SQL; si tras correr `deploy-b` ya existieran múltiples filas por usuario en `user_settings` o `(user_id, schedule_term_id)` en `schedule_selections`, **la alternativa recomendada sin pérdida es mantener `0015` aplicada y revertir únicamente Render a `deploy-a`**, en lugar de forzar un rollback destructivo de esquema.
 
 ---
 
@@ -38,7 +50,7 @@ La rama de desarrollo `etapa2` conserva la historia completa del Tramo 2C sin re
 ### Paso 1 — Crear la rama temporal en Neon, configurar `server/.env` e inspeccionar estado inicial
 
 1. En **Neon Console**, creá una rama temporal desde `production` (retención **sin expiración** o **`>= 7 días`**).
-2. Copiá las cadenas de conexión de la **rama temporal** en `server/.env` (`DATABASE_URL` pooled y `DIRECT_URL` direct).
+2. Copiá las cadenas de conexión de la **rama temporal** en `server/.env` (`DATABASE_URL` pooled y `DIRECT_URL` direct), omitiendo claves reales de Brevo/Resend/R2/Google en el `server/.env` local del ensayo.
 3. Verificá los hosts configurados en PowerShell (sin imprimir usuario ni contraseña) y comprobá el estado base de la rama Git:
 
 ```powershell
@@ -337,11 +349,27 @@ WHERE u.email = '__verify_us_seed__@verify.local'
 ORDER BY sp.name;
 ```
 
+**Ventana de convivencia de despliegue (`deploy-a` corriendo contra esquema `0015`/`0016`):**
+
+Antes de pasar al rollback del Paso 8, verificá también que el código previo (`deploy-a`, compatibilidad dual D1) opera íntegro sobre el esquema ya migrado a `0015`/`0016`, simulando los segundos de transición en Render mientras termina el `buildCommand`:
+
+```powershell
+git checkout deploy-a
+npm --prefix server run build
+$env:ALLOW_DESTRUCTIVE_TEST="1"; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0015 --host-ok=$dbHost
+git checkout deploy-b
+npm --prefix server run build
+```
+
+**Resultado esperado:** tanto `deploy-a` como `deploy-b` pasan íntegramente `verify:user-state-neon` contra el esquema `0015` (`6/6` escenarios, `0` nulos, `0` notificaciones duplicadas, `diff: 0`).
+
 ---
 
 ### Paso 8 — Prueba de Rollback Controlado de `0016` + `0015` y Re-migración Adelante
 
 > **ADVERTENCIA ESTRICTA:** ejecutar **únicamente en esta rama temporal** y solo para validar el procedimiento de emergencia ante un rollback en producción con snapshot sin TTL verificado. **Nunca ejecutar `DELETE FROM drizzle.__drizzle_migrations` sobre datos reales sin respaldo previo.**
+
+*(Nota operativa de producción: revertir primero el servicio en Render a `deploy-a` antes de tocar SQL; si ya hubiera usuarios con más de 1 fila en `user_settings` o `(user_id, schedule_term_id)` en `schedule_selections`, mantener `0015` aplicada y revertir solo Render a `deploy-a`, en lugar de forzar un rollback de esquema con guarda `RAISE EXCEPTION`. El bloque SQL siguiente es el procedimiento completo de emergencia para esta rama temporal que compacta filas secundarias en `extra_settings.perPlan` y `selections_by_plan` antes de eliminar duplicados.)*
 
 1. Primero verificá el host en PowerShell (y recién después ejecutá el bloque SQL de rollback en **Neon SQL Editor** sobre la rama temporal):
 
@@ -472,21 +500,22 @@ git checkout deploy-a
 $env:ALLOW_DESTRUCTIVE_TEST="1"; npm --prefix server run verify:user-state-neon -- --mode=verify --expect-schema=0014 --host-ok=$dbHost
 ```
 
-3. Volver a `deploy-b` y re-aplicar `0015` y `0016` via `db:migrate`, y confirmar con `--mode=check-post-0015`:
+3. Volver a `deploy-b`, re-aplicar `0015` y `0016` via `db:migrate` comprobando idempotencia en una segunda corrida, y confirmar con `--mode=check-post-0015`:
 
 ```powershell
 git checkout deploy-b
 npm --prefix server run db:migrate
+npm --prefix server run db:migrate
 $env:ALLOW_DESTRUCTIVE_TEST="1"; npm --prefix server run verify:user-state-neon -- --mode=check-post-0015 --host-ok=$dbHost
 ```
 
-**Resultado esperado:** `deploy-a` funciona tras rollback, `db:migrate` re-aplica `0015` y `0016` limpiamente, y `--mode=check-post-0015` vuelve a pasar (demostrando preservación ida y vuelta del seed).
+**Resultado esperado:** `deploy-a` funciona tras rollback, la **1ra corrida** de `db:migrate` reaplica `0015` y `0016` limpiamente, la **2da corrida** termina sin cambios (`no-op` idempotente), y `--mode=check-post-0015` vuelve a pasar (demostrando preservación ida y vuelta del seed).
 
 ---
 
 ### Paso 9 — Verificación de Partes B, C, D e Importador contra Postgres real (`deploy-b`)
 
-1. Verificar host antes de ejecutar `verify:import-neon` (prueba ACID del importador y borrado de borradores contra Postgres real):
+1. Verificar host antes de ejecutar `verify:import-neon` (prueba ACID del importador y borrado de borradores contra Postgres real; debe terminar con limpieza completa `diff: 0`, salvo filas inmutables de `admin_audit_log`):
 
 ```powershell
 node -e "require('dotenv').config({path:'server/.env'}); console.log('IMPORT-NEON EN HOST:', new URL(process.env.DATABASE_URL).hostname)"
@@ -494,7 +523,7 @@ $env:ALLOW_DESTRUCTIVE_TEST="1"; npm --prefix server run verify:import-neon -- -
 ```
 
 2. Levantar servidor y frontend en `deploy-b` (en terminales separadas: `npm --prefix server run dev` y `npm run dev`) apuntando a la rama temporal y probar manualmente en `/#admin`:
-   - **Carreras (Tramo 2B):** importar en `draft` el `.xlsx` de Ingeniería Industrial (`IND`) si no estaba cargado y comprobar el visor de solo lectura sin publicar.
+   - **Carreras (Tramo 2B):** en `/#admin` → **Carreras**, importar `artifacts/industrial/industrial-plan-2023.xlsx` con código **`IND`** en modo `draft`, verificar vista previa e inspección (**`56 materias · 222 correlativas`**) en el visor de solo lectura sin publicar y comprobar que no aparece aún en `/api/catalog/*`.
    - **Parte B (409 / R2):** con al menos un `library_files` asociado a una materia del borrador, intentar quitar la materia o borrar el plan borrador -> debe responder `409` indicando cantidad exacta de archivos sin tocar R2; en SQL, intentar borrar la materia directamente debe fallar por FK `RESTRICT` (`23503`).
    - **Parte C (Biblioteca y Reseñas Multi-Plan + Mailer):** verificar filtros por Carrera y Plan en admin, badges `[careerCode] · [planName]`, y al aprobar/rechazar un archivo (si el correo está habilitado en pruebas), confirmar que el asunto/cuerpo refleja la carrera y facultad del archivo y no `Sistemas` fijo.
    - **Parte D (Docentes desde admin sin `selected_plan_id`):** en `/#admin` -> `Reseñas`, crear un docente histórico y vincularlo a una materia de `IND` (o del plan semilla) mientras el admin sigue teniendo `selected_plan_id = ISI`.
