@@ -1,13 +1,56 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { catalogApi, type Institution } from '../../api/catalog.api';
 import { useCareer } from '../../context/CareerContext';
 import { isPlanSelected } from '../../utils/planViewSelectors';
 import { GraduationCap, Check, Building2, BookOpen, Loader2, X } from 'lucide-react';
 import { useIsMobile } from '../../hooks/useIsMobile';
-import { BottomSheet } from './BottomSheet';
+import { BottomSheet, registerLayer, unregisterLayer, isTopLayer } from './BottomSheet';
 
 export const PLAN_SELECTOR_DIALOG_LABEL = 'Catálogo de Carreras y Planes';
+export const PLAN_SELECTOR_DEFAULT_SUBTITLE = 'Seleccioná tu plan de estudios activo';
+export const PLAN_SELECTOR_MANDATORY_SUBTITLE = 'Elegí tu carrera para continuar';
+
+export function isPlanSelectorDismissible(
+  activePlanId?: string | null,
+  required: boolean = false
+): boolean {
+  if (required) return false;
+  return Boolean(activePlanId);
+}
+
+export function getPlanSelectorSubtitle(canClose: boolean): string {
+  return canClose ? PLAN_SELECTOR_DEFAULT_SUBTITLE : PLAN_SELECTOR_MANDATORY_SUBTITLE;
+}
+
+export function acquirePlanSelectorScrollLock(layerId: string): () => void {
+  registerLayer(layerId);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    unregisterLayer(layerId);
+  };
+}
+
+export function restorePlanSelectorFocus(
+  previousElement: HTMLElement | null,
+  fallbackElement?: HTMLElement | null
+): HTMLElement | null {
+  if (
+    previousElement &&
+    previousElement.isConnected &&
+    (typeof document === 'undefined' || previousElement !== document.body)
+  ) {
+    previousElement.focus?.();
+    return previousElement;
+  }
+  if (fallbackElement && fallbackElement.isConnected) {
+    fallbackElement.focus?.();
+    return fallbackElement;
+  }
+  return null;
+}
 
 export function shouldCloseOnPlanSelectorKeyDown(key: string, canClose: boolean): boolean {
   return canClose && key === 'Escape';
@@ -64,11 +107,13 @@ export const PlanSelectorModalView: React.FC<PlanSelectorModalViewProps> = ({
   switchingId,
   currentPlanId,
   canClose = true,
-  subtitle = 'Seleccioná tu plan de estudios activo',
+  subtitle,
   onClose,
   onSelectPlan,
   dialogRef,
 }) => {
+  const resolvedSubtitle = subtitle ?? getPlanSelectorSubtitle(canClose);
+
   const handleRequestClose = () => {
     if (canClose) {
       onClose();
@@ -197,8 +242,10 @@ export const PlanSelectorModalView: React.FC<PlanSelectorModalViewProps> = ({
         isOpen={isOpen}
         onClose={handleRequestClose}
         title={PLAN_SELECTOR_DIALOG_LABEL}
-        subtitle={subtitle}
+        subtitle={resolvedSubtitle}
         maxHeightDvh={88}
+        hideCloseButton={!canClose}
+        dismissible={canClose}
         footer={
           canClose ? (
             <button
@@ -250,7 +297,7 @@ export const PlanSelectorModalView: React.FC<PlanSelectorModalViewProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="text-base font-bold text-white">{PLAN_SELECTOR_DIALOG_LABEL}</h3>
-              <p className="text-xs text-slate-400">{subtitle}</p>
+              <p className="text-xs text-slate-400">{resolvedSubtitle}</p>
             </div>
           </div>
 
@@ -292,14 +339,31 @@ export const PlanSelectorModalView: React.FC<PlanSelectorModalViewProps> = ({
 interface PlanSelectorModalProps {
   isOpen: boolean;
   onClose: () => void;
+  required?: boolean;
+  fallbackFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
-export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, onClose }) => {
+export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({
+  isOpen,
+  onClose,
+  required = false,
+  fallbackFocusRef,
+}) => {
   const { activePlan, reloadServerState } = useCareer();
   const isMobile = useIsMobile();
+  const modalLayerId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [loading, setLoading] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+
+  const canClose = isPlanSelectorDismissible(activePlan?.plan.id, required);
+  const subtitle = getPlanSelectorSubtitle(canClose);
+
+  const handleRequestClose = useCallback(() => {
+    if (!canClose) return;
+    onClose();
+  }, [canClose, onClose]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -330,15 +394,37 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
 
   useEffect(() => {
     if (!isOpen || isMobile) return;
+    return acquirePlanSelectorScrollLock(modalLayerId);
+  }, [isOpen, isMobile, modalLayerId]);
+
+  useEffect(() => {
+    if (!isOpen || isMobile) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (shouldCloseOnPlanSelectorKeyDown(e.key, true)) {
+      if (!isTopLayer(modalLayerId)) return;
+      if (shouldCloseOnPlanSelectorKeyDown(e.key, canClose)) {
         e.preventDefault();
-        onClose();
+        handleRequestClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isMobile, onClose]);
+  }, [isOpen, isMobile, modalLayerId, canClose, handleRequestClose]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const previousElement =
+      typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    if (!isMobile) {
+      dialogRef.current?.focus();
+    }
+
+    return () => {
+      restorePlanSelectorFocus(previousElement, fallbackFocusRef?.current ?? null);
+    };
+  }, [isOpen, isMobile, fallbackFocusRef]);
 
   const handleSelectPlan = async (planId: string) => {
     if (isPlanSelected(planId, activePlan?.plan.id)) {
@@ -371,9 +457,11 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({ isOpen, on
       loading={loading}
       switchingId={switchingId}
       currentPlanId={activePlan?.plan.id}
-      canClose={true}
-      onClose={onClose}
+      canClose={canClose}
+      subtitle={subtitle}
+      onClose={handleRequestClose}
       onSelectPlan={handleSelectPlan}
+      dialogRef={dialogRef}
     />
   );
 };

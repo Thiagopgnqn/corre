@@ -97,6 +97,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
   const [adminPendingCount, setAdminPendingCount] = useState<number | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const planChipRef = useRef<HTMLButtonElement>(null);
 
   // Consulta novedades de Biblioteca para el usuario autenticado
   useEffect(() => {
@@ -228,6 +229,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           <div className="flex items-center gap-1 min-[380px]:gap-1.5 sm:gap-2 lg:gap-2.5 shrink min-w-0">
             <BrandLogo variant="full" size="md" responsiveText />
             <button
+              ref={planChipRef}
               type="button"
               onClick={() => setIsPlanSelectorOpen(true)}
               className="text-[10px] font-bold px-1.5 min-[380px]:px-2 py-1 rounded bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border border-indigo-500/30 hover:border-indigo-400 transition-all cursor-pointer whitespace-nowrap max-w-[82px] min-[380px]:max-w-[95px] sm:max-w-[105px] lg:max-w-none truncate min-h-[36px] flex items-center shrink min-w-0 active:scale-95"
@@ -944,7 +946,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
       />
 
       {/* Selector de Carrera y Plan de Estudios (fuera de header para evitar containing block de backdrop-blur) */}
-      <PlanSelectorModal isOpen={isPlanSelectorOpen} onClose={() => setIsPlanSelectorOpen(false)} />
+      <PlanSelectorModal
+        isOpen={isPlanSelectorOpen}
+        onClose={() => setIsPlanSelectorOpen(false)}
+        fallbackFocusRef={planChipRef}
+      />
 
       {/* Reset Confirmation Dialog */}
       {resetConfirmOpen && (

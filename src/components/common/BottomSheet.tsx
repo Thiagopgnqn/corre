@@ -15,6 +15,8 @@ export interface BottomSheetProps {
   maxHeightDvh?: number;
   /** Desactivar el botón X de cierre visible (por defecto false) */
   hideCloseButton?: boolean;
+  /** Permitir cerrar por backdrop, Escape, swipe o botón X (por defecto true) */
+  dismissible?: boolean;
 }
 
 const FOCUSABLE_SELECTOR =
@@ -69,6 +71,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   className = '',
   maxHeightDvh = 88,
   hideCloseButton = false,
+  dismissible = true,
 }) => {
   const generatedId = useId();
   const titleId = `bottom-sheet-title-${generatedId}`;
@@ -111,7 +114,11 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       }, 50);
 
       return () => clearTimeout(timer);
-    } else if (previousActiveElementRef.current) {
+    } else if (
+      previousActiveElementRef.current &&
+      previousActiveElementRef.current.isConnected &&
+      previousActiveElementRef.current !== document.body
+    ) {
       previousActiveElementRef.current.focus?.();
     }
   }, [isOpen]);
@@ -125,6 +132,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       if (!isTopLayer(generatedId)) return;
 
       if (e.key === 'Escape') {
+        if (!dismissible) return;
         e.preventDefault();
         onClose();
         return;
@@ -160,12 +168,12 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, generatedId]);
+  }, [isOpen, onClose, generatedId, dismissible]);
 
   // 4. Swipe to close mediante Pointer Events en la cabecera / drag-handle
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Solo inicia el gesto si se presiona el botón principal
-    if (e.button !== 0) return;
+    // Solo inicia el gesto si es cerrable y se presiona el botón principal
+    if (!dismissible || e.button !== 0) return;
     isDraggingRef.current = true;
     startYRef.current = e.clientY;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
@@ -204,7 +212,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       {isOpen && (
         <div
           style={{ zIndex: `calc(var(--z-sheet) + ${Math.min(layerIndex, 3)})` }}
-          className="fixed inset-0 flex flex-col justify-end pointer-events-auto pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
+          className="fixed inset-0 flex flex-col justify-end pointer-events-auto pt-[max(0.75rem,env(safe-area-inset-top,0px))] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)]"
         >
           {/* Backdrop con tap para cerrar */}
           <motion.div
@@ -212,9 +220,9 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            onClick={onClose}
+            onClick={dismissible ? onClose : undefined}
             aria-hidden="true"
-            className="fixed inset-0 bg-black/75 backdrop-blur-sm cursor-pointer"
+            className={`fixed inset-0 bg-black/75 backdrop-blur-sm ${dismissible ? 'cursor-pointer' : ''}`}
           />
 
           {/* Panel Bottom Sheet */}
@@ -246,13 +254,17 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onPointerCancel={handlePointerCancel}
-              className="w-full pt-3 pb-2 px-4 cursor-grab active:cursor-grabbing select-none shrink-0 flex flex-col items-center border-b border-slate-800/80 bg-slate-900/90"
+              className={`w-full pt-3 pb-2 px-4 ${
+                dismissible ? 'cursor-grab active:cursor-grabbing' : ''
+              } select-none shrink-0 flex flex-col items-center border-b border-slate-800/80 bg-slate-900/90`}
             >
               {/* Barra / Píldora de arrastre táctil */}
-              <div
-                aria-hidden="true"
-                className="w-12 h-1.5 rounded-full bg-slate-600/80 hover:bg-slate-500 transition-colors mb-2"
-              />
+              {dismissible && (
+                <div
+                  aria-hidden="true"
+                  className="w-12 h-1.5 rounded-full bg-slate-600/80 hover:bg-slate-500 transition-colors mb-2"
+                />
+              )}
 
               {/* Título y botón cerrar */}
               <div className="w-full flex items-center justify-between gap-3">
@@ -270,7 +282,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
                   )}
                 </div>
 
-                {!hideCloseButton && (
+                {!hideCloseButton && dismissible && (
                   <button
                     type="button"
                     onClick={onClose}
