@@ -235,17 +235,19 @@ export class DrizzleAuthStore implements AuthStore {
           selectedPlanId: users.selectedPlanId,
         });
 
-      await tx.insert(userSettings).values({
-        userId: newUser.id,
-        planId: params.selectedPlanId,
-        includePromotionsInGPA: true,
-        minPassingGrade: 4,
-        includeAnalistaTrack: false,
-        allowBlockedElectivesPlanning: false,
-        includeElectivesInProgress: true,
-        soundEnabled: true,
-        tutorialCompleted: false,
-      });
+      if (params.selectedPlanId) {
+        await tx.insert(userSettings).values({
+          userId: newUser.id,
+          planId: params.selectedPlanId,
+          includePromotionsInGPA: true,
+          minPassingGrade: 4,
+          includeAnalistaTrack: false,
+          allowBlockedElectivesPlanning: false,
+          includeElectivesInProgress: true,
+          soundEnabled: true,
+          tutorialCompleted: false,
+        });
+      }
 
       await tx.insert(userIdentities).values({
         userId: newUser.id,
@@ -326,23 +328,26 @@ export class DrizzleAuthStore implements AuthStore {
         });
       }
 
-      const [settings] = await tx
-        .select({ userId: userSettings.userId })
-        .from(userSettings)
-        .where(eq(userSettings.userId, params.userId))
-        .limit(1);
+      if (params.selectedPlanId) {
+        const [settings] = await tx
+          .select({ userId: userSettings.userId })
+          .from(userSettings)
+          .where(eq(userSettings.userId, params.userId))
+          .limit(1);
 
-      if (!settings) {
-        await tx.insert(userSettings).values({
-          userId: params.userId,
-          includePromotionsInGPA: true,
-          minPassingGrade: 4,
-          includeAnalistaTrack: false,
-          allowBlockedElectivesPlanning: false,
-          includeElectivesInProgress: true,
-          soundEnabled: true,
-          tutorialCompleted: false,
-        });
+        if (!settings) {
+          await tx.insert(userSettings).values({
+            userId: params.userId,
+            planId: params.selectedPlanId,
+            includePromotionsInGPA: true,
+            minPassingGrade: 4,
+            includeAnalistaTrack: false,
+            allowBlockedElectivesPlanning: false,
+            includeElectivesInProgress: true,
+            soundEnabled: true,
+            tutorialCompleted: false,
+          });
+        }
       }
 
       const [freshUser] = await tx

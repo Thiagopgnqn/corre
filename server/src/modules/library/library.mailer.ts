@@ -1,6 +1,14 @@
 import { env } from '../../config/env.js';
 import { db } from '../../db/index.js';
-import { users, userSettings, libraryFiles, subjects } from '../../db/schema.js';
+import {
+  users,
+  userSettings,
+  libraryFiles,
+  subjects,
+  studyPlans,
+  careers,
+  faculties,
+} from '../../db/schema.js';
 import { eq, and, sql, isNull, isNotNull, inArray, asc } from 'drizzle-orm';
 import { defaultMailer } from '../mailer/mailer.service.js';
 import { LIBRARY_CONFIG } from '../../config/library.config.js';
@@ -134,7 +142,67 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export interface LibraryFileNotificationItem {
+export interface LibraryCareerMailContext {
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planName?: string | null;
+  facultyName?: string | null;
+}
+
+function buildCareerPlanBadge(item: LibraryCareerMailContext): string | null {
+  const code = item.careerCode?.trim();
+  const plan = item.planName?.trim();
+  const career = item.careerName?.trim();
+  if (code && plan) return `${code} · ${plan}`;
+  if (career && plan) return `${career} · ${plan}`;
+  if (career) return career;
+  if (code) return code;
+  if (plan) return plan;
+  return null;
+}
+
+function buildDynamicMailerFooter(items: LibraryCareerMailContext[]): {
+  textFooter: string;
+  htmlFooter: string;
+} {
+  const uniqueCareers = Array.from(
+    new Set(items.map((i) => i.careerName?.trim()).filter((v): v is string => Boolean(v)))
+  );
+  const uniqueFaculties = Array.from(
+    new Set(items.map((i) => i.facultyName?.trim()).filter((v): v is string => Boolean(v)))
+  );
+
+  if (uniqueCareers.length === 1 && uniqueFaculties.length === 1) {
+    const label = `${uniqueCareers[0]} (${uniqueFaculties[0]})`;
+    return {
+      textFooter: `Stack - ${label}`,
+      htmlFooter: `Stack • Plataforma colaborativa para ${escapeHtml(label)}`,
+    };
+  }
+
+  if (uniqueCareers.length === 1) {
+    const label = uniqueCareers[0];
+    return {
+      textFooter: `Stack - ${label}`,
+      htmlFooter: `Stack • Plataforma colaborativa para ${escapeHtml(label)}`,
+    };
+  }
+
+  if (uniqueCareers.length > 1 && uniqueFaculties.length === 1) {
+    return {
+      textFooter: `Stack - Múltiples carreras (${uniqueFaculties[0]})`,
+      htmlFooter: `Stack • Plataforma colaborativa universitaria (${escapeHtml(uniqueFaculties[0])})`,
+    };
+  }
+
+  return {
+    textFooter: 'Stack - Plataforma Colaborativa Universitaria',
+    htmlFooter: 'Stack • Plataforma colaborativa universitaria',
+  };
+}
+
+export interface LibraryFileNotificationItem extends LibraryCareerMailContext {
   id: string;
   title: string;
   subjectName: string;
@@ -150,18 +218,23 @@ export interface LibraryFileNotificationItem {
  * Template (a): Aviso al Administrador sobre nuevo material para revisar (individual).
  * REGLA ESTRICTA DE PRIVACIDAD: Nunca incluye el email ni la identidad del autor.
  */
-export function buildAdminNewMaterialEmail(data: {
-  title: string;
-  subjectName: string;
-  kind: string;
-  academicYear?: number | null;
-  term?: string | null;
-  sizeBytes: number;
-  mimeType: string;
-  createdAt: Date;
-}): { subject: string; html: string; text: string } {
+export function buildAdminNewMaterialEmail(
+  data: LibraryCareerMailContext & {
+    title: string;
+    subjectName: string;
+    kind: string;
+    academicYear?: number | null;
+    term?: string | null;
+    sizeBytes: number;
+    mimeType: string;
+    createdAt: Date;
+  }
+): { subject: string; html: string; text: string } {
   const safeTitle = escapeHtml(data.title);
   const safeSubject = escapeHtml(data.subjectName);
+  const careerPlanLabel = buildCareerPlanBadge(data);
+  const safeCareerPlan = careerPlanLabel ? escapeHtml(careerPlanLabel) : null;
+  const { textFooter, htmlFooter } = buildDynamicMailerFooter([data]);
   const safeKind = escapeHtml(data.kind.toUpperCase());
   const yearTermParts: string[] = [];
   if (data.academicYear) yearTermParts.push(String(data.academicYear));
@@ -185,7 +258,7 @@ Se ha subido un nuevo recurso a la Biblioteca y quedó en espera de moderación.
 
 Detalles del archivo:
 - Título: ${data.title}
-- Materia: ${data.subjectName}
+${careerPlanLabel ? `- Carrera / Plan: ${careerPlanLabel}\n` : ''}- Materia: ${data.subjectName}
 - Tipo: ${data.kind.toUpperCase()}
 - Año / Cuatrimestre: ${safeYearTerm}
 - Tamaño: ${sizeFormatted}
@@ -198,7 +271,7 @@ ${adminUrl}
 (La identidad del estudiante autor puede ser consultada con auditoría exclusivamente desde el panel).
 
 --
-Stack - Plataforma Colaborativa de Ingeniería en Sistemas
+${textFooter}
 `.trim();
 
   const html = `
@@ -229,6 +302,14 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
             <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #94a3b8; width: 140px;">Título:</td>
             <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; font-weight: 600; color: #ffffff;">${safeTitle}</td>
           </tr>
+          ${
+            safeCareerPlan
+              ? `<tr>
+            <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #94a3b8;">Carrera / Plan:</td>
+            <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #c7d2fe;">${safeCareerPlan}</td>
+          </tr>`
+              : ''
+          }
           <tr>
             <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #94a3b8;">Materia:</td>
             <td style="padding: 14px 16px; border-bottom: 1px solid #1f2937; font-size: 13px; font-weight: 600; color: #ffffff;">${safeSubject}</td>
@@ -266,7 +347,7 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
     </tr>
     <tr>
       <td style="padding: 16px 28px; background-color: #0b0f19; border-top: 1px solid #1f2937; font-size: 11px; color: #64748b; text-align: center;">
-        Stack • Plataforma colaborativa para Ingeniería en Sistemas de Información (UTN FRC)
+        ${htmlFooter}
       </td>
     </tr>
   </table>
@@ -297,9 +378,15 @@ export function buildAdminBatchSummaryEmail(items: LibraryFileNotificationItem[]
       sizeBytes: item.sizeBytes,
       mimeType: item.mimeType,
       createdAt: item.createdAt,
+      careerId: item.careerId,
+      careerCode: item.careerCode,
+      careerName: item.careerName,
+      planName: item.planName,
+      facultyName: item.facultyName,
     });
   }
 
+  const { textFooter, htmlFooter } = buildDynamicMailerFooter(items);
   const subject = sanitizeSubject(`[Stack] ${count} nuevos materiales para revisar en la Biblioteca`);
   const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
   const adminUrl = `${appOrigin}/#admin`;
@@ -308,12 +395,12 @@ export function buildAdminBatchSummaryEmail(items: LibraryFileNotificationItem[]
   const remainingCount = count - displayedItems.length;
 
   const rowsText = displayedItems
-    .map(
-      (it, idx) =>
-        `${idx + 1}. "${it.title}" - Materia: ${it.subjectName} (${it.kind.toUpperCase()}${
-          it.academicYear ? ` ${it.academicYear}` : ''
-        }${it.term ? `-${it.term}` : ''}) [${formatBytes(it.sizeBytes)}]`
-    )
+    .map((it, idx) => {
+      const cp = buildCareerPlanBadge(it);
+      return `${idx + 1}. "${it.title}" - Materia: ${it.subjectName}${cp ? ` [${cp}]` : ''} (${it.kind.toUpperCase()}${
+        it.academicYear ? ` ${it.academicYear}` : ''
+      }${it.term ? `-${it.term}` : ''}) [${formatBytes(it.sizeBytes)}]`;
+    })
     .join('\n');
 
   const text = `
@@ -331,18 +418,19 @@ ${adminUrl}
 (La identidad de los estudiantes autores se mantiene confidencial y solo es consultable de forma auditada desde el panel).
 
 --
-Stack - Plataforma Colaborativa de Ingeniería en Sistemas
+${textFooter}
 `.trim();
 
   const rowsHtml = displayedItems
-    .map(
-      (it) => `
+    .map((it) => {
+      const cp = buildCareerPlanBadge(it);
+      return `
     <tr>
       <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 13px; font-weight: 600; color: #ffffff;">
         ${escapeHtml(it.title)}
       </td>
       <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 13px; color: #818cf8;">
-        ${escapeHtml(it.subjectName)}
+        ${escapeHtml(it.subjectName)}${cp ? `<br><span style="font-size: 11px; color: #94a3b8;">${escapeHtml(cp)}</span>` : ''}
       </td>
       <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 12px; color: #94a3b8; text-transform: uppercase;">
         ${escapeHtml(it.kind)}
@@ -353,8 +441,8 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
       <td style="padding: 10px 14px; border-bottom: 1px solid #1f2937; font-size: 12px; color: #94a3b8;">
         ${formatBytes(it.sizeBytes)}
       </td>
-    </tr>`
-    )
+    </tr>`;
+    })
     .join('');
 
   const html = `
@@ -411,7 +499,7 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
     </tr>
     <tr>
       <td style="padding: 16px 28px; background-color: #0b0f19; border-top: 1px solid #1f2937; font-size: 11px; color: #64748b; text-align: center;">
-        Stack • Plataforma colaborativa para Ingeniería en Sistemas de Información (UTN FRC)
+        ${htmlFooter}
       </td>
     </tr>
   </table>
@@ -425,12 +513,22 @@ Stack - Plataforma Colaborativa de Ingeniería en Sistemas
 /**
  * Template (b): Aviso de aprobación al estudiante uploader (individual).
  */
-export function buildUploaderApprovedEmail(data: {
-  title: string;
-  subjectName: string;
-}): { subject: string; html: string; text: string } {
+export function buildUploaderApprovedEmail(
+  data: LibraryCareerMailContext & {
+    title: string;
+    subjectName: string;
+  }
+): { subject: string; html: string; text: string } {
   const safeTitle = escapeHtml(data.title);
   const safeSubject = escapeHtml(data.subjectName);
+  const careerPlanLabel = buildCareerPlanBadge(data);
+  const safeCareerPlan = careerPlanLabel ? escapeHtml(careerPlanLabel) : null;
+  const audienceText = data.careerName?.trim()
+    ? `los estudiantes de ${data.careerName.trim()}`
+    : 'la comunidad estudiantil';
+  const audienceHtml = data.careerName?.trim()
+    ? `avanzar en ${escapeHtml(data.careerName.trim())}`
+    : 'seguir avanzando en sus estudios';
   const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
   const libraryUrl = `${appOrigin}/#library`;
 
@@ -445,9 +543,9 @@ Hola:
 El material que compartiste ha sido revisado y aprobado por el equipo de administración:
 
 - Título: ${data.title}
-- Materia: ${data.subjectName}
+${careerPlanLabel ? `- Carrera / Plan: ${careerPlanLabel}\n` : ''}- Materia: ${data.subjectName}
 
-Ya se encuentra publicado en el catálogo público de la Biblioteca para que todos los estudiantes de la carrera puedan consultarlo y utilizarlo para estudiar.
+Ya se encuentra publicado en el catálogo público de la Biblioteca para que ${audienceText} puedan consultarlo y utilizarlo para estudiar.
 
 Podés ingresar a la Biblioteca en cualquier momento:
 ${libraryUrl}
@@ -455,7 +553,7 @@ ${libraryUrl}
 ¡Muchas gracias por colaborar con la comunidad!
 
 --
-Stack - Tu carrera, materia a materia
+Stack - Plataforma Colaborativa Universitaria
 `.trim();
 
   const html = `
@@ -484,10 +582,11 @@ Stack - Tu carrera, materia a materia
         <div style="background-color: #0b0f19; border: 1px solid #1f2937; border-radius: 12px; padding: 16px 20px; margin-bottom: 24px;">
           <p style="margin: 0 0 8px 0; font-size: 14px; font-weight: 700; color: #ffffff;">${safeTitle}</p>
           <p style="margin: 0; font-size: 13px; color: #818cf8;">Materia: <strong>${safeSubject}</strong></p>
+          ${safeCareerPlan ? `<p style="margin: 6px 0 0 0; font-size: 12px; color: #94a3b8;">Carrera / Plan: ${safeCareerPlan}</p>` : ''}
         </div>
 
         <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
-          Tu aporte ayuda a cientos de estudiantes a preparar sus exámenes y avanzar en la carrera. Podés ver tus materiales publicados o consultar la Biblioteca aquí:
+          Tu aporte ayuda a cientos de estudiantes a preparar sus exámenes y ${audienceHtml}. Podés ver tus materiales publicados o consultar la Biblioteca aquí:
         </p>
 
         <p style="margin: 0 0 24px 0; font-size: 13px; word-break: break-all; background-color: #0b0f19; padding: 12px 16px; border-radius: 8px; border: 1px solid #1f2937; font-family: monospace; color: #a5b4fc;">
@@ -516,7 +615,7 @@ Stack - Tu carrera, materia a materia
  * Template (b-lote): Aviso de aprobación al estudiante para múltiples aportes.
  */
 export function buildUploaderGroupedApprovedEmail(
-  items: Array<{ title: string; subjectName: string }>
+  items: Array<LibraryCareerMailContext & { title: string; subjectName: string }>
 ): { subject: string; html: string; text: string } {
   if (items.length === 1) {
     return buildUploaderApprovedEmail(items[0]);
@@ -530,7 +629,12 @@ export function buildUploaderGroupedApprovedEmail(
   const displayed = items.slice(0, 15);
   const remaining = count - displayed.length;
 
-  const rowsText = displayed.map((it, idx) => `${idx + 1}. ${it.title} (${it.subjectName})`).join('\n');
+  const rowsText = displayed
+    .map((it, idx) => {
+      const cp = buildCareerPlanBadge(it);
+      return `${idx + 1}. ${it.title} (${it.subjectName}${cp ? ` — ${cp}` : ''})`;
+    })
+    .join('\n');
   const text = `
 ¡Tus materiales ya están disponibles en Stack!
 ==================================================
@@ -542,7 +646,7 @@ El equipo de administración revisó y aprobó ${count} materiales que compartis
 ${rowsText}
 ${remaining > 0 ? `\n... y ${remaining} materiales más.` : ''}
 
-Ya se encuentran publicados en el catálogo público para que todos los estudiantes puedan consultarlos.
+Ya se encuentran publicados en el catálogo público para que la comunidad estudiantil pueda consultarlos.
 
 Podés ingresar a la Biblioteca en cualquier momento:
 ${libraryUrl}
@@ -550,17 +654,20 @@ ${libraryUrl}
 ¡Muchas gracias por colaborar con la comunidad!
 
 --
-Stack - Tu carrera, materia a materia
+Stack - Plataforma Colaborativa Universitaria
 `.trim();
 
   const rowsHtml = displayed
-    .map(
-      (it) => `
+    .map((it) => {
+      const cp = buildCareerPlanBadge(it);
+      return `
     <li style="margin-bottom: 8px;">
       <strong style="color: #ffffff;">${escapeHtml(it.title)}</strong>
-      <span style="color: #818cf8;"> — ${escapeHtml(it.subjectName)}</span>
-    </li>`
-    )
+      <span style="color: #818cf8;"> — ${escapeHtml(it.subjectName)}</span>${
+        cp ? `<span style="font-size: 12px; color: #94a3b8;"> (${escapeHtml(cp)})</span>` : ''
+      }
+    </li>`;
+    })
     .join('');
 
   const html = `
@@ -593,7 +700,7 @@ Stack - Tu carrera, materia a materia
         </div>
 
         <p style="margin: 0 0 16px 0; font-size: 13px; line-height: 1.5; color: #94a3b8;">
-          Tus aportes ayudan a cientos de estudiantes a preparar sus exámenes y avanzar en la carrera. Podés ver tus materiales publicados aquí:
+          Tus aportes ayudan a cientos de estudiantes a preparar sus exámenes y seguir avanzando en sus estudios. Podés ver tus materiales publicados aquí:
         </p>
 
         <p style="margin: 0 0 24px 0; font-size: 13px; word-break: break-all; background-color: #0b0f19; padding: 12px 16px; border-radius: 8px; border: 1px solid #1f2937; font-family: monospace; color: #a5b4fc;">
@@ -621,13 +728,17 @@ Stack - Tu carrera, materia a materia
 /**
  * Template (c): Aviso de rechazo al estudiante uploader (individual).
  */
-export function buildUploaderRejectedEmail(data: {
-  title: string;
-  subjectName: string;
-  rejectionReason: string;
-}): { subject: string; html: string; text: string } {
+export function buildUploaderRejectedEmail(
+  data: LibraryCareerMailContext & {
+    title: string;
+    subjectName: string;
+    rejectionReason: string;
+  }
+): { subject: string; html: string; text: string } {
   const safeTitle = escapeHtml(data.title);
   const safeSubject = escapeHtml(data.subjectName);
+  const careerPlanLabel = buildCareerPlanBadge(data);
+  const safeCareerPlan = careerPlanLabel ? escapeHtml(careerPlanLabel) : null;
   const safeReason = escapeHtml(data.rejectionReason);
   const appOrigin = env.CLIENT_ORIGIN || 'https://corre-ten.vercel.app';
   const uploadsUrl = `${appOrigin}/#library/my-uploads`;
@@ -642,7 +753,7 @@ Hola:
 
 Te escribimos en relación al material que subiste a la Biblioteca de Stack:
 - Título: ${data.title}
-- Materia: ${data.subjectName}
+${careerPlanLabel ? `- Carrera / Plan: ${careerPlanLabel}\n` : ''}- Materia: ${data.subjectName}
 
 Durante la revisión, el equipo de administración indicó el siguiente motivo por el cual no pudo ser publicado en su estado actual:
 
@@ -655,7 +766,7 @@ ${uploadsUrl}
 Agradecemos mucho tu predisposición para colaborar con la comunidad.
 
 --
-Stack - Tu carrera, materia a materia
+Stack - Plataforma Colaborativa Universitaria
 `.trim();
 
   const html = `
@@ -678,7 +789,7 @@ Stack - Tu carrera, materia a materia
       <td style="padding: 28px;">
         <h1 style="margin: 0 0 16px 0; font-size: 18px; font-weight: 700; color: #ffffff;">Tu material no pudo ser publicado en su estado actual</h1>
         <p style="margin: 0 0 20px 0; font-size: 14px; line-height: 1.6; color: #cbd5e1;">
-          Revisamos tu archivo <strong>&ldquo;${safeTitle}&rdquo;</strong> para <strong>${safeSubject}</strong>. Para mantener la calidad y el cumplimiento de las normas de la Biblioteca, se requiere atender el siguiente motivo:
+          Revisamos tu archivo <strong>&ldquo;${safeTitle}&rdquo;</strong> para <strong>${safeSubject}</strong>${safeCareerPlan ? ` (${safeCareerPlan})` : ''}. Para mantener la calidad y el cumplimiento de las normas de la Biblioteca, se requiere atender el siguiente motivo:
         </p>
 
         <div style="background-color: rgba(244, 63, 94, 0.1); border-left: 4px solid #f43f5e; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px;">
@@ -716,7 +827,7 @@ Stack - Tu carrera, materia a materia
  * Template (c-lote): Aviso de rechazo al estudiante para múltiples aportes.
  */
 export function buildUploaderGroupedRejectedEmail(
-  items: Array<{ title: string; subjectName: string; rejectionReason: string }>
+  items: Array<LibraryCareerMailContext & { title: string; subjectName: string; rejectionReason: string }>
 ): { subject: string; html: string; text: string } {
   if (items.length === 1) {
     return buildUploaderRejectedEmail(items[0]);
@@ -731,10 +842,10 @@ export function buildUploaderGroupedRejectedEmail(
   const remaining = count - displayed.length;
 
   const rowsText = displayed
-    .map(
-      (it, idx) =>
-        `${idx + 1}. ${it.title} (${it.subjectName})\n   Motivo: ${it.rejectionReason}`
-    )
+    .map((it, idx) => {
+      const cp = buildCareerPlanBadge(it);
+      return `${idx + 1}. ${it.title} (${it.subjectName}${cp ? ` — ${cp}` : ''})\n   Motivo: ${it.rejectionReason}`;
+    })
     .join('\n\n');
 
   const text = `
@@ -754,21 +865,24 @@ ${uploadsUrl}
 Agradecemos mucho tu predisposición para colaborar con la comunidad.
 
 --
-Stack - Tu carrera, materia a materia
+Stack - Plataforma Colaborativa Universitaria
 `.trim();
 
   const rowsHtml = displayed
-    .map(
-      (it) => `
+    .map((it) => {
+      const cp = buildCareerPlanBadge(it);
+      return `
     <div style="background-color: #0b0f19; border: 1px solid #1f2937; border-left: 3px solid #f43f5e; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px;">
       <p style="margin: 0 0 4px 0; font-size: 13.5px; font-weight: 700; color: #ffffff;">
-        ${escapeHtml(it.title)} <span style="font-size: 12px; font-weight: normal; color: #818cf8;">(${escapeHtml(it.subjectName)})</span>
+        ${escapeHtml(it.title)} <span style="font-size: 12px; font-weight: normal; color: #818cf8;">(${escapeHtml(it.subjectName)}${
+          cp ? ` · ${escapeHtml(cp)}` : ''
+        })</span>
       </p>
       <p style="margin: 0; font-size: 12.5px; color: #fda4af;">
         <strong>Motivo:</strong> ${escapeHtml(it.rejectionReason)}
       </p>
-    </div>`
-    )
+    </div>`;
+    })
     .join('');
 
   const html = `
@@ -858,7 +972,7 @@ export async function sendWithRetry(
   return { success: false, error: lastError };
 }
 
-export interface PendingUploaderFileItem {
+export interface PendingUploaderFileItem extends LibraryCareerMailContext {
   fileId: string;
   uploaderUserId: string;
   userEmail: string;
@@ -1060,13 +1174,26 @@ export async function processPendingUploaderNotifications(options?: {
       let emailContent: { subject: string; html: string; text: string };
       if (first.status === 'approved') {
         emailContent = buildUploaderGroupedApprovedEmail(
-          group.map((g) => ({ title: g.title, subjectName: g.subjectName }))
+          group.map((g) => ({
+            title: g.title,
+            subjectName: g.subjectName,
+            careerId: g.careerId,
+            careerCode: g.careerCode,
+            careerName: g.careerName,
+            planName: g.planName,
+            facultyName: g.facultyName,
+          }))
         );
       } else {
         emailContent = buildUploaderGroupedRejectedEmail(
           group.map((g) => ({
             title: g.title,
             subjectName: g.subjectName,
+            careerId: g.careerId,
+            careerCode: g.careerCode,
+            careerName: g.careerName,
+            planName: g.planName,
+            facultyName: g.facultyName,
             rejectionReason: g.rejectionReason || 'El archivo no cumple con las pautas de publicación.',
           }))
         );
@@ -1113,7 +1240,7 @@ export async function processPendingUploaderNotifications(options?: {
 // 7. Funciones Wrapper de Compatibilidad
 // ---------------------------------------------------------------------------
 
-export interface InMemoryAdminPendingData {
+export interface InMemoryAdminPendingData extends LibraryCareerMailContext {
   id: string;
   title: string;
   subjectName?: string;
@@ -1126,7 +1253,7 @@ export interface InMemoryAdminPendingData {
   adminNotifiedAt?: Date | null;
 }
 
-export interface InMemoryUploaderData {
+export interface InMemoryUploaderData extends LibraryCareerMailContext {
   title: string;
   subjectName: string;
   uploaderUserId?: string | null;
@@ -1162,6 +1289,10 @@ export async function notifyAdminNewPendingFile(
     let sizeBytes = inMemoryData?.sizeBytes || 0;
     let mimeType = inMemoryData?.mimeType || 'application/pdf';
     let createdAt = inMemoryData?.createdAt || new Date();
+    let careerCode: string | null | undefined = inMemoryData?.careerCode;
+    let careerName: string | null | undefined = inMemoryData?.careerName;
+    let planName: string | null | undefined = inMemoryData?.planName;
+    let facultyName: string | null | undefined = inMemoryData?.facultyName;
 
     if (!inMemoryData) {
       const [f] = await db
@@ -1177,8 +1308,25 @@ export async function notifyAdminNewPendingFile(
       sizeBytes = Number(f.sizeBytes);
       mimeType = f.mimeType;
       createdAt = f.createdAt;
-      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
-      subjectName = s?.name || 'Materia';
+      const [ctx] = await db
+        .select({
+          subjectName: subjects.name,
+          planName: studyPlans.name,
+          careerCode: careers.code,
+          careerName: careers.name,
+          facultyName: faculties.name,
+        })
+        .from(subjects)
+        .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+        .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+        .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+        .where(eq(subjects.id, f.subjectId))
+        .limit(1);
+      subjectName = ctx?.subjectName || 'Materia';
+      careerCode = ctx?.careerCode ?? null;
+      careerName = ctx?.careerName ?? null;
+      planName = ctx?.planName ?? null;
+      facultyName = ctx?.facultyName ?? null;
     }
 
     const emailContent = buildAdminNewMaterialEmail({
@@ -1190,6 +1338,10 @@ export async function notifyAdminNewPendingFile(
       sizeBytes,
       mimeType,
       createdAt,
+      careerCode,
+      careerName,
+      planName,
+      facultyName,
     });
 
     const result = await sendWithRetry(async () => {
@@ -1243,17 +1395,41 @@ export async function notifyUploaderFileApproved(
     let userEmail = inMemoryData?.userEmail;
     let title = inMemoryData?.title || 'Material';
     let subjectName = inMemoryData?.subjectName || 'Materia';
+    let careerCode: string | null | undefined = inMemoryData?.careerCode;
+    let careerName: string | null | undefined = inMemoryData?.careerName;
+    let planName: string | null | undefined = inMemoryData?.planName;
+    let facultyName: string | null | undefined = inMemoryData?.facultyName;
 
     if (!inMemoryData) {
       const [f] = await db.select().from(libraryFiles).where(eq(libraryFiles.id, fileId)).limit(1);
       if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
       const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
       if (!u || u.status === 'suspended') return false;
-      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
-      if (settings && settings.notifyLibraryEmail === false) return false;
-      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
+      const settingsRows = await db
+        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
+        .from(userSettings)
+        .where(eq(userSettings.userId, u.id));
+      if (settingsRows.some((s) => s.notifyLibraryEmail === false)) return false;
+      const [ctx] = await db
+        .select({
+          subjectName: subjects.name,
+          planName: studyPlans.name,
+          careerCode: careers.code,
+          careerName: careers.name,
+          facultyName: faculties.name,
+        })
+        .from(subjects)
+        .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+        .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+        .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+        .where(eq(subjects.id, f.subjectId))
+        .limit(1);
       title = f.title;
-      subjectName = s?.name || 'Materia';
+      subjectName = ctx?.subjectName || 'Materia';
+      careerCode = ctx?.careerCode ?? null;
+      careerName = ctx?.careerName ?? null;
+      planName = ctx?.planName ?? null;
+      facultyName = ctx?.facultyName ?? null;
       userEmail = u.email;
     } else {
       if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
@@ -1262,7 +1438,14 @@ export async function notifyUploaderFileApproved(
 
     if (!userEmail) return false;
 
-    const emailContent = buildUploaderApprovedEmail({ title, subjectName });
+    const emailContent = buildUploaderApprovedEmail({
+      title,
+      subjectName,
+      careerCode,
+      careerName,
+      planName,
+      facultyName,
+    });
     const result = await sendWithRetry(async () => {
       return defaultMailer.sendEmail({
         to: userEmail!,
@@ -1315,17 +1498,41 @@ export async function notifyUploaderFileRejected(
     let userEmail = inMemoryData?.userEmail;
     let title = inMemoryData?.title || 'Material';
     let subjectName = inMemoryData?.subjectName || 'Materia';
+    let careerCode: string | null | undefined = inMemoryData?.careerCode;
+    let careerName: string | null | undefined = inMemoryData?.careerName;
+    let planName: string | null | undefined = inMemoryData?.planName;
+    let facultyName: string | null | undefined = inMemoryData?.facultyName;
 
     if (!inMemoryData) {
       const [f] = await db.select().from(libraryFiles).where(eq(libraryFiles.id, fileId)).limit(1);
       if (!f || f.uploaderNotifiedAt || !f.uploaderUserId) return false;
       const [u] = await db.select().from(users).where(eq(users.id, f.uploaderUserId)).limit(1);
       if (!u || u.status === 'suspended') return false;
-      const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, u.id)).limit(1);
-      if (settings && settings.notifyLibraryEmail === false) return false;
-      const [s] = await db.select().from(subjects).where(eq(subjects.id, f.subjectId)).limit(1);
+      const settingsRows = await db
+        .select({ notifyLibraryEmail: userSettings.notifyLibraryEmail })
+        .from(userSettings)
+        .where(eq(userSettings.userId, u.id));
+      if (settingsRows.some((s) => s.notifyLibraryEmail === false)) return false;
+      const [ctx] = await db
+        .select({
+          subjectName: subjects.name,
+          planName: studyPlans.name,
+          careerCode: careers.code,
+          careerName: careers.name,
+          facultyName: faculties.name,
+        })
+        .from(subjects)
+        .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+        .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+        .innerJoin(faculties, eq(careers.facultyId, faculties.id))
+        .where(eq(subjects.id, f.subjectId))
+        .limit(1);
       title = f.title;
-      subjectName = s?.name || 'Materia';
+      subjectName = ctx?.subjectName || 'Materia';
+      careerCode = ctx?.careerCode ?? null;
+      careerName = ctx?.careerName ?? null;
+      planName = ctx?.planName ?? null;
+      facultyName = ctx?.facultyName ?? null;
       userEmail = u.email;
     } else {
       if (inMemoryData.uploaderNotifiedAt || !inMemoryData.uploaderUserId) return false;
@@ -1334,7 +1541,15 @@ export async function notifyUploaderFileRejected(
 
     if (!userEmail) return false;
 
-    const emailContent = buildUploaderRejectedEmail({ title, subjectName, rejectionReason: reason });
+    const emailContent = buildUploaderRejectedEmail({
+      title,
+      subjectName,
+      careerCode,
+      careerName,
+      planName,
+      facultyName,
+      rejectionReason: reason,
+    });
     const result = await sendWithRetry(async () => {
       return defaultMailer.sendEmail({
         to: userEmail!,

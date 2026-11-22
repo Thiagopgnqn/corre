@@ -8,9 +8,18 @@ import jwt from 'jsonwebtoken';
 async function main() {
   const { env } = await import('../src/config/env.js');
   const { createApp } = await import('../src/app.js');
-  const { DrizzleReviewsStore, InMemoryReviewsStore } = await import(
+  const { DrizzleReviewsStore, InMemoryReviewsStore, setActiveReviewsStore } = await import(
     '../src/modules/reviews/reviews.store.js'
   );
+  const { db } = await import('../src/db/index.js');
+  const { InMemoryUserStateStore, buildUpgradeSubjectProgressQuery } = await import(
+    '../src/modules/user-state/userState.store.js'
+  );
+  const {
+    SUBJECT_STATUS_RANK,
+    getSubjectStatusRank,
+    resolveSubjectStatusFromEnrollment,
+  } = await import('../src/modules/enrollments/enrollmentStatus.helpers.js');
   const {
     parseProfessorName,
     compareProfessorParsed,
@@ -401,6 +410,7 @@ async function main() {
       `/api/admin/professors/${histProfId}/subjects`,
       tokenAdmin,
       {
+        planId: store.defaultPlanId,
         subjectId: subjects[3].codeInPlan,
         note: 'Titular histórico cátedra 2022-2024',
       }
@@ -1316,6 +1326,913 @@ async function main() {
     assert(
       drizzleNullResolved === null,
       'DrizzleReviewsStore.resolvePlanContext devuelve null cuando findDefaultPublishedPlan no encuentra planes publicados'
+    );
+
+    // -------------------------------------------------------------------------
+    // 12. TRAMO 2C PARTE C: MODERACIÓN MULTI-PLAN EN RESEÑAS (/reports, /all, /api/admin/reviews)
+    // -------------------------------------------------------------------------
+    console.log('\n📌 12. Moderación multi-plan con contexto carrera/plan y filtros');
+    const cIsiId = crypto.randomUUID();
+    const cIndId = crypto.randomUUID();
+    const pIsiMultiId = crypto.randomUUID();
+    const pIndMultiId = crypto.randomUUID();
+    store.seedPlan(pIsiMultiId, store.defaultFacultyId, {
+      careerId: cIsiId,
+      careerCode: 'ISI',
+      careerName: 'Ingeniería en Sistemas de Información',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    store.seedPlan(pIndMultiId, store.defaultFacultyId, {
+      careerId: cIndId,
+      careerCode: 'IND',
+      careerName: 'Ingeniería Industrial',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+      year: 2023,
+      status: 'draft',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const sIsiMulti = store.seedSubject({
+      codeInPlan: 401,
+      name: 'Inteligencia Artificial',
+      planId: pIsiMultiId,
+    });
+    const sIndMulti = store.seedSubject({
+      codeInPlan: 402,
+      name: 'Estudio del Trabajo',
+      planId: pIndMultiId,
+    });
+    const profMultiMod = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Multiplan, Moderacion Docente',
+    });
+    const modStudentId = crypto.randomUUID();
+    const revIsiMulti = await store.createReview({
+      userId: modStudentId,
+      professorId: profMultiMod.id,
+      subjectId: sIsiMulti.id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 4,
+      clarity: 4,
+      treatment: 4,
+      availability: 4,
+      difficulty: 3,
+      wouldRecommend: true,
+      comment: 'Reseña ISI multiplan para moderación.',
+      attendedDeclared: true,
+    });
+    const revIndMulti = await store.createReview({
+      userId: modStudentId,
+      professorId: profMultiMod.id,
+      subjectId: sIndMulti.id,
+      academicYear: 2026,
+      term: '1C',
+      overall: 2,
+      clarity: 2,
+      treatment: 2,
+      availability: 2,
+      difficulty: 4,
+      wouldRecommend: false,
+      comment: 'Reseña IND multiplan oculta y reportada.',
+      attendedDeclared: true,
+    });
+    await store.setReviewStatus(revIndMulti.id, 'hidden');
+    await store.createReport({
+      reviewId: revIndMulti.id,
+      reporterUserId: studentB.id,
+      reason: 'ofensiva',
+      note: 'Reporte IND multiplan',
+    });
+
+    const queueInd = await api(
+      'GET',
+      `/api/admin/reviews/reports?careerId=${cIndId}&planId=${pIndMultiId}`,
+      tokenAdmin
+    );
+    const allIndFromReviewsRoute = await api(
+      'GET',
+      `/api/admin/reviews/all?careerId=${cIndId}`,
+      tokenAdmin
+    );
+    const allIndFromAdminController = await api(
+      'GET',
+      `/api/admin/reviews?planId=${pIndMultiId}`,
+      tokenAdmin
+    );
+    const allIsiFromAdminController = await api(
+      'GET',
+      `/api/admin/reviews?careerId=${cIsiId}`,
+      tokenAdmin
+    );
+
+    const openRepInd = (queueInd.data?.data?.openReports || [])[0];
+    const hiddenInd = (queueInd.data?.data?.hiddenReviews || [])[0];
+    const catalogInd1 = (allIndFromReviewsRoute.data?.data?.items || [])[0];
+    const catalogInd2 = (allIndFromAdminController.data?.data?.items || [])[0];
+    const catalogIsi = (allIsiFromAdminController.data?.data?.items || [])[0];
+
+    assert(
+      queueInd.status === 200 &&
+        (queueInd.data?.data?.openReports || []).length === 1 &&
+        openRepInd?.careerCode === 'IND' &&
+        openRepInd?.review?.planName === 'Plan 2023' &&
+        (queueInd.data?.data?.hiddenReviews || []).length === 1 &&
+        hiddenInd?.careerCode === 'IND' &&
+        allIndFromReviewsRoute.status === 200 &&
+        (allIndFromReviewsRoute.data?.data?.items || []).length === 1 &&
+        catalogInd1?.id === revIndMulti.id &&
+        catalogInd1?.careerCode === 'IND' &&
+        allIndFromAdminController.status === 200 &&
+        (allIndFromAdminController.data?.data?.items || []).length === 1 &&
+        catalogInd2?.id === revIndMulti.id &&
+        catalogInd2?.planName === 'Plan 2023' &&
+        catalogInd2?.facultyName === 'UTN FRC' &&
+        allIsiFromAdminController.status === 200 &&
+        (allIsiFromAdminController.data?.data?.items || []).length === 1 &&
+        catalogIsi?.id === revIsiMulti.id &&
+        catalogIsi?.careerCode === 'ISI',
+      'Reviews admin (/reports, /all y /api/admin/reviews) exponen metadatos carrera/plan y filtran por careerId/planId'
+    );
+
+    // -------------------------------------------------------------------------
+    // 13. TRAMO 2C PARTE D: DOCENTES DESDE ADMIN DESACOPLADOS DE selectedPlanId
+    // -------------------------------------------------------------------------
+    console.log('\n📌 13. Parte D: Crear/vincular docentes en planB con admin selectedPlanId=planA');
+    const facOtherId = crypto.randomUUID();
+    const pIndOtherFacId = crypto.randomUUID();
+    store.seedPlan(pIndOtherFacId, facOtherId, {
+      careerId: crypto.randomUUID(),
+      careerCode: 'IND-B',
+      careerName: 'Ingeniería Industrial Regional B',
+      planName: 'Plan 2023 Regional B',
+      facultyName: 'UTN FRBA',
+      year: 2023,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const sIndOtherFac = store.seedSubject({
+      codeInPlan: 501,
+      name: 'Gestión de Calidad Regional B',
+      planId: pIndOtherFacId,
+    });
+    const sIndSameCodeAsIsi = store.seedSubject({
+      codeInPlan: subjects[0].codeInPlan,
+      name: 'Química General IND',
+      planId: pIndMultiId,
+    });
+
+    // Admin con selectedPlanId = pIsiMultiId (planA) crea docente directamente en pIndMultiId (planB)
+    const tokenAdminPlanA = makeToken({
+      ...adminUser,
+      selectedPlanId: pIsiMultiId,
+    });
+    store.seedUserPlan(adminUser.id, pIsiMultiId);
+
+    const createInPlanB = await api('POST', '/api/admin/professors', tokenAdminPlanA, {
+      displayName: 'Gomez, Industrial Docente',
+      planId: pIndMultiId,
+      subjectId: sIndSameCodeAsIsi.id,
+      note: 'Docente histórico de Industrial',
+    });
+    const createdProfBId = createInPlanB.data?.data?.professor?.id as string | undefined;
+    const isLinkedToIndSub =
+      createdProfBId &&
+      store.historicalLinks.some(
+        (l) => l.professorId === createdProfBId && l.subjectId === sIndSameCodeAsIsi.id
+      );
+    const isLinkedToIsiSub =
+      createdProfBId &&
+      store.historicalLinks.some(
+        (l) => l.professorId === createdProfBId && l.subjectId === subjects[0].id
+      );
+    assert(
+      createInPlanB.status === 201 &&
+        createInPlanB.data?.data?.linkedSubject?.id === sIndSameCodeAsIsi.id &&
+        Boolean(isLinkedToIndSub) &&
+        !isLinkedToIsiSub,
+      'POST /api/admin/professors con planId/subjectId de planB vincula en planB aunque el admin tenga selectedPlanId=planA'
+    );
+
+    // Vincular docente existente a materia de pIndMultiId por UUID sin usar selectedPlanId
+    const linkCrossPlan = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIndMultiId,
+        subjectId: sIndMulti.id,
+        note: 'Vínculo multiplan por UUID',
+      }
+    );
+    const profListPlanB = await api('GET', `/api/admin/professors?planId=${pIndOtherFacId}`, tokenAdminPlanA);
+
+    // Validaciones negativas: mismatch plan/materia (400), numeric sin planId (400), otra facultad (400)
+    const createPlanMismatch = await api('POST', '/api/admin/professors', tokenAdminPlanA, {
+      displayName: 'Mismatch, Docente',
+      planId: pIsiMultiId,
+      subjectId: sIndSameCodeAsIsi.id,
+    });
+    const linkPlanMismatch = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIsiMultiId,
+        subjectId: sIndMulti.id,
+      }
+    );
+    const linkNumericNoPlan = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        subjectId: 1,
+      }
+    );
+    const linkCrossFaculty = await api(
+      'POST',
+      `/api/admin/professors/${profBotta1.id}/subjects`,
+      tokenAdminPlanA,
+      {
+        planId: pIndOtherFacId,
+        subjectId: sIndOtherFac.id,
+      }
+    );
+
+    assert(
+      linkCrossPlan.status === 201 &&
+        linkCrossPlan.data?.data?.subject?.id === sIndMulti.id &&
+        profListPlanB.status === 200 &&
+        !(profListPlanB.data?.data?.professors || []).some((p: any) => p.id === profBotta1.id) &&
+        createPlanMismatch.status === 400 &&
+        linkPlanMismatch.status === 400 &&
+        linkNumericNoPlan.status === 400 &&
+        linkCrossFaculty.status === 400,
+      'POST /subjects vincula en planB, GET /professors?planId filtra por facultad y rechaza con 400 mismatch plan/materia, numérico sin planId o cruce de facultades',
+      `statuses=${linkCrossPlan.status}/${profListPlanB.status}/${createPlanMismatch.status}/${linkPlanMismatch.status}/${linkNumericNoPlan.status}/${linkCrossFaculty.status}`
+    );
+
+    // -------------------------------------------------------------------------
+    // 14. ACTUALIZACIÓN ATÓMICA DE ESTADO DE MATERIA AL GUARDAR CURSADA
+    // -------------------------------------------------------------------------
+    console.log('\n📌 14. Actualización automática y atómica del estado al guardar cursada');
+
+    const enrollStudent = {
+      id: crypto.randomUUID(),
+      email: 'cursada.estado@frc.utn.edu.ar',
+      role: 'user' as const,
+    };
+    testUsersMap.set(enrollStudent.id, {
+      ...enrollStudent,
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: store.defaultPlanId,
+    });
+    const tokenEnroll = makeToken(enrollStudent);
+
+    const subPromo = store.seedSubject({
+      codeInPlan: 701,
+      name: 'Materia Promo Directa',
+      shortName: 'MPD',
+      level: 2,
+    });
+    const subReg = store.seedSubject({
+      codeInPlan: 702,
+      name: 'Materia Regular Directa',
+      shortName: 'MRD',
+      level: 2,
+    });
+    const subAprob = store.seedSubject({
+      codeInPlan: 703,
+      name: 'Materia Ya Aprobada',
+      shortName: 'MYA',
+      level: 2,
+    });
+    const subLibreCheck = store.seedSubject({
+      codeInPlan: 704,
+      name: 'Materia Cursando y Libre',
+      shortName: 'MCL',
+      level: 2,
+    });
+    const subEditCycle = store.seedSubject({
+      codeInPlan: 705,
+      name: 'Materia Edición y Borrado',
+      shortName: 'MEB',
+      level: 2,
+    });
+    const subRevGate = store.seedSubject({
+      codeInPlan: 706,
+      name: 'Materia Habilitación Reseña',
+      shortName: 'MHR',
+      level: 3,
+    });
+    const subRevPromo = store.seedSubject({
+      codeInPlan: 707,
+      name: 'Materia Habilitación Promo',
+      shortName: 'MHP',
+      level: 3,
+    });
+
+    const profEnrollGate = await store.createOrResolveProfessor({
+      facultyId: store.defaultFacultyId,
+      displayName: 'Docente Gate Reseñas, Lucía',
+    });
+    store.seedCommissionTeaching({
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      termLabel: '2026 1C',
+      isCurrent: true,
+    });
+    store.seedCommissionTeaching({
+      professorId: profEnrollGate.id,
+      subjectId: subRevPromo.id,
+      termLabel: '2026 1C',
+      isCurrent: true,
+    });
+
+    // 14.1 Promoción sobre materia sin estado -> promocionada
+    const resPromoNew = await api('PUT', `/api/enrollments/${subPromo.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const progPromoNew = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subPromo.id);
+    assert(
+      resPromoNew.status === 200 &&
+        resPromoNew.data?.data?.subjectStatus === 'promocionada' &&
+        progPromoNew?.status === 'promocionada',
+      'Promoción sobre materia sin estado actualiza progreso a "promocionada" e incluye subjectStatus'
+    );
+
+    // 14.2 Regularización sobre materia sin estado -> regularizada
+    const resRegNew = await api('PUT', `/api/enrollments/${subReg.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progRegNew = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subReg.id);
+    assert(
+      resRegNew.status === 200 &&
+        resRegNew.data?.data?.subjectStatus === 'regularizada' &&
+        progRegNew?.status === 'regularizada',
+      'Regularización sobre materia sin estado actualiza progreso a "regularizada" e incluye subjectStatus'
+    );
+
+    // 14.3 Materia ya aprobada (nota 9) + cursada regularizada -> sigue aprobada (nota intacta)
+    store.seedUserProgress(enrollStudent.id, subAprob.id, 'aprobada', 9);
+    const resAprobPlusReg = await api('PUT', `/api/enrollments/${subAprob.id}`, tokenEnroll, {
+      academicYear: 2024,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progAfterAprobReg = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subAprob.id);
+    assert(
+      resAprobPlusReg.status === 200 &&
+        resAprobPlusReg.data?.data?.subjectStatus === 'aprobada' &&
+        progAfterAprobReg?.status === 'aprobada' &&
+        progAfterAprobReg?.grade === 9,
+      'Materia ya aprobada + cursada regularizada NO baja de estado y conserva nota 9'
+    );
+
+    // 14.4 Materia ya aprobada (nota 9) + cursada promocionada -> pasa a promocionada (nota conservada)
+    const resAprobPlusPromo = await api('PUT', `/api/enrollments/${subAprob.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const progAfterAprobPromo = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subAprob.id);
+    assert(
+      resAprobPlusPromo.status === 200 &&
+        resAprobPlusPromo.data?.data?.subjectStatus === 'promocionada' &&
+        progAfterAprobPromo?.status === 'promocionada' &&
+        progAfterAprobPromo?.grade === 9,
+      'Materia aprobada + cursada promocionada sube a "promocionada" conservando nota 9'
+    );
+
+    // 14.5 Cursada cursando o libre -> estado sin cambios
+    const resCursandoOnly = await api('PUT', `/api/enrollments/${subLibreCheck.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'cursando',
+      professorIds: [],
+    });
+    const resLibreOnly = await api('PUT', `/api/enrollments/${subLibreCheck.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '2C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const progLibreCheck = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subLibreCheck.id);
+    assert(
+      resCursandoOnly.status === 200 &&
+        resCursandoOnly.data?.data?.subjectStatus === 'pendiente' &&
+        resLibreOnly.status === 200 &&
+        resLibreOnly.data?.data?.subjectStatus === 'pendiente' &&
+        progLibreCheck === undefined,
+      'Cursada cursando y cursada libre sobre materia sin estado devuelven subjectStatus="pendiente" sin modificar progreso'
+    );
+
+    // 14.6 Editar cursada existente de cursando a regularizada -> sube el estado
+    const resCreateCursando = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'cursando',
+      professorIds: [],
+    });
+    const editEnrollmentId = resCreateCursando.data?.data?.id as string;
+    const resEditToReg = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      enrollmentId: editEnrollmentId,
+      academicYear: 2026,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const progAfterEditToReg = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subEditCycle.id);
+    assert(
+      resCreateCursando.status === 200 &&
+        resCreateCursando.data?.data?.subjectStatus === 'pendiente' &&
+        resEditToReg.status === 200 &&
+        resEditToReg.data?.data?.subjectStatus === 'regularizada' &&
+        progAfterEditToReg?.status === 'regularizada',
+      'Editar cursada existente de cursando a regularizada sube el estado de la materia a regularizada'
+    );
+
+    // 14.7 Editar cursada hacia libre o borrar cursada -> estado NO se revierte
+    const resEditToLibre = await api('PUT', `/api/enrollments/${subEditCycle.id}`, tokenEnroll, {
+      enrollmentId: editEnrollmentId,
+      academicYear: 2026,
+      term: '1C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const resDeleteEnrKeepState = await api('DELETE', `/api/enrollments/${editEnrollmentId}`, tokenEnroll);
+    const progAfterDel = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(subEditCycle.id);
+    assert(
+      resEditToLibre.status === 200 &&
+        resEditToLibre.data?.data?.subjectStatus === 'regularizada' &&
+        resDeleteEnrKeepState.status === 200 &&
+        progAfterDel?.status === 'regularizada',
+      'Editar cursada existente a libre o borrarla NO revierte el estado ya alcanzado'
+    );
+
+    // 14.8 Materia de otro plan -> 404 y no escribe ni cursada ni progreso
+    const enrollmentsCountBeforeOther = Array.from(store.enrollmentsMap.values()).filter(
+      (e) => e.userId === enrollStudent.id && e.subjectId === sIndMulti.id
+    ).length;
+    const resOtherPlan = await api('PUT', `/api/enrollments/${sIndMulti.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const enrollmentsCountAfterOther = Array.from(store.enrollmentsMap.values()).filter(
+      (e) => e.userId === enrollStudent.id && e.subjectId === sIndMulti.id
+    ).length;
+    const progOtherPlan = (await store.getUserSubjectProgressMap(enrollStudent.id)).get(sIndMulti.id);
+    assert(
+      resOtherPlan.status === 404 &&
+        enrollmentsCountBeforeOther === 0 &&
+        enrollmentsCountAfterOther === 0 &&
+        progOtherPlan === undefined,
+      'Materia de otro plan devuelve 404 y no escribe ni cursada ni progreso'
+    );
+
+    // 14.9 Efecto en reseñas: cursada libre NO habilita; regularizada/promocionada SÍ habilitan
+    const resGateLibre = await api('PUT', `/api/enrollments/${subRevGate.id}`, tokenEnroll, {
+      academicYear: 2025,
+      term: '1C',
+      status: 'libre',
+      professorIds: [],
+    });
+    const revbleAfterLibre = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterLibre = (revbleAfterLibre.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevGate.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterLibre = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      overall: 4,
+    });
+    assert(
+      resGateLibre.status === 200 &&
+        resGateLibre.data?.data?.subjectStatus === 'pendiente' &&
+        !isEligibleAfterLibre &&
+        postRevAfterLibre.status === 403 &&
+        postRevAfterLibre.data?.code === 'SUBJECT_NOT_COMPLETED',
+      'Con cursada "libre" (sin docente), la materia NO aparece en /api/me/reviewable y POST /api/reviews rechaza con 403'
+    );
+
+    const resGateReg = await api('PUT', `/api/enrollments/${subRevGate.id}`, tokenEnroll, {
+      enrollmentId: resGateLibre.data?.data?.id,
+      academicYear: 2025,
+      term: '1C',
+      status: 'regularizada',
+      professorIds: [],
+    });
+    const revbleAfterReg = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterReg = (revbleAfterReg.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevGate.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterReg = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevGate.id,
+      overall: 5,
+      comment: 'Habilitado por regularizar la cursada.',
+    });
+
+    const resGatePromo = await api('PUT', `/api/enrollments/${subRevPromo.id}`, tokenEnroll, {
+      academicYear: 2026,
+      term: '1C',
+      status: 'promocionada',
+      professorIds: [],
+    });
+    const revbleAfterPromo = await api('GET', '/api/me/reviewable', tokenEnroll);
+    const isEligibleAfterPromo = (revbleAfterPromo.data?.data?.eligible || []).some(
+      (e: any) => e.subjectId === subRevPromo.id && e.professorId === profEnrollGate.id
+    );
+    const postRevAfterPromo = await api('POST', '/api/reviews', tokenEnroll, {
+      professorId: profEnrollGate.id,
+      subjectId: subRevPromo.id,
+      overall: 5,
+      comment: 'Habilitado por promocionar la cursada.',
+    });
+    assert(
+      resGateReg.status === 200 &&
+        resGateReg.data?.data?.subjectStatus === 'regularizada' &&
+        isEligibleAfterReg &&
+        postRevAfterReg.status === 201 &&
+        resGatePromo.status === 200 &&
+        resGatePromo.data?.data?.subjectStatus === 'promocionada' &&
+        isEligibleAfterPromo &&
+        postRevAfterPromo.status === 201,
+      'Tras regularizar o promocionar cursada, la materia aparece en /api/me/reviewable y POST /api/reviews acepta (201)'
+    );
+
+    // 14.10 Integración con ambos almacenes inyectados (GET /api/state refleja nuevo estado)
+    const pairedReviewsStore = new InMemoryReviewsStore();
+    const pairedUserStateStore = new InMemoryUserStateStore();
+    const pairedPlanId = pairedReviewsStore.defaultPlanId;
+    const pairedFacId = pairedReviewsStore.defaultFacultyId;
+    pairedUserStateStore.seedPlan({
+      id: pairedPlanId,
+      name: 'Plan Integrado',
+      facultyId: pairedFacId,
+      totalLevels: 5,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const pSub1 = pairedReviewsStore.seedSubject({
+      codeInPlan: 801,
+      name: 'Integrada Promo',
+      planId: pairedPlanId,
+    });
+    const pSub2 = pairedReviewsStore.seedSubject({
+      codeInPlan: 802,
+      name: 'Integrada Aprobada',
+      planId: pairedPlanId,
+    });
+    pairedUserStateStore.seedSubject({
+      id: pSub1.id,
+      planId: pairedPlanId,
+      codeInPlan: 801,
+    });
+    pairedUserStateStore.seedSubject({
+      id: pSub2.id,
+      planId: pairedPlanId,
+      codeInPlan: 802,
+    });
+
+    const pairedUserId = crypto.randomUUID();
+    pairedReviewsStore.seedUserPlan(pairedUserId, pairedPlanId);
+    pairedUserStateStore.seedUser(pairedUserId, pairedPlanId);
+    testUsersMap.set(pairedUserId, {
+      id: pairedUserId,
+      email: 'paired.stores@frc.utn.edu.ar',
+      role: 'user',
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: pairedPlanId,
+    });
+    const pairedToken = makeToken({
+      id: pairedUserId,
+      email: 'paired.stores@frc.utn.edu.ar',
+      role: 'user',
+      selectedPlanId: pairedPlanId,
+    });
+    await pairedUserStateStore.upsertSubjectProgress(pairedUserId, pSub2.id, 'aprobada', '8');
+
+    const pairedApp = createApp({
+      reviewsStore: pairedReviewsStore,
+      userStateStore: pairedUserStateStore,
+    });
+    const pairedServer = http.createServer(pairedApp);
+    await new Promise<void>((resolve) => pairedServer.listen(0, resolve));
+    const pairedPort = (pairedServer.address() as { port: number }).port;
+    const pairedApi = async (method: string, ep: string, body?: any) => {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'XMLHttpRequest',
+        Cookie: `accessToken=${pairedToken}`,
+      };
+      const opts: RequestInit = { method, headers };
+      if (body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(`http://localhost:${pairedPort}${ep}`, opts);
+      const t = await r.text();
+      return { status: r.status, data: t ? JSON.parse(t) : null };
+    };
+
+    try {
+      const putPairedPromo = await pairedApi('PUT', `/api/enrollments/${pSub1.id}`, {
+        academicYear: 2026,
+        term: '1C',
+        status: 'promocionada',
+        professorIds: [],
+      });
+      const putPairedRegOnAprob = await pairedApi('PUT', `/api/enrollments/${pSub2.id}`, {
+        academicYear: 2025,
+        term: '1C',
+        status: 'regularizada',
+        professorIds: [],
+      });
+      const statePaired = await pairedApi('GET', '/api/state');
+      assert(
+        putPairedPromo.status === 200 &&
+          putPairedPromo.data?.data?.subjectStatus === 'promocionada' &&
+          putPairedRegOnAprob.status === 200 &&
+          putPairedRegOnAprob.data?.data?.subjectStatus === 'aprobada' &&
+          statePaired.status === 200 &&
+          statePaired.data?.data?.progress?.['801']?.status === 'promocionada' &&
+          statePaired.data?.data?.progress?.['802']?.status === 'aprobada' &&
+          statePaired.data?.data?.progress?.['802']?.grade === 8,
+        'Con reviewsStore + userStateStore inyectados, GET /api/state refleja promocionada y respeta aprobada (nota 8) sin bajar'
+      );
+    } finally {
+      await new Promise<void>((resolve) => pairedServer.close(() => resolve()));
+      setActiveReviewsStore(store);
+    }
+
+    // 14.11 Atomicidad en memoria: si falla upsertSubjectProgress, no queda la cursada ni cambia el progreso
+    const atomicReviewsStore = new InMemoryReviewsStore();
+    const failingUserStateStore = new InMemoryUserStateStore();
+    const atomicPlanId = atomicReviewsStore.defaultPlanId;
+    const atomicFacId = atomicReviewsStore.defaultFacultyId;
+    failingUserStateStore.seedPlan({
+      id: atomicPlanId,
+      name: 'Plan Atómico',
+      facultyId: atomicFacId,
+      totalLevels: 5,
+      status: 'published',
+      isActive: true,
+      careerStatus: 'published',
+    });
+    const aSub = atomicReviewsStore.seedSubject({
+      codeInPlan: 901,
+      name: 'Materia Atomicidad',
+      planId: atomicPlanId,
+    });
+    failingUserStateStore.seedSubject({
+      id: aSub.id,
+      planId: atomicPlanId,
+      codeInPlan: 901,
+    });
+    const atomicUserId = crypto.randomUUID();
+    atomicReviewsStore.seedUserPlan(atomicUserId, atomicPlanId);
+    failingUserStateStore.seedUser(atomicUserId, atomicPlanId);
+    testUsersMap.set(atomicUserId, {
+      id: atomicUserId,
+      email: 'atomic.fail@frc.utn.edu.ar',
+      role: 'user',
+      status: 'active',
+      emailVerified: true,
+      selectedPlanId: atomicPlanId,
+    });
+    const atomicToken = makeToken({
+      id: atomicUserId,
+      email: 'atomic.fail@frc.utn.edu.ar',
+      role: 'user',
+      selectedPlanId: atomicPlanId,
+    });
+
+    await failingUserStateStore.upsertSubjectProgress(atomicUserId, aSub.id, 'cursando', null);
+    failingUserStateStore.upsertSubjectProgress = async () => {
+      throw new Error('Falla simulada al guardar subject_progress');
+    };
+
+    const atomicApp = createApp({
+      reviewsStore: atomicReviewsStore,
+      userStateStore: failingUserStateStore,
+    });
+    const atomicServer = http.createServer(atomicApp);
+    await new Promise<void>((resolve) => atomicServer.listen(0, resolve));
+    const atomicPort = (atomicServer.address() as { port: number }).port;
+    const atomicApi = async (method: string, ep: string, body?: any) => {
+      const headers: Record<string, string> = {
+        'X-Requested-With': 'XMLHttpRequest',
+        Cookie: `accessToken=${atomicToken}`,
+      };
+      const opts: RequestInit = { method, headers };
+      if (body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(`http://localhost:${atomicPort}${ep}`, opts);
+      const t = await r.text();
+      return { status: r.status, data: t ? JSON.parse(t) : null };
+    };
+
+    try {
+      const resAtomicFail = await atomicApi('PUT', `/api/enrollments/${aSub.id}`, {
+        academicYear: 2026,
+        term: '1C',
+        status: 'promocionada',
+        professorIds: [],
+      });
+      const enrListAfterFail = await atomicApi('GET', '/api/enrollments');
+      const stateAfterFail = await atomicApi('GET', '/api/state');
+      const revProgAfterFail = (await atomicReviewsStore.getUserSubjectProgressMap(atomicUserId)).get(aSub.id);
+      assert(
+        resAtomicFail.status === 500 &&
+          atomicReviewsStore.enrollmentsMap.size === 0 &&
+          (enrListAfterFail.data?.data?.enrollments || []).length === 0 &&
+          stateAfterFail.data?.data?.progress?.['901']?.status === 'cursando' &&
+          revProgAfterFail?.status === 'cursando',
+        'Atomicidad: si falla el guardado del progreso (500), hace rollback de la cursada y no cambia el progreso'
+      );
+    } finally {
+      await new Promise<void>((resolve) => atomicServer.close(() => resolve()));
+      setActiveReviewsStore(store);
+    }
+
+    // 14.12 GET /api/enrollments omite subjectStatus cuando no lo calcula; PUT sí lo devuelve siempre
+    const listEnrollmentsRes = await api('GET', '/api/enrollments', tokenEnroll);
+    const listedEnrollments = (listEnrollmentsRes.data?.data?.enrollments || []) as Array<
+      Record<string, unknown>
+    >;
+    const listOmitsSubjectStatus =
+      listedEnrollments.length >= 4 &&
+      listedEnrollments.every(
+        (item) =>
+          !Object.prototype.hasOwnProperty.call(item, 'subjectStatus') &&
+          item.subjectStatus === undefined
+      );
+    assert(
+      listEnrollmentsRes.status === 200 &&
+        listOmitsSubjectStatus &&
+        Object.prototype.hasOwnProperty.call(resPromoNew.data?.data || {}, 'subjectStatus') &&
+        typeof resPromoNew.data?.data?.subjectStatus === 'string',
+      'GET /api/enrollments omite subjectStatus cuando no se calculó; PUT /api/enrollments/:subjectId lo incluye siempre'
+    );
+
+    // 14.13 Verificación pura de SQL generado por upgradeSubjectProgressWithDb vs SUBJECT_STATUS_RANK
+    const compiledUpgrade = buildUpgradeSubjectProgressQuery(
+      db,
+      '11111111-1111-4111-8111-111111111111',
+      '22222222-2222-4222-8222-222222222222',
+      'promocionada',
+      new Date('2026-11-21T18:00:00.000Z')
+    ).toSQL();
+
+    const lowerSql = compiledUpgrade.sql.toLowerCase();
+    const doUpdateIdx = lowerSql.indexOf('do update set');
+    const returningIdx = lowerSql.indexOf('returning');
+    const doUpdateClause =
+      doUpdateIdx >= 0
+        ? compiledUpgrade.sql.slice(doUpdateIdx, returningIdx > doUpdateIdx ? returningIdx : undefined)
+        : '';
+
+    const updatedAtMarker = ', "updated_at" = ';
+    const updatedAtIdx = doUpdateClause.indexOf(updatedAtMarker);
+    const statusUpdateBranch =
+      updatedAtIdx >= 0 ? doUpdateClause.slice(0, updatedAtIdx) : doUpdateClause;
+    const updatedAtBranch =
+      updatedAtIdx >= 0 ? doUpdateClause.slice(updatedAtIdx + updatedAtMarker.length) : '';
+
+    const extractCaseRankMap = (sqlSlice: string, columnRegexPart: string) => {
+      const nullRegex = new RegExp(
+        `WHEN ${columnRegexPart} IS NULL THEN CAST\\(\\$(\\d+) AS integer\\)`
+      );
+      const nullMatch = sqlSlice.match(nullRegex);
+      const nullRank = nullMatch ? Number(compiledUpgrade.params[Number(nullMatch[1]) - 1]) : NaN;
+
+      const pairRegex = new RegExp(
+        `WHEN ${columnRegexPart} = \\$(\\d+) THEN CAST\\(\\$(\\d+) AS integer\\)`,
+        'g'
+      );
+      const pairs: Array<[string, number]> = [];
+      let m: RegExpExecArray | null;
+      while ((m = pairRegex.exec(sqlSlice)) !== null) {
+        const statusKey = String(compiledUpgrade.params[Number(m[1]) - 1]);
+        const rankValue = Number(compiledUpgrade.params[Number(m[2]) - 1]);
+        pairs.push([statusKey, rankValue]);
+      }
+      return { nullRank, pairs };
+    };
+
+    const existingCaseStatus = extractCaseRankMap(statusUpdateBranch, '"subject_progress"\\."status"');
+    const excludedCaseStatus = extractCaseRankMap(statusUpdateBranch, 'excluded\\.status');
+    const existingCaseUpdatedAt = extractCaseRankMap(updatedAtBranch, '"subject_progress"\\."status"');
+    const excludedCaseUpdatedAt = extractCaseRankMap(updatedAtBranch, 'excluded\\.status');
+    const expectedEntries = Object.entries(SUBJECT_STATUS_RANK);
+
+    const matchesEntries = (extracted: typeof existingCaseStatus) =>
+      extracted.nullRank === getSubjectStatusRank(null) &&
+      extracted.pairs.length === expectedEntries.length &&
+      expectedEntries.every(
+        ([k, v], idx) => extracted.pairs[idx][0] === k && extracted.pairs[idx][1] === v
+      );
+
+    const casePairsMatchExpected =
+      matchesEntries(existingCaseStatus) &&
+      matchesEntries(excludedCaseStatus) &&
+      matchesEntries(existingCaseUpdatedAt) &&
+      matchesEntries(excludedCaseUpdatedAt);
+
+    const sqlRankLookup = (val: string | null | undefined, extracted: typeof existingCaseStatus): number | null => {
+      if (val === null || val === undefined) return extracted.nullRank;
+      const found = extracted.pairs.find(([k]) => k === val);
+      return found ? found[1] : null;
+    };
+
+    const allTestCurrentStatuses = [
+      null,
+      undefined,
+      'pendiente',
+      'disponible',
+      'bloqueada',
+      'libre',
+      'cursando',
+      'regularizada',
+      'aprobada',
+      'promocionada',
+      'desconocido',
+      '',
+    ];
+    const allTestEnrollmentStatuses = [
+      null,
+      undefined,
+      'cursando',
+      'libre',
+      'regularizada',
+      'promocionada',
+      'aprobada',
+      'desconocido',
+      '',
+    ];
+
+    let sqlParityChecked = 0;
+    let sqlParityOk = true;
+    for (const cur of allTestCurrentStatuses) {
+      for (const enr of allTestEnrollmentStatuses) {
+        const helperRes = resolveSubjectStatusFromEnrollment(cur, enr);
+        const wouldInvokeSqlUpgrade = enr === 'regularizada' || enr === 'promocionada';
+        let sqlWouldUpdate = false;
+        let sqlNextStatus = cur ?? null;
+        if (wouldInvokeSqlUpgrade) {
+          const exRank = sqlRankLookup(cur, existingCaseStatus);
+          const newRank = sqlRankLookup(enr, excludedCaseStatus);
+          if (exRank !== null && newRank !== null && newRank > exRank) {
+            sqlWouldUpdate = true;
+            sqlNextStatus = enr;
+          }
+        }
+        if (
+          sqlWouldUpdate !== helperRes.shouldUpdate ||
+          sqlNextStatus !== helperRes.nextStatus
+        ) {
+          sqlParityOk = false;
+        }
+        sqlParityChecked++;
+      }
+    }
+
+    assert(
+      lowerSql.includes('insert into "subject_progress"') &&
+        /on conflict \("user_id",\s*"subject_id"\) do update set/.test(lowerSql) &&
+        statusUpdateBranch.includes('"status" = CASE') &&
+        statusUpdateBranch.includes('THEN excluded.status ELSE "subject_progress"."status" END') &&
+        updatedAtBranch.startsWith('CASE ') &&
+        updatedAtBranch.includes('THEN excluded.updated_at ELSE "subject_progress"."updated_at" END') &&
+        !doUpdateClause.includes('"grade"') &&
+        lowerSql.includes('returning "status"') &&
+        casePairsMatchExpected &&
+        sqlParityChecked === 12 * 9 &&
+        sqlParityOk,
+      'SQL generado por upgradeSubjectProgressWithDb respeta SUBJECT_STATUS_RANK, preserva grade, condiciona updated_at y tiene paridad 108/108 con el helper puro'
     );
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { eq, and } from 'drizzle-orm';
 import { db, pool } from '../db/index.js';
+import { formatSubjectDisplayCode } from '../modules/catalog/planConfig.helpers.js';
 import {
   institutions,
   faculties,
@@ -192,6 +193,12 @@ async function runSeed() {
             planId: plan.id,
             sharedSubjectId: sharedSub.id,
             codeInPlan: sub.codeInPlan,
+            displayCode:
+              sub.displayCode ??
+              formatSubjectDisplayCode(
+                { codeInPlan: sub.codeInPlan, kind: sub.kind },
+                { careerCode: catalog.career.code, planYear: catalog.studyPlan.year }
+              ),
             name: sub.name,
             shortName: sub.shortName,
             level: sub.level,
@@ -210,6 +217,13 @@ async function runSeed() {
           .update(subjects)
           .set({
             sharedSubjectId: existingSub.sharedSubjectId || sharedSub.id,
+            displayCode:
+              sub.displayCode ??
+              existingSub.displayCode ??
+              formatSubjectDisplayCode(
+                { codeInPlan: sub.codeInPlan, kind: sub.kind },
+                { careerCode: catalog.career.code, planYear: catalog.studyPlan.year }
+              ),
             name: sub.name,
             shortName: sub.shortName,
             level: sub.level,

@@ -123,6 +123,7 @@ export const renameProfessorBodySchema = z.object({
 });
 
 export const linkProfessorSubjectBodySchema = z.object({
+  planId: z.string().uuid('Identificador de plan inválido').optional(),
   subjectId: subjectIdentifierSchema,
   note: z.string().trim().max(250).nullable().optional(),
 });
@@ -134,6 +135,7 @@ export const createHistoricalProfessorBodySchema = z.object({
     .min(3, 'El nombre del profesor debe tener al menos 3 caracteres')
     .max(120, 'El nombre del profesor no puede superar 120 caracteres'),
   facultyId: z.string().uuid().optional(),
+  planId: z.string().uuid('Identificador de plan inválido').optional(),
   subjectId: subjectIdentifierSchema.optional(),
   note: z.string().trim().max(250).nullable().optional(),
 });

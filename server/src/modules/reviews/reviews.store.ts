@@ -37,6 +37,11 @@ import {
   findDefaultPublishedPlan,
   type PublishedPlanWithCareer,
 } from '../catalog/catalog.helpers.js';
+import { resolveSubjectStatusFromEnrollment } from '../enrollments/enrollmentStatus.helpers.js';
+import {
+  upgradeSubjectProgressWithDb,
+  type UserStateStore,
+} from '../user-state/userState.store.js';
 
 export type ReviewStatus = 'published' | 'hidden' | 'removed';
 export type ReportReason = 'ofensiva' | 'datos personales' | 'falsa o spam' | 'otra';
@@ -190,6 +195,7 @@ export interface StoredEnrollment {
   term: EnrollmentTerm | null;
   source: EnrollmentSource;
   status: string | null;
+  subjectStatus?: string | null;
   professors: Array<{
     professorId: string;
     displayName: string;
@@ -198,7 +204,18 @@ export interface StoredEnrollment {
   updatedAt: Date;
 }
 
-export interface AdminModerationReportItem {
+export interface ReviewHierarchyContext {
+  careerId?: string | null;
+  careerCode?: string | null;
+  careerName?: string | null;
+  planId?: string | null;
+  planName?: string | null;
+  planYear?: number | null;
+  planStatus?: string | null;
+  facultyName?: string | null;
+}
+
+export interface AdminModerationReportItem extends ReviewHierarchyContext {
   reportId: string;
   reviewId: string;
   reason: ReportReason;
@@ -210,7 +227,7 @@ export interface AdminModerationReportItem {
   reporterEmail?: string | null;
   authorUserId?: string | null;
   authorEmail?: string | null;
-  review: {
+  review: ReviewHierarchyContext & {
     id: string;
     professorId: string;
     professorName: string;
@@ -226,7 +243,7 @@ export interface AdminModerationReportItem {
   };
 }
 
-export interface AdminHiddenReviewItem {
+export interface AdminHiddenReviewItem extends ReviewHierarchyContext {
   id: string;
   professorId: string;
   professorName: string;
@@ -242,7 +259,7 @@ export interface AdminHiddenReviewItem {
   authorEmail?: string | null;
 }
 
-export interface AdminReviewCatalogItem {
+export interface AdminReviewCatalogItem extends ReviewHierarchyContext {
   id: string;
   professorId: string;
   professorName: string;
@@ -355,6 +372,10 @@ function formatYearMonth(date: Date): string {
 
 export interface ReviewsStore {
   resolvePlanContext(userId: string, requestedPlanId?: string | null): Promise<PlanContext | null>;
+  getPlanContextById(planId: string): Promise<PlanContext | null>;
+  getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null>;
   getDefaultFacultyId(): Promise<string | null>;
   getPlanSubjects(planId: string): Promise<PlanSubjectRef[]>;
   getSubjectByIdOrCode(planId: string, idOrCode: string | number): Promise<PlanSubjectRef | null>;
@@ -528,7 +549,10 @@ export interface ReviewsStore {
   getUserSeenRecommendationKeys(userId: string): Promise<Set<string>>;
   markRecommendationsSeen(userId: string, keys: string[]): Promise<void>;
 
-  listModerationQueue(): Promise<{
+  listModerationQueue(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
   }>;
@@ -537,6 +561,10 @@ export interface ReviewsStore {
     pageSize?: number;
     search?: string;
     status?: ReviewStatus | 'all';
+    professorId?: string;
+    subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -562,6 +590,7 @@ export interface ReviewsStore {
 
   getAffectedProfessorIdsByUser(userId: string): Promise<string[]>;
   recalculateProfessorStats(professorId: string): Promise<void>;
+  linkUserStateStore?(userStateStore: UserStateStore): void;
 }
 
 function mapDbStatsRow(row: {
@@ -698,6 +727,43 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async getDefaultFacultyId(): Promise<string | null> {
     const [fac] = await db.select({ id: faculties.id }).from(faculties).limit(1);
     return fac?.id || null;
+  }
+
+  async getPlanContextById(planId: string): Promise<PlanContext | null> {
+    if (!this.isValidUuid(planId)) return null;
+    const [row] = await db
+      .select({
+        planId: studyPlans.id,
+        facultyId: careers.facultyId,
+      })
+      .from(studyPlans)
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .where(eq(studyPlans.id, planId))
+      .limit(1);
+    return row ? { planId: row.planId, facultyId: row.facultyId } : null;
+  }
+
+  async getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null> {
+    if (!this.isValidUuid(subjectId)) return null;
+    const [row] = await db
+      .select({
+        id: subjects.id,
+        planId: subjects.planId,
+        facultyId: careers.facultyId,
+        codeInPlan: subjects.codeInPlan,
+        name: subjects.name,
+        shortName: subjects.shortName,
+        level: subjects.level,
+        kind: subjects.kind,
+      })
+      .from(subjects)
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .where(eq(subjects.id, subjectId))
+      .limit(1);
+    return row || null;
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
@@ -1742,12 +1808,23 @@ export class DrizzleReviewsStore implements ReviewsStore {
     });
   }
 
-  async listModerationQueue(): Promise<{
+  async listModerationQueue(filters?: {
+    careerId?: string;
+    planId?: string;
+  }): Promise<{
     openReports: AdminModerationReportItem[];
     hiddenReviews: AdminHiddenReviewItem[];
   }> {
     const authorUsers = alias(users, 'author_users');
     const reporterUsers = alias(users, 'reporter_users');
+
+    const reportConditions = [eq(reviewReports.status, 'open')];
+    if (filters?.careerId && filters.careerId !== 'all') {
+      reportConditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      reportConditions.push(eq(studyPlans.id, filters.planId));
+    }
 
     const reportsRows = await db
       .select({
@@ -1756,6 +1833,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: authorUsers.id,
         authorEmail: authorUsers.email,
         reporterUserId: reporterUsers.id,
@@ -1765,9 +1850,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .innerJoin(professorReviews, eq(reviewReports.reviewId, professorReviews.id))
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .leftJoin(reporterUsers, eq(reviewReports.reporterUserId, reporterUsers.id))
-      .where(eq(reviewReports.status, 'open'))
+      .where(and(...reportConditions))
       .orderBy(desc(reviewReports.createdAt));
 
     const openCountByReview = new Map<string, number>();
@@ -1775,33 +1863,55 @@ export class DrizzleReviewsStore implements ReviewsStore {
       openCountByReview.set(r.review.id, (openCountByReview.get(r.review.id) || 0) + 1);
     }
 
-    const openReports: AdminModerationReportItem[] = reportsRows.map((r) => ({
-      reportId: r.report.id,
-      reviewId: r.review.id,
-      reason: r.report.reason as ReportReason,
-      note: r.report.note,
-      reportStatus: r.report.status as ReportStatus,
-      reportedMonthYear: formatYearMonth(r.report.createdAt),
-      openReportsOnReview: openCountByReview.get(r.review.id) || 1,
-      reporterUserId: r.reporterUserId || null,
-      reporterEmail: r.reporterEmail || null,
-      authorUserId: r.authorUserId || null,
-      authorEmail: r.authorEmail || null,
-      review: {
-        id: r.review.id,
-        professorId: r.review.professorId,
-        professorName: r.profName,
-        subjectId: r.review.subjectId,
-        subjectCode: r.subCode,
-        subjectName: r.subName,
-        overall: r.review.overall,
-        comment: r.review.comment,
-        status: r.review.status as ReviewStatus,
-        publishedMonthYear: formatYearMonth(r.review.createdAt),
+    const openReports: AdminModerationReportItem[] = reportsRows.map((r) => {
+      const hierarchy = {
+        careerId: r.careerId,
+        careerCode: r.careerCode,
+        careerName: r.careerName,
+        planId: r.planId,
+        planName: r.planName,
+        planYear: r.planYear,
+        planStatus: r.planStatus,
+        facultyName: r.facultyName,
+      };
+      return {
+        reportId: r.report.id,
+        reviewId: r.review.id,
+        reason: r.report.reason as ReportReason,
+        note: r.report.note,
+        reportStatus: r.report.status as ReportStatus,
+        reportedMonthYear: formatYearMonth(r.report.createdAt),
+        openReportsOnReview: openCountByReview.get(r.review.id) || 1,
+        reporterUserId: r.reporterUserId || null,
+        reporterEmail: r.reporterEmail || null,
         authorUserId: r.authorUserId || null,
         authorEmail: r.authorEmail || null,
-      },
-    }));
+        ...hierarchy,
+        review: {
+          id: r.review.id,
+          professorId: r.review.professorId,
+          professorName: r.profName,
+          subjectId: r.review.subjectId,
+          subjectCode: r.subCode,
+          subjectName: r.subName,
+          overall: r.review.overall,
+          comment: r.review.comment,
+          status: r.review.status as ReviewStatus,
+          publishedMonthYear: formatYearMonth(r.review.createdAt),
+          authorUserId: r.authorUserId || null,
+          authorEmail: r.authorEmail || null,
+          ...hierarchy,
+        },
+      };
+    });
+
+    const hiddenConditions = [eq(professorReviews.status, 'hidden')];
+    if (filters?.careerId && filters.careerId !== 'all') {
+      hiddenConditions.push(eq(careers.id, filters.careerId));
+    }
+    if (filters?.planId && filters.planId !== 'all') {
+      hiddenConditions.push(eq(studyPlans.id, filters.planId));
+    }
 
     const hiddenRows = await db
       .select({
@@ -1809,14 +1919,25 @@ export class DrizzleReviewsStore implements ReviewsStore {
         profName: professors.displayName,
         subCode: subjects.codeInPlan,
         subName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: authorUsers.id,
         authorEmail: authorUsers.email,
       })
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
-      .where(eq(professorReviews.status, 'hidden'))
+      .where(and(...hiddenConditions))
       .orderBy(desc(professorReviews.updatedAt));
 
     const hiddenReviews: AdminHiddenReviewItem[] = hiddenRows.map((h) => ({
@@ -1826,6 +1947,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
       subjectId: h.review.subjectId,
       subjectCode: h.subCode,
       subjectName: h.subName,
+      careerId: h.careerId,
+      careerCode: h.careerCode,
+      careerName: h.careerName,
+      planId: h.planId,
+      planName: h.planName,
+      planYear: h.planYear,
+      planStatus: h.planStatus,
+      facultyName: h.facultyName,
       overall: h.review.overall,
       comment: h.review.comment,
       status: h.review.status as ReviewStatus,
@@ -1845,6 +1974,8 @@ export class DrizzleReviewsStore implements ReviewsStore {
     status?: string;
     professorId?: string;
     subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -1868,6 +1999,12 @@ export class DrizzleReviewsStore implements ReviewsStore {
     if (params?.subjectId) {
       conditions.push(eq(professorReviews.subjectId, params.subjectId));
     }
+    if (params?.careerId && params.careerId !== 'all') {
+      conditions.push(eq(careers.id, params.careerId));
+    }
+    if (params?.planId && params.planId !== 'all') {
+      conditions.push(eq(studyPlans.id, params.planId));
+    }
     if (params?.search && params.search.trim()) {
       const term = `%${params.search.trim().toLowerCase()}%`;
       conditions.push(
@@ -1882,6 +2019,9 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .where(whereClause);
 
@@ -1895,6 +2035,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
         subjectId: professorReviews.subjectId,
         subjectCode: subjects.codeInPlan,
         subjectName: subjects.name,
+        careerId: careers.id,
+        careerCode: careers.code,
+        careerName: careers.name,
+        planId: studyPlans.id,
+        planName: studyPlans.name,
+        planYear: studyPlans.year,
+        planStatus: studyPlans.status,
+        facultyName: faculties.name,
         authorUserId: professorReviews.userId,
         authorEmail: authorUsers.email,
         overall: professorReviews.overall,
@@ -1914,6 +2062,9 @@ export class DrizzleReviewsStore implements ReviewsStore {
       .from(professorReviews)
       .innerJoin(professors, eq(professorReviews.professorId, professors.id))
       .innerJoin(subjects, eq(professorReviews.subjectId, subjects.id))
+      .innerJoin(studyPlans, eq(subjects.planId, studyPlans.id))
+      .innerJoin(careers, eq(studyPlans.careerId, careers.id))
+      .innerJoin(faculties, eq(careers.facultyId, faculties.id))
       .leftJoin(authorUsers, eq(professorReviews.userId, authorUsers.id))
       .where(whereClause)
       .orderBy(desc(professorReviews.createdAt))
@@ -1927,6 +2078,14 @@ export class DrizzleReviewsStore implements ReviewsStore {
       subjectId: r.subjectId,
       subjectCode: r.subjectCode,
       subjectName: r.subjectName,
+      careerId: r.careerId,
+      careerCode: r.careerCode,
+      careerName: r.careerName,
+      planId: r.planId,
+      planName: r.planName,
+      planYear: r.planYear,
+      planStatus: r.planStatus,
+      facultyName: r.facultyName,
       authorUserId: r.authorUserId,
       authorEmail: r.authorEmail || 'usuario_eliminado@stack.com',
       overall: r.overall,
@@ -2608,7 +2767,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
   }): Promise<StoredEnrollment> {
     const uniqueProfIds = Array.from(new Set(params.professorIds));
 
-    const targetId = await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const existingRows = await tx
         .select()
         .from(subjectEnrollments)
@@ -2715,7 +2874,10 @@ export class DrizzleReviewsStore implements ReviewsStore {
         if (placeholder) {
           await tx
             .update(subjectEnrollments)
-            .set({ updatedAt: new Date() })
+            .set({
+              status: params.status || placeholder.status || 'cursando',
+              updatedAt: new Date(),
+            })
             .where(eq(subjectEnrollments.id, placeholder.id));
           chosenId = placeholder.id;
           skipProfReplace = true;
@@ -2783,12 +2945,44 @@ export class DrizzleReviewsStore implements ReviewsStore {
         }
       }
 
-      return chosenId!;
+      const [existingProgress] = await tx
+        .select({
+          status: subjectProgress.status,
+        })
+        .from(subjectProgress)
+        .where(
+          and(
+            eq(subjectProgress.userId, params.userId),
+            eq(subjectProgress.subjectId, params.subjectId)
+          )
+        )
+        .for('update');
+
+      const currentSubjectStatus = existingProgress?.status ?? 'pendiente';
+      const resolution = resolveSubjectStatusFromEnrollment(
+        currentSubjectStatus,
+        params.status
+      );
+      let finalSubjectStatus = currentSubjectStatus;
+
+      if (resolution.shouldUpdate && resolution.nextStatus) {
+        finalSubjectStatus = await upgradeSubjectProgressWithDb(
+          tx,
+          params.userId,
+          params.subjectId,
+          resolution.nextStatus
+        );
+      }
+
+      return { chosenId: chosenId!, finalSubjectStatus };
     });
 
     await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
-    const saved = await this.getEnrollmentById(targetId);
-    return saved!;
+    const saved = await this.getEnrollmentById(result.chosenId);
+    return {
+      ...saved!,
+      subjectStatus: result.finalSubjectStatus,
+    };
   }
 
   async deleteUserEnrollment(
@@ -2847,16 +3041,22 @@ export class DrizzleReviewsStore implements ReviewsStore {
 
   async getUserSeenRecommendationKeys(userId: string): Promise<Set<string>> {
     try {
-      const [row] = await db
+      const rows = await db
         .select({ extraSettings: userSettings.extraSettings })
         .from(userSettings)
-        .where(eq(userSettings.userId, userId))
-        .limit(1);
-      const raw = (row?.extraSettings as Record<string, unknown> | null)?.seenRecommendationKeys;
-      if (Array.isArray(raw)) {
-        return new Set(raw.filter((x): x is string => typeof x === 'string'));
+        .where(eq(userSettings.userId, userId));
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const raw = (row?.extraSettings as Record<string, unknown> | null)?.seenRecommendationKeys;
+        if (Array.isArray(raw)) {
+          for (const item of raw) {
+            if (typeof item === 'string') {
+              seen.add(item);
+            }
+          }
+        }
       }
-      return new Set();
+      return seen;
     } catch {
       return new Set();
     }
@@ -2864,36 +3064,60 @@ export class DrizzleReviewsStore implements ReviewsStore {
 
   async markRecommendationsSeen(userId: string, keys: string[]): Promise<void> {
     if (keys.length === 0) return;
-    const [existing] = await db
+    const rows = await db
       .select()
       .from(userSettings)
-      .where(eq(userSettings.userId, userId))
-      .limit(1);
+      .where(eq(userSettings.userId, userId));
 
-    const prevExtra =
-      existing?.extraSettings && typeof existing.extraSettings === 'object'
-        ? (existing.extraSettings as Record<string, unknown>)
-        : {};
-    const prevList = Array.isArray(prevExtra.seenRecommendationKeys)
-      ? prevExtra.seenRecommendationKeys.filter((x): x is string => typeof x === 'string')
-      : [];
-    const merged = Array.from(new Set([...prevList, ...keys])).slice(-500);
-    const nextExtra = {
-      ...prevExtra,
-      seenRecommendationKeys: merged,
-    };
+    if (rows.length > 0) {
+      const target = rows[0];
+      const prevList: string[] = [];
+      for (const row of rows) {
+        const extra =
+          row.extraSettings && typeof row.extraSettings === 'object'
+            ? (row.extraSettings as Record<string, unknown>)
+            : {};
+        if (Array.isArray(extra.seenRecommendationKeys)) {
+          for (const item of extra.seenRecommendationKeys) {
+            if (typeof item === 'string') prevList.push(item);
+          }
+        }
+      }
 
-    if (existing) {
+      const targetExtra =
+        target.extraSettings && typeof target.extraSettings === 'object'
+          ? (target.extraSettings as Record<string, unknown>)
+          : {};
+      const merged = Array.from(new Set([...prevList, ...keys])).slice(-500);
+      const nextExtra = {
+        ...targetExtra,
+        seenRecommendationKeys: merged,
+      };
+      const whereClause = target.planId
+        ? and(eq(userSettings.userId, userId), eq(userSettings.planId, target.planId))
+        : eq(userSettings.userId, userId);
+
       await db
         .update(userSettings)
         .set({ extraSettings: nextExtra, updatedAt: new Date() })
-        .where(eq(userSettings.userId, userId));
-    } else {
-      await db.insert(userSettings).values({
-        userId,
-        extraSettings: nextExtra,
-      });
+        .where(whereClause);
+      return;
     }
+
+    const planCtx = await this.resolvePlanContext(userId);
+    if (!planCtx?.planId) {
+      return;
+    }
+
+    const merged = Array.from(new Set(keys)).slice(-500);
+    await db
+      .insert(userSettings)
+      .values({
+        userId,
+        planId: planCtx.planId,
+        extraSettings: { seenRecommendationKeys: merged },
+      })
+      .onConflictDoNothing();
   }
 }
 
@@ -2906,7 +3130,11 @@ export interface InMemoryReviewPlanMeta {
   status: 'draft' | 'published' | 'archived';
   isActive: boolean;
   careerStatus: 'draft' | 'published' | 'archived';
+  careerId?: string;
   careerCode?: string;
+  careerName?: string;
+  planName?: string;
+  facultyName?: string;
   year?: number;
 }
 
@@ -2939,6 +3167,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     adminUserId: string | null;
   }> = [];
   public userProgress = new Map<string, Map<string, { status: string; grade: number | null }>>();
+  private linkedUserStateStore: UserStateStore | null = null;
   public reviewsMap = new Map<string, StoredReview>();
   public helpfulVotes = new Set<string>(); // `${reviewId}::${userId}`
   public reportsList: Array<{
@@ -3055,9 +3284,29 @@ export class InMemoryReviewsStore implements ReviewsStore {
       status: options?.status ?? 'published',
       isActive: options?.isActive ?? true,
       careerStatus: options?.careerStatus ?? 'published',
+      careerId: options?.careerId,
       careerCode: options?.careerCode,
+      careerName: options?.careerName,
+      planName: options?.planName,
+      facultyName: options?.facultyName,
       year: options?.year,
     });
+  }
+
+  private getSubjectHierarchy(subjectId: string) {
+    const sub = this.subjectsMap.get(subjectId);
+    const planId = sub?.planId || null;
+    const meta = planId ? this.planMetadata.get(planId) : undefined;
+    return {
+      careerId: meta?.careerId ?? null,
+      careerCode: meta?.careerCode ?? null,
+      careerName: meta?.careerName ?? null,
+      planId,
+      planName: meta?.planName ?? (meta?.year ? `Plan ${meta.year}` : null),
+      planYear: meta?.year ?? null,
+      planStatus: meta?.status ?? null,
+      facultyName: meta?.facultyName ?? null,
+    };
   }
 
   seedUserPlan(userId: string, planId: string | null) {
@@ -3148,6 +3397,35 @@ export class InMemoryReviewsStore implements ReviewsStore {
 
   async getDefaultFacultyId(): Promise<string | null> {
     return this.defaultFacultyId;
+  }
+
+  async getPlanContextById(planId: string): Promise<PlanContext | null> {
+    if (this.planFaculties.has(planId)) {
+      return { planId, facultyId: this.planFaculties.get(planId)! };
+    }
+    const meta = this.planMetadata.get(planId);
+    if (meta) {
+      return { planId, facultyId: meta.facultyId };
+    }
+    if (planId === this.defaultPlanId) {
+      return { planId: this.defaultPlanId, facultyId: this.defaultFacultyId };
+    }
+    return null;
+  }
+
+  async getSubjectWithPlanContextById(
+    subjectId: string
+  ): Promise<(PlanSubjectRef & { planId: string; facultyId: string }) | null> {
+    const sub = this.subjectsMap.get(subjectId);
+    if (!sub) return null;
+    const facultyId =
+      this.planFaculties.get(sub.planId) ||
+      this.planMetadata.get(sub.planId)?.facultyId ||
+      this.defaultFacultyId;
+    return {
+      ...sub,
+      facultyId,
+    };
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectRef[]> {
@@ -3267,10 +3545,51 @@ export class InMemoryReviewsStore implements ReviewsStore {
     return false;
   }
 
+  linkUserStateStore(userStateStore: UserStateStore): void {
+    this.linkedUserStateStore = userStateStore;
+  }
+
+  private async getEffectiveSubjectProgress(
+    userId: string,
+    subjectId: string
+  ): Promise<{ status: string; grade: number | null }> {
+    if (this.linkedUserStateStore) {
+      const rows = await this.linkedUserStateStore.listSubjectProgress(userId, [subjectId]);
+      if (rows.length > 0) {
+        return {
+          status: rows[0].status,
+          grade: rows[0].grade !== null ? Number(rows[0].grade) : null,
+        };
+      }
+    }
+    const local = this.userProgress.get(userId)?.get(subjectId);
+    if (local) {
+      return { status: local.status, grade: local.grade };
+    }
+    return { status: 'pendiente', grade: null };
+  }
+
   async getUserSubjectProgressMap(
     userId: string
   ): Promise<Map<string, { status: string; grade: number | null }>> {
-    return this.userProgress.get(userId) || new Map();
+    const map = new Map<string, { status: string; grade: number | null }>();
+    const local = this.userProgress.get(userId);
+    if (local) {
+      for (const [sid, val] of local.entries()) {
+        map.set(sid, { ...val });
+      }
+    }
+    if (this.linkedUserStateStore) {
+      const allSubjectIds = Array.from(this.subjectsMap.keys());
+      const linkedRows = await this.linkedUserStateStore.listSubjectProgress(userId, allSubjectIds);
+      for (const r of linkedRows) {
+        map.set(r.subjectId, {
+          status: r.status,
+          grade: r.grade !== null ? Number(r.grade) : null,
+        });
+      }
+    }
+    return map;
   }
 
   async getGlobalPublishedSummary(
@@ -3769,7 +4088,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     };
   }
 
-  async listModerationQueue() {
+  async listModerationQueue(filters?: { careerId?: string; planId?: string }) {
     const openReportsRaw = this.reportsList
       .filter((rp) => rp.status === 'open')
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -3779,13 +4098,26 @@ export class InMemoryReviewsStore implements ReviewsStore {
       openCountByReview.set(rp.reviewId, (openCountByReview.get(rp.reviewId) || 0) + 1);
     }
 
+    const matchesFilter = (subjectId: string) => {
+      const hier = this.getSubjectHierarchy(subjectId);
+      if (filters?.careerId && filters.careerId !== 'all' && hier.careerId !== filters.careerId) {
+        return false;
+      }
+      if (filters?.planId && filters.planId !== 'all' && hier.planId !== filters.planId) {
+        return false;
+      }
+      return true;
+    };
+
     const openReports: AdminModerationReportItem[] = [];
     for (const rp of openReportsRaw) {
       const rev = this.reviewsMap.get(rp.reviewId);
       if (!rev) continue;
+      if (!matchesFilter(rev.subjectId)) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       if (!prof || !sub) continue;
+      const hier = this.getSubjectHierarchy(sub.id);
 
       openReports.push({
         reportId: rp.id,
@@ -3799,6 +4131,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         reportStatus: rp.status,
         reportedMonthYear: formatYearMonth(rp.createdAt),
         openReportsOnReview: openCountByReview.get(rev.id) || 1,
+        ...hier,
         review: {
           id: rev.id,
           professorId: prof.id,
@@ -3812,6 +4145,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
           comment: rev.comment,
           status: rev.status,
           publishedMonthYear: formatYearMonth(rev.createdAt),
+          ...hier,
         },
       });
     }
@@ -3819,9 +4153,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     const hiddenReviews: AdminHiddenReviewItem[] = [];
     for (const rev of this.reviewsMap.values()) {
       if (rev.status !== 'hidden') continue;
+      if (!matchesFilter(rev.subjectId)) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       if (!prof || !sub) continue;
+      const hier = this.getSubjectHierarchy(sub.id);
 
       hiddenReviews.push({
         id: rev.id,
@@ -3830,6 +4166,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         subjectId: sub.id,
         subjectCode: sub.codeInPlan,
         subjectName: sub.name,
+        ...hier,
         authorUserId: rev.userId,
         authorEmail: 'autor@stack.com',
         overall: rev.overall,
@@ -3848,6 +4185,10 @@ export class InMemoryReviewsStore implements ReviewsStore {
     pageSize?: number;
     search?: string;
     status?: ReviewStatus | 'all';
+    professorId?: string;
+    subjectId?: string;
+    careerId?: string;
+    planId?: string;
   }): Promise<{
     items: AdminReviewCatalogItem[];
     total: number;
@@ -3863,6 +4204,11 @@ export class InMemoryReviewsStore implements ReviewsStore {
     let all: AdminReviewCatalogItem[] = [];
     for (const rev of this.reviewsMap.values()) {
       if (status !== 'all' && rev.status !== status) continue;
+      if (params.professorId && rev.professorId !== params.professorId) continue;
+      if (params.subjectId && rev.subjectId !== params.subjectId) continue;
+      const hier = this.getSubjectHierarchy(rev.subjectId);
+      if (params.careerId && params.careerId !== 'all' && hier.careerId !== params.careerId) continue;
+      if (params.planId && params.planId !== 'all' && hier.planId !== params.planId) continue;
       const prof = this.professorsMap.get(rev.professorId);
       const sub = this.subjectsMap.get(rev.subjectId);
       const profName = prof?.displayName || 'Profesor desconocido';
@@ -3885,6 +4231,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
         subjectId: rev.subjectId,
         subjectCode: sub?.codeInPlan || 0,
         subjectName: subName,
+        ...hier,
         authorUserId: rev.userId,
         authorEmail,
         overall: rev.overall,
@@ -4259,24 +4606,57 @@ export class InMemoryReviewsStore implements ReviewsStore {
       r.commissionId === null &&
       r.professorIds.length === 0;
 
+    const enrollmentsSnapshot = new Map(
+      Array.from(this.enrollmentsMap.entries(), ([k, v]) => [
+        k,
+        { ...v, professorIds: [...v.professorIds] },
+      ])
+    );
+    const prevUserProg = this.userProgress.get(params.userId);
+    const userProgSnapshot = prevUserProg
+      ? new Map(Array.from(prevUserProg.entries(), ([k, v]) => [k, { ...v }]))
+      : undefined;
+
     const now = new Date();
     let targetId: string;
 
-    if (params.enrollmentId) {
-      const target = existingRows.find((r) => r.id === params.enrollmentId);
-      if (!target) {
-        const err = new Error('Cursada no encontrada');
-        (err as any).status = 404;
-        throw err;
-      }
-      if (params.academicYear !== null && params.term !== null) {
-        const conflict = existingRows.find(
-          (r) =>
-            r.id !== params.enrollmentId &&
-            r.academicYear === params.academicYear &&
-            r.term === params.term
+    try {
+      if (params.enrollmentId) {
+        const target = existingRows.find((r) => r.id === params.enrollmentId);
+        if (!target) {
+          const err = new Error('Cursada no encontrada');
+          (err as any).status = 404;
+          throw err;
+        }
+        if (params.academicYear !== null && params.term !== null) {
+          const conflict = existingRows.find(
+            (r) =>
+              r.id !== params.enrollmentId &&
+              r.academicYear === params.academicYear &&
+              r.term === params.term
+          );
+          if (conflict) {
+            const err = new Error(
+              'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
+            );
+            (err as any).status = 409;
+            (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
+            throw err;
+          }
+        }
+        target.commissionId = params.commissionId;
+        target.academicYear = params.academicYear;
+        target.term = params.term;
+        target.source = params.source;
+        target.status = params.status || 'cursando';
+        target.professorIds = uniqueProfIds;
+        target.updatedAt = now;
+        targetId = target.id;
+      } else if (params.academicYear !== null && params.term !== null) {
+        const samePeriod = existingRows.find(
+          (r) => r.academicYear === params.academicYear && r.term === params.term
         );
-        if (conflict) {
+        if (samePeriod) {
           const err = new Error(
             'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
           );
@@ -4284,107 +4664,122 @@ export class InMemoryReviewsStore implements ReviewsStore {
           (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
           throw err;
         }
-      }
-      target.commissionId = params.commissionId;
-      target.academicYear = params.academicYear;
-      target.term = params.term;
-      target.source = params.source;
-      target.status = params.status || 'cursando';
-      target.professorIds = uniqueProfIds;
-      target.updatedAt = now;
-      targetId = target.id;
-    } else if (params.academicYear !== null && params.term !== null) {
-      const samePeriod = existingRows.find(
-        (r) => r.academicYear === params.academicYear && r.term === params.term
-      );
-      if (samePeriod) {
-        const err = new Error(
-          'Ya tenés otra cursada registrada para esta materia en ese mismo año y cuatrimestre.'
-        );
-        (err as any).status = 409;
-        (err as any).code = 'DUPLICATE_ENROLLMENT_PERIOD';
-        throw err;
-      }
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.commissionId = params.commissionId;
-        placeholder.academicYear = params.academicYear;
-        placeholder.term = params.term;
-        placeholder.source = params.source;
-        placeholder.status = params.status || 'cursando';
-        placeholder.professorIds = uniqueProfIds;
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.commissionId = params.commissionId;
+          placeholder.academicYear = params.academicYear;
+          placeholder.term = params.term;
+          placeholder.source = params.source;
+          placeholder.status = params.status || 'cursando';
+          placeholder.professorIds = uniqueProfIds;
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: params.commissionId,
+            academicYear: params.academicYear,
+            term: params.term,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: uniqueProfIds,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
+      } else if (params.commissionId === null && uniqueProfIds.length === 0) {
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.status = params.status || placeholder.status || 'cursando';
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else if (existingRows.length > 0) {
+          targetId = existingRows[0].id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: null,
+            academicYear: null,
+            term: null,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: [],
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: params.commissionId,
-          academicYear: params.academicYear,
-          term: params.term,
-          source: params.source,
-          status: params.status || 'cursando',
-          professorIds: uniqueProfIds,
-          createdAt: now,
-          updatedAt: now,
-        });
+        const placeholder = existingRows.find(isEmptyPlaceholder);
+        if (placeholder) {
+          placeholder.commissionId = params.commissionId;
+          placeholder.academicYear = params.academicYear;
+          placeholder.term = params.term;
+          placeholder.source = params.source;
+          placeholder.status = params.status || 'cursando';
+          placeholder.professorIds = uniqueProfIds;
+          placeholder.updatedAt = now;
+          targetId = placeholder.id;
+        } else {
+          targetId = crypto.randomUUID();
+          this.enrollmentsMap.set(targetId, {
+            id: targetId,
+            userId: params.userId,
+            subjectId: params.subjectId,
+            commissionId: params.commissionId,
+            academicYear: params.academicYear,
+            term: params.term,
+            source: params.source,
+            status: params.status || 'cursando',
+            professorIds: uniqueProfIds,
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
       }
-    } else if (params.commissionId === null && uniqueProfIds.length === 0) {
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.status = params.status || placeholder.status || 'cursando';
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
-      } else if (existingRows.length > 0) {
-        targetId = existingRows[0].id;
-      } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: null,
-          academicYear: null,
-          term: null,
-          source: params.source,
-          status: params.status || 'cursando',
-          professorIds: [],
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    } else {
-      const placeholder = existingRows.find(isEmptyPlaceholder);
-      if (placeholder) {
-        placeholder.commissionId = params.commissionId;
-        placeholder.academicYear = params.academicYear;
-        placeholder.term = params.term;
-        placeholder.source = params.source;
-        placeholder.status = params.status || 'cursando';
-        placeholder.professorIds = uniqueProfIds;
-        placeholder.updatedAt = now;
-        targetId = placeholder.id;
-      } else {
-        targetId = crypto.randomUUID();
-        this.enrollmentsMap.set(targetId, {
-          id: targetId,
-          userId: params.userId,
-          subjectId: params.subjectId,
-          commissionId: params.commissionId,
-          academicYear: params.academicYear,
-          term: params.term,
-          source: params.source,
-          professorIds: uniqueProfIds,
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-    }
 
-    await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
-    return this.hydrateInMemoryEnrollment(this.enrollmentsMap.get(targetId)!);
+      const currentProg = await this.getEffectiveSubjectProgress(params.userId, params.subjectId);
+      const resolution = resolveSubjectStatusFromEnrollment(currentProg.status, params.status);
+      let finalSubjectStatus = currentProg.status;
+
+      if (resolution.shouldUpdate && resolution.nextStatus) {
+        if (this.linkedUserStateStore) {
+          await this.linkedUserStateStore.upsertSubjectProgress(
+            params.userId,
+            params.subjectId,
+            resolution.nextStatus,
+            currentProg.grade !== null ? String(currentProg.grade) : null
+          );
+        }
+        const userMap = this.userProgress.get(params.userId) || new Map();
+        userMap.set(params.subjectId, {
+          status: resolution.nextStatus,
+          grade: currentProg.grade,
+        });
+        this.userProgress.set(params.userId, userMap);
+        finalSubjectStatus = resolution.nextStatus;
+      }
+
+      await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+      return {
+        ...this.hydrateInMemoryEnrollment(this.enrollmentsMap.get(targetId)!),
+        subjectStatus: finalSubjectStatus,
+      };
+    } catch (err) {
+      this.enrollmentsMap = enrollmentsSnapshot;
+      if (userProgSnapshot) {
+        this.userProgress.set(params.userId, userProgSnapshot);
+      } else {
+        this.userProgress.delete(params.userId);
+      }
+      await this.recalculateAttendedDeclaredForUserSubject(params.userId, params.subjectId);
+      throw err;
+    }
   }
 
   async deleteUserEnrollment(
@@ -4426,3 +4821,13 @@ export class InMemoryReviewsStore implements ReviewsStore {
 }
 
 export const defaultReviewsStore: ReviewsStore = new DrizzleReviewsStore();
+
+let activeReviewsStore: ReviewsStore | null = null;
+
+export function getActiveReviewsStore(): ReviewsStore {
+  return activeReviewsStore || defaultReviewsStore;
+}
+
+export function setActiveReviewsStore(store: ReviewsStore | null): void {
+  activeReviewsStore = store;
+}

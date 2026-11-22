@@ -1,14 +1,9 @@
 import { Request, Response } from 'express';
-import { eq, count, inArray, and } from 'drizzle-orm';
+import { eq, inArray, and } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { env } from '../../config/env.js';
 import {
-  institutions,
-  faculties,
-  careers,
-  studyPlans,
   subjects,
-  planSpecialRules,
   commissions,
   commissionSlots,
   commissionProfessors,
@@ -16,6 +11,22 @@ import {
 } from '../../db/schema.js';
 import { AdminService, bumpCatalogVersion } from './admin.service.js';
 import { logAdminAction } from './admin.audit.js';
+import { buildPlanImportTemplateBuffer } from './planImport.template.js';
+import {
+  PlanImportConcurrencyError,
+  PlanImportTimeoutError,
+  PlanImportUncompressedLimitError,
+  PlanImportWorkerError,
+} from './planImport.parser.js';
+import {
+  PlanImportRequestSchema,
+  PlanImportServiceError,
+  confirmPlanImport,
+  deleteAdminDraftPlan,
+  getAdminPlanDetail,
+  listAdminPlansOverview,
+  previewPlanImport,
+} from './planImport.service.js';
 
 // ==========================================
 // 1. REAUTENTICACIÓN (Ajuste 1)
@@ -682,7 +693,7 @@ export async function applyScheduleImport(req: Request, res: Response): Promise<
 
 export async function listAdminReviews(req: Request, res: Response): Promise<void> {
   try {
-    const { page, pageSize, search, status, professorId, subjectId } = req.query;
+    const { page, pageSize, search, status, professorId, subjectId, careerId, planId } = req.query;
     const data = await AdminService.listReviews({
       page: page ? parseInt(String(page), 10) : 1,
       pageSize: pageSize ? parseInt(String(pageSize), 10) : 20,
@@ -690,6 +701,8 @@ export async function listAdminReviews(req: Request, res: Response): Promise<voi
       status: typeof status === 'string' ? status : undefined,
       professorId: typeof professorId === 'string' ? professorId : undefined,
       subjectId: typeof subjectId === 'string' ? subjectId : undefined,
+      careerId: typeof careerId === 'string' ? careerId : undefined,
+      planId: typeof planId === 'string' ? planId : undefined,
     });
     res.json({ success: true, data });
   } catch (err: any) {
@@ -735,144 +748,156 @@ export async function listAuditLogs(req: Request, res: Response): Promise<void> 
 }
 
 // ==========================================
-// 8. CATÁLOGO BASE EXISTENTE (Reutilizado)
+// 8. GESTIÓN E IMPORTACIÓN DE PLANES DE ESTUDIO (Etapa 2)
 // ==========================================
 
-export async function getAdminPlans(req: Request, res: Response): Promise<void> {
-  try {
-    const allInstitutions = await db.select().from(institutions);
-    const allFaculties = await db.select().from(faculties);
-    const allCareers = await db.select().from(careers);
-    const allPlans = await db.select().from(studyPlans);
-
-    const planStats = await Promise.all(
-      allPlans.map(async (plan) => {
-        const [subCount] = await db
-          .select({ value: count() })
-          .from(subjects)
-          .where(eq(subjects.planId, plan.id));
-
-        const [rulesCount] = await db
-          .select({ value: count() })
-          .from(planSpecialRules)
-          .where(eq(planSpecialRules.planId, plan.id));
-
-        return {
-          ...plan,
-          subjectCount: subCount?.value || 0,
-          rulesCount: rulesCount?.value || 0,
-        };
-      })
-    );
-
-    res.json({
-      success: true,
-      data: {
-        institutions: allInstitutions,
-        faculties: allFaculties,
-        careers: allCareers,
-        plans: planStats,
-      },
+function handlePlanImportControllerError(
+  res: Response,
+  error: unknown,
+  fallbackMessage: string
+): void {
+  if (error instanceof PlanImportServiceError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      error: error.message,
+      details: error.details,
     });
+    return;
+  }
+  if (error instanceof PlanImportConcurrencyError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: 'PLAN_IMPORT_IN_PROGRESS',
+      error: error.message,
+    });
+    return;
+  }
+  if (error instanceof PlanImportTimeoutError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: 'PLAN_IMPORT_TIMEOUT',
+      error: error.message,
+    });
+    return;
+  }
+  if (error instanceof PlanImportUncompressedLimitError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      error: error.message,
+    });
+    return;
+  }
+  if (error instanceof PlanImportWorkerError) {
+    res.status(error.statusCode).json({
+      success: false,
+      code: error.code,
+      error: error.message,
+    });
+    return;
+  }
+
+  console.error(fallbackMessage, error);
+  res.status(500).json({ success: false, error: fallbackMessage });
+}
+
+export async function getAdminPlans(_req: Request, res: Response): Promise<void> {
+  try {
+    const data = await listAdminPlansOverview();
+    res.json({ success: true, data });
   } catch (error) {
-    console.error('Error fetching admin plans:', error);
-    res.status(500).json({ success: false, error: 'Error al obtener planes de estudio' });
+    handlePlanImportControllerError(res, error, 'Error al obtener planes de estudio');
   }
 }
 
-export async function createCareer(req: Request, res: Response): Promise<void> {
-  const { facultyId, name, code } = req.body;
+export async function downloadPlanTemplate(_req: Request, res: Response): Promise<void> {
+  try {
+    const buffer = buildPlanImportTemplateBuffer();
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="plantilla-plan-estudios-stack.xlsx"'
+    );
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Length', String(buffer.length));
+    res.status(200).send(buffer);
+  } catch (error) {
+    handlePlanImportControllerError(res, error, 'Error al generar plantilla de plan de estudios');
+  }
+}
 
-  if (!facultyId || !name || !code) {
+export async function previewPlanImportHandler(req: Request, res: Response): Promise<void> {
+  const parsedBody = PlanImportRequestSchema.safeParse(req.body);
+  if (!parsedBody.success) {
     res.status(400).json({
       success: false,
-      error: 'facultyId, name y code son requeridos',
+      code: 'INVALID_REQUEST_BODY',
+      error: 'Datos de entrada inválidos para la vista previa',
+      details: parsedBody.error.flatten(),
     });
     return;
   }
 
   try {
-    const [faculty] = await db.select().from(faculties).where(eq(faculties.id, facultyId)).limit(1);
-    if (!faculty) {
-      res.status(404).json({ success: false, error: 'Facultad no encontrada' });
-      return;
-    }
+    const data = await previewPlanImport(parsedBody.data);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    handlePlanImportControllerError(res, error, 'Error al generar vista previa del plan');
+  }
+}
 
-    const [createdCareer] = await db
-      .insert(careers)
-      .values({
-        facultyId,
-        name: name.trim(),
-        code: code.trim().toUpperCase(),
-      })
-      .returning();
+export async function confirmPlanImportHandler(req: Request, res: Response): Promise<void> {
+  const parsedBody = PlanImportRequestSchema.safeParse(req.body);
+  if (!parsedBody.success) {
+    res.status(400).json({
+      success: false,
+      code: 'INVALID_REQUEST_BODY',
+      error: 'Datos de entrada inválidos para confirmar la importación',
+      details: parsedBody.error.flatten(),
+    });
+    return;
+  }
 
-    await bumpCatalogVersion();
-
-    await logAdminAction({
+  try {
+    const data = await confirmPlanImport({
+      input: parsedBody.data,
       adminUserId: req.user!.id,
       adminEmail: req.user!.email,
-      action: 'career.create',
-      targetType: 'career',
-      targetId: createdCareer.id,
-      details: { name: createdCareer.name, code: createdCareer.code },
-      ip: req.ip,
+      ip: req.ip || null,
     });
-
-    res.status(201).json({
-      success: true,
-      data: createdCareer,
-    });
+    const status = parsedBody.data.targetMode === 'existing_draft_plan' ? 200 : 201;
+    res.status(status).json({ success: true, data });
   } catch (error) {
-    console.error('Error creating career:', error);
-    res.status(500).json({ success: false, error: 'Error al crear la carrera' });
+    handlePlanImportControllerError(res, error, 'Error al importar el plan de estudios');
   }
 }
 
-export async function createPlan(req: Request, res: Response): Promise<void> {
-  const { careerId, name, year, config, subjects: subjectList, rules, acronyms: acronymList } = req.body;
-
-  if (!careerId || !name || !year || !Array.isArray(subjectList)) {
-    res.status(400).json({
-      success: false,
-      error: 'careerId, name, year y lista de subjects son requeridos',
-    });
-    return;
-  }
-
+export async function getAdminPlanDetailHandler(req: Request, res: Response): Promise<void> {
+  const planId = String(req.params.id || '');
   try {
-    const result = await db.transaction(async (tx) => {
-      const [newPlan] = await tx
-        .insert(studyPlans)
-        .values({
-          careerId,
-          name: name.trim(),
-          year: parseInt(year, 10),
-          isActive: true,
-          config: config || { requiredElectiveCredits: 20, defaultMinPassingGrade: 4 },
-        })
-        .returning();
-
-      await logAdminAction({
-        tx,
-        adminUserId: req.user!.id,
-        adminEmail: req.user!.email,
-        action: 'plan.create',
-        targetType: 'study_plan',
-        targetId: newPlan.id,
-        details: { name: newPlan.name, year: newPlan.year, subjectsCount: subjectList.length },
-        ip: req.ip,
-      });
-
-      return { plan: newPlan, subjectsCount: subjectList.length };
-    });
-
-    await bumpCatalogVersion();
-
-    res.status(201).json({ success: true, data: result });
+    const data = await getAdminPlanDetail(planId);
+    res.status(200).json({ success: true, data });
   } catch (error) {
-    console.error('Error creating plan:', error);
-    res.status(500).json({ success: false, error: 'Error al crear el plan de estudios' });
+    handlePlanImportControllerError(res, error, 'Error al obtener el detalle del plan');
+  }
+}
+
+export async function deleteDraftPlanHandler(req: Request, res: Response): Promise<void> {
+  const planId = String(req.params.id || '');
+  try {
+    const data = await deleteAdminDraftPlan({
+      planId,
+      adminUserId: req.user!.id,
+      adminEmail: req.user!.email,
+      ip: req.ip || null,
+    });
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    handlePlanImportControllerError(res, error, 'Error al eliminar el plan en borrador');
   }
 }
 

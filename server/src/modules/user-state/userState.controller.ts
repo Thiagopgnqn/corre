@@ -9,6 +9,7 @@ import {
   extractPlanSettings,
   mergePlanScheduleSelections,
   mergePlanSettings,
+  resolvePlanMaxLevel,
 } from './userState.helpers.js';
 import { defaultUserStateStore, UserStateStore } from './userState.store.js';
 
@@ -34,13 +35,14 @@ export function createUserStateHandlers(
 
       const planId = active.planId;
       const planSubs = planId ? await store.getPlanSubjects(planId) : [];
+      const maxLevel = resolvePlanMaxLevel(active.totalLevels, planSubs);
       const planSubjectIds = planSubs.map((s) => s.id);
       const uuidToCode = new Map<string, number>();
       planSubs.forEach((s) => {
         uuidToCode.set(s.id, s.codeInPlan);
       });
 
-      const settingsRow = await store.getUserSettings(userId);
+      const settingsRow = await store.getUserSettings(userId, planId);
       const settings = extractPlanSettings(settingsRow, planId);
 
       const progressRows = await store.listSubjectProgress(userId, planSubjectIds);
@@ -59,10 +61,13 @@ export function createUserStateHandlers(
       });
 
       const electivesRows = await store.listElectiveAssignments(userId, planSubjectIds);
-      const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      const assignedElectives: Record<number, number[]> = {};
+      for (let level = 1; level <= maxLevel; level++) {
+        assignedElectives[level] = [];
+      }
       electivesRows.forEach((e) => {
         const code = uuidToCode.get(e.subjectId);
-        if (code !== undefined && e.year >= 1 && e.year <= 5) {
+        if (code !== undefined && e.year >= 1 && e.year <= maxLevel) {
           if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
           assignedElectives[e.year].push(code);
         }
@@ -80,7 +85,7 @@ export function createUserStateHandlers(
       const currentTerm = await store.getCurrentScheduleTerm(active.facultyId);
       let scheduleSelectionMap: Record<string, string> = {};
       if (currentTerm) {
-        const sel = await store.getScheduleSelection(userId, currentTerm.id);
+        const sel = await store.getScheduleSelection(userId, currentTerm.id, planId);
         scheduleSelectionMap = extractPlanScheduleSelections(sel, planId);
       }
 
@@ -220,6 +225,7 @@ export function createUserStateHandlers(
       }
 
       const planSubs = await store.getPlanSubjects(active.planId);
+      const maxLevel = resolvePlanMaxLevel(active.totalLevels, planSubs);
       const validElectives = planSubs.filter((s) => s.kind === 'electiva');
       const codeToUuid = new Map<number, string>();
       const uuidSet = new Set<string>();
@@ -231,7 +237,7 @@ export function createUserStateHandlers(
       const seenElectives = new Set<string>();
       const nextAssignments: Array<{ subjectId: string; year: number }> = [];
 
-      for (let year = 1; year <= 5; year++) {
+      for (let year = 1; year <= maxLevel; year++) {
         const list = Array.isArray(rawAssignments[year]) ? rawAssignments[year] : [];
         for (const item of list) {
           let subjectUuid: string | undefined;
@@ -336,7 +342,7 @@ export function createUserStateHandlers(
     try {
       const active = await store.resolveUserActivePlan(userId, req.user?.selectedPlanId);
       const planId = active?.planId ?? null;
-      const existing = await store.getUserSettings(userId);
+      const existing = await store.getUserSettings(userId, planId);
       const merged = mergePlanSettings(existing, planId, req.body || {});
 
       await store.upsertUserSettings(userId, merged);
@@ -517,7 +523,7 @@ export function createUserStateHandlers(
         return;
       }
 
-      const existing = await store.getScheduleSelection(userId, termId);
+      const existing = await store.getScheduleSelection(userId, termId, active.planId);
       const merged = mergePlanScheduleSelections(existing, active.planId, selections || {});
       await store.upsertScheduleSelection(userId, termId, merged);
 
@@ -549,6 +555,7 @@ export function createUserStateHandlers(
       }
 
       const planSubs = await store.getPlanSubjects(active.planId);
+      const maxLevel = resolvePlanMaxLevel(active.totalLevels, planSubs);
       const codeToUuid = new Map<number, string>();
       planSubs.forEach((s) => codeToUuid.set(s.codeInPlan, s.id));
 
@@ -558,6 +565,7 @@ export function createUserStateHandlers(
         facultyId: active.facultyId,
         planSubjectIds: planSubs.map((s) => s.id),
         codeToUuid,
+        maxLevel,
         settingsIncoming:
           payload.settings && typeof payload.settings === 'object' ? payload.settings : undefined,
         userState: payload.userState,
@@ -626,11 +634,12 @@ export function createUserStateHandlers(
       }
 
       const planSubs = await store.getPlanSubjects(active.planId);
+      const maxLevel = resolvePlanMaxLevel(active.totalLevels, planSubs);
       const planSubjectIds = planSubs.map((s) => s.id);
       const uuidToCode = new Map<string, number>();
       planSubs.forEach((s) => uuidToCode.set(s.id, s.codeInPlan));
 
-      const settingsRow = await store.getUserSettings(userId);
+      const settingsRow = await store.getUserSettings(userId, active.planId);
       const activeSettings = extractPlanSettings(settingsRow, active.planId);
       const progressRows = await store.listSubjectProgress(userId, planSubjectIds);
       const electivesRows = await store.listElectiveAssignments(userId, planSubjectIds);
@@ -640,7 +649,7 @@ export function createUserStateHandlers(
       const currentTerm = await store.getCurrentScheduleTerm(active.facultyId);
       let selections: Record<string, string> = {};
       if (currentTerm) {
-        const sel = await store.getScheduleSelection(userId, currentTerm.id);
+        const sel = await store.getScheduleSelection(userId, currentTerm.id, active.planId);
         selections = extractPlanScheduleSelections(sel, active.planId);
       }
 
@@ -656,10 +665,13 @@ export function createUserStateHandlers(
         }
       });
 
-      const assignedElectives: Record<number, number[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] };
+      const assignedElectives: Record<number, number[]> = {};
+      for (let level = 1; level <= maxLevel; level++) {
+        assignedElectives[level] = [];
+      }
       electivesRows.forEach((e) => {
         const code = uuidToCode.get(e.subjectId);
-        if (code !== undefined && e.year >= 1 && e.year <= 5) {
+        if (code !== undefined && e.year >= 1 && e.year <= maxLevel) {
           if (!assignedElectives[e.year]) assignedElectives[e.year] = [];
           assignedElectives[e.year].push(code);
         }

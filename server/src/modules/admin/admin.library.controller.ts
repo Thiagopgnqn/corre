@@ -3,7 +3,9 @@ import { getLibraryService } from '../library/library.service.js';
 
 export async function listPendingFiles(req: Request, res: Response): Promise<void> {
   try {
-    const pending = await getLibraryService().listPendingFiles();
+    const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+    const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+    const pending = await getLibraryService().listPendingFiles({ careerId, planId });
     res.json({ success: true, data: pending });
   } catch (err: any) {
     res.status(err.status || 500).json({ success: false, error: err.message || 'Error al listar cola de moderación' });
@@ -12,10 +14,12 @@ export async function listPendingFiles(req: Request, res: Response): Promise<voi
 
 export async function listAllFiles(req: Request, res: Response): Promise<void> {
   try {
-    const { status, subjectId, kind, search, page, pageSize } = req.query;
+    const { status, subjectId, careerId, planId, kind, search, page, pageSize } = req.query;
     const result = await getLibraryService().listAllFilesAdmin({
       status: status as string,
       subjectId: subjectId as string,
+      careerId: typeof careerId === 'string' ? careerId : undefined,
+      planId: typeof planId === 'string' ? planId : undefined,
       kind: kind as string,
       search: search as string,
       page: page ? parseInt(page as string, 10) : undefined,
@@ -98,7 +102,9 @@ export async function suspendAuthor(req: Request, res: Response): Promise<void> 
 export async function listReports(req: Request, res: Response): Promise<void> {
   try {
     const status = (req.query.status as any) || 'open';
-    const reports = await getLibraryService().listReports(status);
+    const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+    const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+    const reports = await getLibraryService().listReports(status, { careerId, planId });
     res.json({ success: true, data: reports });
   } catch (err: any) {
     res.status(err.status || 500).json({ success: false, error: err.message || 'Error al listar reportes' });

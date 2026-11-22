@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql, type AnyColumn, type SQL } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import {
   careers,
@@ -17,12 +17,18 @@ import {
 } from '../../db/schema.js';
 import { invalidateUserStatusCache } from '../../middlewares/auth.middleware.js';
 import { findDefaultPublishedPlan, isValidUuid } from '../catalog/catalog.helpers.js';
-import { LibraryService } from '../library/library.service.js';
+import {
+  SUBJECT_STATUS_RANK,
+  getSubjectStatusRank,
+} from '../enrollments/enrollmentStatus.helpers.js';
+import { getActiveLibraryService, getLibraryService } from '../library/library.service.js';
 import { defaultReviewsStore } from '../reviews/reviews.store.js';
 import {
+  DEFAULT_PLAN_SETTINGS,
   mergePlanScheduleSelections,
   mergePlanSettings,
   PlanSettingsValues,
+  resolvePlanMaxLevel,
   StoredScheduleSelectionLike,
   StoredUserSettingsLike,
 } from './userState.helpers.js';
@@ -32,12 +38,14 @@ export interface ActivePlanContext {
   planId: string | null;
   planName: string | null;
   facultyId: string | null;
+  totalLevels: number | null;
 }
 
 export interface PlanSubjectInfo {
   id: string;
   codeInPlan: number;
   kind: string;
+  level: number;
 }
 
 export interface SubjectProgressEntry {
@@ -97,6 +105,7 @@ export interface ImportPlanBundleInput {
   facultyId: string | null;
   planSubjectIds: string[];
   codeToUuid: Map<number, string>;
+  maxLevel?: number;
   settingsIncoming?: Partial<PlanSettingsValues> & { extraSettings?: unknown };
   userState?: Record<string, unknown>;
   assignedElectives?: Record<string, unknown>;
@@ -112,7 +121,7 @@ export interface UserStateStore {
   ): Promise<ActivePlanContext | null>;
   getPlanSubjects(planId: string): Promise<PlanSubjectInfo[]>;
   findPlanSubject(planId: string, subjectIdOrCode: string): Promise<PlanSubjectInfo | null>;
-  getUserSettings(userId: string): Promise<StoredUserSettingsLike | null>;
+  getUserSettings(userId: string, planId?: string | null): Promise<StoredUserSettingsLike | null>;
   upsertUserSettings(
     userId: string,
     values: PlanSettingsValues & { planId: string | null; extraSettings: Record<string, any> }
@@ -141,7 +150,11 @@ export interface UserStateStore {
   ): Promise<void>;
   getCurrentScheduleTerm(facultyId: string | null): Promise<ScheduleTermEntry | null>;
   getScheduleTermForFaculty(termId: string, facultyId: string | null): Promise<ScheduleTermEntry | null>;
-  getScheduleSelection(userId: string, scheduleTermId: string): Promise<StoredScheduleSelectionLike | null>;
+  getScheduleSelection(
+    userId: string,
+    scheduleTermId: string,
+    planId?: string | null
+  ): Promise<StoredScheduleSelectionLike | null>;
   upsertScheduleSelection(
     userId: string,
     scheduleTermId: string,
@@ -196,6 +209,170 @@ function normalizeStringSelections(raw: unknown): Record<string, string> {
   return out;
 }
 
+function parseTotalLevelsFromConfig(config: unknown): number | null {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return null;
+  const raw = (config as Record<string, unknown>).totalLevels;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 1) {
+    return Math.floor(raw);
+  }
+  return null;
+}
+
+function pickUserSettingsRowForPlan(
+  rows: Array<typeof userSettings.$inferSelect>,
+  planId?: string | null
+): StoredUserSettingsLike | null {
+  if (rows.length === 0) return null;
+  const notifyAll = rows.every((r) => r.notifyLibraryEmail !== false);
+  const asObj = (v: unknown) =>
+    v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, any>) : {};
+
+  const matched =
+    (planId ? rows.find((r) => r.planId === planId) : undefined) ||
+    (planId
+      ? rows.find((r) => {
+          const perPlan = asObj(asObj(r.extraSettings).perPlan);
+          return perPlan[planId] && typeof perPlan[planId] === 'object';
+        })
+      : undefined);
+
+  if (matched) {
+    return { ...matched, notifyLibraryEmail: notifyAll };
+  }
+  if (rows.length === 1) {
+    return { ...rows[0], notifyLibraryEmail: notifyAll };
+  }
+  return {
+    ...DEFAULT_PLAN_SETTINGS,
+    planId: planId ?? null,
+    notifyLibraryEmail: notifyAll,
+    extraSettings: {},
+  };
+}
+
+function pickScheduleSelectionRowForPlan(
+  rows: Array<typeof scheduleSelections.$inferSelect>,
+  planId?: string | null
+): (typeof scheduleSelections.$inferSelect) | null {
+  if (rows.length === 0) return null;
+  const matched =
+    (planId ? rows.find((r) => r.planId === planId) : undefined) ||
+    (planId
+      ? rows.find(
+          (r) =>
+            r.selectionsByPlan &&
+            typeof r.selectionsByPlan === 'object' &&
+            Object.prototype.hasOwnProperty.call(r.selectionsByPlan, planId)
+        )
+      : undefined);
+
+  if (matched) return matched;
+  if (rows.length === 1) return rows[0];
+  return null;
+}
+
+export type DbExecutor =
+  | typeof db
+  | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function upsertSubjectProgressWithDb(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  status: string,
+  grade: string | null
+): Promise<void> {
+  if (status === 'pendiente' && grade === null) {
+    await executor
+      .delete(subjectProgress)
+      .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)));
+    return;
+  }
+
+  const [existing] = await executor
+    .select({ id: subjectProgress.id })
+    .from(subjectProgress)
+    .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)))
+    .limit(1);
+
+  if (existing) {
+    await executor
+      .update(subjectProgress)
+      .set({ status, grade, updatedAt: new Date() })
+      .where(eq(subjectProgress.id, existing.id));
+  } else {
+    await executor.insert(subjectProgress).values({ userId, subjectId, status, grade });
+  }
+}
+
+/**
+ * Construye dinámicamente el `CASE` de rango SQL a partir de `SUBJECT_STATUS_RANK`
+ * sin números hardcodeados a mano, para garantizar paridad exacta con el helper puro.
+ */
+export function buildSubjectStatusRankSqlCase(statusColumnOrExpr: SQL | AnyColumn): SQL {
+  const nullRank = getSubjectStatusRank(null) ?? 0;
+  const whenClauses: SQL[] = [
+    sql`WHEN ${statusColumnOrExpr} IS NULL THEN CAST(${nullRank} AS integer)`,
+    ...Object.entries(SUBJECT_STATUS_RANK).map(
+      ([statusKey, rankValue]) =>
+        sql`WHEN ${statusColumnOrExpr} = ${statusKey} THEN CAST(${rankValue} AS integer)`
+    ),
+  ];
+  return sql`CASE ${sql.join(whenClauses, sql` `)} ELSE NULL END`;
+}
+
+/**
+ * Genera la consulta atómica `INSERT ... ON CONFLICT (user_id, subject_id) DO UPDATE`
+ * que solo promueve el estado si `rank(nuevo) > rank(existente)`, conserva `grade`
+ * existente intacta y actualiza `updated_at` únicamente cuando cambia el estado.
+ */
+export function buildUpgradeSubjectProgressQuery(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  targetStatus: string,
+  now: Date = new Date()
+) {
+  const existingRankSql = buildSubjectStatusRankSqlCase(subjectProgress.status);
+  const excludedRankSql = buildSubjectStatusRankSqlCase(sql`excluded.status`);
+  const shouldReplaceSql = sql`(${excludedRankSql}) > (${existingRankSql})`;
+
+  return executor
+    .insert(subjectProgress)
+    .values({
+      userId,
+      subjectId,
+      status: targetStatus,
+      grade: null,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [subjectProgress.userId, subjectProgress.subjectId],
+      set: {
+        status: sql`CASE WHEN ${shouldReplaceSql} THEN excluded.status ELSE ${subjectProgress.status} END`,
+        updatedAt: sql`CASE WHEN ${shouldReplaceSql} THEN excluded.updated_at ELSE ${subjectProgress.updatedAt} END`,
+      },
+    })
+    .returning({
+      status: subjectProgress.status,
+    });
+}
+
+export async function upgradeSubjectProgressWithDb(
+  executor: DbExecutor,
+  userId: string,
+  subjectId: string,
+  targetStatus: string
+): Promise<string> {
+  const [row] = await buildUpgradeSubjectProgressQuery(
+    executor,
+    userId,
+    subjectId,
+    targetStatus
+  );
+  return row?.status ?? targetStatus;
+}
+
 export class DrizzleUserStateStore implements UserStateStore {
   async resolveUserActivePlan(
     userId: string,
@@ -214,12 +391,14 @@ export class DrizzleUserStateStore implements UserStateStore {
     let planId = user.selectedPlanId;
     let planName: string | null = null;
     let facultyId: string | null = null;
+    let totalLevels: number | null = null;
 
     if (planId && isValidUuid(planId)) {
       const [row] = await db
         .select({
           planId: studyPlans.id,
           planName: studyPlans.name,
+          planConfig: studyPlans.config,
           facultyId: careers.facultyId,
         })
         .from(studyPlans)
@@ -229,6 +408,7 @@ export class DrizzleUserStateStore implements UserStateStore {
       if (row) {
         planName = row.planName;
         facultyId = row.facultyId;
+        totalLevels = parseTotalLevelsFromConfig(row.planConfig);
       } else {
         planId = null;
       }
@@ -240,6 +420,7 @@ export class DrizzleUserStateStore implements UserStateStore {
         planId = defaultPublished.plan.id;
         planName = defaultPublished.plan.name;
         facultyId = defaultPublished.career.facultyId;
+        totalLevels = parseTotalLevelsFromConfig(defaultPublished.plan.config);
         await db.update(users).set({ selectedPlanId: planId }).where(eq(users.id, userId));
         invalidateUserStatusCache(userId);
       }
@@ -250,13 +431,19 @@ export class DrizzleUserStateStore implements UserStateStore {
       planId,
       planName,
       facultyId,
+      totalLevels,
     };
   }
 
   async getPlanSubjects(planId: string): Promise<PlanSubjectInfo[]> {
     if (!isValidUuid(planId)) return [];
     return await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
+      .select({
+        id: subjects.id,
+        codeInPlan: subjects.codeInPlan,
+        kind: subjects.kind,
+        level: subjects.level,
+      })
       .from(subjects)
       .where(eq(subjects.planId, planId));
   }
@@ -268,7 +455,12 @@ export class DrizzleUserStateStore implements UserStateStore {
 
     if (/^\d+$/.test(raw)) {
       const [row] = await db
-        .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
+        .select({
+          id: subjects.id,
+          codeInPlan: subjects.codeInPlan,
+          kind: subjects.kind,
+          level: subjects.level,
+        })
         .from(subjects)
         .where(and(eq(subjects.planId, planId), eq(subjects.codeInPlan, parseInt(raw, 10))))
         .limit(1);
@@ -277,30 +469,66 @@ export class DrizzleUserStateStore implements UserStateStore {
 
     if (!isValidUuid(raw)) return null;
     const [row] = await db
-      .select({ id: subjects.id, codeInPlan: subjects.codeInPlan, kind: subjects.kind })
+      .select({
+        id: subjects.id,
+        codeInPlan: subjects.codeInPlan,
+        kind: subjects.kind,
+        level: subjects.level,
+      })
       .from(subjects)
       .where(and(eq(subjects.planId, planId), eq(subjects.id, raw)))
       .limit(1);
     return row || null;
   }
 
-  async getUserSettings(userId: string): Promise<StoredUserSettingsLike | null> {
-    const [row] = await db.select().from(userSettings).where(eq(userSettings.userId, userId)).limit(1);
-    return row || null;
+  async getUserSettings(
+    userId: string,
+    planId?: string | null
+  ): Promise<StoredUserSettingsLike | null> {
+    const rows = await db.select().from(userSettings).where(eq(userSettings.userId, userId));
+    return pickUserSettingsRowForPlan(rows, planId);
   }
 
-  async upsertUserSettings(
+  private async upsertUserSettingsWithDb(
+    executor: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
     userId: string,
     values: PlanSettingsValues & { planId: string | null; extraSettings: Record<string, any> }
   ): Promise<void> {
-    const [existing] = await db
-      .select({ userId: userSettings.userId })
-      .from(userSettings)
-      .where(eq(userSettings.userId, userId))
-      .limit(1);
+    const rows = await executor.select().from(userSettings).where(eq(userSettings.userId, userId));
+    let effectivePlanId =
+      values.planId && isValidUuid(values.planId)
+        ? values.planId
+        : rows.find((r) => r.planId && isValidUuid(r.planId))?.planId || null;
 
-    const payload = {
-      planId: values.planId,
+    if (!effectivePlanId) {
+      effectivePlanId = (await this.resolveUserActivePlan(userId))?.planId || null;
+    }
+
+    if (!effectivePlanId) {
+      // Sin ningún plan existente en BD: actualizar fila previa si existe sin escribir NULL en plan_id
+      if (rows.length > 0) {
+        const updateNoPlan = {
+          includePromotionsInGPA: values.includePromotionsInGPA,
+          minPassingGrade: values.minPassingGrade,
+          includeAnalistaTrack: values.includeAnalistaTrack,
+          allowBlockedElectivesPlanning: values.allowBlockedElectivesPlanning,
+          includeElectivesInProgress: values.includeElectivesInProgress,
+          soundEnabled: values.soundEnabled,
+          tutorialCompleted: values.tutorialCompleted,
+          notifyLibraryEmail: values.notifyLibraryEmail,
+          extraSettings: values.extraSettings,
+          updatedAt: new Date(),
+        };
+        await executor
+          .update(userSettings)
+          .set(updateNoPlan)
+          .where(eq(userSettings.userId, userId));
+      }
+      return;
+    }
+
+    const basePayload = {
+      planId: effectivePlanId,
       includePromotionsInGPA: values.includePromotionsInGPA,
       minPassingGrade: values.minPassingGrade,
       includeAnalistaTrack: values.includeAnalistaTrack,
@@ -313,11 +541,39 @@ export class DrizzleUserStateStore implements UserStateStore {
       updatedAt: new Date(),
     };
 
-    if (existing) {
-      await db.update(userSettings).set(payload).where(eq(userSettings.userId, userId));
-    } else {
-      await db.insert(userSettings).values({ userId, ...payload });
+    if (rows.length === 0) {
+      await executor.insert(userSettings).values({ userId, ...basePayload });
+      return;
     }
+
+    if (rows.length === 1) {
+      // Mantiene compatibilidad estricta con esquema 0014 (PK user_id) y con 0015 (1 fila -> actualiza in-place con planId)
+      await executor.update(userSettings).set(basePayload).where(eq(userSettings.userId, userId));
+      return;
+    }
+
+    // Múltiples filas por usuario solo existen bajo esquema 0015 (PK compuesta): actualizar fila objetivo y sincronizar preferencia global
+    const hasTargetRow = rows.some((r) => r.planId === effectivePlanId);
+    if (hasTargetRow) {
+      await executor
+        .update(userSettings)
+        .set(basePayload)
+        .where(and(eq(userSettings.userId, userId), eq(userSettings.planId, effectivePlanId)));
+    } else {
+      await executor.insert(userSettings).values({ userId, ...basePayload });
+    }
+
+    await executor
+      .update(userSettings)
+      .set({ notifyLibraryEmail: values.notifyLibraryEmail, updatedAt: new Date() })
+      .where(eq(userSettings.userId, userId));
+  }
+
+  async upsertUserSettings(
+    userId: string,
+    values: PlanSettingsValues & { planId: string | null; extraSettings: Record<string, any> }
+  ): Promise<void> {
+    await this.upsertUserSettingsWithDb(db, userId, values);
   }
 
   async listSubjectProgress(
@@ -337,27 +593,7 @@ export class DrizzleUserStateStore implements UserStateStore {
     status: string,
     grade: string | null
   ): Promise<void> {
-    if (status === 'pendiente' && grade === null) {
-      await db
-        .delete(subjectProgress)
-        .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)));
-      return;
-    }
-
-    const [existing] = await db
-      .select({ id: subjectProgress.id })
-      .from(subjectProgress)
-      .where(and(eq(subjectProgress.userId, userId), eq(subjectProgress.subjectId, subjectId)))
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(subjectProgress)
-        .set({ status, grade, updatedAt: new Date() })
-        .where(eq(subjectProgress.id, existing.id));
-    } else {
-      await db.insert(subjectProgress).values({ userId, subjectId, status, grade });
-    }
+    await upsertSubjectProgressWithDb(db, userId, subjectId, status, grade);
   }
 
   async listElectiveAssignments(
@@ -463,9 +699,10 @@ export class DrizzleUserStateStore implements UserStateStore {
 
   async getScheduleSelection(
     userId: string,
-    scheduleTermId: string
+    scheduleTermId: string,
+    planId?: string | null
   ): Promise<StoredScheduleSelectionLike | null> {
-    const [sel] = await db
+    const rows = await db
       .select()
       .from(scheduleSelections)
       .where(
@@ -473,9 +710,96 @@ export class DrizzleUserStateStore implements UserStateStore {
           eq(scheduleSelections.userId, userId),
           eq(scheduleSelections.scheduleTermId, scheduleTermId)
         )
-      )
-      .limit(1);
-    return sel || null;
+      );
+    return pickScheduleSelectionRowForPlan(rows, planId);
+  }
+
+  private async upsertScheduleSelectionWithDb(
+    executor: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
+    userId: string,
+    scheduleTermId: string,
+    payload: {
+      planId: string | null;
+      selections: Record<string, string>;
+      selectionsByPlan: Record<string, Record<string, string>>;
+    }
+  ): Promise<void> {
+    const rows = await executor
+      .select()
+      .from(scheduleSelections)
+      .where(
+        and(
+          eq(scheduleSelections.userId, userId),
+          eq(scheduleSelections.scheduleTermId, scheduleTermId)
+        )
+      );
+
+    let effectivePlanId =
+      payload.planId && isValidUuid(payload.planId)
+        ? payload.planId
+        : rows.find((r) => r.planId && isValidUuid(r.planId))?.planId || null;
+
+    if (!effectivePlanId) {
+      effectivePlanId = (await this.resolveUserActivePlan(userId))?.planId || null;
+    }
+
+    if (!effectivePlanId) {
+      if (rows.length > 0) {
+        await executor
+          .update(scheduleSelections)
+          .set({
+            selections: payload.selections,
+            selectionsByPlan: payload.selectionsByPlan,
+            updatedAt: new Date(),
+          })
+          .where(eq(scheduleSelections.id, rows[0].id));
+      }
+      return;
+    }
+
+    if (rows.length === 0) {
+      await executor.insert(scheduleSelections).values({
+        userId,
+        planId: effectivePlanId,
+        scheduleTermId,
+        selections: payload.selections,
+        selectionsByPlan: payload.selectionsByPlan,
+      });
+      return;
+    }
+
+    if (rows.length === 1) {
+      await executor
+        .update(scheduleSelections)
+        .set({
+          planId: effectivePlanId,
+          selections: payload.selections,
+          selectionsByPlan: payload.selectionsByPlan,
+          updatedAt: new Date(),
+        })
+        .where(eq(scheduleSelections.id, rows[0].id));
+      return;
+    }
+
+    const match = rows.find((r) => r.planId === effectivePlanId);
+    if (match) {
+      await executor
+        .update(scheduleSelections)
+        .set({
+          selections: payload.selections,
+          selectionsByPlan: payload.selectionsByPlan,
+          updatedAt: new Date(),
+        })
+        .where(eq(scheduleSelections.id, match.id));
+    } else {
+      await executor.insert(scheduleSelections).values({
+        userId,
+        planId: effectivePlanId,
+        scheduleTermId,
+        selections: payload.selections,
+        selectionsByPlan: payload.selectionsByPlan,
+      });
+    }
   }
 
   async upsertScheduleSelection(
@@ -487,36 +811,7 @@ export class DrizzleUserStateStore implements UserStateStore {
       selectionsByPlan: Record<string, Record<string, string>>;
     }
   ): Promise<void> {
-    const [existing] = await db
-      .select({ id: scheduleSelections.id })
-      .from(scheduleSelections)
-      .where(
-        and(
-          eq(scheduleSelections.userId, userId),
-          eq(scheduleSelections.scheduleTermId, scheduleTermId)
-        )
-      )
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(scheduleSelections)
-        .set({
-          planId: payload.planId,
-          selections: payload.selections,
-          selectionsByPlan: payload.selectionsByPlan,
-          updatedAt: new Date(),
-        })
-        .where(eq(scheduleSelections.id, existing.id));
-    } else {
-      await db.insert(scheduleSelections).values({
-        userId,
-        planId: payload.planId,
-        scheduleTermId,
-        selections: payload.selections,
-        selectionsByPlan: payload.selectionsByPlan,
-      });
-    }
+    await this.upsertScheduleSelectionWithDb(db, userId, scheduleTermId, payload);
   }
 
   async listScheduleProposals(
@@ -701,35 +996,14 @@ export class DrizzleUserStateStore implements UserStateStore {
       let proposalsCount = 0;
 
       if (input.settingsIncoming) {
-        const [existingSet] = await tx
+        const existingRows = await tx
           .select()
           .from(userSettings)
-          .where(eq(userSettings.userId, input.userId))
-          .limit(1);
+          .where(eq(userSettings.userId, input.userId));
 
+        const existingSet = pickUserSettingsRowForPlan(existingRows, input.planId);
         const merged = mergePlanSettings(existingSet, input.planId, input.settingsIncoming);
-        const setValues = {
-          planId: merged.planId,
-          includePromotionsInGPA: merged.includePromotionsInGPA,
-          minPassingGrade: merged.minPassingGrade,
-          includeAnalistaTrack: merged.includeAnalistaTrack,
-          allowBlockedElectivesPlanning: merged.allowBlockedElectivesPlanning,
-          includeElectivesInProgress: merged.includeElectivesInProgress,
-          soundEnabled: merged.soundEnabled,
-          tutorialCompleted: merged.tutorialCompleted,
-          notifyLibraryEmail: merged.notifyLibraryEmail,
-          extraSettings: merged.extraSettings,
-          updatedAt: new Date(),
-        };
-
-        if (existingSet) {
-          await tx
-            .update(userSettings)
-            .set(setValues)
-            .where(eq(userSettings.userId, input.userId));
-        } else {
-          await tx.insert(userSettings).values({ userId: input.userId, ...setValues });
-        }
+        await this.upsertUserSettingsWithDb(tx, input.userId, merged);
       }
 
       const userState = input.userState || {};
@@ -785,7 +1059,8 @@ export class DrizzleUserStateStore implements UserStateStore {
         }
         const seen = new Set<string>();
 
-        for (let year = 1; year <= 5; year++) {
+        const maxLevel = resolvePlanMaxLevel(input.maxLevel);
+        for (let year = 1; year <= maxLevel; year++) {
           const list = Array.isArray((input.assignedElectives as any)[year])
             ? (input.assignedElectives as any)[year]
             : [];
@@ -830,7 +1105,7 @@ export class DrizzleUserStateStore implements UserStateStore {
       }
 
       if (currentTerm && input.scheduleSelections && typeof input.scheduleSelections === 'object') {
-        const [existingSel] = await tx
+        const existingSelRows = await tx
           .select()
           .from(scheduleSelections)
           .where(
@@ -838,34 +1113,16 @@ export class DrizzleUserStateStore implements UserStateStore {
               eq(scheduleSelections.userId, input.userId),
               eq(scheduleSelections.scheduleTermId, currentTerm.id)
             )
-          )
-          .limit(1);
+          );
 
+        const existingSel = pickScheduleSelectionRowForPlan(existingSelRows, input.planId);
         const mergedSel = mergePlanScheduleSelections(
           existingSel,
           input.planId,
           input.scheduleSelections
         );
 
-        if (existingSel) {
-          await tx
-            .update(scheduleSelections)
-            .set({
-              planId: mergedSel.planId,
-              selections: mergedSel.selections,
-              selectionsByPlan: mergedSel.selectionsByPlan,
-              updatedAt: new Date(),
-            })
-            .where(eq(scheduleSelections.id, existingSel.id));
-        } else {
-          await tx.insert(scheduleSelections).values({
-            userId: input.userId,
-            planId: mergedSel.planId,
-            scheduleTermId: currentTerm.id,
-            selections: mergedSel.selections,
-            selectionsByPlan: mergedSel.selectionsByPlan,
-          });
-        }
+        await this.upsertScheduleSelectionWithDb(tx, input.userId, currentTerm.id, mergedSel);
       }
 
       if (currentTerm && Array.isArray(input.scheduleDrafts)) {
@@ -888,7 +1145,7 @@ export class DrizzleUserStateStore implements UserStateStore {
   }
 
   async deleteAccount(userId: string, deleteFiles: boolean): Promise<void> {
-    const libraryService = new LibraryService();
+    const libraryService = getLibraryService();
     await libraryService.handleAccountDeletion(userId, deleteFiles);
 
     const affectedProfessorIds = await defaultReviewsStore.getAffectedProfessorIdsByUser(userId);
@@ -904,6 +1161,7 @@ export interface InMemoryUserStatePlan {
   id: string;
   name: string;
   facultyId: string;
+  totalLevels?: number;
   status?: 'draft' | 'published' | 'archived';
   isActive?: boolean;
   careerStatus?: 'draft' | 'published' | 'archived';
@@ -933,13 +1191,14 @@ export class InMemoryUserStateStore implements UserStateStore {
     this.usersPlan.set(userId, selectedPlanId);
   }
 
-  seedSubject(input: { id?: string; planId: string; codeInPlan: number; kind?: string }) {
+  seedSubject(input: { id?: string; planId: string; codeInPlan: number; kind?: string; level?: number }) {
     const id = input.id || crypto.randomUUID();
     const sub = {
       id,
       planId: input.planId,
       codeInPlan: input.codeInPlan,
       kind: input.kind || 'obligatoria',
+      level: input.level ?? 1,
     };
     this.subjects.set(id, sub);
     return sub;
@@ -997,6 +1256,7 @@ export class InMemoryUserStateStore implements UserStateStore {
       planId: plan ? plan.id : planId,
       planName: plan ? plan.name : null,
       facultyId: plan ? plan.facultyId : null,
+      totalLevels: plan?.totalLevels ?? null,
     };
   }
 
@@ -1018,7 +1278,10 @@ export class InMemoryUserStateStore implements UserStateStore {
     return sub && sub.planId === planId ? sub : null;
   }
 
-  async getUserSettings(userId: string): Promise<StoredUserSettingsLike | null> {
+  async getUserSettings(
+    userId: string,
+    _planId?: string | null
+  ): Promise<StoredUserSettingsLike | null> {
     return this.settings.get(userId) || null;
   }
 
@@ -1138,7 +1401,8 @@ export class InMemoryUserStateStore implements UserStateStore {
 
   async getScheduleSelection(
     userId: string,
-    scheduleTermId: string
+    scheduleTermId: string,
+    _planId?: string | null
   ): Promise<StoredScheduleSelectionLike | null> {
     return this.selections.get(`${userId}::${scheduleTermId}`) || null;
   }
@@ -1304,7 +1568,8 @@ export class InMemoryUserStateStore implements UserStateStore {
     if (input.assignedElectives && typeof input.assignedElectives === 'object') {
       const seen = new Set<string>();
       const nextAssignments: Array<{ subjectId: string; year: number }> = [];
-      for (let year = 1; year <= 5; year++) {
+      const maxLevel = resolvePlanMaxLevel(input.maxLevel);
+      for (let year = 1; year <= maxLevel; year++) {
         const list = Array.isArray((input.assignedElectives as any)[year])
           ? (input.assignedElectives as any)[year]
           : [];
@@ -1363,7 +1628,11 @@ export class InMemoryUserStateStore implements UserStateStore {
     return { progressCount, electivesCount, basketCount, proposalsCount };
   }
 
-  async deleteAccount(userId: string, _deleteFiles: boolean): Promise<void> {
+  async deleteAccount(userId: string, deleteFiles: boolean): Promise<void> {
+    const activeLib = getActiveLibraryService();
+    if (activeLib) {
+      await activeLib.handleAccountDeletion(userId, deleteFiles);
+    }
     this.deletedUsers.add(userId);
     this.usersPlan.delete(userId);
     this.settings.delete(userId);

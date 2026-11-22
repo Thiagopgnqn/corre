@@ -162,9 +162,12 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
   // Listado de profesores + candidatos a duplicados
   router.get('/professors', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+      const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
       const data = await service.adminListProfessors({
         adminUserId: req.user!.id,
-        planId: req.user?.selectedPlanId,
+        planId,
+        facultyId,
       });
       res.json({ success: true, data });
     } catch (err) {
@@ -175,9 +178,12 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
   // Candidatos a duplicados en formato plano para el panel de administración
   router.get('/professors/duplicates', async (req: Request, res: Response, next: NextFunction) => {
     try {
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+      const facultyId = typeof req.query.facultyId === 'string' ? req.query.facultyId : undefined;
       const data = await service.adminListProfessors({
         adminUserId: req.user!.id,
-        planId: req.user?.selectedPlanId,
+        planId,
+        facultyId,
       });
       const confidenceLabel: Record<string, string> = { high: 'Alta', medium: 'Media', low: 'Baja' };
       const candidates = (data.duplicateCandidates || [])
@@ -207,6 +213,7 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
           adminUserId: req.user!.id,
           displayName: req.body.displayName,
           facultyId: req.body.facultyId,
+          planId: req.body.planId,
           subjectId: req.body.subjectId,
           note: req.body.note,
         });
@@ -217,7 +224,11 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
           action: 'professor.create_historical',
           targetType: 'professor',
           targetId: data.professor.id,
-          details: { displayName: data.professor.displayName, subjectId: req.body.subjectId },
+          details: {
+            displayName: data.professor.displayName,
+            planId: req.body.planId,
+            subjectId: req.body.subjectId,
+          },
           ip: req.ip,
         });
 
@@ -300,6 +311,7 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
         const data = await service.adminLinkProfessorToSubject({
           adminUserId: req.user!.id,
           professorId: String(req.params.id),
+          planId: req.body.planId,
           subjectId: req.body.subjectId,
           note: req.body.note,
         });
@@ -310,7 +322,11 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
           action: 'professor.link_subject',
           targetType: 'professor',
           targetId: String(req.params.id),
-          details: { subjectId: req.body.subjectId, note: req.body.note },
+          details: {
+            planId: req.body.planId,
+            subjectId: req.body.subjectId,
+            note: req.body.note,
+          },
           ip: req.ip,
         });
 
@@ -322,9 +338,11 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
   );
 
   // Cola de moderación: reportes abiertos + reseñas ocultas
-  router.get('/reviews/reports', async (_req: Request, res: Response, next: NextFunction) => {
+  router.get('/reviews/reports', async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await service.adminGetModerationQueue();
+      const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+      const data = await service.adminGetModerationQueue({ careerId, planId });
       res.json({ success: true, data });
     } catch (err) {
       next(err);
@@ -340,6 +358,8 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
       const status = typeof req.query.status === 'string' ? req.query.status : undefined;
       const professorId = typeof req.query.professorId === 'string' ? req.query.professorId : undefined;
       const subjectId = typeof req.query.subjectId === 'string' ? req.query.subjectId : undefined;
+      const careerId = typeof req.query.careerId === 'string' ? req.query.careerId : undefined;
+      const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
 
       const data = await service.adminListAllReviews({
         page,
@@ -348,6 +368,8 @@ export function createAdminReviewsRouter(service: ReviewsService): Router {
         status,
         professorId,
         subjectId,
+        careerId,
+        planId,
       });
 
       res.json({ success: true, data });

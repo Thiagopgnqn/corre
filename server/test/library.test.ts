@@ -2,6 +2,9 @@
 import './setupTestEnv.js';
 
 import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import zlib from 'zlib';
 import { Readable } from 'stream';
@@ -24,8 +27,11 @@ import {
   setMockAdminRecipients,
   escapeHtml,
   sanitizeSubject,
+  buildAdminNewMaterialEmail,
   buildAdminBatchSummaryEmail,
+  buildUploaderApprovedEmail,
   buildUploaderGroupedApprovedEmail,
+  buildUploaderRejectedEmail,
   buildUploaderGroupedRejectedEmail,
   processPendingAdminNotifications,
   processPendingUploaderNotifications,
@@ -1398,12 +1404,22 @@ async function main() {
     updatedAt: new Date(),
   });
 
-  // Alumno 2 se da de baja con deleteFiles = false (preservar para la comunidad)
+  // Alumno 2 se da de baja con deleteFiles = false (preservar para la comunidad, 0 llamadas a R2)
+  const r2DeleteSpyCalls: string[] = [];
+  const origR2Delete = mockR2.deleteObject.bind(mockR2);
+  mockR2.deleteObject = async (key: string) => {
+    r2DeleteSpyCalls.push(key);
+    return origR2Delete(key);
+  };
   await libraryStore.handleAccountDeletion(student2Id, false);
   const preservedFile = libraryStore.files.get('file-community');
   assert(preservedFile !== undefined, 'Archivo se preserva en el catálogo si deleteFiles: false');
   assert(preservedFile.uploaderUserId === null, 'La autoría se desvincula fijando uploaderUserId = null');
   assert(mockR2.hasObjectDirect(fileKeepKey), 'El objeto en R2 permanece activo');
+  assert(
+    r2DeleteSpyCalls.length === 0,
+    'handleAccountDeletion(..., false) realiza 0 llamadas a r2.deleteObject'
+  );
 
   // Alumno 3 se da de baja con deleteFiles = true
   const fileDeleteKey = 'library/to-delete.pdf';
@@ -1423,6 +1439,11 @@ async function main() {
   await libraryStore.handleAccountDeletion(student3Id, true);
   assert(!libraryStore.files.has('file-delete-user'), 'Archivo eliminado de la base si deleteFiles: true');
   assert(!mockR2.hasObjectDirect(fileDeleteKey), 'Objeto eliminado físicamente de R2 si deleteFiles: true');
+  assert(
+    r2DeleteSpyCalls.length === 1 && r2DeleteSpyCalls[0] === fileDeleteKey,
+    'handleAccountDeletion(..., true) invoca r2.deleteObject solo para los archivos propios del usuario'
+  );
+  mockR2.deleteObject = origR2Delete;
 
   // ---------------------------------------------------------------------------
   // 14. SISTEMA DE NOTIFICACIONES POR CORREO ELECTRÓNICO (BIBLIOTECA)
@@ -3080,6 +3101,247 @@ async function main() {
       adminGlobalDetail.status === 200,
     'selectedPlanId = null bloquea acceso al plan draft en detalle/listado/descarga/voto/reporte/upload (404), habilita el plan publicado (200) y conserva alcance global de admin (200)',
     `statuses=${draftDetailBlocked.status}/${draftSubFilesBlocked.status}/${draftDownloadBlocked.status}/${draftHelpfulBlocked.status}/${draftReportBlocked.status}/${draftUploadBlocked.status}/${pubDetailAllowed.status}/${adminGlobalDetail.status}`
+  );
+
+  // ---------------------------------------------------------------------------
+  // 18. TRAMO 2C PARTE C: MODERACIÓN MULTI-PLAN Y MAILS SIN HARDCODE
+  // ---------------------------------------------------------------------------
+  console.log('📌 18. Parte C: Contexto carrera/plan en Biblioteca Admin y mails multi-carrera');
+
+  const multiCareerIsiId = '00000000-0000-4000-8000-00000000c101';
+  const multiCareerIndId = '00000000-0000-4000-8000-00000000c102';
+  const multiPlanIsiId = '00000000-0000-4000-8000-00000000p101';
+  const multiPlanIndId = '00000000-0000-4000-8000-00000000p102';
+  libraryStore.seedPlan({
+    id: multiPlanIsiId,
+    name: 'Plan 2023',
+    year: 2023,
+    status: 'published',
+    careerId: multiCareerIsiId,
+    careerCode: 'ISI',
+    careerName: 'Ingeniería en Sistemas de Información',
+    facultyName: 'UTN FRC',
+  });
+  libraryStore.seedPlan({
+    id: multiPlanIndId,
+    name: 'Plan 2023',
+    year: 2023,
+    status: 'draft',
+    careerId: multiCareerIndId,
+    careerCode: 'IND',
+    careerName: 'Ingeniería Industrial',
+    facultyName: 'UTN FRC',
+  });
+
+  const subIsiMultiId = '00000000-0000-4000-8000-00000000s101';
+  const subIndMultiId = '00000000-0000-4000-8000-00000000s102';
+  libraryStore.seedSubject({
+    id: subIsiMultiId,
+    name: 'Sistemas Operativos',
+    codeInPlan: 21,
+    level: 3,
+    planId: multiPlanIsiId,
+  });
+  libraryStore.seedSubject({
+    id: subIndMultiId,
+    name: 'Investigación Operativa I',
+    codeInPlan: 31,
+    level: 4,
+    planId: multiPlanIndId,
+  });
+
+  const filePendingIsiId = '00000000-0000-4000-8000-00000000f101';
+  const filePendingIndId = '00000000-0000-4000-8000-00000000f102';
+  libraryStore.files.set(filePendingIsiId, {
+    id: filePendingIsiId,
+    uploaderUserId: student1Id,
+    subjectId: subIsiMultiId,
+    kind: 'apunte',
+    title: 'Apunte ISI SO',
+    originalFilename: 'so.pdf',
+    storageKey: 'library/so.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1200,
+    status: 'pending',
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+  libraryStore.files.set(filePendingIndId, {
+    id: filePendingIndId,
+    uploaderUserId: student2Id,
+    subjectId: subIndMultiId,
+    kind: 'parcial',
+    title: 'Parcial IND IO',
+    originalFilename: 'io.pdf',
+    storageKey: 'library/io.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: 1500,
+    status: 'pending',
+    downloadCount: 0,
+    helpfulCount: 0,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+
+  const repIsiId = '00000000-0000-4000-8000-00000000r101';
+  const repIndId = '00000000-0000-4000-8000-00000000r102';
+  libraryStore.reports.set(repIsiId, {
+    id: repIsiId,
+    fileId: filePendingIsiId,
+    reporterUserId: student2Id,
+    reason: 'spam',
+    note: 'rep isi',
+    status: 'open',
+    createdAt: new Date(),
+  });
+  libraryStore.reports.set(repIndId, {
+    id: repIndId,
+    fileId: filePendingIndId,
+    reporterUserId: student1Id,
+    reason: 'contenido_erroneo',
+    note: 'rep ind',
+    status: 'open',
+    createdAt: new Date(),
+  });
+
+  const adminPendingInd = await api(
+    'GET',
+    `/api/admin/library/pending?careerId=${multiCareerIndId}&planId=${multiPlanIndId}`,
+    adminToken
+  );
+  const adminCatalogInd = await api(
+    'GET',
+    `/api/admin/library/files?careerId=${multiCareerIndId}`,
+    adminToken
+  );
+  const adminReportsInd = await api(
+    'GET',
+    `/api/admin/library/reports?status=open&planId=${multiPlanIndId}`,
+    adminToken
+  );
+  const indPendingItem = (adminPendingInd.data?.data || []).find((x: any) => x.id === filePendingIndId);
+  const indCatalogItem = (adminCatalogInd.data?.data?.items || []).find((x: any) => x.id === filePendingIndId);
+  const indReportItem = (adminReportsInd.data?.data || []).find((x: any) => x.id === repIndId);
+  assert(
+    adminPendingInd.status === 200 &&
+      (adminPendingInd.data?.data || []).length === 1 &&
+      indPendingItem?.careerCode === 'IND' &&
+      indPendingItem?.careerName === 'Ingeniería Industrial' &&
+      indPendingItem?.planName === 'Plan 2023' &&
+      indPendingItem?.planStatus === 'draft' &&
+      indPendingItem?.facultyName === 'UTN FRC' &&
+      adminCatalogInd.status === 200 &&
+      (adminCatalogInd.data?.data?.items || []).length === 1 &&
+      indCatalogItem?.careerCode === 'IND' &&
+      adminReportsInd.status === 200 &&
+      (adminReportsInd.data?.data || []).length === 1 &&
+      indReportItem?.careerCode === 'IND' &&
+      indReportItem?.planId === multiPlanIndId,
+    'Library admin pending, files y reports devuelven campos de carrera/plan y filtran por careerId/planId sin mezclar ISI vs IND'
+  );
+
+  // Verificación de mailer sin hardcode y adaptación multi-carrera
+  const mailIndSingle = buildAdminNewMaterialEmail({
+    title: 'Parcial IND',
+    subjectName: 'Investigación Operativa I',
+    kind: 'parcial',
+    sizeBytes: 2048,
+    mimeType: 'application/pdf',
+    createdAt: new Date(),
+    careerCode: 'IND',
+    careerName: 'Ingeniería Industrial',
+    planName: 'Plan 2023',
+    facultyName: 'UTN FRC',
+  });
+  const mailMixedBatch = buildAdminBatchSummaryEmail([
+    {
+      id: 'm1',
+      title: 'Apunte ISI',
+      subjectName: 'Sistemas Operativos',
+      kind: 'apunte',
+      sizeBytes: 1024,
+      mimeType: 'application/pdf',
+      createdAt: new Date(),
+      careerCode: 'ISI',
+      careerName: 'Ingeniería en Sistemas de Información',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+    },
+    {
+      id: 'm2',
+      title: 'Parcial IND',
+      subjectName: 'Investigación Operativa I',
+      kind: 'parcial',
+      sizeBytes: 2048,
+      mimeType: 'application/pdf',
+      createdAt: new Date(),
+      careerCode: 'IND',
+      careerName: 'Ingeniería Industrial',
+      planName: 'Plan 2023',
+      facultyName: 'UTN FRC',
+    },
+  ]);
+  const mailNeutralNoCtx = buildAdminNewMaterialEmail({
+    title: 'Genérico',
+    subjectName: 'Álgebra',
+    kind: 'otro',
+    sizeBytes: 512,
+    mimeType: 'application/pdf',
+    createdAt: new Date(),
+  });
+  const mailUploaderInd = buildUploaderApprovedEmail({
+    title: 'Parcial IND',
+    subjectName: 'Investigación Operativa I',
+    careerCode: 'IND',
+    careerName: 'Ingeniería Industrial',
+    planName: 'Plan 2023',
+  });
+  const mailUploaderGroupedOk = buildUploaderGroupedApprovedEmail([
+    {
+      title: 'A',
+      subjectName: 'Sistemas',
+      careerCode: 'ISI',
+      careerName: 'Ingeniería en Sistemas de Información',
+      planName: 'Plan 2023',
+    },
+    {
+      title: 'B',
+      subjectName: 'Operativa',
+      careerCode: 'IND',
+      careerName: 'Ingeniería Industrial',
+      planName: 'Plan 2023',
+    },
+  ]);
+  const mailUploaderRej = buildUploaderRejectedEmail({
+    title: 'X',
+    subjectName: 'Termodinámica',
+    rejectionReason: 'Borroso',
+    careerCode: 'IND',
+    careerName: 'Ingeniería Industrial',
+    planName: 'Plan 2023',
+  });
+  const mailerSrcPath = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../src/modules/library/library.mailer.ts'
+  );
+  const mailerSrc = fs.readFileSync(mailerSrcPath, 'utf-8');
+  assert(
+    mailIndSingle.text.includes('Ingeniería Industrial (UTN FRC)') &&
+      !mailIndSingle.text.includes('Ingeniería en Sistemas') &&
+      !mailIndSingle.html.includes('Ingeniería en Sistemas') &&
+      mailMixedBatch.text.includes('IND · Plan 2023') &&
+      mailMixedBatch.text.includes('ISI · Plan 2023') &&
+      mailMixedBatch.text.includes('Múltiples carreras (UTN FRC)') &&
+      mailNeutralNoCtx.text.includes('Plataforma Colaborativa Universitaria') &&
+      !mailNeutralNoCtx.text.includes('UTN FRC') &&
+      mailUploaderInd.text.includes('Ingeniería Industrial') &&
+      mailUploaderGroupedOk.text.includes('IND · Plan 2023') &&
+      mailUploaderRej.text.includes('IND · Plan 2023') &&
+      !mailerSrc.includes('Ingeniería en Sistemas') &&
+      !mailerSrc.includes('UTN FRC'),
+    'library.mailer.ts adapta mails a carrera/facultad o lote mixto, usa fallback neutro y tiene 0 ocurrencias hardcodeadas de Ingeniería en Sistemas / UTN FRC'
   );
 
   // ---------------------------------------------------------------------------

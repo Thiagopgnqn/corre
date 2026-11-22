@@ -79,6 +79,7 @@ const catalog = {
   subjects: [
     ...CORE_SUBJECTS.map((s) => ({
       codeInPlan: s.id,
+      displayCode: String(s.id),
       name: s.name,
       shortName: s.name,
       level: s.level,
@@ -95,6 +96,7 @@ const catalog = {
     })),
     ...ELECTIVES.map((e) => ({
       codeInPlan: e.id,
+      displayCode: [408, 512, 513, 514].includes(e.id) ? `X-${e.id}` : `E-${e.id}`,
       name: e.name,
       shortName: e.name,
       level: e.level,
