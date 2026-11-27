@@ -407,6 +407,7 @@ export interface ReviewsStore {
     page: number;
     pageSize: number;
     viewerUserId?: string;
+    excludeOpenReports?: boolean;
   }): Promise<{
     items: StoredReview[];
     total: number;
@@ -877,6 +878,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
   async getProfessorById(
     professorId: string
   ): Promise<{ professor: ProfessorEntity; aliases: ProfessorAliasEntity[] } | null> {
+    if (!this.isValidUuid(professorId)) return null;
     try {
       const [prof] = await db
         .select()
@@ -1158,6 +1160,7 @@ export class DrizzleReviewsStore implements ReviewsStore {
     page: number;
     pageSize: number;
     viewerUserId?: string;
+    excludeOpenReports?: boolean;
   }) {
     if (params.allowedSubjectIds !== undefined && params.allowedSubjectIds.length === 0) {
       return {
@@ -1177,6 +1180,15 @@ export class DrizzleReviewsStore implements ReviewsStore {
     }
     if (params.allowedSubjectIds && params.allowedSubjectIds.length > 0) {
       conditions.push(inArray(professorReviews.subjectId, params.allowedSubjectIds));
+    }
+    if (params.excludeOpenReports) {
+      conditions.push(
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${reviewReports}
+          WHERE ${reviewReports.reviewId} = ${professorReviews.id}
+            AND ${reviewReports.status} = 'open'
+        )`
+      );
     }
     const whereClause = and(...conditions);
 
@@ -3628,6 +3640,7 @@ export class InMemoryReviewsStore implements ReviewsStore {
     page: number;
     pageSize: number;
     viewerUserId?: string;
+    excludeOpenReports?: boolean;
   }) {
     const allowedSet =
       params.allowedSubjectIds !== undefined ? new Set(params.allowedSubjectIds) : null;
@@ -3636,7 +3649,9 @@ export class InMemoryReviewsStore implements ReviewsStore {
         r.professorId === params.professorId &&
         r.status === 'published' &&
         (!params.subjectUuid || r.subjectId === params.subjectUuid) &&
-        (!allowedSet || allowedSet.has(r.subjectId))
+        (!allowedSet || allowedSet.has(r.subjectId)) &&
+        (!params.excludeOpenReports ||
+          !this.reportsList.some((rp) => rp.reviewId === r.id && rp.status === 'open'))
     );
 
     list.sort((a, b) => {

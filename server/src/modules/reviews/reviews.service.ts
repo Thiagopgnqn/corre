@@ -23,6 +23,7 @@ import {
 import {
   ComputedAggregate,
   emptyAggregate,
+  PlanContext,
   PlanSubjectRef,
   ReportReason,
   ReviewsStore,
@@ -243,6 +244,34 @@ export class ReviewsService {
       return { professors: [], thresholds: this.getThresholdsMeta() };
     }
 
+    return this.listProfessorsForPlanContext(ctx, params);
+  }
+
+  async listPublicProfessors(params: {
+    planId: string;
+    facultyId: string;
+    search?: string;
+    subjectId?: string;
+    minRating?: number;
+    withReviewsOnly?: boolean;
+    sort?: 'rating' | 'reviews' | 'name';
+  }) {
+    return this.listProfessorsForPlanContext(
+      { planId: params.planId, facultyId: params.facultyId },
+      params
+    );
+  }
+
+  private async listProfessorsForPlanContext(
+    ctx: PlanContext,
+    params: {
+      search?: string;
+      subjectId?: string;
+      minRating?: number;
+      withReviewsOnly?: boolean;
+      sort?: 'rating' | 'reviews' | 'name';
+    }
+  ) {
     const [facultyProfessors, teachingPairs] = await Promise.all([
       this.store.listFacultyProfessors(ctx.facultyId),
       this.store.getTeachingPairsForPlan(ctx.planId, ctx.facultyId),
@@ -350,35 +379,28 @@ export class ReviewsService {
     };
   }
 
-  async getProfessorDetail(params: {
-    userId: string;
-    planId?: string | null;
-    professorId: string;
-  }) {
-    const found = await this.store.getProfessorById(params.professorId);
+  private async getProfessorDetailCore(ctx: PlanContext | null, professorId: string) {
+    const found = await this.store.getProfessorById(professorId);
     if (!found) {
       throw appError('Profesor no encontrado', 404);
     }
 
-    const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
     if (ctx && found.professor.facultyId !== ctx.facultyId) {
       throw appError('Profesor no encontrado', 404);
     }
 
     const [statsMap, subStatsMap, teachingPairs, planSubs] = await Promise.all([
-      this.store.getProfessorStatsMap([params.professorId]),
-      this.store.getProfessorSubjectStatsMap(params.professorId),
+      this.store.getProfessorStatsMap([professorId]),
+      this.store.getProfessorSubjectStatsMap(professorId),
       ctx
         ? this.store.getTeachingPairsForPlan(ctx.planId, found.professor.facultyId)
         : Promise.resolve([]),
       ctx ? this.store.getPlanSubjects(ctx.planId) : Promise.resolve([]),
     ]);
 
-    const overallAgg = formatPublicAggregate(
-      statsMap.get(params.professorId) || emptyAggregate()
-    );
+    const overallAgg = formatPublicAggregate(statsMap.get(professorId) || emptyAggregate());
 
-    const profPairs = teachingPairs.filter((tp) => tp.professorId === params.professorId);
+    const profPairs = teachingPairs.filter((tp) => tp.professorId === professorId);
     const planSubIds = new Set(planSubs.map((s) => s.id));
     const rawSubIds = Array.from(
       new Set([...profPairs.map((p) => p.subjectId), ...Array.from(subStatsMap.keys())])
@@ -405,6 +427,27 @@ export class ReviewsService {
       })
       .sort((a, b) => b.reviewCount - a.reviewCount || a.level - b.level);
 
+    return {
+      professor: {
+        id: found.professor.id,
+        displayName: found.professor.displayName,
+        normalizedKey: found.professor.normalizedKey,
+        aliases: found.aliases.map((a) => a.aliasRaw),
+        ...overallAgg,
+        subjects: subjectBreakdown,
+      },
+      thresholds: this.getThresholdsMeta(),
+    };
+  }
+
+  async getProfessorDetail(params: {
+    userId: string;
+    planId?: string | null;
+    professorId: string;
+  }) {
+    const ctx = await this.store.resolvePlanContext(params.userId, params.planId);
+    const core = await this.getProfessorDetailCore(ctx, params.professorId);
+
     const firstReviews = await this.getProfessorReviews({
       userId: params.userId,
       planId: ctx?.planId,
@@ -415,16 +458,88 @@ export class ReviewsService {
     });
 
     return {
-      professor: {
-        id: found.professor.id,
-        displayName: found.professor.displayName,
-        normalizedKey: found.professor.normalizedKey,
-        aliases: found.aliases.map((a) => a.aliasRaw),
-        ...overallAgg,
-        subjects: subjectBreakdown,
-      },
+      professor: core.professor,
       reviewsPage: firstReviews,
-      thresholds: this.getThresholdsMeta(),
+      thresholds: core.thresholds,
+    };
+  }
+
+  async getPublicProfessorDetail(params: {
+    planId: string;
+    facultyId: string;
+    professorId: string;
+  }) {
+    return this.getProfessorDetailCore(
+      { planId: params.planId, facultyId: params.facultyId },
+      params.professorId
+    );
+  }
+
+  async getPublicProfessorReviewsRaw(params: {
+    planId: string;
+    facultyId: string;
+    professorId: string;
+    subjectId?: string;
+    page?: number;
+    pageSize?: number;
+    sort?: 'recent' | 'helpful';
+  }) {
+    const found = await this.store.getProfessorById(params.professorId);
+    if (!found || found.professor.facultyId !== params.facultyId) {
+      throw appError('Profesor no encontrado', 404);
+    }
+
+    const page = Math.max(1, params.page || 1);
+    const pageSize = Math.min(10, Math.max(1, params.pageSize || 10));
+    const sort = params.sort === 'helpful' ? 'helpful' : 'recent';
+
+    let subjectUuid: string | undefined;
+    let allowedSubjectIds: string[] | undefined;
+    if (params.subjectId && params.subjectId.trim()) {
+      const sub = await this.store.getSubjectByIdOrCode(params.planId, params.subjectId.trim());
+      if (!sub) {
+        return {
+          items: [] as StoredReview[],
+          subjectMap: new Map<string, PlanSubjectRef>(),
+          professorPublishedReviewCount: 0,
+          page,
+          pageSize,
+          total: 0,
+          totalPages: 0,
+        };
+      }
+      subjectUuid = sub.id;
+    } else {
+      const planSubs = await this.store.getPlanSubjects(params.planId);
+      allowedSubjectIds = planSubs.map((s) => s.id);
+    }
+
+    const [statsMap, result] = await Promise.all([
+      this.store.getProfessorStatsMap([params.professorId]),
+      this.store.listPublishedReviews({
+        professorId: params.professorId,
+        subjectUuid,
+        allowedSubjectIds,
+        sort,
+        page,
+        pageSize,
+        excludeOpenReports: true,
+      }),
+    ]);
+
+    const profTotalPublished = statsMap.get(params.professorId)?.reviewCount || 0;
+    const subjectMap = await this.store.getSubjectsByIds(
+      Array.from(new Set(result.items.map((r) => r.subjectId)))
+    );
+
+    return {
+      items: result.items,
+      subjectMap,
+      professorPublishedReviewCount: profTotalPublished,
+      page,
+      pageSize,
+      total: result.total,
+      totalPages: Math.ceil(result.total / pageSize),
     };
   }
 
