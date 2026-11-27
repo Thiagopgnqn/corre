@@ -99,6 +99,7 @@ describe('API Contract Integrity: Frontend apiFetch vs Express Routes', () => {
     ...getRouterRoutes(path.join(serverDir, 'app.ts'), ''),
     ...getRouterRoutes(path.join(serverDir, 'modules', 'auth', 'auth.routes.ts'), '/api/auth'),
     ...getRouterRoutes(path.join(serverDir, 'modules', 'catalog', 'catalog.routes.ts'), '/api/catalog'),
+    ...getRouterRoutes(path.join(serverDir, 'modules', 'public', 'public.routes.ts'), '/api/public'),
     ...getRouterRoutes(path.join(serverDir, 'modules', 'professors', 'professors.routes.ts'), '/api/professors'),
     ...getRouterRoutes(path.join(serverDir, 'modules', 'reviews', 'reviews.routes.ts'), '/api/reviews'),
     ...getRouterRoutes(path.join(serverDir, 'modules', 'reviews', 'reviews.routes.ts'), '/api/admin'),

@@ -21,7 +21,7 @@
     "verify:import-neon": "tsx src/scripts/verifyImportNeon.ts",
     "verify:user-state-neon": "tsx src/scripts/verifyUserStateNeon.ts",
     "verify:scan-pdfs": "tsx src/scripts/scanPdfFolder.ts",
-    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts && tsx test/library.test.ts && tsx test/multicarreraIsolation.test.ts && tsx test/catalogConfigAndSecurity.test.ts && tsx test/planImport.test.ts",
+    "test": "tsx test/reviews.test.ts && tsx test/authVerification.test.ts && tsx test/admin.test.ts && tsx test/library.test.ts && tsx test/multicarreraIsolation.test.ts && tsx test/catalogConfigAndSecurity.test.ts && tsx test/planImport.test.ts && tsx test/publicAccess.test.ts",
     "test:neon": "tsx test/integration.test.ts && tsx test/reviews.test.ts"
   },
   "dependencies": {
