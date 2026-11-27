@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAuth } from '../../middlewares/auth.middleware.js';
 import { getCareers, getPlan, getSchedule, getCatalogVersionHandler } from './catalog.controller.js';
 
 const router = Router();
@@ -7,7 +8,7 @@ const router = Router();
 router.get('/version', getCatalogVersionHandler);
 router.get('/careers', getCareers);
 router.get('/plans/:planId', getPlan);
-router.get('/schedule', getSchedule);
+router.get('/schedule', requireAuth, getSchedule);
 
 export default router;
 

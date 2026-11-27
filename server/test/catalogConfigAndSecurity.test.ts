@@ -1409,6 +1409,13 @@ async function main() {
     });
     assert(Boolean(etag) && notModifiedRes.status === 304, 'Soporta ETag y devuelve 304 ante If-None-Match');
 
+    // 3b-bis. GET /api/catalog/schedule exige sesión autenticada (401 sin token)
+    const unauthScheduleRes = await fetch(`${baseUrl}/api/catalog/schedule`);
+    assert(
+      unauthScheduleRes.status === 401,
+      'GET /api/catalog/schedule rechaza acceso sin sesión (401)'
+    );
+
     // 3c. Draft / archived / inactive / draft career -> 404
     for (const [label, id] of [
       ['plan draft', draftPlan.planId],
