@@ -19,7 +19,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref();
 
-function getClientIp(req: Request): string {
+export function getClientIp(req: Request): string {
   const forwarded = req.headers['x-forwarded-for'];
   if (typeof forwarded === 'string' && forwarded.length > 0) {
     const firstIp = forwarded.split(',')[0].trim();

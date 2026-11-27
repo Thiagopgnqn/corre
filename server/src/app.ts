@@ -9,6 +9,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { AuthController } from './modules/auth/auth.controller.js';
 import { AuthService } from './modules/auth/auth.service.js';
 import catalogRouter from './modules/catalog/catalog.routes.js';
+import { createPublicRouter } from './modules/public/public.routes.js';
 import { updateSelectedPlan } from './modules/catalog/catalog.controller.js';
 import adminRouter from './modules/admin/admin.routes.js';
 import { createUserStateRouter } from './modules/user-state/userState.routes.js';
@@ -168,6 +169,7 @@ export function createApp(options?: {
   // 6. Módulos de la API
   instance.use('/api/auth', authRouter);
   instance.use('/api/catalog', catalogRouter);
+  instance.use('/api/public', createPublicRouter(reviewsService));
   instance.use('/api/professors', createProfessorsRouter(reviewsService));
   instance.use('/api/reviews', createReviewsRouter(reviewsService));
   instance.use('/api/enrollments', createEnrollmentsRouter(enrollmentsService));
