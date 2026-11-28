@@ -9,6 +9,7 @@ import {
   syncGoogleGisButton,
   __resetGoogleLoginButtonForTesting,
 } from '../src/components/auth/GoogleLoginButton.tsx';
+import { determineAppScreen } from '../src/utils/authGate.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -42,17 +43,6 @@ function handleBackspace(
   }
   next[index] = '';
   return { updatedDigits: next, nextFocusIndex: index };
-}
-
-function determineAppScreen(params: {
-  isLoading: boolean;
-  isAuthenticated: boolean;
-  isEmailVerified: boolean;
-}): 'loading' | 'auth-screen' | 'verify-email-screen' | 'main-app' {
-  if (params.isLoading) return 'loading';
-  if (!params.isAuthenticated) return 'auth-screen';
-  if (!params.isEmailVerified) return 'verify-email-screen';
-  return 'main-app';
 }
 
 console.log('🧪 Ejecutando pruebas unitarias de frontend para Autenticación y Verificación de Email...');
@@ -107,15 +97,36 @@ console.log('🧪 Ejecutando pruebas unitarias de frontend para Autenticación y
     'loading'
   );
 
-  // Caso 2: Sin sesión iniciada
+  // Caso 2: Sin sesión iniciada -> explora shell público salvo que pida login
   assert.equal(
-    determineAppScreen({ isLoading: false, isAuthenticated: false, isEmailVerified: false }),
-    'auth-screen'
+    determineAppScreen({
+      isLoading: false,
+      isAuthenticated: false,
+      isEmailVerified: false,
+      isLoginOpen: false,
+    }),
+    'public-shell',
+    'Visitante sin sesión entra al shell público de solo lectura por defecto'
+  );
+  assert.equal(
+    determineAppScreen({
+      isLoading: false,
+      isAuthenticated: false,
+      isEmailVerified: false,
+      isLoginOpen: true,
+    }),
+    'auth-screen',
+    'Visitante que pidió iniciar sesión ve AuthScreen'
   );
 
   // Caso 3: Sesión activa pero email NO verificado
   assert.equal(
-    determineAppScreen({ isLoading: false, isAuthenticated: true, isEmailVerified: false }),
+    determineAppScreen({
+      isLoading: false,
+      isAuthenticated: true,
+      isEmailVerified: false,
+      isLoginOpen: false,
+    }),
     'verify-email-screen',
     'Una sesión activa con email_verified false DEBE mostrar VerifyEmailScreen y NUNCA la app'
   );
