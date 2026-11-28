@@ -13,12 +13,199 @@ import {
   X,
 } from 'lucide-react';
 import { libraryApi } from '../../api/library.api';
+import { publicApi, type PublicLibraryFileItem } from '../../api/public.api';
+import { useOptionalAuth } from '../../context/AuthContext';
+import { useOptionalCareer } from '../../context/CareerContext';
 import { LibraryDownloadToast } from './LibraryDownloadToast';
 import type {
   LibraryFilePublic,
   LibraryFileKind,
   LibraryReportReason,
+  LibraryTerm,
 } from '../../types/library';
+
+export const LIBRARY_FILES_PAGE_SIZE = 20;
+
+export function mapPublicLibraryFileToCard(item: PublicLibraryFileItem): LibraryFilePublic {
+  return {
+    id: item.id,
+    subjectId: item.subjectId,
+    kind: (item.kind as LibraryFileKind) || 'otro',
+    academicYear: item.academicYear,
+    term: (item.term as LibraryTerm | null) ?? null,
+    examInstance: item.examInstance,
+    hasSolution: item.hasSolution,
+    title: item.title,
+    description: item.description,
+    originalFilename: '',
+    mimeType: item.mimeType,
+    sizeBytes: item.sizeBytes,
+    downloadCount: item.downloadCount,
+    helpfulCount: item.helpfulCount,
+    hasVotedHelpful: false,
+    professorNames: item.professorNames,
+    createdAt: item.createdAt,
+  };
+}
+
+function renderKindBadge(k: LibraryFileKind) {
+  switch (k) {
+    case 'parcial':
+      return <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold text-[11px] uppercase">Parcial</span>;
+    case 'final':
+      return <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold text-[11px] uppercase">Final</span>;
+    case 'apunte':
+      return <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-semibold text-[11px] uppercase">Apunte</span>;
+    case 'resumen':
+      return <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold text-[11px] uppercase">Resumen</span>;
+    case 'tp':
+      return <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[11px] uppercase">TP</span>;
+    case 'guia':
+      return <span className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 font-semibold text-[11px] uppercase">Guía</span>;
+    default:
+      return <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold text-[11px] uppercase">Otro</span>;
+  }
+}
+
+export interface LibraryFileCardViewProps {
+  file: LibraryFilePublic;
+  isPublicMode: boolean;
+  isDownloading: boolean;
+  onDownload: (file: LibraryFilePublic, e?: React.MouseEvent<HTMLButtonElement>) => void;
+  onToggleHelpful: (file: LibraryFilePublic) => void;
+  onReport: (file: LibraryFilePublic) => void;
+}
+
+export const LibraryFileCardView: React.FC<LibraryFileCardViewProps> = ({
+  file,
+  isPublicMode,
+  isDownloading,
+  onDownload,
+  onToggleHelpful,
+  onReport,
+}) => {
+  const isPdf = file.mimeType === 'application/pdf';
+  const sizeLabel = `${(file.sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
+
+  return (
+    <div className="p-3.5 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 w-full min-w-0 max-w-full overflow-hidden">
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {renderKindBadge(file.kind)}
+
+            {file.academicYear && (
+              <span className="text-[11px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
+                {file.academicYear} {file.term ? `· ${file.term}` : ''}
+              </span>
+            )}
+
+            {file.examInstance && (
+              <span className="text-[11px] text-slate-300 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
+                {file.examInstance}
+              </span>
+            )}
+
+            {file.hasSolution && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold border border-emerald-500/25">
+                <CheckCircle2 className="w-3 h-3" />
+                Con resolución
+              </span>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => onReport(file)}
+            className="text-slate-500 hover:text-slate-300 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
+            title="Reportar material"
+          >
+            <Flag className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-bold text-white leading-snug break-words">
+            {file.title}
+          </h3>
+          {file.description && (
+            <p className="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
+              {file.description}
+            </p>
+          )}
+        </div>
+
+        {file.professorNames && file.professorNames.length > 0 && (
+          <div className="flex items-center gap-1 flex-wrap pt-0.5">
+            <span className="text-[10px] text-slate-500">Cátedra:</span>
+            {file.professorNames.map((name, i) => (
+              <span
+                key={i}
+                className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-950 text-indigo-300 border border-indigo-500/20"
+              >
+                {name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="pt-3 border-t border-slate-800/80 space-y-3">
+        <div
+          className={`flex items-center text-[11px] text-slate-400 ${
+            isPublicMode ? 'justify-end' : 'justify-between'
+          }`}
+        >
+          {!isPublicMode && <span className="text-slate-500 italic">Subido por un estudiante</span>}
+          <span className="font-mono text-slate-500">
+            {isPdf ? 'PDF' : 'Imagen'} · {sizeLabel}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 w-full min-w-0">
+          <button
+            type="button"
+            onClick={() => onToggleHelpful(file)}
+            className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
+              !isPublicMode && file.hasVotedHelpful
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
+            }`}
+            title={
+              !isPublicMode && file.hasVotedHelpful ? 'Quitar voto útil' : 'Marcar como útil'
+            }
+          >
+            <ThumbsUp
+              className={`w-3.5 h-3.5 shrink-0 ${
+                !isPublicMode && file.hasVotedHelpful ? 'text-amber-400' : ''
+              }`}
+            />
+            <span>{file.helpfulCount > 0 ? file.helpfulCount : 'Es útil'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => onDownload(file, e)}
+            disabled={isDownloading}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
+          >
+            {isDownloading ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Descargando...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Descargar ({file.downloadCount})</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 interface SubjectInfo {
   id: string; // UUID
@@ -41,8 +228,15 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
   onOpenUpload,
   refreshKey = 0,
 }) => {
+  const auth = useOptionalAuth();
+  const isAuthenticated = Boolean(auth?.isAuthenticated);
+  const career = useOptionalCareer();
+  const activePlanId = career?.activePlan?.plan.id;
+
   const [files, setFiles] = useState<LibraryFilePublic[]>([]);
   const [total, setTotal] = useState<number>(0);
+  const [page, setPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,22 +257,56 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [showDownloadToast, setShowDownloadToast] = useState<boolean>(false);
 
+  const openAuthPromptForLibrary = () => {
+    const returnToHash =
+      typeof window !== 'undefined' && window.location.hash
+        ? window.location.hash
+        : `#library/${subject.codeInPlan}`;
+    auth?.openLoginPrompt('descargar o aportar material', { returnToHash });
+  };
+
+  useEffect(() => {
+    setPage(1);
+  }, [subject.id]);
+
   const fetchFiles = async () => {
     setIsLoading(true);
     setError(null);
     try {
       const kindParam = activeKindTab !== 'todos' ? (activeKindTab as LibraryFileKind) : undefined;
-      const res = await libraryApi.listFiles({
-        subjectId: subject.id,
-        kind: kindParam,
-        search: search.trim() || undefined,
-        hasSolution: onlyWithSolution ? true : undefined,
-        sort,
-      });
+      if (isAuthenticated) {
+        const res = await libraryApi.listFiles({
+          subjectId: subject.id,
+          kind: kindParam,
+          search: search.trim() || undefined,
+          hasSolution: onlyWithSolution ? true : undefined,
+          sort,
+          page,
+          pageSize: LIBRARY_FILES_PAGE_SIZE,
+        });
 
-      if (res.success && res.data) {
-        setFiles(res.data.files);
-        setTotal(res.data.total);
+        if (res.success && res.data) {
+          setFiles(res.data.files);
+          setTotal(res.data.total);
+          setTotalPages(Math.max(1, res.data.totalPages || 1));
+        }
+      } else {
+        const res = await publicApi.listLibraryFiles({
+          planId: activePlanId,
+          subjectId: subject.id,
+          kind: kindParam,
+          search: search.trim() || undefined,
+          hasSolution: onlyWithSolution ? true : undefined,
+          sort,
+          page,
+          pageSize: LIBRARY_FILES_PAGE_SIZE,
+        });
+
+        if (res.success && res.data) {
+          setFiles(res.data.items.map(mapPublicLibraryFileToCard));
+          setTotal(res.data.total);
+          setTotalPages(Math.max(1, res.data.totalPages || 1));
+        }
       }
     } catch (err: any) {
       console.error('Error al cargar materiales:', err);
@@ -90,9 +318,13 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
 
   useEffect(() => {
     fetchFiles();
-  }, [subject.id, activeKindTab, search, sort, onlyWithSolution, refreshKey]);
+  }, [isAuthenticated, activePlanId, subject.id, activeKindTab, search, sort, onlyWithSolution, page, refreshKey]);
 
   const handleDownload = async (file: LibraryFilePublic, e?: React.MouseEvent<HTMLButtonElement>) => {
+    if (!isAuthenticated) {
+      openAuthPromptForLibrary();
+      return;
+    }
     const clickedBtn = e?.currentTarget ?? null;
     setDownloadingId(file.id);
     try {
@@ -137,6 +369,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
   };
 
   const handleToggleHelpful = async (file: LibraryFilePublic) => {
+    if (!isAuthenticated) {
+      openAuthPromptForLibrary();
+      return;
+    }
     try {
       const res = await libraryApi.toggleHelpful(file.id);
       if (res.success && res.data) {
@@ -157,6 +393,14 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
     }
   };
 
+  const handleOpenReport = (file: LibraryFilePublic) => {
+    if (!isAuthenticated) {
+      openAuthPromptForLibrary();
+      return;
+    }
+    setReportingFile(file);
+  };
+
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reportingFile) return;
@@ -174,25 +418,6 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
       alert(err?.message || 'Error al enviar reporte.');
     } finally {
       setIsSubmittingReport(false);
-    }
-  };
-
-  const kindBadge = (k: LibraryFileKind) => {
-    switch (k) {
-      case 'parcial':
-        return <span className="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-semibold text-[11px] uppercase">Parcial</span>;
-      case 'final':
-        return <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-semibold text-[11px] uppercase">Final</span>;
-      case 'apunte':
-        return <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-semibold text-[11px] uppercase">Apunte</span>;
-      case 'resumen':
-        return <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold text-[11px] uppercase">Resumen</span>;
-      case 'tp':
-        return <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold text-[11px] uppercase">TP</span>;
-      case 'guia':
-        return <span className="px-2 py-0.5 rounded bg-teal-500/20 text-teal-300 font-semibold text-[11px] uppercase">Guía</span>;
-      default:
-        return <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold text-[11px] uppercase">Otro</span>;
     }
   };
 
@@ -246,7 +471,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Buscar por título o palabras clave..."
             className="w-full pl-9 pr-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 text-base md:text-xs min-w-0"
           />
@@ -259,7 +487,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             <input
               type="checkbox"
               checked={onlyWithSolution}
-              onChange={(e) => setOnlyWithSolution(e.target.checked)}
+              onChange={(e) => {
+                setOnlyWithSolution(e.target.checked);
+                setPage(1);
+              }}
               className="w-4 h-4 rounded border-slate-700 text-emerald-500 bg-slate-950 focus:ring-emerald-500 cursor-pointer"
             />
             <span className="text-xs font-medium">Solo con resolución</span>
@@ -273,7 +504,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             <select
               id="sort-select"
               value={sort}
-              onChange={(e) => setSort(e.target.value as any)}
+              onChange={(e) => {
+                setSort(e.target.value as any);
+                setPage(1);
+              }}
               className="w-full md:w-auto px-3 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-slate-800 text-white text-base md:text-xs focus:outline-none focus:border-indigo-500 min-w-0 max-w-full cursor-pointer"
             >
               <option value="recent">Más recientes</option>
@@ -305,7 +539,10 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
             <button
               key={tab.id}
               type="button"
-              onClick={() => setActiveKindTab(tab.id)}
+              onClick={() => {
+                setActiveKindTab(tab.id);
+                setPage(1);
+              }}
               className={`px-4 py-2 min-h-[44px] rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center justify-center shrink-0 snap-start ${
                 activeKindTab === tab.id
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
@@ -357,135 +594,49 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0 max-w-full">
-          {files.map((file) => {
-            const isPdf = file.mimeType === 'application/pdf';
-            const sizeLabel = `${(file.sizeBytes / (1024 * 1024)).toFixed(2)} MB`;
-
-            return (
-              <div
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full min-w-0 max-w-full">
+            {files.map((file) => (
+              <LibraryFileCardView
                 key={file.id}
-                className="p-3.5 sm:p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4 w-full min-w-0 max-w-full overflow-hidden"
+                file={file}
+                isPublicMode={!isAuthenticated}
+                isDownloading={downloadingId === file.id}
+                onDownload={handleDownload}
+                onToggleHelpful={handleToggleHelpful}
+                onReport={handleOpenReport}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-2 pt-2 text-xs">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="px-3.5 py-2 min-h-[44px] rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer"
               >
-                <div className="space-y-2.5">
-                  {/* Top Badges */}
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {kindBadge(file.kind)}
-
-                      {file.academicYear && (
-                        <span className="text-[11px] font-mono text-slate-400 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
-                          {file.academicYear} {file.term ? `· ${file.term}` : ''}
-                        </span>
-                      )}
-
-                      {file.examInstance && (
-                        <span className="text-[11px] text-slate-300 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800">
-                          {file.examInstance}
-                        </span>
-                      )}
-
-                      {file.hasSolution && (
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 text-[10px] font-semibold border border-emerald-500/25">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Con resolución
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Report Menu */}
-                    <button
-                      type="button"
-                      onClick={() => setReportingFile(file)}
-                      className="text-slate-500 hover:text-slate-300 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl hover:bg-slate-800 transition-colors cursor-pointer"
-                      title="Reportar material"
-                    >
-                      <Flag className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Title & Description */}
-                  <div>
-                    <h3 className="text-sm font-bold text-white leading-snug break-words">
-                      {file.title}
-                    </h3>
-                    {file.description && (
-                      <p className="text-xs text-slate-400 mt-1 line-clamp-2 break-words">
-                        {file.description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Professors tags if present */}
-                  {file.professorNames && file.professorNames.length > 0 && (
-                    <div className="flex items-center gap-1 flex-wrap pt-0.5">
-                      <span className="text-[10px] text-slate-500">Cátedra:</span>
-                      {file.professorNames.map((name, i) => (
-                        <span
-                          key={i}
-                          className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-950 text-indigo-300 border border-indigo-500/20"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer: Anonymous author, stats & actions */}
-                <div className="pt-3 border-t border-slate-800/80 space-y-3">
-                  <div className="flex items-center justify-between text-[11px] text-slate-400">
-                    <span className="text-slate-500 italic">Subido por un estudiante</span>
-                    <span className="font-mono text-slate-500">
-                      {isPdf ? 'PDF' : 'Imagen'} · {sizeLabel}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1 w-full min-w-0">
-                    {/* Helpful Vote Button */}
-                    <button
-                      type="button"
-                      onClick={() => handleToggleHelpful(file)}
-                      className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
-                        file.hasVotedHelpful
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                          : 'bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border-slate-800'
-                      }`}
-                      title={file.hasVotedHelpful ? 'Quitar voto útil' : 'Marcar como útil'}
-                    >
-                      <ThumbsUp className={`w-3.5 h-3.5 shrink-0 ${file.hasVotedHelpful ? 'text-amber-400' : ''}`} />
-                      <span>{file.helpfulCount > 0 ? file.helpfulCount : 'Es útil'}</span>
-                    </button>
-
-                    {/* Download Button */}
-                    <button
-                      type="button"
-                      onClick={(e) => handleDownload(file, e)}
-                      disabled={downloadingId === file.id}
-                      className="inline-flex items-center justify-center gap-1.5 px-4 py-2 min-h-[44px] flex-1 sm:flex-initial whitespace-nowrap rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/30 cursor-pointer"
-                    >
-                      {downloadingId === file.id ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Descargando...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-3.5 h-3.5" />
-                          <span>Descargar ({file.downloadCount})</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+                Anterior
+              </button>
+              <span className="font-mono text-slate-400">
+                Página {page} de {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="px-3.5 py-2 min-h-[44px] rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 cursor-pointer"
+              >
+                Siguiente
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       {/* Report Modal */}
-      {reportingFile && (
+      {isAuthenticated && reportingFile && (
         <div className="fixed inset-0 z-[var(--z-modal)] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm">
           <form
             onSubmit={handleSubmitReport}
@@ -574,7 +725,7 @@ export const SubjectLibraryView: React.FC<SubjectLibraryViewProps> = ({
       )}
       {/* Toast posterior a la descarga de material */}
       <LibraryDownloadToast
-        isOpen={showDownloadToast}
+        isOpen={isAuthenticated && showDownloadToast}
         onClose={() => setShowDownloadToast(false)}
         onUpload={onOpenUpload}
       />

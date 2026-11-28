@@ -11,10 +11,12 @@ import {
   FolderOpen,
 } from 'lucide-react';
 import { libraryApi } from '../../api/library.api';
+import { publicApi } from '../../api/public.api';
 import { UploadMaterialModal } from './UploadMaterialModal';
 import { SubjectLibraryView } from './SubjectLibraryView';
 import { MyUploadsView } from './MyUploadsView';
 import { LibraryTermsPage } from './LibraryTermsPage';
+import { LoginPromptScreen } from '../auth/LoginPromptScreen';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { LibraryWelcomeModal } from './LibraryWelcomeModal';
@@ -68,8 +70,9 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   const [libraryRefreshKey, setLibraryRefreshKey] = useState<number>(0);
 
   // Cartel de bienvenida comunitario (C1)
-  const { user } = useAuth();
-  const { isTutorialOpen, activeCareer, planConfig, electives } = useCareer();
+  const { user, isAuthenticated, openLoginPrompt } = useAuth();
+  const { isTutorialOpen, activePlan, activeCareer, planConfig, electives } = useCareer();
+  const activePlanId = activePlan?.plan.id;
   const libraryStructure = useMemo(
     () =>
       buildLibraryHomeStructure({
@@ -81,12 +84,18 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
     [subjects, electives, planConfig, activeCareer]
   );
   const [showWelcomeModal, setShowWelcomeModal] = useState<boolean>(() =>
-    shouldShowLibraryWelcome({ isTutorialOpen, userId: user?.id })
+    isAuthenticated && Boolean(user?.id)
+      ? shouldShowLibraryWelcome({ isTutorialOpen, userId: user?.id })
+      : false
   );
 
   // Si el tutorial está abierto o se activa, el cartel de bienvenida no debe mostrarse.
-  // Al navegar o si no está marcado como visto, lo activa en cualquier subvista.
+  // Al navegar o si no está marcado como visto, lo activa en cualquier subvista (solo con sesión).
   useEffect(() => {
+    if (!isAuthenticated) {
+      if (showWelcomeModal) setShowWelcomeModal(false);
+      return;
+    }
     if (isTutorialOpen && showWelcomeModal) {
       setShowWelcomeModal(false);
     } else if (!isTutorialOpen && !showWelcomeModal) {
@@ -94,10 +103,12 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
         setShowWelcomeModal(true);
       }
     }
-  }, [isTutorialOpen, showWelcomeModal, user?.id, subView]);
+  }, [isAuthenticated, isTutorialOpen, showWelcomeModal, user?.id, subView]);
 
   const handleCloseWelcome = () => {
-    markLibraryWelcomeSeen(user?.id);
+    if (isAuthenticated) {
+      markLibraryWelcomeSeen(user?.id);
+    }
     setShowWelcomeModal(false);
   };
 
@@ -108,20 +119,31 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
 
   // Load subjects summary & novelty check
   const loadData = useCallback(async () => {
+    if (!isAuthenticated && !activePlanId) {
+      return;
+    }
     setIsLoading(true);
     setError(null);
     try {
-      const [sumRes, myUpRes] = await Promise.all([
-        libraryApi.getSubjectsSummary(),
-        libraryApi.peekMyUploads().catch(() => null),
-      ]);
+      if (isAuthenticated) {
+        const [sumRes, myUpRes] = await Promise.all([
+          libraryApi.getSubjectsSummary(),
+          libraryApi.peekMyUploads().catch(() => null),
+        ]);
 
-      if (sumRes.success && sumRes.data) {
-        setSubjects(sumRes.data);
-      }
+        if (sumRes.success && sumRes.data) {
+          setSubjects(sumRes.data);
+        }
 
-      if (myUpRes && myUpRes.success && myUpRes.data) {
-        setHasNovelty(Boolean(myUpRes.data.hasStatusUpdates));
+        if (myUpRes && myUpRes.success && myUpRes.data) {
+          setHasNovelty(Boolean(myUpRes.data.hasStatusUpdates));
+        }
+      } else {
+        const sumRes = await publicApi.listLibrarySubjects(activePlanId);
+        if (sumRes.success && sumRes.data) {
+          setSubjects(sumRes.data);
+        }
+        setHasNovelty(false);
       }
     } catch (err: any) {
       console.error('Error cargando biblioteca:', err);
@@ -129,7 +151,7 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isAuthenticated, activePlanId]);
 
   const handleUploadSuccess = useCallback(() => {
     setLibraryRefreshKey((prev) => prev + 1);
@@ -170,6 +192,10 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   };
 
   const handleOpenMyUploads = () => {
+    if (!isAuthenticated) {
+      openLoginPrompt('descargar o aportar material', { returnToHash: '#library/my-uploads' });
+      return;
+    }
     setSubView('my-uploads');
     setHasNovelty(false);
     if (typeof window !== 'undefined') {
@@ -185,6 +211,14 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   };
 
   const handleOpenUpload = (subjectId?: string) => {
+    if (!isAuthenticated) {
+      const returnToHash =
+        typeof window !== 'undefined' && window.location.hash
+          ? window.location.hash
+          : '#library';
+      openLoginPrompt('descargar o aportar material', { returnToHash });
+      return;
+    }
     setUploadTargetSubjectId(subjectId || selectedSubject?.id);
     setIsUploadOpen(true);
   };
@@ -215,9 +249,13 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   if (subView === 'terms') {
     return (
       <>
-        <LibraryTermsPage onBack={handleBackToCatalog} career={activeCareer} />
+        <LibraryTermsPage
+          onBack={handleBackToCatalog}
+          career={activeCareer}
+          isAuthenticated={isAuthenticated}
+        />
         <LibraryWelcomeModal
-          isOpen={showWelcomeModal}
+          isOpen={isAuthenticated && showWelcomeModal}
           onClose={handleCloseWelcome}
           onOpenUpload={handleWelcomeUpload}
           onOpenTerms={handleOpenTerms}
@@ -229,21 +267,27 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
   if (subView === 'my-uploads') {
     return (
       <>
-        <MyUploadsView
-          onBack={handleBackToCatalog}
-          onOpenUpload={() => handleOpenUpload()}
-          refreshKey={libraryRefreshKey}
-        />
-        <UploadMaterialModal
-          isOpen={isUploadOpen}
-          onClose={() => setIsUploadOpen(false)}
-          onSuccess={handleUploadSuccess}
-          initialSubjectId={uploadTargetSubjectId}
-          subjects={subjects}
-          onOpenTerms={handleOpenTerms}
-        />
+        {isAuthenticated ? (
+          <>
+            <MyUploadsView
+              onBack={handleBackToCatalog}
+              onOpenUpload={() => handleOpenUpload()}
+              refreshKey={libraryRefreshKey}
+            />
+            <UploadMaterialModal
+              isOpen={isUploadOpen}
+              onClose={() => setIsUploadOpen(false)}
+              onSuccess={handleUploadSuccess}
+              initialSubjectId={uploadTargetSubjectId}
+              subjects={subjects}
+              onOpenTerms={handleOpenTerms}
+            />
+          </>
+        ) : (
+          <LoginPromptScreen view="library-uploads" onBackToMap={handleBackToCatalog} />
+        )}
         <LibraryWelcomeModal
-          isOpen={showWelcomeModal}
+          isOpen={isAuthenticated && showWelcomeModal}
           onClose={handleCloseWelcome}
           onOpenUpload={handleWelcomeUpload}
           onOpenTerms={handleOpenTerms}
@@ -267,16 +311,18 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
             <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
           </div>
         )}
-        <UploadMaterialModal
-          isOpen={isUploadOpen}
-          onClose={() => setIsUploadOpen(false)}
-          onSuccess={handleUploadSuccess}
-          initialSubjectId={selectedSubject?.id}
-          subjects={subjects}
-          onOpenTerms={handleOpenTerms}
-        />
+        {isAuthenticated && (
+          <UploadMaterialModal
+            isOpen={isUploadOpen}
+            onClose={() => setIsUploadOpen(false)}
+            onSuccess={handleUploadSuccess}
+            initialSubjectId={selectedSubject?.id}
+            subjects={subjects}
+            onOpenTerms={handleOpenTerms}
+          />
+        )}
         <LibraryWelcomeModal
-          isOpen={showWelcomeModal}
+          isOpen={isAuthenticated && showWelcomeModal}
           onClose={handleCloseWelcome}
           onOpenUpload={handleWelcomeUpload}
           onOpenTerms={handleOpenTerms}
@@ -464,18 +510,20 @@ export const LibraryHome: React.FC<LibraryHomeProps> = ({
       </div>
 
       {/* Upload Modal */}
-      <UploadMaterialModal
-        isOpen={isUploadOpen}
-        onClose={() => setIsUploadOpen(false)}
-        onSuccess={handleUploadSuccess}
-        initialSubjectId={uploadTargetSubjectId}
-        subjects={subjects}
-        onOpenTerms={handleOpenTerms}
-      />
+      {isAuthenticated && (
+        <UploadMaterialModal
+          isOpen={isUploadOpen}
+          onClose={() => setIsUploadOpen(false)}
+          onSuccess={handleUploadSuccess}
+          initialSubjectId={uploadTargetSubjectId}
+          subjects={subjects}
+          onOpenTerms={handleOpenTerms}
+        />
+      )}
 
       {/* Cartel de bienvenida comunitario (C1) */}
       <LibraryWelcomeModal
-        isOpen={showWelcomeModal}
+        isOpen={isAuthenticated && showWelcomeModal}
         onClose={handleCloseWelcome}
         onOpenUpload={handleWelcomeUpload}
         onOpenTerms={handleOpenTerms}

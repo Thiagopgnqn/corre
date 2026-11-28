@@ -2,19 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ShieldCheck, AlertCircle, Mail, CheckCircle2, Check, Loader2 } from 'lucide-react';
 import { APP_NAME, CONTACT_EMAIL } from '../../config/brand';
 import { libraryApi } from '../../api/library.api';
+import { useOptionalAuth } from '../../context/AuthContext';
 import type { PlanCareerMeta } from '../../types/career';
 import { getLibraryTermsIntroParagraph } from '../../utils/planText';
 
 interface LibraryTermsPageProps {
   onBack: () => void;
   career?: Partial<PlanCareerMeta> | null;
+  isAuthenticated?: boolean;
 }
 
-export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack, career }) => {
+export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({
+  onBack,
+  career,
+  isAuthenticated: isAuthenticatedProp,
+}) => {
+  const auth = useOptionalAuth();
+  const isLoggedIn = isAuthenticatedProp ?? Boolean(auth?.isAuthenticated);
   const [accepted, setAccepted] = useState(false);
   const [isAccepting, setIsAccepting] = useState(false);
 
   useEffect(() => {
+    if (!isLoggedIn) return;
     libraryApi
       .getTermsStatus()
       .then((res) => {
@@ -23,7 +32,7 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack, care
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isLoggedIn]);
 
   const handleAccept = async () => {
     setIsAccepting(true);
@@ -174,44 +183,58 @@ export const LibraryTermsPage: React.FC<LibraryTermsPageProps> = ({ onBack, care
 
       {/* Footer Back & Accept */}
       <div className="pt-4 flex items-center justify-between gap-4 flex-wrap border-t border-slate-800">
-        <div className="flex items-center gap-2">
-          {accepted ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
-              <Check className="w-3.5 h-3.5" />
-              Términos de la Biblioteca aceptados
-            </span>
-          ) : (
-            <p className="text-xs text-slate-400">
-              Podés aceptar los términos aquí o marcando la casilla al subir tu primer material.
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          {!accepted && (
+        {isLoggedIn ? (
+          <>
+            <div className="flex items-center gap-2">
+              {accepted ? (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+                  <Check className="w-3.5 h-3.5" />
+                  Términos de la Biblioteca aceptados
+                </span>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Podés aceptar los términos aquí o marcando la casilla al subir tu primer material.
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {!accepted && (
+                <button
+                  type="button"
+                  onClick={handleAccept}
+                  disabled={isAccepting}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+                >
+                  {isAccepting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Aceptando...
+                    </>
+                  ) : (
+                    'Aceptar Términos de la Biblioteca'
+                  )}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={onBack}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer"
+              >
+                Volver a la Biblioteca
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="w-full flex items-center justify-end">
             <button
               type="button"
-              onClick={handleAccept}
-              disabled={isAccepting}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-all shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
+              onClick={onBack}
+              className="px-5 py-2.5 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer"
             >
-              {isAccepting ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Aceptando...
-                </>
-              ) : (
-                'Aceptar Términos de la Biblioteca'
-              )}
+              Volver a la Biblioteca
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onBack}
-            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 cursor-pointer"
-          >
-            Volver a la Biblioteca
-          </button>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

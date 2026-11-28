@@ -1,8 +1,14 @@
 import React from 'react';
-import { BarChart3, CalendarDays, Compass, Kanban, Lock, Sparkles, ArrowRight } from 'lucide-react';
+import { BarChart3, CalendarDays, Compass, FolderOpen, Kanban, Lock, Sparkles, ArrowRight } from 'lucide-react';
 import { useAuth, type OpenLoginOptions } from '../../context/AuthContext';
 
-export type ProtectedPromptView = 'stats' | 'schedule' | 'kanban' | 'planner' | 'electives';
+export type ProtectedPromptView =
+  | 'stats'
+  | 'schedule'
+  | 'kanban'
+  | 'planner'
+  | 'electives'
+  | 'library-uploads';
 
 export const LOGIN_PROMPT_COPY: Record<
   ProtectedPromptView,
@@ -42,6 +48,12 @@ export const LOGIN_PROMPT_COPY: Record<
       'Ingresá con tu cuenta para distribuir créditos electivos por nivel y seguir el requisito de tu plan.',
     icon: Sparkles,
   },
+  'library-uploads': {
+    headline: 'Iniciá sesión para ver tus aportes en la Biblioteca',
+    description:
+      'Ingresá con tu cuenta para subir apuntes, parciales o guías, consultar el estado de revisión y administrar tus archivos.',
+    icon: FolderOpen,
+  },
 };
 
 export interface LoginPromptScreenViewProps {
@@ -57,7 +69,7 @@ export const LoginPromptScreenView: React.FC<LoginPromptScreenViewProps> = ({
 }) => {
   const copy = LOGIN_PROMPT_COPY[view];
   const Icon = copy.icon;
-  const returnToHash = `#${view}`;
+  const returnToHash = view === 'library-uploads' ? '#library/my-uploads' : `#${view}`;
 
   return (
     <div className="flex-1 flex items-center justify-center p-4 sm:p-8 min-h-[calc(100dvh-10rem)]">
