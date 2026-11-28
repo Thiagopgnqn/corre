@@ -23,6 +23,7 @@ import {
   GitBranch,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { useAuth } from '../../context/AuthContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 import { buildGraphViewStructure } from '../../utils/planViewSelectors';
@@ -114,11 +115,13 @@ const CorrelativeGraphContent: React.FC = () => {
     electives,
     subjectsById,
     planConfig,
+    isPublicMode,
   } = useCareer();
+  const { openLoginPrompt } = useAuth();
 
   const isMobile = useIsMobile();
   const [mobileGraphView, setMobileGraphView] = useState<'lista' | 'mapa'>(() => {
-    if (typeof window !== 'undefined') {
+    if (!isPublicMode && typeof window !== 'undefined') {
       const saved = localStorage.getItem('ui_mobile_graph_view');
       if (saved === 'mapa' || saved === 'lista') return saved;
     }
@@ -127,7 +130,7 @@ const CorrelativeGraphContent: React.FC = () => {
 
   const handleSetMobileGraphView = (view: 'lista' | 'mapa') => {
     setMobileGraphView(view);
-    if (typeof window !== 'undefined') {
+    if (!isPublicMode && typeof window !== 'undefined') {
       localStorage.setItem('ui_mobile_graph_view', view);
     }
   };
@@ -244,13 +247,16 @@ const CorrelativeGraphContent: React.FC = () => {
         status,
         grade,
         levelLabel: planConfig?.levelLabel,
+        isPublicMode,
         isSelected,
         isHovered,
         isPrereqHighlight,
         isUnlockHighlight,
         isDimmed,
         isSampleSubject: subject.id === sampleSubjectId,
-        onOpenStatusModal: setStatusModalSubjectId,
+        onOpenStatusModal: isPublicMode
+          ? () => openLoginPrompt('guardar tus estados', { returnToHash: '#graph' })
+          : setStatusModalSubjectId,
       };
 
       return {
@@ -263,12 +269,14 @@ const CorrelativeGraphContent: React.FC = () => {
   }, [
     graphStructure.nodesLayout,
     planConfig?.levelLabel,
+    isPublicMode,
     selectedSubjectId,
     hoveredNodeId,
     upstreamSet,
     downstreamSet,
     focusedId,
     sampleSubjectId,
+    openLoginPrompt,
     setStatusModalSubjectId,
   ]);
 
@@ -349,6 +357,11 @@ const CorrelativeGraphContent: React.FC = () => {
 
   const handleContextQuickStatus = (status: SubjectStatus, needsGrade = false) => {
     if (!contextMenu) return;
+    if (isPublicMode) {
+      setContextMenu(null);
+      openLoginPrompt('guardar tus estados', { returnToHash: '#graph' });
+      return;
+    }
     const subId = contextMenu.subjectId;
     setContextMenu(null);
     if (needsGrade) {
@@ -528,6 +541,9 @@ const CorrelativeGraphContent: React.FC = () => {
           <MiniMap
             nodeColor={(n) => {
               const data = n.data as unknown as SubjectNodeData;
+              if (data.isPublicMode) {
+                return '#6366f1';
+              }
               switch (data.status) {
                 case 'aprobada':
                   return '#22c55e';
@@ -602,9 +618,14 @@ const CorrelativeGraphContent: React.FC = () => {
           <div className="py-1">
             <button
               type="button"
-              disabled={isSimulationMode}
-              title={isSimulationMode ? 'No disponible en modo simulación' : undefined}
+              disabled={!isPublicMode && isSimulationMode}
+              title={!isPublicMode && isSimulationMode ? 'No disponible en modo simulación' : undefined}
               onClick={() => {
+                if (isPublicMode) {
+                  setContextMenu(null);
+                  openLoginPrompt('guardar tus cursadas', { returnToHash: '#graph' });
+                  return;
+                }
                 if (isSimulationMode) return;
                 const subId = contextMenu.subjectId;
                 setContextMenu(null);

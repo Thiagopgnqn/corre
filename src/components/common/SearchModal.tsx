@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, X, Layers, Clock, ArrowRight } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { useAuth } from '../../context/AuthContext';
 import { getSubjectStatus } from '../../utils/correlativas';
 import { buildSearchModalStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from './StatusBadge';
@@ -20,7 +21,9 @@ export const SearchModal: React.FC = () => {
     electives,
     planConfig,
     acronyms,
+    isPublicMode,
   } = useCareer();
+  const { openLoginPrompt } = useAuth();
 
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
@@ -66,7 +69,7 @@ export const SearchModal: React.FC = () => {
         includeIntermediateTrack: settings.includeAnalistaTrack,
         query,
         levelFilter,
-        statusFilter,
+        statusFilter: isPublicMode ? 'all' : statusFilter,
         planConfig,
         acronyms,
       }),
@@ -77,6 +80,7 @@ export const SearchModal: React.FC = () => {
       settings.includeAnalistaTrack,
       query,
       levelFilter,
+      isPublicMode,
       statusFilter,
       planConfig,
       acronyms,
@@ -146,23 +150,27 @@ export const SearchModal: React.FC = () => {
             </button>
           ))}
 
-          <div className="h-5 w-[1px] bg-slate-800 mx-1 shrink-0" />
+          {!isPublicMode && (
+            <>
+              <div className="h-5 w-[1px] bg-slate-800 mx-1 shrink-0" />
 
-          <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
-          {statusFilterOptions.map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStatusFilter(st)}
-              className={`min-h-[44px] px-3 py-1.5 rounded-xl font-semibold capitalize transition-colors shrink-0 flex items-center cursor-pointer ${
-                statusFilter === st
-                  ? 'bg-indigo-600 text-white shadow-md'
-                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              {st === 'all' ? 'Todos' : st}
-            </button>
-          ))}
+              <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
+              {statusFilterOptions.map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`min-h-[44px] px-3 py-1.5 rounded-xl font-semibold capitalize transition-colors shrink-0 flex items-center cursor-pointer ${
+                    statusFilter === st
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                  }`}
+                >
+                  {st === 'all' ? 'Todos' : st}
+                </button>
+              ))}
+            </>
+          )}
         </div>
 
         {/* Results List */}
@@ -211,15 +219,21 @@ export const SearchModal: React.FC = () => {
                   </div>
 
                   <div
-                    className="flex items-center justify-between pt-2 border-t border-slate-800/60"
+                    className={`flex items-center pt-2 border-t border-slate-800/60 ${
+                      isPublicMode ? 'justify-end' : 'justify-between'
+                    }`}
                     onClick={(e) => e.stopPropagation()}
                   >
-                    <StatusBadge status={status} grade={grade} size="sm" />
+                    {!isPublicMode && <StatusBadge status={status} grade={grade} size="sm" />}
                     <button
                       type="button"
                       onClick={() => {
-                        setStatusModalSubjectId(subject.id);
                         setIsSearchOpen(false);
+                        if (isPublicMode) {
+                          openLoginPrompt('guardar tus estados', { returnToHash: '#graph' });
+                        } else {
+                          setStatusModalSubjectId(subject.id);
+                        }
                       }}
                       className="min-h-[44px] px-3.5 py-1 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-indigo-600 text-slate-200 border border-slate-700 flex items-center gap-1.5 cursor-pointer active:scale-95"
                     >
@@ -297,23 +311,27 @@ export const SearchModal: React.FC = () => {
               </button>
             ))}
 
-            <div className="h-4 w-[1px] bg-slate-800 mx-1 shrink-0" />
+            {!isPublicMode && (
+              <>
+                <div className="h-4 w-[1px] bg-slate-800 mx-1 shrink-0" />
 
-            <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
-            {statusFilterOptions.map((st) => (
-              <button
-                key={st}
-                type="button"
-                onClick={() => setStatusFilter(st)}
-                className={`px-2 py-0.5 rounded-md capitalize transition-colors cursor-pointer ${
-                  statusFilter === st
-                    ? 'bg-indigo-600 text-white font-semibold'
-                    : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {st === 'all' ? 'Todos' : st}
-              </button>
-            ))}
+                <span className="text-slate-400 font-medium ml-1 shrink-0">Estado:</span>
+                {statusFilterOptions.map((st) => (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatusFilter(st)}
+                    className={`px-2 py-0.5 rounded-md capitalize transition-colors cursor-pointer ${
+                      statusFilter === st
+                        ? 'bg-indigo-600 text-white font-semibold'
+                        : 'bg-slate-800/80 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {st === 'all' ? 'Todos' : st}
+                  </button>
+                ))}
+              </>
+            )}
           </div>
 
           {/* Results list */}
@@ -367,14 +385,18 @@ export const SearchModal: React.FC = () => {
                       className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end pt-1 sm:pt-0 border-t border-slate-800/50 sm:border-0"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <StatusBadge status={status} grade={grade} size="sm" />
+                      {!isPublicMode && <StatusBadge status={status} grade={grade} size="sm" />}
                       <button
                         type="button"
                         onClick={() => {
-                          setStatusModalSubjectId(subject.id);
                           setIsSearchOpen(false);
+                          if (isPublicMode) {
+                            openLoginPrompt('guardar tus estados', { returnToHash: '#graph' });
+                          } else {
+                            setStatusModalSubjectId(subject.id);
+                          }
                         }}
-                        className="px-2.5 py-1 text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
+                        className="px-2.5 py-1 min-h-[36px] text-xs rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-300 hover:text-white border border-slate-700 transition-colors flex items-center gap-1 shrink-0 cursor-pointer"
                       >
                         <span>Estado</span>
                         <ArrowRight className="w-3 h-3" />

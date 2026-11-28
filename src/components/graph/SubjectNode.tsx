@@ -19,6 +19,7 @@ export interface SubjectNodeData {
   status: SubjectStatus;
   grade?: number;
   levelLabel?: string;
+  isPublicMode?: boolean;
   isSelected?: boolean;
   isHovered?: boolean;
   isPrereqHighlight?: boolean; // Highlighted as prerequisite (upstream)
@@ -29,13 +30,16 @@ export interface SubjectNodeData {
   [key: string]: unknown;
 }
 
-export const SubjectNode = memo(({ data }: NodeProps) => {
-  const nodeData = data as unknown as SubjectNodeData;
+export const SubjectNodeCard: React.FC<{
+  nodeData: SubjectNodeData;
+  withHandles?: boolean;
+}> = ({ nodeData, withHandles = false }) => {
   const {
     subject,
     status,
     grade,
     levelLabel,
+    isPublicMode = false,
     isSelected,
     isHovered,
     isPrereqHighlight,
@@ -158,28 +162,41 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
 
   const isElective = subject.isElective;
   const vm = buildSubjectNodeViewModel(subject, status, grade, { levelLabel });
+  const correlCount = new Set([...subject.regularPrereqs, ...subject.approvedPrereqs]).size;
+
+  const cardBg = isPublicMode ? 'bg-slate-900/90' : style.bg;
+  const cardBorder = isPublicMode
+    ? isElective
+      ? 'border-dashed border-amber-500/50 border-2'
+      : 'border-slate-700/90 border-2'
+    : isElective
+      ? 'border-dashed border-amber-400/80 border-2 shadow-[0_0_14px_rgba(251,191,36,0.3)]'
+      : style.border;
+  const cardGlow = isPublicMode ? '' : style.glow;
+  const cardStripe = isPublicMode
+    ? isElective
+      ? 'bg-amber-500/60'
+      : 'bg-indigo-500/60'
+    : style.stripe;
+  const cardTitleColor = isPublicMode ? 'text-white' : style.titleColor;
 
   return (
     <div
       data-tour={isSampleSubject ? 'sample-subject' : undefined}
       data-subject-id={subject.id}
-      className={`relative w-[230px] sm:w-[245px] rounded-xl overflow-hidden backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${
-        style.bg
-      } ${
-        isElective
-          ? 'border-dashed border-amber-400/80 border-2 shadow-[0_0_14px_rgba(251,191,36,0.3)]'
-          : style.border
-      } ${style.glow} ${highlightClass} ${dimClass}`}
+      className={`relative w-[230px] sm:w-[245px] rounded-xl overflow-hidden backdrop-blur-md transition-all duration-300 select-none cursor-pointer ${cardBg} ${cardBorder} ${cardGlow} ${highlightClass} ${dimClass}`}
     >
       {/* High-visibility colored stripe on left edge (immediately identifiable without zoom) */}
-      <div className={`absolute left-0 top-0 bottom-0 w-2 ${style.stripe}`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-2 ${cardStripe}`} />
 
       {/* Target Handle on the Left (prerequisites come here) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-indigo-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
-      />
+      {withHandles && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!w-2.5 !h-2.5 !bg-indigo-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
+        />
+      )}
 
       <div className="py-2.5 pl-3.5 pr-2.5 flex flex-col justify-between min-h-[110px]">
         {/* Top bar: Code, Level, Modality, Status Icon */}
@@ -207,19 +224,31 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
           </div>
 
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onOpenStatusModal?.(subject.id);
             }}
-            className={`p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 ${style.color}`}
-            title={`Cambiar estado (${style.pillLabel})`}
+            className={`p-1 rounded-md hover:bg-slate-800 transition-colors shrink-0 ${
+              isPublicMode ? 'text-slate-400 hover:text-white' : style.color
+            }`}
+            title={
+              isPublicMode
+                ? 'Iniciá sesión para guardar tus estados'
+                : `Cambiar estado (${style.pillLabel})`
+            }
+            aria-label={
+              isPublicMode
+                ? 'Iniciá sesión para guardar tus estados'
+                : `Cambiar estado (${style.pillLabel})`
+            }
           >
-            <Icon className="w-4 h-4" />
+            {isPublicMode ? <Lock className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
           </button>
         </div>
 
         {/* Subject Name: Fully readable, no line clipping */}
-        <h3 className={`font-bold text-xs sm:text-[13px] leading-snug break-words my-1 ${style.titleColor}`}>
+        <h3 className={`font-bold text-xs sm:text-[13px] leading-snug break-words my-1 ${cardTitleColor}`}>
           {subject.name}
         </h3>
 
@@ -233,7 +262,11 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
             )}
           </span>
 
-          {vm.showGradeBadge ? (
+          {isPublicMode ? (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700/60 whitespace-nowrap shrink-0">
+              {correlCount > 0 ? `${correlCount} correl.` : 'Sin correl.'}
+            </span>
+          ) : vm.showGradeBadge ? (
             <span
               className={`px-1.5 py-0.5 rounded font-mono font-bold text-xs whitespace-nowrap shrink-0 ${
                 status === 'promocionada'
@@ -254,13 +287,20 @@ export const SubjectNode = memo(({ data }: NodeProps) => {
       </div>
 
       {/* Source Handle on the Right (what this subject unlocks) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-emerald-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
-      />
+      {withHandles && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-2.5 !h-2.5 !bg-emerald-400 !border-2 !border-slate-900 transition-transform hover:!scale-150"
+        />
+      )}
     </div>
   );
+};
+
+export const SubjectNode = memo(({ data }: NodeProps) => {
+  const nodeData = data as unknown as SubjectNodeData;
+  return <SubjectNodeCard nodeData={nodeData} withHandles={true} />;
 });
 
 SubjectNode.displayName = 'SubjectNode';

@@ -3,8 +3,8 @@ import {
   Lock,
   ChevronRight,
 } from 'lucide-react';
-import type { Subject, UserCareerState } from '../../types/career';
-import { useCareer } from '../../context/CareerContext';
+import type { PlanConfig, Subject, UserCareerState } from '../../types/career';
+import { useOptionalCareer } from '../../context/CareerContext';
 import { checkEligibility } from '../../utils/correlativas';
 import { buildSubjectListViewStructure } from '../../utils/planViewSelectors';
 import { StatusBadge } from '../common/StatusBadge';
@@ -16,6 +16,9 @@ interface SubjectListViewProps {
   selectedSubjectId: number | null;
   isSimulationActive?: boolean;
   sampleSubjectId?: number;
+  isPublicMode?: boolean;
+  planConfig?: Partial<PlanConfig> | null;
+  subjectsById?: Map<number, Subject>;
 }
 
 export const SubjectListView: React.FC<SubjectListViewProps> = ({
@@ -25,8 +28,17 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
   selectedSubjectId,
   isSimulationActive = false,
   sampleSubjectId,
+  isPublicMode: isPublicModeProp,
+  planConfig: planConfigProp,
+  subjectsById: subjectsByIdProp,
 }) => {
-  const { subjectsById, planConfig } = useCareer();
+  const career = useOptionalCareer();
+  const isPublicMode = isPublicModeProp ?? career?.isPublicMode ?? false;
+  const planConfig = planConfigProp ?? career?.planConfig ?? null;
+  const subjectsById = useMemo(
+    () => subjectsByIdProp ?? career?.subjectsById ?? new Map(subjects.map((s) => [s.id, s])),
+    [subjectsByIdProp, career?.subjectsById, subjects]
+  );
   const effectiveSampleId = sampleSubjectId ?? subjects[0]?.id ?? 1;
 
   // Agrupar materias por nivel según configuración del plan activo
@@ -58,21 +70,25 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                   {group.title}
                 </h3>
                 <span className="text-xs text-slate-400 font-medium">
-                  {group.summaryLabel}
+                  {isPublicMode
+                    ? `(${group.total} ${group.total === 1 ? 'materia' : 'materias'})`
+                    : group.summaryLabel}
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono font-bold text-indigo-400">
-                  {group.percentage}%
-                </span>
-                <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                  <div
-                    className="h-full bg-indigo-500 transition-all duration-300"
-                    style={{ width: `${group.percentage}%` }}
-                  />
+              {!isPublicMode && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-indigo-400">
+                    {group.percentage}%
+                  </span>
+                  <div className="w-16 h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-500 transition-all duration-300"
+                      style={{ width: `${group.percentage}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Lista de Materias del Nivel */}
@@ -87,6 +103,10 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                   missingApprovedNames,
                 } = item;
                 const isSelected = selectedSubjectId === subject.id;
+                const correlCount = new Set([
+                  ...subject.regularPrereqs,
+                  ...subject.approvedPrereqs,
+                ]).size;
 
                 return (
                   <div
@@ -110,6 +130,14 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                           <span>{subject.modality}</span>
                           <span>•</span>
                           <span>{subject.weeklyHours} hs/sem</span>
+                          {isPublicMode && correlCount > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>
+                                {correlCount} {correlCount === 1 ? 'correlativa' : 'correlativas'}
+                              </span>
+                            </>
+                          )}
                           {subject.isElective && (
                             <span className="px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[10px] font-semibold">
                               Electiva
@@ -123,36 +151,38 @@ export const SubjectListView: React.FC<SubjectListViewProps> = ({
                         </h4>
                       </div>
 
-                      {/* Estado actual */}
+                      {/* Estado actual (solo usuario autenticado) */}
                       <div className="shrink-0 pt-0.5 flex items-center gap-1.5">
-                        <StatusBadge status={status} grade={grade} size="sm" />
+                        {!isPublicMode && <StatusBadge status={status} grade={grade} size="sm" />}
                         <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
                       </div>
                     </div>
 
-                    {/* Motivo de bloqueo explícito en texto si está bloqueada */}
-                    {isBlocked && (missingRegularNames.length > 0 || missingApprovedNames.length > 0) && (
-                      <div className="mt-2.5 pt-2 border-t border-slate-800/60 space-y-1 text-[11px] text-rose-300/90 bg-rose-950/20 p-2 rounded-xl border border-rose-500/20">
-                        {missingRegularNames.length > 0 && (
-                          <div className="flex items-start gap-1.5">
-                            <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                            <span>
-                              <strong className="text-rose-200">Falta regularizar:</strong>{' '}
-                              {missingRegularNames.join(', ')}
-                            </span>
-                          </div>
-                        )}
-                        {missingApprovedNames.length > 0 && (
-                          <div className="flex items-start gap-1.5">
-                            <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                            <span>
-                              <strong className="text-rose-200">Falta aprobar:</strong>{' '}
-                              {missingApprovedNames.join(', ')}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {/* Motivo de bloqueo explícito en texto si está bloqueada (solo autenticado) */}
+                    {!isPublicMode &&
+                      isBlocked &&
+                      (missingRegularNames.length > 0 || missingApprovedNames.length > 0) && (
+                        <div className="mt-2.5 pt-2 border-t border-slate-800/60 space-y-1 text-[11px] text-rose-300/90 bg-rose-950/20 p-2 rounded-xl border border-rose-500/20">
+                          {missingRegularNames.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                              <span>
+                                <strong className="text-rose-200">Falta regularizar:</strong>{' '}
+                                {missingRegularNames.join(', ')}
+                              </span>
+                            </div>
+                          )}
+                          {missingApprovedNames.length > 0 && (
+                            <div className="flex items-start gap-1.5">
+                              <Lock className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                              <span>
+                                <strong className="text-rose-200">Falta aprobar:</strong>{' '}
+                                {missingApprovedNames.join(', ')}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
                   </div>
                 );
               })}

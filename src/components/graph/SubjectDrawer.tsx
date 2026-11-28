@@ -18,6 +18,7 @@ import {
   Layers,
 } from 'lucide-react';
 import { useCareer } from '../../context/CareerContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   getSubjectStatus,
   getUnlockedBySubject,
@@ -28,6 +29,7 @@ import { resolveSpecialRuleView } from '../../utils/planText';
 import { formatEnrollmentPeriodLabel } from '../../utils/enrollmentLogic';
 import { StatusBadge } from '../common/StatusBadge';
 import { libraryApi } from '../../api/library.api';
+import { publicApi } from '../../api/public.api';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 
@@ -52,7 +54,9 @@ export const SubjectDrawer: React.FC = () => {
     allSubjects,
     subjectsById,
     isSimulationMode,
+    isPublicMode,
   } = useCareer();
+  const { openLoginPrompt } = useAuth();
 
   const isMobile = useIsMobile();
   const [mobileTab, setMobileTab] = useState<DrawerMobileTab>('info');
@@ -69,12 +73,36 @@ export const SubjectDrawer: React.FC = () => {
     setIsAddingAttempt(false);
     setAttemptNotes('');
     setMobileTab('info');
-  }, [selectedSubject?.id]);
+  }, [selectedSubject?.id, isPublicMode]);
 
   React.useEffect(() => {
+    let cancelled = false;
+    if (isPublicMode) {
+      const planId = activePlan?.plan.id;
+      if (!planId) return;
+      publicApi
+        .listLibrarySubjects(planId)
+        .then((res) => {
+          if (cancelled) return;
+          if (res.success && res.data) {
+            const map: Record<string, number> = {};
+            res.data.forEach((item) => {
+              if (item.codeInPlan) map[String(item.codeInPlan)] = item.approvedFilesCount || 0;
+              if (item.id) map[item.id] = item.approvedFilesCount || 0;
+            });
+            setLibraryCounts(map);
+          }
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }
+
     libraryApi
       .getSubjectsSummary()
       .then((res) => {
+        if (cancelled) return;
         if (res.success && res.data) {
           const map: Record<string, number> = {};
           res.data.forEach((item: any) => {
@@ -85,7 +113,10 @@ export const SubjectDrawer: React.FC = () => {
         }
       })
       .catch(() => {});
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [isPublicMode, activePlan?.plan.id]);
 
   if (!selectedSubject) return null;
 
@@ -462,26 +493,53 @@ export const SubjectDrawer: React.FC = () => {
         </div>
       </div>
 
+      {!isPublicMode && (
+        <button
+          type="button"
+          onClick={() => toggleBasketSubject(selectedSubject.id)}
+          className={`w-full min-h-[48px] p-3 rounded-xl border font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 ${
+            isInBasket
+              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+              : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
+          }`}
+        >
+          {isInBasket ? (
+            <>
+              <CalendarCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Agregada a mi cuatrimestre (Quitar)</span>
+            </>
+          ) : (
+            <>
+              <CalendarPlus className="w-4 h-4 text-indigo-400 shrink-0" />
+              <span>Agregar a mi cuatrimestre planeado</span>
+            </>
+          )}
+        </button>
+      )}
+    </div>
+  );
+
+  const renderPublicLoginCtaSection = () => (
+    <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-3">
+      <div className="flex items-start gap-2.5">
+        <div className="w-8 h-8 rounded-lg bg-indigo-600/20 border border-indigo-500/30 flex items-center justify-center shrink-0 mt-0.5">
+          <Lock className="w-4 h-4 text-amber-400" />
+        </div>
+        <p className="text-xs text-slate-200 leading-relaxed font-medium">
+          Iniciá sesión para guardar tus estados, notas, cursadas y finales
+        </p>
+      </div>
       <button
         type="button"
-        onClick={() => toggleBasketSubject(selectedSubject.id)}
-        className={`w-full min-h-[48px] p-3 rounded-xl border font-semibold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98 ${
-          isInBasket
-            ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
-            : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800 hover:text-white'
-        }`}
+        onClick={() =>
+          openLoginPrompt('guardar tus estados, notas, cursadas y finales', {
+            returnToHash: '#graph',
+          })
+        }
+        className="w-full min-h-[48px] px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-md shadow-indigo-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
       >
-        {isInBasket ? (
-          <>
-            <CalendarCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Agregada a mi cuatrimestre (Quitar)</span>
-          </>
-        ) : (
-          <>
-            <CalendarPlus className="w-4 h-4 text-indigo-400 shrink-0" />
-            <span>Agregar a mi cuatrimestre planeado</span>
-          </>
-        )}
+        <Sparkles className="w-4 h-4 text-amber-300 shrink-0" />
+        <span>Iniciar sesión</span>
       </button>
     </div>
   );
@@ -529,7 +587,7 @@ export const SubjectDrawer: React.FC = () => {
         <p className="leading-relaxed break-words">
           {specialRuleView.text}
         </p>
-        {specialRuleView.statusBadge && (
+        {!isPublicMode && specialRuleView.statusBadge && (
           <div className="pt-1 text-[11px]">
             {specialRuleView.statusBadge.canRender ? (
               <span className="text-emerald-400 font-semibold flex items-center gap-1">
@@ -557,7 +615,11 @@ export const SubjectDrawer: React.FC = () => {
 
       {selectedSubject.regularPrereqs.length === 0 &&
       selectedSubject.approvedPrereqs.length === 0 ? (
-        <div className="p-3 rounded-xl bg-slate-800/30 border border-slate-800 text-xs text-emerald-400 flex items-center gap-2">
+        <div
+          className={`p-3 rounded-xl bg-slate-800/30 border border-slate-800 text-xs flex items-center gap-2 ${
+            isPublicMode ? 'text-slate-300' : 'text-emerald-400'
+          }`}
+        >
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           <span>No tiene materias correlativas previas requeridas.</span>
         </div>
@@ -567,12 +629,14 @@ export const SubjectDrawer: React.FC = () => {
             <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-2">
               <div className="text-xs font-semibold text-amber-300 flex items-center justify-between">
                 <span>Requiere REGULARIZADA (o aprobada):</span>
-                <span className="text-[11px] text-slate-400">
-                  {selectedSubject.regularPrereqs.filter((id) =>
-                    isRegularOrHigher(activeState[id])
-                  ).length}{' '}
-                  / {selectedSubject.regularPrereqs.length}
-                </span>
+                {!isPublicMode && (
+                  <span className="text-[11px] text-slate-400">
+                    {selectedSubject.regularPrereqs.filter((id) =>
+                      isRegularOrHigher(activeState[id])
+                    ).length}{' '}
+                    / {selectedSubject.regularPrereqs.length}
+                  </span>
+                )}
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.regularPrereqs.map((reqId) => {
@@ -582,17 +646,22 @@ export const SubjectDrawer: React.FC = () => {
                     <div
                       key={reqId}
                       className={`flex items-start justify-between text-xs p-2 rounded-lg gap-2 ${
-                        met ? 'bg-emerald-950/20 text-emerald-300' : 'bg-rose-950/20 text-rose-300'
+                        isPublicMode
+                          ? 'bg-slate-900/80 text-slate-200 border border-slate-800/80'
+                          : met
+                            ? 'bg-emerald-950/20 text-emerald-300'
+                            : 'bg-rose-950/20 text-rose-300'
                       }`}
                     >
                       <span className="leading-snug break-words flex-1">
                         #{reqSub?.code} {reqSub?.name || `Materia #${reqId}`}
                       </span>
-                      {met ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      )}
+                      {!isPublicMode &&
+                        (met ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        ))}
                     </div>
                   );
                 })}
@@ -604,12 +673,14 @@ export const SubjectDrawer: React.FC = () => {
             <div className="p-3 rounded-xl bg-slate-800/40 border border-slate-800 space-y-2">
               <div className="text-xs font-semibold text-green-300 flex items-center justify-between">
                 <span>Requiere APROBADA (final o promoción):</span>
-                <span className="text-[11px] text-slate-400">
-                  {selectedSubject.approvedPrereqs.filter((id) =>
-                    isApprovedOrHigher(activeState[id])
-                  ).length}{' '}
-                  / {selectedSubject.approvedPrereqs.length}
-                </span>
+                {!isPublicMode && (
+                  <span className="text-[11px] text-slate-400">
+                    {selectedSubject.approvedPrereqs.filter((id) =>
+                      isApprovedOrHigher(activeState[id])
+                    ).length}{' '}
+                    / {selectedSubject.approvedPrereqs.length}
+                  </span>
+                )}
               </div>
               <div className="space-y-1.5">
                 {selectedSubject.approvedPrereqs.map((reqId) => {
@@ -619,17 +690,22 @@ export const SubjectDrawer: React.FC = () => {
                     <div
                       key={reqId}
                       className={`flex items-start justify-between text-xs p-2 rounded-lg gap-2 ${
-                        met ? 'bg-emerald-950/20 text-emerald-300' : 'bg-rose-950/20 text-rose-300'
+                        isPublicMode
+                          ? 'bg-slate-900/80 text-slate-200 border border-slate-800/80'
+                          : met
+                            ? 'bg-emerald-950/20 text-emerald-300'
+                            : 'bg-rose-950/20 text-rose-300'
                       }`}
                     >
                       <span className="leading-snug break-words flex-1">
                         #{reqSub?.code} {reqSub?.name || `Materia #${reqId}`}
                       </span>
-                      {met ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      ) : (
-                        <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                      )}
+                      {!isPublicMode &&
+                        (met ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        ) : (
+                          <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                        ))}
                     </div>
                   );
                 })}
@@ -705,18 +781,29 @@ export const SubjectDrawer: React.FC = () => {
       label: string;
       icon: React.ComponentType<{ className?: string }>;
       badge?: number;
-    }> = [
-      { id: 'info', label: 'General', icon: BookOpen },
-      { id: 'correlativas', label: 'Correlativas', icon: Layers },
-      { id: 'cursadas', label: 'Mi Cursada', icon: Users, badge: subjectEnrollments.length },
-      { id: 'historial', label: 'Finales', icon: Clock, badge: subjectExamAttempts.length },
-      {
-        id: 'biblioteca',
-        label: 'Material',
-        icon: Sparkles,
-        badge: libraryCounts[String(selectedSubject.id)],
-      },
-    ];
+    }> = isPublicMode
+      ? [
+          { id: 'info', label: 'General', icon: BookOpen },
+          { id: 'correlativas', label: 'Correlativas', icon: Layers },
+          {
+            id: 'biblioteca',
+            label: 'Material',
+            icon: Sparkles,
+            badge: libraryCounts[String(selectedSubject.id)],
+          },
+        ]
+      : [
+          { id: 'info', label: 'General', icon: BookOpen },
+          { id: 'correlativas', label: 'Correlativas', icon: Layers },
+          { id: 'cursadas', label: 'Mi Cursada', icon: Users, badge: subjectEnrollments.length },
+          { id: 'historial', label: 'Finales', icon: Clock, badge: subjectExamAttempts.length },
+          {
+            id: 'biblioteca',
+            label: 'Material',
+            icon: Sparkles,
+            badge: libraryCounts[String(selectedSubject.id)],
+          },
+        ];
 
     return (
       <BottomSheet
@@ -767,7 +854,7 @@ export const SubjectDrawer: React.FC = () => {
           <div className="space-y-4 pt-1 pb-6">
             {mobileTab === 'info' && (
               <>
-                {renderStatusSection()}
+                {isPublicMode ? renderPublicLoginCtaSection() : renderStatusSection()}
                 {renderStatsAndBasketSection()}
                 {renderLibraryLinkSection()}
                 {renderSpecialRuleSection()}
@@ -782,9 +869,9 @@ export const SubjectDrawer: React.FC = () => {
               </>
             )}
 
-            {mobileTab === 'cursadas' && renderEnrollmentsSection()}
+            {!isPublicMode && mobileTab === 'cursadas' && renderEnrollmentsSection()}
 
-            {mobileTab === 'historial' && renderExamAttemptsSection()}
+            {!isPublicMode && mobileTab === 'historial' && renderExamAttemptsSection()}
 
             {mobileTab === 'biblioteca' && (
               <div className="space-y-3">
@@ -852,9 +939,15 @@ export const SubjectDrawer: React.FC = () => {
 
           {/* Drawer Body - continuous scroll */}
           <div className="p-4 sm:p-5 overflow-y-auto space-y-5 flex-1 text-sm pb-24 sm:pb-6">
-            {renderStatusSection()}
-            {renderEnrollmentsSection()}
-            {renderExamAttemptsSection()}
+            {isPublicMode ? (
+              renderPublicLoginCtaSection()
+            ) : (
+              <>
+                {renderStatusSection()}
+                {renderEnrollmentsSection()}
+                {renderExamAttemptsSection()}
+              </>
+            )}
             {renderStatsAndBasketSection()}
             {renderLibraryLinkSection()}
             {renderSpecialRuleSection()}
