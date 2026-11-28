@@ -1,3 +1,5 @@
+import { writeAuthHint } from '../utils/authGate';
+
 export class ApiError extends Error {
   status: number;
   code?: string;
@@ -83,12 +85,14 @@ export async function apiFetch<T = any>(
               processQueue(null);
               return apiFetch<T>(url, options);
             } else {
+              writeAuthHint('0');
               isRefreshing = false;
               const err = new ApiError('Sesión expirada', 401, 'UNAUTHORIZED');
               processQueue(err);
               throw err;
             }
           } catch (err) {
+            writeAuthHint('0');
             isRefreshing = false;
             processQueue(err);
             throw err;

@@ -1,5 +1,16 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { authApi, type User } from '../api/auth.api';
+import {
+  normalizeReturnToHash,
+  resolveReturnToHashAfterAuth,
+  runInitialSessionCheck,
+  writeAuthHint,
+} from '../utils/authGate';
+
+export interface OpenLoginOptions {
+  returnToHash?: string;
+  mode?: 'login' | 'register';
+}
 
 interface AuthContextType {
   user: User | null;
@@ -7,6 +18,11 @@ interface AuthContextType {
   isEmailVerified: boolean;
   isLoading: boolean;
   isWakingServer: boolean;
+  isLoginOpen: boolean;
+  loginInitialMode: 'login' | 'register';
+  returnToHash: string | null;
+  openLogin: (options?: OpenLoginOptions) => void;
+  closeLogin: () => void;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: (credential: string) => Promise<void>;
   register: (
@@ -28,29 +44,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isWakingServer, setIsWakingServer] = useState<boolean>(false);
-  const coldStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
+  const [loginInitialMode, setLoginInitialMode] = useState<'login' | 'register'>('login');
+  const [returnToHash, setReturnToHash] = useState<string | null>(null);
+  const returnToHashRef = useRef<string | null>(null);
 
   const checkSession = useCallback(async () => {
     setIsLoading(true);
-
-    // Si tarda más de 2.5s, avisar que el servidor se está despertando (Render free tier)
-    coldStartTimerRef.current = setTimeout(() => {
-      setIsWakingServer(true);
-    }, 2500);
-
     try {
-      const res = await authApi.getMe();
-      if (res.success && res.user) {
-        setUser(res.user);
-      } else {
-        setUser(null);
-      }
-    } catch {
-      setUser(null);
+      const outcome = await runInitialSessionCheck<User>({
+        fetchMe: () => authApi.getMe(),
+        onWakingChange: setIsWakingServer,
+        wakingDelayMs: 2500,
+      });
+      setUser(outcome.user);
     } finally {
-      if (coldStartTimerRef.current) {
-        clearTimeout(coldStartTimerRef.current);
-      }
       setIsWakingServer(false);
       setIsLoading(false);
     }
@@ -60,24 +68,65 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkSession();
   }, [checkSession]);
 
+  const openLogin = useCallback((options?: OpenLoginOptions) => {
+    const rawHash =
+      options?.returnToHash !== undefined
+        ? options.returnToHash
+        : typeof window !== 'undefined'
+          ? window.location.hash
+          : '';
+    const normalized = normalizeReturnToHash(rawHash);
+    returnToHashRef.current = normalized;
+    setReturnToHash(normalized);
+    setLoginInitialMode(options?.mode ?? 'login');
+    setIsLoginOpen(true);
+  }, []);
+
+  const closeLogin = useCallback(() => {
+    setIsLoginOpen(false);
+  }, []);
+
+  const handleAuthCompletion = useCallback((emailVerified: boolean) => {
+    const resolution = resolveReturnToHashAfterAuth({
+      currentReturnToHash: returnToHashRef.current,
+      emailVerified,
+      applyHash: (targetHash) => {
+        if (typeof window !== 'undefined') {
+          window.location.hash = targetHash;
+        }
+      },
+    });
+    returnToHashRef.current = resolution.remainingReturnToHash;
+    setReturnToHash(resolution.remainingReturnToHash);
+    if (resolution.shouldCloseLogin) {
+      setIsLoginOpen(false);
+    }
+  }, []);
+
   const login = async (email: string, password: string) => {
     const res = await authApi.login(email, password);
     if (res.success && res.user) {
+      writeAuthHint('1');
       setUser(res.user);
+      handleAuthCompletion(Boolean(res.user.emailVerified === true));
     }
   };
 
   const loginWithGoogle = async (credential: string) => {
     const res = await authApi.loginWithGoogle(credential);
     if (res.success && res.user) {
+      writeAuthHint('1');
       setUser(res.user);
+      handleAuthCompletion(Boolean(res.user.emailVerified === true));
     }
   };
 
   const register = async (email: string, password: string, selectedPlanId?: string) => {
     const res = await authApi.register(email, password, selectedPlanId);
     if (res.success && res.user) {
+      writeAuthHint('1');
       setUser(res.user);
+      handleAuthCompletion(Boolean(res.user.emailVerified === true));
     }
     return { emailDeliveryFailed: Boolean(res.emailDeliveryFailed) };
   };
@@ -85,7 +134,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const verifyEmail = async (code: string) => {
     const res = await authApi.verifyEmail(code);
     if (res.success && res.user) {
+      writeAuthHint('1');
       setUser(res.user);
+      handleAuthCompletion(true);
     }
   };
 
@@ -98,7 +149,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await authApi.cancelRegistration();
     } finally {
+      writeAuthHint('0');
       setUser(null);
+      setIsLoginOpen(false);
+      returnToHashRef.current = null;
+      setReturnToHash(null);
     }
   };
 
@@ -108,7 +163,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.error('Error logging out:', e);
     } finally {
+      writeAuthHint('0');
       setUser(null);
+      setIsLoginOpen(false);
+      returnToHashRef.current = null;
+      setReturnToHash(null);
     }
   };
 
@@ -116,7 +175,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await authApi.deleteAccount();
     } finally {
+      writeAuthHint('0');
       setUser(null);
+      setIsLoginOpen(false);
+      returnToHashRef.current = null;
+      setReturnToHash(null);
     }
   };
 
@@ -124,6 +187,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await authApi.getMe();
       if (res.success && res.user) {
+        writeAuthHint('1');
         setUser(res.user);
       }
     } catch {
@@ -141,6 +205,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isEmailVerified,
         isLoading,
         isWakingServer,
+        isLoginOpen,
+        loginInitialMode,
+        returnToHash,
+        openLogin,
+        closeLogin,
         login,
         loginWithGoogle,
         register,

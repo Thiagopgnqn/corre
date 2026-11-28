@@ -1,19 +1,24 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Lock, Mail, ArrowRight, Loader2, Sparkles, AlertCircle } from 'lucide-react';
+import { Lock, Mail, ArrowRight, ArrowLeft, Loader2, Sparkles, AlertCircle } from 'lucide-react';
 import { GoogleLoginButton } from './GoogleLoginButton';
 import { BrandLogo, StackSymbol } from '../common/BrandLogo';
 import { CreatorCredit } from '../common/CreatorCredit';
 import { APP_NAME, APP_TAGLINE } from '../../config/brand';
 
 export const AuthScreen: React.FC = () => {
-  const { login, register, loginWithGoogle, isWakingServer } = useAuth();
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const { login, register, loginWithGoogle, isWakingServer, closeLogin, loginInitialMode } = useAuth();
+  const [mode, setMode] = useState<'login' | 'register'>(loginInitialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setMode(loginInitialMode);
+    setError(null);
+  }, [loginInitialMode]);
 
   const loginWithGoogleRef = useRef(loginWithGoogle);
   loginWithGoogleRef.current = loginWithGoogle;
@@ -93,6 +98,17 @@ export const AuthScreen: React.FC = () => {
       )}
 
       <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 backdrop-blur-xl rounded-2xl shadow-2xl p-4 sm:p-8 relative z-10">
+        <div className="mb-3">
+          <button
+            type="button"
+            onClick={closeLogin}
+            className="inline-flex items-center gap-1.5 min-h-[44px] px-2 -ml-2 text-xs font-medium text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-4 h-4 shrink-0" />
+            <span>Volver a explorar sin cuenta</span>
+          </button>
+        </div>
+
         {/* Brand Header */}
         <div className="text-center mb-4 sm:mb-6">
           <div className="flex justify-center mb-2 sm:mb-3">
