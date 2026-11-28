@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { catalogApi, type Institution } from '../../api/catalog.api';
+import { publicApi } from '../../api/public.api';
+import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
 import { isPlanSelected } from '../../utils/planViewSelectors';
 import { GraduationCap, Check, Building2, BookOpen, Loader2, X } from 'lucide-react';
@@ -349,7 +351,8 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({
   required = false,
   fallbackFocusRef,
 }) => {
-  const { activePlan, reloadServerState } = useCareer();
+  const { isAuthenticated } = useAuth();
+  const { activePlan, reloadServerState, selectPublicPlan } = useCareer();
   const isMobile = useIsMobile();
   const modalLayerId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -369,8 +372,10 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({
     if (!isOpen) return;
     let cancelled = false;
     setLoading(true);
-    catalogApi
-      .getCareers()
+    const loadCareersPromise = isAuthenticated
+      ? catalogApi.getCareers()
+      : publicApi.getCareers();
+    loadCareersPromise
       .then((res) => {
         if (!cancelled && res.success && res.data) {
           setInstitutions(res.data);
@@ -390,7 +395,7 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen]);
+  }, [isOpen, isAuthenticated]);
 
   useEffect(() => {
     if (!isOpen || isMobile) return;
@@ -436,9 +441,17 @@ export const PlanSelectorModal: React.FC<PlanSelectorModalProps> = ({
       await executePlanSelection({
         planId,
         currentPlanId: activePlan?.plan.id,
-        updateSelectedPlan: catalogApi.updateSelectedPlan,
+        updateSelectedPlan: async (targetPlanId) => {
+          if (isAuthenticated) {
+            return catalogApi.updateSelectedPlan(targetPlanId);
+          }
+          await selectPublicPlan(targetPlanId);
+          return { success: true };
+        },
         reloadServerState: async () => {
-          await reloadServerState();
+          if (isAuthenticated) {
+            await reloadServerState();
+          }
         },
         onClose,
       });

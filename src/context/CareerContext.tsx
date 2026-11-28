@@ -79,8 +79,15 @@ import {
   saveExamAttempts,
 } from '../utils/storage';
 import { useAuth } from './AuthContext';
+import { ApiError } from '../api/client';
 import { userStateApi, type ConsolidatedUserState } from '../api/userState.api';
 import { catalogApi, loadPlanCatalogSmart } from '../api/catalog.api';
+import {
+  clearPublicSelectedPlanId,
+  loadPublicPlanCatalogSmart,
+  readPublicSelectedPlanId,
+  writePublicSelectedPlanId,
+} from '../api/public.api';
 import { enrollmentsApi } from '../api/enrollments.api';
 import { professorsApi } from '../api/professors.api';
 import type { SyncStatus } from '../components/common/SyncStatusBadge';
@@ -261,11 +268,13 @@ interface CareerContextType {
   retryLoadCatalog: () => Promise<void>;
 
   // Full-Stack & Sync features
+  isPublicMode: boolean;
   syncStatus: SyncStatus;
   showMigrationModal: boolean;
   setShowMigrationModal: (show: boolean) => void;
   currentPlanName: string;
   reloadServerState: (overridePlanId?: string) => Promise<void>;
+  selectPublicPlan: (planId: string) => Promise<void>;
 }
 
 const CareerContext = createContext<CareerContextType | undefined>(undefined);
@@ -312,7 +321,7 @@ const EMPTY_PROGRESS: CareerProgress = {
 };
 
 export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading: isAuthLoading, user } = useAuth();
 
   const [activePlan, setActivePlan] = useState<ActivePlanCatalog | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -364,6 +373,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [currentPlanName, setCurrentPlanName] = useState<string>('Plan de estudio');
 
   const activePlanRef = useRef<ActivePlanCatalog | null>(null);
+  const authenticatedCatalogLoadedRef = useRef<boolean>(false);
   const hydrationStateRef = useRef<CareerHydrationState>(createCareerHydrationState());
   const hasHydratedRef = useRef(false);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -451,6 +461,39 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSelectedSubjectId(null);
   }, []);
 
+  const applyPublicCatalogToState = useCallback((catalog: ActivePlanCatalog) => {
+    activePlanRef.current = catalog;
+    setActivePlan(catalog);
+    setCatalogStatus('ready');
+    setCatalogError(null);
+    setCurrentPlanName(catalog.plan.name);
+
+    const planTotalLevels = catalog.plan.config.totalLevels;
+    setUserState({});
+    setAssignedElectives(buildEmptyAssignedElectives(planTotalLevels));
+    setSettings(DEFAULT_SETTINGS);
+    setSemesterBasket([]);
+    setScheduleSelections({});
+    setScheduleDrafts([]);
+    setCustomSchedules(null);
+    setServerSchedules(null);
+    setScheduleStatus('ready');
+    setScheduleError(null);
+    setEnrollments([]);
+    setExamAttempts([]);
+    setSimulationState(null);
+    setSelectedSubjectId(null);
+    setStatusModalSubjectId(null);
+    setShowMigrationModal(false);
+    setIsTutorialOpen(false);
+    setPendingCommissionPrompt(null);
+    setKanbanEnrollmentHint(null);
+    setPendingReviewPrompts([]);
+    setUnseenRecommendationsCount(0);
+    setGlobalReviewModalTarget(null);
+    setSyncStatus('saved');
+  }, []);
+
   const scheduleSeqRef = useRef(0);
 
   const syncHydrationState = useCallback((next: CareerHydrationState) => {
@@ -492,10 +535,10 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Load server catalog + state when authenticated
   const reloadServerState = useCallback(
     async (overridePlanId?: string) => {
-      if (!isAuthenticated) return;
+      if (!isAuthenticated || !isEmailVerified) return;
 
       const isPlanSwitch =
-        typeof overridePlanId === 'string' || activePlanRef.current !== null;
+        typeof overridePlanId === 'string' || authenticatedCatalogLoadedRef.current;
       const requestedPlanId =
         overridePlanId ?? (isPlanSwitch ? 'current' : user?.selectedPlanId || 'current');
 
@@ -516,11 +559,13 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             onImmediateCache,
           }),
         applyCatalogToUi: (catalog) => {
+          authenticatedCatalogLoadedRef.current = true;
           applyLoadedCatalogToState(catalog);
           effectiveStateForTutorial = loadUserState(catalog.plan.id);
           effectiveSettingsForTutorial = loadSettings(catalog.plan.id);
         },
         refreshCatalogInPlace: (catalog) => {
+          authenticatedCatalogLoadedRef.current = true;
           activePlanRef.current = catalog;
           setActivePlan(catalog);
           setCurrentPlanName(catalog.plan.name);
@@ -626,6 +671,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     },
     [
       isAuthenticated,
+      isEmailVerified,
       user?.selectedPlanId,
       applyLoadedCatalogToState,
       syncHydrationState,
@@ -634,9 +680,98 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     ]
   );
 
+  const loadPublicCatalog = useCallback(
+    async (
+      overridePlanId?: string,
+      options?: { throwOnError?: boolean; preserveExistingOnError?: boolean }
+    ) => {
+      const nextHydration = resetHydrationOnLogout(hydrationStateRef.current);
+      const seq = nextHydration.reloadSeq;
+      syncHydrationState(nextHydration);
+      authenticatedCatalogLoadedRef.current = false;
+
+      if (!options?.preserveExistingOnError) {
+        setCatalogStatus('loading');
+        setCatalogError(null);
+      }
+
+      const initialPlanId = overridePlanId ?? readPublicSelectedPlanId() ?? 'current';
+
+      try {
+        let result;
+        try {
+          result = await loadPublicPlanCatalogSmart({
+            planId: initialPlanId,
+            forceRefresh: false,
+            onWakingChange: setIsWakingCatalogServer,
+            onImmediateCache: (cachedCatalog) => {
+              if (seq !== hydrationStateRef.current.reloadSeq) return;
+              applyPublicCatalogToState(cachedCatalog);
+            },
+          });
+        } catch (err) {
+          const shouldFallbackToCurrent =
+            overridePlanId === undefined &&
+            initialPlanId !== 'current' &&
+            err instanceof ApiError &&
+            (err.status === 404 || err.status === 400);
+          if (!shouldFallbackToCurrent) {
+            throw err;
+          }
+          clearPublicSelectedPlanId();
+          result = await loadPublicPlanCatalogSmart({
+            planId: 'current',
+            forceRefresh: false,
+            onWakingChange: setIsWakingCatalogServer,
+            onImmediateCache: (cachedCatalog) => {
+              if (seq !== hydrationStateRef.current.reloadSeq) return;
+              applyPublicCatalogToState(cachedCatalog);
+            },
+          });
+        }
+
+        if (seq !== hydrationStateRef.current.reloadSeq) return;
+        writePublicSelectedPlanId(result.catalog.plan.id);
+        applyPublicCatalogToState(result.catalog);
+      } catch (err) {
+        if (seq !== hydrationStateRef.current.reloadSeq) return;
+        console.error('Error loading public plan catalog:', err);
+        if (!options?.preserveExistingOnError) {
+          activePlanRef.current = null;
+          setActivePlan(null);
+          setCatalogError(
+            err instanceof Error && err.message
+              ? err.message
+              : 'No se pudo cargar el plan de estudio público. Verificá tu conexión e intentá nuevamente.'
+          );
+          setCatalogStatus('error');
+        }
+        if (options?.throwOnError) {
+          throw err;
+        }
+      }
+    },
+    [applyPublicCatalogToState, syncHydrationState]
+  );
+
+  const selectPublicPlan = useCallback(
+    async (planId: string) => {
+      if (isAuthenticated) return;
+      await loadPublicCatalog(planId, {
+        throwOnError: true,
+        preserveExistingOnError: true,
+      });
+    },
+    [isAuthenticated, loadPublicCatalog]
+  );
+
   const retryLoadCatalog = useCallback(async () => {
-    await reloadServerState();
-  }, [reloadServerState]);
+    if (isAuthenticated && isEmailVerified) {
+      await reloadServerState();
+    } else if (!isAuthenticated) {
+      await loadPublicCatalog();
+    }
+  }, [isAuthenticated, isEmailVerified, reloadServerState, loadPublicCatalog]);
 
   const retryLoadSchedule = useCallback(async () => {
     const planId = activePlanRef.current?.plan.id;
@@ -645,9 +780,12 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [isAuthenticated, loadPlanSchedule]);
 
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthLoading) return;
+
+    if (isAuthenticated && isEmailVerified) {
       reloadServerState();
-    } else {
+    } else if (isAuthenticated && !isEmailVerified) {
+      authenticatedCatalogLoadedRef.current = false;
       scheduleSeqRef.current += 1;
       syncHydrationState(resetHydrationOnLogout(hydrationStateRef.current));
       activePlanRef.current = null;
@@ -658,8 +796,19 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setScheduleStatus('loading');
       setScheduleError(null);
       setUnseenRecommendationsCount(0);
+    } else {
+      authenticatedCatalogLoadedRef.current = false;
+      scheduleSeqRef.current += 1;
+      loadPublicCatalog();
     }
-  }, [isAuthenticated, reloadServerState, syncHydrationState]);
+  }, [
+    isAuthLoading,
+    isAuthenticated,
+    isEmailVerified,
+    reloadServerState,
+    loadPublicCatalog,
+    syncHydrationState,
+  ]);
 
   const activeSchedules = useMemo(() => {
     if (customSchedules && customSchedules.length > 0) {
@@ -754,7 +903,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         editingEnrollment?: SubjectEnrollment | null;
       }
     ) => {
-      if (!canSaveEnrollmentInSimulation(isSimulationMode)) {
+      if (!isAuthenticated || !canSaveEnrollmentInSimulation(isSimulationMode)) {
         return;
       }
       const sub = subjectsById.get(subjectCode);
@@ -769,7 +918,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
       setKanbanEnrollmentHint(null);
     },
-    [activeState, isSimulationMode, subjectsById]
+    [activeState, isAuthenticated, isSimulationMode, subjectsById]
   );
 
   const dismissKanbanEnrollmentHint = useCallback(() => {
@@ -968,13 +1117,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [userState, simulationState]);
 
   const toggleSimulationMode = useCallback(() => {
+    if (!isAuthenticated) return;
     if (isSimulationMode) {
       setSimulationState(null);
     } else {
       setSimulationState({ ...userState });
     }
     soundManager.playClick();
-  }, [isSimulationMode, userState]);
+  }, [isAuthenticated, isSimulationMode, userState]);
 
   const applySimulation = useCallback(() => {
     if (simulationState) {
@@ -1009,6 +1159,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       grade?: number,
       options?: { source?: StatusChangeTriggerSource }
     ) => {
+      if (!isAuthenticated) return;
       const targetState = isSimulationMode ? simulationState! : userState;
       const prevSubState = targetState[id];
       const subjectObj = subjectsById.get(id);
@@ -1133,6 +1284,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const batchUpdateStatus = useCallback(
     (updates: Array<{ id: number; status: SubjectStatus; grade?: number }>) => {
+      if (!isAuthenticated) return;
       const targetState = isSimulationMode ? { ...simulationState! } : { ...userState };
       updates.forEach(({ id, status, grade }) => {
         targetState[id] = {
@@ -1168,6 +1320,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   // Elective assignment handlers (strictly prevent duplication across levels)
   const addElectiveToYear = useCallback(
     (electiveId: number, targetYear: number) => {
+      if (!isAuthenticated) return;
       const validYear = Math.max(1, Math.min(totalLevels, targetYear));
       setAssignedElectives((prev) => {
         const next = buildEmptyAssignedElectives(totalLevels);
@@ -1193,6 +1346,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const removeElectiveFromYear = useCallback(
     (electiveId: number, year: number) => {
+      if (!isAuthenticated) return;
       setAssignedElectives((prev) => {
         const yearList = prev[year] || [];
         const next = {
@@ -1217,6 +1371,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const moveElectiveYear = useCallback(
     (electiveId: number, _fromYear: number, toYear: number) => {
+      if (!isAuthenticated) return;
       const validToYear = Math.max(1, Math.min(totalLevels, toYear));
       setAssignedElectives((prev) => {
         const next = buildEmptyAssignedElectives(totalLevels);
@@ -1242,6 +1397,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const updateSettings = useCallback(
     (newSettings: Partial<AppSettings>) => {
+      if (!isAuthenticated) return;
       setSettings((prev) => {
         const next = { ...prev, ...newSettings };
         if (isAuthenticated && hasHydratedRef.current) {
@@ -1258,12 +1414,14 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const toggleSound = useCallback(() => {
+    if (!isAuthenticated) return;
     const isNowOn = soundManager.toggleMute();
     setSoundEnabled(isNowOn);
-  }, []);
+  }, [isAuthenticated]);
 
   const toggleBasketSubject = useCallback(
     (id: number) => {
+      if (!isAuthenticated) return;
       setSemesterBasket((prev) => {
         const exists = prev.includes(id);
         const next = exists ? prev.filter((item) => item !== id) : [...prev, id];
@@ -1284,6 +1442,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const clearBasket = useCallback(() => {
+    if (!isAuthenticated) return;
     setSemesterBasket([]);
     soundManager.playClick();
 
@@ -1550,6 +1709,9 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const importData = useCallback(
     (json: string): { success: boolean; error?: string } => {
+      if (!isAuthenticated) {
+        return { success: false, error: 'Iniciá sesión para importar datos' };
+      }
       const result = importCareerFromJson(json, {
         validElectiveIds,
         electives,
@@ -1595,6 +1757,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   );
 
   const resetAll = useCallback(() => {
+    if (!isAuthenticated) return;
     const pId = activePlan?.plan.id;
     const emptyElectives = buildEmptyAssignedElectives(totalLevels);
     clearCareerData(pId);
@@ -1624,6 +1787,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [isAuthenticated, activePlan, totalLevels]);
 
   const loadSample = useCallback(() => {
+    if (!isAuthenticated) return;
     const sample = getSampleStudentForPlan(activePlan);
     setUserState(sample.userState);
     setSemesterBasket([]);
@@ -1645,11 +1809,12 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Interactive Tour controls
   const startTutorial = useCallback((fromStep: number = 0) => {
+    if (!isAuthenticated) return;
     realUserStateBackupRef.current = { ...userState };
     setCurrentTutorialStep(fromStep);
     setIsTutorialOpen(true);
     soundManager.playClick();
-  }, [userState]);
+  }, [isAuthenticated, userState]);
 
   const closeTutorial = useCallback((options?: { openOnboarding?: boolean }) => {
     setIsTutorialOpen(false);
@@ -1815,11 +1980,13 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         isWakingCatalogServer,
         catalogError,
         retryLoadCatalog,
+        isPublicMode: !isAuthenticated,
         syncStatus,
         showMigrationModal,
         setShowMigrationModal,
         currentPlanName,
         reloadServerState,
+        selectPublicPlan,
       }}
     >
       {children}

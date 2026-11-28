@@ -24,6 +24,8 @@ import {
   Shield,
   ChevronRight,
   Info,
+  LogIn,
+  GraduationCap,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCareer } from '../../context/CareerContext';
@@ -61,7 +63,8 @@ interface NavbarProps {
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, openLogin } = useAuth();
+  const isAuthenticated = Boolean(user);
   const {
     isSimulationMode,
     toggleSimulationMode,
@@ -282,7 +285,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           {/* Actions & Utilities */}
           <div className="flex items-center gap-1 min-[380px]:gap-1.5 sm:gap-2 shrink-0">
             {/* Secondary Actions (Desktop >= 1900px) */}
-            {primaryIntermediateDegree && (
+            {isAuthenticated && primaryIntermediateDegree && (
               <div className="hidden min-[1900px]:flex items-center gap-2 shrink-0">
                 <button
                   data-tour="analista-button"
@@ -312,20 +315,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             )}
 
             {/* Simulation Mode Toggle Button ("¿Y si...?") */}
-            <button
-              data-tour="simulation-button"
-              onClick={toggleSimulationMode}
-              className={`p-1 min-[380px]:p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shrink-0 cursor-pointer active:scale-95 ${
-                isSimulationMode
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
-                  : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
-              }`}
-              title="Modo simulación hipotética"
-              aria-label="Alternar modo simulación"
-            >
-              <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="hidden lg:inline whitespace-nowrap">¿Y si...?</span>
-            </button>
+            {isAuthenticated && (
+              <button
+                data-tour="simulation-button"
+                onClick={toggleSimulationMode}
+                className={`p-1 min-[380px]:p-2 sm:px-2.5 sm:py-1.5 min-h-[44px] min-w-[44px] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border shrink-0 cursor-pointer active:scale-95 ${
+                  isSimulationMode
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/30 animate-pulse'
+                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-300 border-slate-700/80 hover:border-amber-500/50'
+                }`}
+                title="Modo simulación hipotética"
+                aria-label="Alternar modo simulación"
+              >
+                <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="hidden lg:inline whitespace-nowrap">¿Y si...?</span>
+              </button>
+            )}
 
             {/* Quick Search Button (Target táctil garantizado >= 44x44px en mobile) */}
             <button
@@ -343,7 +348,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             </button>
 
             {/* Cloud Sync Status */}
-            <SyncStatusBadge status={syncStatus} />
+            {isAuthenticated && <SyncStatusBadge status={syncStatus} />}
 
             {/* User Profile & Account Menu */}
             <UserMenu
@@ -353,14 +358,16 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
             />
 
             {/* Tutorial Launcher (Desktop >= 1650px) */}
-            <button
-              onClick={() => startTutorial(0)}
-              className="hidden min-[1650px]:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-              title="Ver tutorial guiado interactivo"
-            >
-              <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span className="whitespace-nowrap">Tutorial</span>
-            </button>
+            {isAuthenticated && (
+              <button
+                onClick={() => startTutorial(0)}
+                className="hidden min-[1650px]:flex p-2 sm:px-2.5 sm:py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 transition-all items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+                title="Ver tutorial guiado interactivo"
+              >
+                <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="whitespace-nowrap">Tutorial</span>
+              </button>
+            )}
 
             {/* More Menu Dropdown Desktop (hidden en mobile) */}
             <div className="relative shrink-0 hidden md:block" ref={menuRef}>
@@ -381,194 +388,242 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
 
               {isMoreMenuOpen && (
                 <div className="absolute right-0 mt-2 w-64 sm:w-72 max-w-[calc(100vw-1.5rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-2xl bg-slate-900 border border-slate-800 shadow-2xl py-1.5 z-[var(--z-modal)] text-xs divide-y divide-slate-800/80 backdrop-blur-xl animate-fade-in">
-                  {user && (
-                    <div className="px-3.5 py-2.5 bg-slate-950/40">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-[11px] shrink-0">
-                          {user.email.charAt(0)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold text-white truncate">{user.email}</p>
-                          <p className="text-[10px] text-indigo-400">{currentPlanName}</p>
-                        </div>
-                        {user.role === 'admin' && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
-                            Admin
-                          </span>
-                        )}
+                  {!user ? (
+                    <>
+                      <div className="px-3.5 py-2.5 bg-slate-950/40">
+                        <p className="text-xs font-semibold text-white">Exploración pública</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">{currentPlanName}</p>
                       </div>
-                    </div>
-                  )}
 
-                  <div className="px-3.5 py-2 text-[11px] text-slate-400 flex items-center justify-between">
-                    <span>Progreso de carrera:</span>
-                    <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span>
-                  </div>
+                      <div className="py-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            openLogin();
+                          }}
+                          className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-indigo-600/20 text-indigo-300 font-semibold flex items-center gap-2 cursor-pointer"
+                        >
+                          <LogIn className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Iniciar sesión</span>
+                        </button>
 
-                  <div className="py-1">
-                    {/* Intermediate degree toggle in dropdown */}
-                    {primaryIntermediateDegree && (
-                      <button
-                        data-tour="analista-button"
-                        onClick={() => {
-                          updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
-                        }}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
-                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            setIsPlanSelectorOpen(true);
+                          }}
+                          className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-2 cursor-pointer"
+                        >
+                          <GraduationCap className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span>Cambiar de Carrera / Plan</span>
+                        </button>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          data-testid="more-menu-about-btn"
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            setIsAboutModalOpen(true);
+                          }}
+                          className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span>Acerca de {APP_NAME}</span>
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="px-3.5 py-2.5 bg-slate-950/40">
                         <div className="flex items-center gap-2">
-                          <Award className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span>{getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}</span>
+                          <div className="w-7 h-7 rounded-lg bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold uppercase text-[11px] shrink-0">
+                            {user.email.charAt(0)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-white truncate">{user.email}</p>
+                            <p className="text-[10px] text-indigo-400">{currentPlanName}</p>
+                          </div>
+                          {user.role === 'admin' && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold shrink-0">
+                              Admin
+                            </span>
+                          )}
                         </div>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                          settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
-                        }`}>
-                          {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
-                        </span>
-                      </button>
-                    )}
-
-                    {/* Simulation toggle in dropdown */}
-                    <button
-                      onClick={() => {
-                        toggleSimulationMode();
-                        setIsMoreMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Modo ¿Y si...? (Simulación)</span>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        isSimulationMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {isSimulationMode ? 'ON' : 'OFF'}
-                      </span>
-                    </button>
 
-                    {/* Sound toggle in dropdown */}
-                    <button
-                      onClick={toggleSound}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2">
-                        {soundEnabled ? (
-                          <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        ) : (
-                          <VolumeX className="w-4 h-4 text-slate-500 shrink-0" />
+                      <div className="px-3.5 py-2 text-[11px] text-slate-400 flex items-center justify-between">
+                        <span>Progreso de carrera:</span>
+                        <span className="font-bold text-white">{computedProgress.careerPercentageBySubjects}%</span>
+                      </div>
+
+                      <div className="py-1">
+                        {/* Intermediate degree toggle in dropdown */}
+                        {primaryIntermediateDegree && (
+                          <button
+                            data-tour="analista-button"
+                            onClick={() => {
+                              updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack });
+                            }}
+                            className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
+                          >
+                            <div className="flex items-center gap-2">
+                              <Award className="w-4 h-4 text-amber-400 shrink-0" />
+                              <span>{getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}</span>
+                            </div>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                              settings.includeAnalistaTrack ? 'bg-amber-500/30 text-amber-300' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {settings.includeAnalistaTrack ? 'ON' : 'OFF'}
+                            </span>
+                          </button>
                         )}
-                        <span>Efectos de sonido</span>
+
+                        {/* Simulation toggle in dropdown */}
+                        <button
+                          onClick={() => {
+                            toggleSimulationMode();
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            <FlaskConical className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>Modo ¿Y si...? (Simulación)</span>
+                          </div>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                            isSimulationMode ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {isSimulationMode ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
+
+                        {/* Sound toggle in dropdown */}
+                        <button
+                          onClick={toggleSound}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center justify-between gap-2 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2">
+                            {soundEnabled ? (
+                              <Volume2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                            ) : (
+                              <VolumeX className="w-4 h-4 text-slate-500 shrink-0" />
+                            )}
+                            <span>Efectos de sonido</span>
+                          </div>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                            soundEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
+                          }`}>
+                            {soundEnabled ? 'ON' : 'OFF'}
+                          </span>
+                        </button>
                       </div>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                        soundEnabled ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {soundEnabled ? 'ON' : 'OFF'}
-                      </span>
-                    </button>
-                  </div>
 
-                  <div className="py-1">
-                    {/* Carga rápida por nivel */}
-                    <button
-                      data-tour="onboarding-menu-item"
-                      onClick={() => {
-                        setIsOnboardingOpen(true);
-                        setIsMoreMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Layers className="w-4 h-4 text-indigo-400 shrink-0" />
-                      <span>Carga rápida por nivel</span>
-                    </button>
+                      <div className="py-1">
+                        {/* Carga rápida por nivel */}
+                        <button
+                          data-tour="onboarding-menu-item"
+                          onClick={() => {
+                            setIsOnboardingOpen(true);
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Layers className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span>Carga rápida por nivel</span>
+                        </button>
 
-                    {/* Cargar muestra */}
-                    <button
-                      onClick={() => {
-                        loadSample();
-                        setIsMoreMenuOpen(false);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>{getDemoNavbarLabel(planConfig)}</span>
-                    </button>
+                        {/* Cargar muestra */}
+                        <button
+                          onClick={() => {
+                            loadSample();
+                            setIsMoreMenuOpen(false);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>{getDemoNavbarLabel(planConfig)}</span>
+                        </button>
 
-                    {/* Tutorial */}
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        startTutorial(0);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
-                    >
-                      <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>Ver tutorial interactivo</span>
-                    </button>
-                  </div>
+                        {/* Tutorial */}
+                        <button
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            startTutorial(0);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+                        >
+                          <HelpCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Ver tutorial interactivo</span>
+                        </button>
+                      </div>
 
-                  <div className="py-1">
-                    {/* Export */}
-                    <button
-                      onClick={handleExport}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Exportar carrera (JSON)</span>
-                    </button>
+                      <div className="py-1">
+                        {/* Export */}
+                        <button
+                          onClick={handleExport}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Exportar carrera (JSON)</span>
+                        </button>
 
-                    {/* Import */}
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
-                    >
-                      <Upload className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <span>Importar carrera (JSON)</span>
-                    </button>
-                  </div>
+                        {/* Import */}
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 flex items-center gap-2 cursor-pointer"
+                        >
+                          <Upload className="w-4 h-4 text-cyan-400 shrink-0" />
+                          <span>Importar carrera (JSON)</span>
+                        </button>
+                      </div>
 
-                  <div className="py-1">
-                    {/* Reset */}
-                    <button
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setResetConfirmOpen(true);
-                      }}
-                      className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2 cursor-pointer"
-                    >
-                      <RotateCcw className="w-4 h-4 shrink-0" />
-                      <span>Reiniciar carrera...</span>
-                    </button>
-                  </div>
+                      <div className="py-1">
+                        {/* Reset */}
+                        <button
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            setResetConfirmOpen(true);
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-rose-950/40 text-rose-400 flex items-center gap-2 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4 shrink-0" />
+                          <span>Reiniciar carrera...</span>
+                        </button>
+                      </div>
 
-                  {user && (
-                    <div className="py-1">
-                      <button
-                        onClick={() => {
-                          setIsMoreMenuOpen(false);
-                          logout();
-                        }}
-                        className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                      >
-                        <LogOut className="w-4 h-4 text-slate-400" />
-                        <span>Cerrar Sesión</span>
-                      </button>
-                    </div>
+                      <div className="py-1">
+                        <button
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            logout();
+                          }}
+                          className="w-full text-left px-3.5 py-2 hover:bg-slate-800 text-slate-400 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <LogOut className="w-4 h-4 text-slate-400" />
+                          <span>Cerrar Sesión</span>
+                        </button>
+                      </div>
+
+                      <div className="pt-1 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          data-testid="more-menu-about-btn"
+                          onClick={() => {
+                            setIsMoreMenuOpen(false);
+                            setIsAboutModalOpen(true);
+                          }}
+                          className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <Info className="w-4 h-4 text-indigo-400 shrink-0" />
+                          <span>Acerca de {APP_NAME}</span>
+                        </button>
+                      </div>
+                    </>
                   )}
-
-                  <div className="pt-1 border-t border-slate-800/80">
-                    <button
-                      type="button"
-                      data-testid="more-menu-about-btn"
-                      onClick={() => {
-                        setIsMoreMenuOpen(false);
-                        setIsAboutModalOpen(true);
-                      }}
-                      className="w-full min-h-[44px] text-left px-3.5 py-2 hover:bg-slate-800 text-slate-300 hover:text-white flex items-center gap-2 cursor-pointer transition-colors"
-                    >
-                      <Info className="w-4 h-4 text-indigo-400 shrink-0" />
-                      <span>Acerca de {APP_NAME}</span>
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -666,9 +721,41 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
         isOpen={isMobile && isMoreMenuOpen}
         onClose={() => setIsMoreMenuOpen(false)}
         title="Más Secciones & Herramientas"
-        subtitle={`Progreso de carrera: ${computedProgress.careerPercentageBySubjects}% de materias`}
+        subtitle={
+          isAuthenticated
+            ? `Progreso de carrera: ${computedProgress.careerPercentageBySubjects}% de materias`
+            : 'Exploración pública de solo lectura'
+        }
       >
         <div className="space-y-4 py-2">
+          {!isAuthenticated && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreMenuOpen(false);
+                  openLogin();
+                }}
+                className="w-full min-h-[48px] px-4 py-3 rounded-2xl bg-gradient-to-r from-[#2A2E8A] to-[#171A52] hover:from-[#353AA8] hover:to-[#1E2269] text-white border border-indigo-400/30 flex items-center justify-center gap-2.5 text-sm font-semibold shadow-lg shadow-[#171A52]/40 transition-all cursor-pointer"
+              >
+                <LogIn className="w-5 h-5 text-amber-400 shrink-0" />
+                <span>Iniciar sesión</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMoreMenuOpen(false);
+                  setIsPlanSelectorOpen(true);
+                }}
+                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+              >
+                <GraduationCap className="w-5 h-5 text-indigo-400 shrink-0" />
+                <span>Cambiar de Carrera / Plan</span>
+              </button>
+            </div>
+          )}
+
           {/* 1. Vistas Secundarias */}
           <div>
             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
@@ -737,162 +824,168 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
           </div>
 
           {/* 2. Preferencias e Interruptores */}
-          <div>
-            <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
-              Preferencias
-            </h3>
-            <div className="space-y-1.5">
-              {/* Intermediate degree switch */}
-              {primaryIntermediateDegree && (
+          {isAuthenticated && (
+            <div>
+              <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
+                Preferencias
+              </h3>
+              <div className="space-y-1.5">
+                {/* Intermediate degree switch */}
+                {primaryIntermediateDegree && (
+                  <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <Award className="w-5 h-5 text-amber-400 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-white">
+                          {getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          {getIntermediateDegreeMobileSubtitle(primaryIntermediateDegree, allSubjects)}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      data-tour="analista-button"
+                      role="switch"
+                      aria-checked={settings.includeAnalistaTrack}
+                      onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                        settings.includeAnalistaTrack ? 'bg-amber-500' : 'bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          settings.includeAnalistaTrack ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                )}
+
+                {/* Simulation switch */}
                 <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
-                    <Award className="w-5 h-5 text-amber-400 shrink-0" />
+                    <FlaskConical className="w-5 h-5 text-amber-400 shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-xs font-semibold text-white">
-                        {getIntermediateDegreeToggleDropdownLabel(primaryIntermediateDegree)}
-                      </div>
-                      <div className="text-[11px] text-slate-400">
-                        {getIntermediateDegreeMobileSubtitle(primaryIntermediateDegree, allSubjects)}
-                      </div>
+                      <div className="text-xs font-semibold text-white">Modo ¿Y si...? (Simulación)</div>
+                      <div className="text-[11px] text-slate-400">Proyectá escenarios sin alterar tu historia</div>
                     </div>
                   </div>
                   <button
                     type="button"
-                    data-tour="analista-button"
                     role="switch"
-                    aria-checked={settings.includeAnalistaTrack}
-                    onClick={() => updateSettings({ includeAnalistaTrack: !settings.includeAnalistaTrack })}
+                    aria-checked={isSimulationMode}
+                    onClick={toggleSimulationMode}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      settings.includeAnalistaTrack ? 'bg-amber-500' : 'bg-slate-700'
+                      isSimulationMode ? 'bg-amber-500' : 'bg-slate-700'
                     }`}
                   >
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                        settings.includeAnalistaTrack ? 'translate-x-5' : 'translate-x-0'
+                        isSimulationMode ? 'translate-x-5' : 'translate-x-0'
                       }`}
                     />
                   </button>
                 </div>
-              )}
 
-              {/* Simulation switch */}
-              <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <FlaskConical className="w-5 h-5 text-amber-400 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold text-white">Modo ¿Y si...? (Simulación)</div>
-                    <div className="text-[11px] text-slate-400">Proyectá escenarios sin alterar tu historia</div>
+                {/* Sound switch */}
+                <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {soundEnabled ? (
+                      <Volume2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <VolumeX className="w-5 h-5 text-slate-500 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-semibold text-white">Efectos de Sonido</div>
+                      <div className="text-[11px] text-slate-400">Sonidos de desbloqueo y festejos</div>
+                    </div>
                   </div>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isSimulationMode}
-                  onClick={toggleSimulationMode}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    isSimulationMode ? 'bg-amber-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      isSimulationMode ? 'translate-x-5' : 'translate-x-0'
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={soundEnabled}
+                    onClick={toggleSound}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      soundEnabled ? 'bg-emerald-500' : 'bg-slate-700'
                     }`}
-                  />
-                </button>
-              </div>
-
-              {/* Sound switch */}
-              <div className="min-h-[48px] px-4 py-3 rounded-2xl bg-slate-800/60 border border-slate-700/60 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  {soundEnabled ? (
-                    <Volume2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                  ) : (
-                    <VolumeX className="w-5 h-5 text-slate-500 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs font-semibold text-white">Efectos de Sonido</div>
-                    <div className="text-[11px] text-slate-400">Sonidos de desbloqueo y festejos</div>
-                  </div>
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        soundEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={soundEnabled}
-                  onClick={toggleSound}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    soundEnabled ? 'bg-emerald-500' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                      soundEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
               </div>
             </div>
-          </div>
+          )}
 
           {/* 3. Utilidades y Carga Rápida */}
           <div>
             <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">
-              Herramientas
+              {isAuthenticated ? 'Herramientas' : 'Información'}
             </h3>
             <div className="space-y-1.5">
-              <button
-                type="button"
-                data-tour="onboarding-menu-item"
-                onClick={() => {
-                  setIsMoreMenuOpen(false);
-                  setIsOnboardingOpen(true);
-                }}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <Layers className="w-5 h-5 text-indigo-400 shrink-0" />
-                <span>Carga rápida por nivel</span>
-              </button>
+              {isAuthenticated && (
+                <>
+                  <button
+                    type="button"
+                    data-tour="onboarding-menu-item"
+                    onClick={() => {
+                      setIsMoreMenuOpen(false);
+                      setIsOnboardingOpen(true);
+                    }}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <Layers className="w-5 h-5 text-indigo-400 shrink-0" />
+                    <span>Carga rápida por nivel</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMoreMenuOpen(false);
-                  loadSample();
-                }}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
-                <span>{getDemoNavbarLabel(planConfig)}</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreMenuOpen(false);
+                      loadSample();
+                    }}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <Sparkles className="w-5 h-5 text-amber-400 shrink-0" />
+                    <span>{getDemoNavbarLabel(planConfig)}</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMoreMenuOpen(false);
-                  startTutorial(0);
-                }}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
-                <span>Ver tutorial interactivo</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMoreMenuOpen(false);
+                      startTutorial(0);
+                    }}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <HelpCircle className="w-5 h-5 text-amber-400 shrink-0" />
+                    <span>Ver tutorial interactivo</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={handleExport}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <Download className="w-5 h-5 text-emerald-400 shrink-0" />
-                <span>Exportar carrera (JSON)</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <Download className="w-5 h-5 text-emerald-400 shrink-0" />
+                    <span>Exportar carrera (JSON)</span>
+                  </button>
 
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <Upload className="w-5 h-5 text-cyan-400 shrink-0" />
-                <span>Importar carrera (JSON)</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-slate-200 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-5 h-5 text-cyan-400 shrink-0" />
+                    <span>Importar carrera (JSON)</span>
+                  </button>
+                </>
+              )}
 
               <button
                 type="button"
@@ -906,17 +999,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentView, setCurrentView }) =
                 <span>Acerca de {APP_NAME}</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsMoreMenuOpen(false);
-                  setResetConfirmOpen(true);
-                }}
-                className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
-              >
-                <RotateCcw className="w-5 h-5 text-rose-400 shrink-0" />
-                <span>Reiniciar carrera...</span>
-              </button>
+              {isAuthenticated && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMoreMenuOpen(false);
+                    setResetConfirmOpen(true);
+                  }}
+                  className="w-full min-h-[48px] px-4 py-3 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 flex items-center gap-3 text-sm font-medium transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-5 h-5 text-rose-400 shrink-0" />
+                  <span>Reiniciar carrera...</span>
+                </button>
+              )}
             </div>
           </div>
 

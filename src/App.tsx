@@ -19,6 +19,8 @@ import { OnboardingModal } from './components/onboarding/OnboardingModal';
 import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
+import { LoginPromptScreen } from './components/auth/LoginPromptScreen';
+import { determineAppScreen } from './utils/authGate';
 import { LocalStorageMigrationModal } from './components/migration/LocalStorageMigrationModal';
 import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
 import { ReviewRecommendationToast } from './components/enrollments/ReviewRecommendationToast';
@@ -54,7 +56,7 @@ const parseHashState = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated, isEmailVerified, isLoading, isWakingServer, user } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading, isWakingServer, isLoginOpen, user } = useAuth();
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -148,7 +150,14 @@ const AppContent: React.FC = () => {
     }
   };
 
-  if (isLoading) {
+  const screenState = determineAppScreen({
+    isLoading,
+    isAuthenticated,
+    isEmailVerified,
+    isLoginOpen,
+  });
+
+  if (screenState === 'loading') {
     return (
       <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100 px-4 text-center">
         <div className="w-12 h-12 rounded-2xl bg-[#171A52]/60 border border-indigo-500/30 flex items-center justify-center mb-4 text-[#FFB938] shadow-lg shadow-[#171A52]/50">
@@ -164,12 +173,12 @@ const AppContent: React.FC = () => {
     );
   }
 
-  if (!isAuthenticated) {
-    return <AuthScreen />;
+  if (screenState === 'verify-email-screen') {
+    return <VerifyEmailScreen />;
   }
 
-  if (!isEmailVerified) {
-    return <VerifyEmailScreen />;
+  if (screenState === 'auth-screen') {
+    return <AuthScreen />;
   }
 
   if (catalogStatus === 'error') {
@@ -255,20 +264,33 @@ const AppContent: React.FC = () => {
             className={`flex-1 flex flex-col ${isScheduleView ? 'min-h-0 h-full overflow-hidden lg:overflow-visible lg:h-auto' : ''}`}
           >
             {currentView === 'graph' && <CorrelativeGraph />}
-            {currentView === 'kanban' && <KanbanBoard />}
-            {currentView === 'planner' && (
-              <SemesterPlanner onNavigateToSchedule={() => handleSetView('schedule')} />
-            )}
-            {currentView === 'schedule' && (
-              isScheduleAvailable ? (
-                <ScheduleBuilder onNavigateToMap={() => handleSetView('graph')} />
+            {currentView === 'kanban' &&
+              (isAuthenticated ? (
+                <KanbanBoard />
               ) : (
-                <ScheduleUnavailableNotice
-                  availability={scheduleAvailability as 'wider-needed' | 'desktop-only'}
-                  onNavigateToMap={() => handleSetView('graph')}
-                />
-              )
-            )}
+                <LoginPromptScreen view="kanban" onBackToMap={() => handleSetView('graph')} />
+              ))}
+            {currentView === 'planner' &&
+              (isAuthenticated ? (
+                <SemesterPlanner onNavigateToSchedule={() => handleSetView('schedule')} />
+              ) : (
+                <LoginPromptScreen view="planner" onBackToMap={() => handleSetView('graph')} />
+              ))}
+            {currentView === 'schedule' &&
+              (isAuthenticated ? (
+                isScheduleAvailable ? (
+                  <ScheduleBuilder onNavigateToMap={() => handleSetView('graph')} />
+                ) : (
+                  <ScheduleUnavailableNotice
+                    availability={scheduleAvailability as 'wider-needed' | 'desktop-only'}
+                    onNavigateToMap={() => handleSetView('graph')}
+                  />
+                )
+              ) : (
+                <div className="h-full overflow-y-auto">
+                  <LoginPromptScreen view="schedule" onBackToMap={() => handleSetView('graph')} />
+                </div>
+              ))}
             {currentView === 'professors' && <ProfessorsDirectory />}
             {currentView === 'library' && (
               <LibraryHome
@@ -286,8 +308,18 @@ const AppContent: React.FC = () => {
                 }
               />
             )}
-            {currentView === 'electives' && <ElectivesPicker />}
-            {currentView === 'stats' && <StatsDashboard />}
+            {currentView === 'electives' &&
+              (isAuthenticated ? (
+                <ElectivesPicker />
+              ) : (
+                <LoginPromptScreen view="electives" onBackToMap={() => handleSetView('graph')} />
+              ))}
+            {currentView === 'stats' &&
+              (isAuthenticated ? (
+                <StatsDashboard />
+              ) : (
+                <LoginPromptScreen view="stats" onBackToMap={() => handleSetView('graph')} />
+              ))}
             {currentView === 'admin' && (
               <React.Suspense
                 fallback={
@@ -304,7 +336,7 @@ const AppContent: React.FC = () => {
       </main>
 
       {/* Post-login migration modal if user has local data */}
-      {showMigrationModal && (
+      {isAuthenticated && showMigrationModal && (
         <LocalStorageMigrationModal
           onSuccess={() => {
             setShowMigrationModal(false);
@@ -315,23 +347,27 @@ const AppContent: React.FC = () => {
       )}
 
       {/* Global Modals & Interactive Tour */}
-      <EnrollmentModal />
-      <ReviewRecommendationToast />
-      {globalReviewModalTarget && (
-        <ReviewFormModal
-          isOpen={true}
-          onClose={closeGlobalReviewModal}
-          initialProfessorId={globalReviewModalTarget.professorId}
-          initialSubjectId={globalReviewModalTarget.subjectId}
-          initialAcademicYear={globalReviewModalTarget.academicYear}
-          initialTerm={globalReviewModalTarget.term}
-          onSaved={refreshReviewableSummary}
-        />
+      {isAuthenticated && (
+        <>
+          <EnrollmentModal />
+          <ReviewRecommendationToast />
+          {globalReviewModalTarget && (
+            <ReviewFormModal
+              isOpen={true}
+              onClose={closeGlobalReviewModal}
+              initialProfessorId={globalReviewModalTarget.professorId}
+              initialSubjectId={globalReviewModalTarget.subjectId}
+              initialAcademicYear={globalReviewModalTarget.academicYear}
+              initialTerm={globalReviewModalTarget.term}
+              onSaved={refreshReviewableSummary}
+            />
+          )}
+          <QuickStatusModal />
+          <OnboardingModal />
+          <TutorialSpotlight currentView={currentView} onNavigateView={handleSetView} />
+        </>
       )}
-      <QuickStatusModal />
       <SearchModal />
-      <OnboardingModal />
-      <TutorialSpotlight currentView={currentView} onNavigateView={handleSetView} />
     </div>
   );
 };

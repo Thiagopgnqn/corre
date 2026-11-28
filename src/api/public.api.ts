@@ -163,7 +163,7 @@ export interface PublicLibraryFileItem {
  */
 export async function publicFetch<T = unknown>(
   endpoint: string,
-  options: { signal?: AbortSignal; headers?: Record<string, string>; method?: string } = {}
+  options: { signal?: AbortSignal | null; headers?: Record<string, string>; method?: string } = {}
 ): Promise<T> {
   if (options.method && options.method.toUpperCase() !== 'GET') {
     throw new ApiError('Solo se permiten peticiones GET en rutas públicas', 405, 'METHOD_NOT_ALLOWED');
@@ -340,12 +340,12 @@ function clampInt(value: number | undefined, fallback: number, min: number, max:
 }
 
 export const publicApi = {
-  async getVersion(requestOptions?: { signal?: AbortSignal }): Promise<CatalogVersionResponse> {
+  async getVersion(requestOptions?: { signal?: AbortSignal | null }): Promise<CatalogVersionResponse> {
     return publicFetch<CatalogVersionResponse>('/api/public/catalog/version', requestOptions);
   },
 
   async getCareers(requestOptions?: {
-    signal?: AbortSignal;
+    signal?: AbortSignal | null;
   }): Promise<{ success: boolean; data: Institution[] }> {
     return publicFetch<{ success: boolean; data: Institution[] }>(
       '/api/public/catalog/careers',
@@ -355,7 +355,7 @@ export const publicApi = {
 
   async getPlan(
     planId: string = 'current',
-    requestOptions?: { signal?: AbortSignal }
+    requestOptions?: { signal?: AbortSignal | null }
   ): Promise<PlanDetailResponse> {
     const target = planId.trim() || 'current';
     return publicFetch<PlanDetailResponse>(

@@ -33,7 +33,7 @@ export const UserMenu: React.FC<UserMenuProps> = ({
   onOpenPlanSelector,
   onNavigateAdmin,
 }) => {
-  const { user, logout, deleteAccount } = useAuth();
+  const { user, logout, deleteAccount, openLogin } = useAuth();
   const { settings, updateSettings, currentPlanName: contextPlanName } = useCareer();
   const resolvedPlanName = currentPlanName || contextPlanName || 'Plan de estudio';
   const isMobile = useIsMobile();
@@ -70,7 +70,17 @@ export const UserMenu: React.FC<UserMenuProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isMobile]);
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <button
+        type="button"
+        onClick={() => openLogin()}
+        className="min-h-[44px] min-w-[44px] px-3 sm:px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-[#2A2E8A] to-[#171A52] hover:from-[#353AA8] hover:to-[#1E2269] text-white border border-indigo-400/30 text-xs font-semibold transition-all cursor-pointer whitespace-nowrap shadow-sm flex items-center justify-center shrink-0 active:scale-95"
+      >
+        Iniciar sesión
+      </button>
+    );
+  }
 
   const handleExport = async () => {
     setIsExporting(true);
