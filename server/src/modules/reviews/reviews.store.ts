@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { and, count, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, notExists, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { db } from '../../db/index.js';
 import {
@@ -672,6 +672,52 @@ function isMissingMigrationError(err: unknown): boolean {
 // 1. IMPLEMENTACIÓN POSTGRESQL / DRIZZLE ORM (PRODUCCIÓN)
 // ============================================================================
 
+export function buildPublishedReviewsWhereClause(params: {
+  professorId: string;
+  subjectUuid?: string;
+  allowedSubjectIds?: string[];
+  excludeOpenReports?: boolean;
+}) {
+  const conditions = [
+    eq(professorReviews.professorId, params.professorId),
+    eq(professorReviews.status, 'published'),
+  ];
+  if (params.subjectUuid) {
+    conditions.push(eq(professorReviews.subjectId, params.subjectUuid));
+  }
+  if (params.allowedSubjectIds && params.allowedSubjectIds.length > 0) {
+    conditions.push(inArray(professorReviews.subjectId, params.allowedSubjectIds));
+  }
+  if (params.excludeOpenReports) {
+    conditions.push(
+      notExists(
+        db
+          .select({ one: sql`1` })
+          .from(reviewReports)
+          .where(
+            and(
+              eq(reviewReports.reviewId, professorReviews.id),
+              eq(reviewReports.status, 'open')
+            )
+          )
+      )
+    );
+  }
+  return and(...conditions);
+}
+
+export function buildPublishedReviewsCountQuery(params: {
+  professorId: string;
+  subjectUuid?: string;
+  allowedSubjectIds?: string[];
+  excludeOpenReports?: boolean;
+}) {
+  return db
+    .select({ value: count() })
+    .from(professorReviews)
+    .where(buildPublishedReviewsWhereClause(params));
+}
+
 export interface DrizzleReviewsStoreDeps {
   findDefaultPlan?: () => Promise<Pick<PublishedPlanWithCareer, 'plan' | 'career'> | null>;
   getUserSelectedPlanId?: (userId: string) => Promise<string | null>;
@@ -1171,31 +1217,19 @@ export class DrizzleReviewsStore implements ReviewsStore {
       };
     }
 
-    const conditions = [
-      eq(professorReviews.professorId, params.professorId),
-      eq(professorReviews.status, 'published'),
-    ];
-    if (params.subjectUuid) {
-      conditions.push(eq(professorReviews.subjectId, params.subjectUuid));
-    }
-    if (params.allowedSubjectIds && params.allowedSubjectIds.length > 0) {
-      conditions.push(inArray(professorReviews.subjectId, params.allowedSubjectIds));
-    }
-    if (params.excludeOpenReports) {
-      conditions.push(
-        sql`NOT EXISTS (
-          SELECT 1 FROM ${reviewReports}
-          WHERE ${reviewReports.reviewId} = ${professorReviews.id}
-            AND ${reviewReports.status} = 'open'
-        )`
-      );
-    }
-    const whereClause = and(...conditions);
+    const whereClause = buildPublishedReviewsWhereClause({
+      professorId: params.professorId,
+      subjectUuid: params.subjectUuid,
+      allowedSubjectIds: params.allowedSubjectIds,
+      excludeOpenReports: params.excludeOpenReports,
+    });
 
-    const [totalRow] = await db
-      .select({ value: count() })
-      .from(professorReviews)
-      .where(whereClause);
+    const [totalRow] = await buildPublishedReviewsCountQuery({
+      professorId: params.professorId,
+      subjectUuid: params.subjectUuid,
+      allowedSubjectIds: params.allowedSubjectIds,
+      excludeOpenReports: params.excludeOpenReports,
+    });
     const total = Number(totalRow?.value || 0);
 
     const orderBy =

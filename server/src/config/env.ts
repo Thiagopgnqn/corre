@@ -5,6 +5,19 @@ if (process.env.NODE_ENV !== 'test') {
   dotenv.config();
 }
 
+export function parsePositiveIntEnv(raw: unknown, fallback: number): number {
+  if (raw === undefined || raw === null) return fallback;
+  const trimmed = String(raw).trim();
+  if (!/^\d+$/.test(trimmed)) return fallback;
+  const parsedValue = Number(trimmed);
+  if (!Number.isSafeInteger(parsedValue) || parsedValue < 1) return fallback;
+  return parsedValue;
+}
+
+export function parseRateLimitDebugEnv(raw: unknown): boolean {
+  return String(raw ?? '').trim() === '1';
+}
+
 const baseSchema = z.object({
   DATABASE_URL: z.string().min(1, 'DATABASE_URL (conexión pooled de Neon) es requerida'),
   DIRECT_URL: z.string().optional(),
@@ -49,6 +62,14 @@ const baseSchema = z.object({
   LIBRARY_ADMIN_NOTIFY_COOLDOWN_SECONDS: z.coerce.number().int().nonnegative().optional(),
   LIBRARY_MAX_REJECTIONS_THRESHOLD: z.coerce.number().int().nonnegative().optional(),
   LIBRARY_REJECTIONS_WINDOW_DAYS: z.coerce.number().int().positive().optional(),
+  // Rate limit público (/api/public/*)
+  PUBLIC_TRUSTED_HOPS: z.preprocess((v) => parsePositiveIntEnv(v, 2), z.number().int().min(1)),
+  PUBLIC_RATE_LIMIT_PER_MIN: z.preprocess((v) => parsePositiveIntEnv(v, 120), z.number().int().min(1)),
+  PUBLIC_RATE_LIMIT_UMBRELLA_PER_MIN: z.preprocess(
+    (v) => parsePositiveIntEnv(v, 1500),
+    z.number().int().min(1)
+  ),
+  RATE_LIMIT_DEBUG: z.preprocess((v) => parseRateLimitDebugEnv(v), z.boolean()),
 });
 
 const envSchema = baseSchema.superRefine((data, ctx) => {
@@ -154,5 +175,12 @@ export const env = parsed.success
       R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY,
       R2_BUCKET: process.env.R2_BUCKET,
       CONTACT_EMAIL: process.env.CONTACT_EMAIL || 'contacto@stack.app',
+      PUBLIC_TRUSTED_HOPS: parsePositiveIntEnv(process.env.PUBLIC_TRUSTED_HOPS, 2),
+      PUBLIC_RATE_LIMIT_PER_MIN: parsePositiveIntEnv(process.env.PUBLIC_RATE_LIMIT_PER_MIN, 120),
+      PUBLIC_RATE_LIMIT_UMBRELLA_PER_MIN: parsePositiveIntEnv(
+        process.env.PUBLIC_RATE_LIMIT_UMBRELLA_PER_MIN,
+        1500
+      ),
+      RATE_LIMIT_DEBUG: parseRateLimitDebugEnv(process.env.RATE_LIMIT_DEBUG),
     };
 

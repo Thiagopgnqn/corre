@@ -18,7 +18,9 @@ async function main() {
   const { InMemoryCatalogStore, setCatalogStoreForTesting } = await import(
     '../src/modules/catalog/catalog.store.js'
   );
-  const { InMemoryReviewsStore } = await import('../src/modules/reviews/reviews.store.js');
+  const { InMemoryReviewsStore, DrizzleReviewsStore, buildPublishedReviewsCountQuery } = await import(
+    '../src/modules/reviews/reviews.store.js'
+  );
   const { InMemoryUserStateStore } = await import('../src/modules/user-state/userState.store.js');
   const { InMemoryLibraryService, setLibraryServiceForTesting } = await import(
     '../src/modules/library/library.service.js'
@@ -26,8 +28,12 @@ async function main() {
   const { MemoryMockR2Service } = await import('../src/services/r2.service.js');
   const { setLiveUserResolverForTesting } = await import('../src/middlewares/auth.middleware.js');
   const {
+    BoundedCounterMap,
     configurePublicRateLimiterForTesting,
+    getLastHopIp,
+    getPublicClientIp,
     resetPublicRateLimiterForTesting,
+    resolvePublicRateLimiterEnvConfig,
   } = await import('../src/modules/public/public.rateLimiter.js');
 
   console.log('======================================================================');
@@ -1289,6 +1295,188 @@ async function main() {
         Number(ip1Limited.headers.get('retry-after')) >= 1 &&
         ip2Ok.status === 200,
       'IP limitada vía X-Forwarded-For recibe 429 + Retry-After sin afectar a otra IP distinta (200)'
+    );
+
+    // =========================================================================
+    // 6. HARDENING DEL RATE LIMIT PÚBLICO Y GUARDAS DRIZZLE (a–g)
+    // =========================================================================
+    console.log('\n📌 6. Hardening: XFF desde la derecha, doble balde, env defaults, tope memoria y Drizzle');
+
+    // (a) Spoofing a la izquierda con hops=2: misma IP real cuenta en el mismo balde y no afecta a otra IP
+    configurePublicRateLimiterForTesting({
+      maxRequests: 2,
+      umbrellaMaxRequests: 100,
+      trustedHops: 2,
+      windowMs: 60_000,
+    });
+    const spoofA1 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '1.1.1.1, 203.0.113.10, 10.0.1.5' },
+    });
+    const spoofA2 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '2.2.2.2, 203.0.113.10, 10.0.1.5' },
+    });
+    const spoofA3 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '3.3.3.3, 203.0.113.10, 10.0.1.5' },
+    });
+    const otherCleanIp = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '9.9.9.9, 198.51.100.22, 10.0.1.5' },
+    });
+    assert(
+      spoofA1.status === 200 &&
+        spoofA2.status === 200 &&
+        spoofA3.status === 429 &&
+        Number(spoofA3.headers.get('retry-after')) >= 1 &&
+        otherCleanIp.status === 200,
+      '(a) Spoofing a la izquierda con hops=2 comparte balde por 203.0.113.10 y bloquea sin afectar 198.51.100.22'
+    );
+
+    // (b) Llamada directa rotando valor izquierdo dispara el paraguas por lastHop
+    configurePublicRateLimiterForTesting({
+      maxRequests: 50,
+      umbrellaMaxRequests: 3,
+      trustedHops: 2,
+      windowMs: 60_000,
+    });
+    const umb1 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '192.0.2.1, 203.0.113.99' },
+    });
+    const umb2 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '192.0.2.2, 203.0.113.99' },
+    });
+    const umb3 = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '192.0.2.3, 203.0.113.99' },
+    });
+    const umb4Blocked = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '192.0.2.4, 203.0.113.99' },
+    });
+    const otherLastHopOk = await req('GET', '/api/public/catalog/version', {
+      headers: { 'X-Forwarded-For': '192.0.2.4, 198.51.100.77' },
+    });
+    assert(
+      umb1.status === 200 &&
+        umb2.status === 200 &&
+        umb3.status === 200 &&
+        umb4Blocked.status === 429 &&
+        otherLastHopOk.status === 200,
+      '(b) Rotar XFF izquierdo llamando con un solo salto no evade el paraguas por lastHop'
+    );
+
+    // (c) Header de una sola entrada con hops=2, prefijo ::ffff:, acotado a 64 chars y sin header
+    const singleHopReq = {
+      headers: { 'x-forwarded-for': '::ffff:203.0.113.55' },
+      socket: { remoteAddress: '10.0.0.1' },
+    } as any;
+    const noHeaderReq = {
+      headers: {},
+      socket: { remoteAddress: '::ffff:198.51.100.44' },
+    } as any;
+    const longEntry = 'a'.repeat(120);
+    const truncatedReq = {
+      headers: { 'x-forwarded-for': `${longEntry}, 10.0.0.2` },
+      socket: { remoteAddress: '10.0.0.1' },
+    } as any;
+    assert(
+      getPublicClientIp(singleHopReq, 2) === '203.0.113.55' &&
+        getLastHopIp(singleHopReq) === '203.0.113.55' &&
+        getPublicClientIp(noHeaderReq, 2) === '198.51.100.44' &&
+        getLastHopIp(noHeaderReq) === '198.51.100.44' &&
+        getPublicClientIp(truncatedReq, 2).length === 64,
+      '(c) Header de 1 entrada con hops=2 usa esa entrada, normaliza ::ffff:, acota a 64 chars y fallback a socket'
+    );
+
+    // (d) Variables de entorno inválidas caen a defaults seguros y RATE_LIMIT_DEBUG loguea máx 20 sin IPs
+    const invalidEnv = resolvePublicRateLimiterEnvConfig({
+      PUBLIC_TRUSTED_HOPS: '0',
+      PUBLIC_RATE_LIMIT_PER_MIN: '-15',
+      PUBLIC_RATE_LIMIT_UMBRELLA_PER_MIN: 'no-es-numero',
+      RATE_LIMIT_DEBUG: 'true',
+    });
+    const decimalEnv = resolvePublicRateLimiterEnvConfig({
+      PUBLIC_TRUSTED_HOPS: '2.5',
+      PUBLIC_RATE_LIMIT_PER_MIN: '',
+      PUBLIC_RATE_LIMIT_UMBRELLA_PER_MIN: '-1',
+      RATE_LIMIT_DEBUG: '1',
+    });
+    const debugLogs: string[] = [];
+    configurePublicRateLimiterForTesting({
+      maxRequests: 100,
+      umbrellaMaxRequests: 100,
+      trustedHops: 2,
+      debug: true,
+      logger: (msg) => debugLogs.push(msg),
+    });
+    for (let i = 0; i < 25; i++) {
+      await req('GET', '/api/public/catalog/version', {
+        headers: { 'X-Forwarded-For': `203.0.113.${10 + i}, 10.0.1.5` },
+      });
+    }
+    const debugLogsContainAnyIp = debugLogs.some(
+      (line) => line.includes('203.0.113.') || line.includes('10.0.1.5') || line.includes('127.0.0.1')
+    );
+    assert(
+      invalidEnv.trustedHops === 2 &&
+        invalidEnv.clientMaxPerMin === 120 &&
+        invalidEnv.umbrellaMaxPerMin === 1500 &&
+        invalidEnv.debug === false &&
+        decimalEnv.trustedHops === 2 &&
+        decimalEnv.clientMaxPerMin === 120 &&
+        decimalEnv.umbrellaMaxPerMin === 1500 &&
+        decimalEnv.debug === true &&
+        debugLogs.length === 20 &&
+        debugLogs.every((l) => l.includes('xffEntries=2') && l.includes('clientEqualsLastHop=false')) &&
+        !debugLogsContainAnyIp,
+      '(d) Variables de entorno inválidas usan defaults seguros y RATE_LIMIT_DEBUG=1 loguea solo 20 requests sin IPs'
+    );
+
+    // (e) Tope de memoria: BoundedCounterMap(5) nunca supera tamaño 5 tras 20 IPs distintas (y barre vencidas)
+    const bounded = new BoundedCounterMap(5);
+    let maxObservedSize = 0;
+    const baseNow = 1_000_000;
+    for (let i = 0; i < 20; i++) {
+      bounded.increment(`203.0.113.${i}`, baseNow + i * 10, 60_000);
+      if (bounded.size > maxObservedSize) maxObservedSize = bounded.size;
+    }
+    const boundedAfterExpiry = new BoundedCounterMap(2);
+    boundedAfterExpiry.increment('198.51.100.1', baseNow, 100);
+    boundedAfterExpiry.increment('198.51.100.2', baseNow + 200, 60_000);
+    // .1 ya venció en baseNow + 250 -> debe barrerse antes de desalojar a .2
+    boundedAfterExpiry.increment('198.51.100.3', baseNow + 250, 60_000);
+    assert(
+      maxObservedSize === 5 &&
+        bounded.size === 5 &&
+        !bounded.has('203.0.113.0') &&
+        bounded.has('203.0.113.19') &&
+        boundedAfterExpiry.size === 2 &&
+        !boundedAfterExpiry.has('198.51.100.1') &&
+        boundedAfterExpiry.has('198.51.100.2') &&
+        boundedAfterExpiry.has('198.51.100.3'),
+      '(e) BoundedCounterMap(5) acota en 5 entradas con 20 IPs y barre vencidas antes de desalojar activas'
+    );
+
+    // (f) DrizzleReviewsStore.getProfessorById con id no-UUID devuelve null sin abrir conexión DB
+    const drizzleStore = new DrizzleReviewsStore();
+    const nonUuidProf = await drizzleStore.getProfessorById('no-es-un-uuid-valido');
+    assert(
+      nonUuidProf === null,
+      '(f) DrizzleReviewsStore.getProfessorById("no-es-un-uuid-valido") retorna null sin consultar Postgres'
+    );
+
+    // (g) buildPublishedReviewsCountQuery(.toSQL()) refleja el filtro NOT EXISTS sobre review_reports ('open')
+    const sqlWithExclusion = buildPublishedReviewsCountQuery({
+      professorId: '11111111-1111-4111-8111-111111111111',
+      excludeOpenReports: true,
+    }).toSQL();
+    const sqlWithoutExclusion = buildPublishedReviewsCountQuery({
+      professorId: '11111111-1111-4111-8111-111111111111',
+      excludeOpenReports: false,
+    }).toSQL();
+    assert(
+      /not exists/i.test(sqlWithExclusion.sql) &&
+        sqlWithExclusion.sql.includes('"review_reports"') &&
+        sqlWithExclusion.params.includes('published') &&
+        sqlWithExclusion.params.includes('open') &&
+        !sqlWithoutExclusion.sql.includes('"review_reports"'),
+      '(g) buildPublishedReviewsCountQuery(.toSQL()) aplica NOT EXISTS sobre review_reports con estado open'
     );
   } finally {
     configurePublicRateLimiterForTesting(null);
