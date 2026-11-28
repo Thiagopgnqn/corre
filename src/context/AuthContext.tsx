@@ -12,15 +12,29 @@ export interface OpenLoginOptions {
   mode?: 'login' | 'register';
 }
 
+export interface LoginPromptRequest {
+  actionLabel: string;
+  description?: string;
+  returnToHash?: string;
+}
+
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isEmailVerified: boolean;
   isLoading: boolean;
   isWakingServer: boolean;
+  sessionCheckError: string | null;
+  retrySessionCheck: () => Promise<void>;
   isLoginOpen: boolean;
   loginInitialMode: 'login' | 'register';
   returnToHash: string | null;
+  loginPrompt: LoginPromptRequest | null;
+  openLoginPrompt: (
+    actionLabel: string,
+    options?: { description?: string; returnToHash?: string }
+  ) => void;
+  closeLoginPrompt: () => void;
   openLogin: (options?: OpenLoginOptions) => void;
   closeLogin: () => void;
   login: (email: string, password: string) => Promise<void>;
@@ -44,29 +58,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isWakingServer, setIsWakingServer] = useState<boolean>(false);
+  const [sessionCheckError, setSessionCheckError] = useState<string | null>(null);
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(false);
   const [loginInitialMode, setLoginInitialMode] = useState<'login' | 'register'>('login');
   const [returnToHash, setReturnToHash] = useState<string | null>(null);
+  const [loginPrompt, setLoginPrompt] = useState<LoginPromptRequest | null>(null);
   const returnToHashRef = useRef<string | null>(null);
 
   const checkSession = useCallback(async () => {
     setIsLoading(true);
+    setSessionCheckError(null);
     try {
       const outcome = await runInitialSessionCheck<User>({
         fetchMe: () => authApi.getMe(),
         onWakingChange: setIsWakingServer,
         wakingDelayMs: 2500,
       });
-      setUser(outcome.user);
+      if (outcome.status === 'transient_error') {
+        setUser(null);
+        setSessionCheckError(
+          'El servidor está despertando o hay un problema temporal de conexión. Tu sesión sigue guardada.'
+        );
+      } else {
+        setUser(outcome.user);
+      }
     } finally {
       setIsWakingServer(false);
       setIsLoading(false);
     }
   }, []);
 
+  const retrySessionCheck = useCallback(async () => {
+    await checkSession();
+  }, [checkSession]);
+
   useEffect(() => {
     checkSession();
   }, [checkSession]);
+
+  const openLoginPrompt = useCallback(
+    (actionLabel: string, options?: { description?: string; returnToHash?: string }) => {
+      const fallbackHash =
+        options?.returnToHash !== undefined
+          ? options.returnToHash
+          : typeof window !== 'undefined'
+            ? window.location.hash
+            : '';
+      setLoginPrompt({
+        actionLabel,
+        description: options?.description,
+        returnToHash: normalizeReturnToHash(fallbackHash) ?? undefined,
+      });
+    },
+    []
+  );
+
+  const closeLoginPrompt = useCallback(() => {
+    setLoginPrompt(null);
+  }, []);
 
   const openLogin = useCallback((options?: OpenLoginOptions) => {
     const rawHash =
@@ -78,6 +127,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const normalized = normalizeReturnToHash(rawHash);
     returnToHashRef.current = normalized;
     setReturnToHash(normalized);
+    setLoginPrompt(null);
+    setSessionCheckError(null);
     setLoginInitialMode(options?.mode ?? 'login');
     setIsLoginOpen(true);
   }, []);
@@ -205,9 +256,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isEmailVerified,
         isLoading,
         isWakingServer,
+        sessionCheckError,
+        retrySessionCheck,
         isLoginOpen,
         loginInitialMode,
         returnToHash,
+        loginPrompt,
+        openLoginPrompt,
+        closeLoginPrompt,
         openLogin,
         closeLogin,
         login,
@@ -232,4 +288,8 @@ export const useAuth = (): AuthContextType => {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+};
+
+export const useOptionalAuth = (): AuthContextType | undefined => {
+  return useContext(AuthContext);
 };

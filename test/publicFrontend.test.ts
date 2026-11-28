@@ -740,3 +740,166 @@ test('(i) Usuario logueado mantiene hidratación, PUT /api/me/plan e ignora plan
     /applyPublicCatalogToState[\s\S]*?migrateLegacyLocalStorageToPlan/
   );
 });
+
+// ============================================================================
+// (j) Corrección stack_auth_hint: solo cambia a '0' ante 401/403 definitivos
+// ============================================================================
+test('(j) stack_auth_hint solo cambia a "0" ante 401/403 definitivos y conserva marca en red/503', async () => {
+  // 1. Marca '1' + refresh con error de red: queda '1', transient_error y pantalla de reintento (sin modo público)
+  {
+    const storage = new MockStorage();
+    storage.setItem(AUTH_HINT_STORAGE_KEY, '1');
+    await withGlobals(
+      storage,
+      async (url) => {
+        if (url === '/api/me') {
+          return jsonResponse({ success: false, error: 'Expired' }, 401);
+        }
+        if (url === '/api/auth/refresh') {
+          throw new TypeError('Failed to fetch');
+        }
+        return jsonResponse({}, 404);
+      },
+      async () => {
+        const res = await runInitialSessionCheck({
+          storage,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(res.status, 'transient_error');
+        assert.equal(res.user, null);
+        assert.equal(res.hintAfter, '1');
+        assert.equal(readAuthHint(storage), '1');
+        assert.equal(
+          determineAppScreen({
+            isLoading: false,
+            isAuthenticated: false,
+            isEmailVerified: false,
+            isLoginOpen: false,
+            hasSessionError: true,
+          }),
+          'session-error-screen'
+        );
+      }
+    );
+  }
+
+  // 2. Marca '1' + 503 (en /api/auth/refresh y directo en /api/me): queda '1' y transient_error
+  {
+    const storageRefresh503 = new MockStorage();
+    storageRefresh503.setItem(AUTH_HINT_STORAGE_KEY, '1');
+    await withGlobals(
+      storageRefresh503,
+      async (url) => {
+        if (url === '/api/me') return jsonResponse({ success: false }, 401);
+        if (url === '/api/auth/refresh') return jsonResponse({ error: 'Booting' }, 503);
+        return jsonResponse({}, 404);
+      },
+      async () => {
+        const res = await runInitialSessionCheck({
+          storage: storageRefresh503,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(res.status, 'transient_error');
+        assert.equal(res.hintAfter, '1');
+        assert.equal(readAuthHint(storageRefresh503), '1');
+      }
+    );
+
+    const storageMe503 = new MockStorage();
+    storageMe503.setItem(AUTH_HINT_STORAGE_KEY, '1');
+    await withGlobals(
+      storageMe503,
+      async () => jsonResponse({ error: 'Booting' }, 503),
+      async () => {
+        const res = await runInitialSessionCheck({
+          storage: storageMe503,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(res.status, 'transient_error');
+        assert.equal(readAuthHint(storageMe503), '1');
+      }
+    );
+  }
+
+  // 3. Marca '1' + 401 (y 403): pasa a '0' y modo anónimo
+  {
+    for (const statusCode of [401, 403]) {
+      const storage = new MockStorage();
+      storage.setItem(AUTH_HINT_STORAGE_KEY, '1');
+      await withGlobals(
+        storage,
+        async (url) => {
+          if (url === '/api/me') return jsonResponse({ success: false }, 401);
+          if (url === '/api/auth/refresh') return jsonResponse({ error: 'Denied' }, statusCode);
+          return jsonResponse({}, 404);
+        },
+        async () => {
+          const res = await runInitialSessionCheck({
+            storage,
+            fetchMe: () => apiFetch('/api/me'),
+          });
+          assert.equal(res.status, 'anonymous');
+          assert.equal(res.hintAfter, '0');
+          assert.equal(readAuthHint(storage), '0');
+        }
+      );
+    }
+  }
+
+  // 4. Marca ausente + error de red: NO guarda '0' (queda ausente) y permite reintentar
+  {
+    const storage = new MockStorage();
+    let attempt = 0;
+    await withGlobals(
+      storage,
+      async (url) => {
+        if (url === '/api/me') {
+          attempt += 1;
+          if (attempt === 1) {
+            throw new TypeError('NetworkError when attempting to fetch resource');
+          }
+          return jsonResponse({
+            success: true,
+            user: { id: 'u-wake', email: 'wake@utn.edu.ar', emailVerified: true },
+          });
+        }
+        return jsonResponse({}, 404);
+      },
+      async () => {
+        const firstTry = await runInitialSessionCheck<{ id: string }>({
+          storage,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(firstTry.status, 'transient_error');
+        assert.equal(readAuthHint(storage), null);
+        assert.equal(firstTry.hintAfter, null);
+
+        const retry = await runInitialSessionCheck<{ id: string }>({
+          storage,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(retry.status, 'authenticated');
+        assert.equal(retry.user?.id, 'u-wake');
+        assert.equal(readAuthHint(storage), '1');
+      }
+    );
+  }
+
+  // 5. Marca ausente + 401: guarda '0'
+  {
+    const storage = new MockStorage();
+    await withGlobals(
+      storage,
+      async () => jsonResponse({ success: false, error: 'Unauthorized' }, 401),
+      async () => {
+        const res = await runInitialSessionCheck({
+          storage,
+          fetchMe: () => apiFetch('/api/me'),
+        });
+        assert.equal(res.status, 'anonymous');
+        assert.equal(res.hintAfter, '0');
+        assert.equal(readAuthHint(storage), '0');
+      }
+    );
+  }
+});

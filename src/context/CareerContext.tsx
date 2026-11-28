@@ -321,7 +321,7 @@ const EMPTY_PROGRESS: CareerProgress = {
 };
 
 export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isEmailVerified, isLoading: isAuthLoading, user } = useAuth();
+  const { isAuthenticated, isEmailVerified, isLoading: isAuthLoading, sessionCheckError, user } = useAuth();
 
   const [activePlan, setActivePlan] = useState<ActivePlanCatalog | null>(null);
   const [catalogStatus, setCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -780,7 +780,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, [isAuthenticated, loadPlanSchedule]);
 
   useEffect(() => {
-    if (isAuthLoading) return;
+    if (isAuthLoading || sessionCheckError) return;
 
     if (isAuthenticated && isEmailVerified) {
       reloadServerState();
@@ -803,6 +803,7 @@ export const CareerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
   }, [
     isAuthLoading,
+    sessionCheckError,
     isAuthenticated,
     isEmailVerified,
     reloadServerState,
@@ -2000,4 +2001,8 @@ export const useCareer = () => {
     throw new Error('useCareer must be used within a CareerProvider');
   }
   return context;
+};
+
+export const useOptionalCareer = (): CareerContextType | undefined => {
+  return useContext(CareerContext);
 };

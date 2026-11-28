@@ -84,18 +84,28 @@ export async function apiFetch<T = any>(
               isRefreshing = false;
               processQueue(null);
               return apiFetch<T>(url, options);
-            } else {
+            } else if (refreshRes.status === 401 || refreshRes.status === 403) {
               writeAuthHint('0');
-              isRefreshing = false;
-              const err = new ApiError('Sesión expirada', 401, 'UNAUTHORIZED');
-              processQueue(err);
-              throw err;
+              throw new ApiError('Sesión expirada', refreshRes.status, 'UNAUTHORIZED');
+            } else {
+              throw new ApiError(
+                `El servidor está despertando o temporalmente no disponible (${refreshRes.status})`,
+                refreshRes.status,
+                'SERVER_UNAVAILABLE'
+              );
             }
           } catch (err) {
-            writeAuthHint('0');
             isRefreshing = false;
-            processQueue(err);
-            throw err;
+            const normalizedErr =
+              err instanceof ApiError
+                ? err
+                : new ApiError(
+                    (err as Error)?.message || 'Error de conexión con el servidor',
+                    0,
+                    'NETWORK_ERROR'
+                  );
+            processQueue(normalizedErr);
+            throw normalizedErr;
           }
         }
 

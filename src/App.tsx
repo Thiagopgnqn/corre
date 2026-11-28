@@ -20,6 +20,7 @@ import { TutorialSpotlight } from './components/tutorial/TutorialSpotlight';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { VerifyEmailScreen } from './components/auth/VerifyEmailScreen';
 import { LoginPromptScreen } from './components/auth/LoginPromptScreen';
+import { LoginPromptModal } from './components/auth/LoginPromptModal';
 import { determineAppScreen } from './utils/authGate';
 import { LocalStorageMigrationModal } from './components/migration/LocalStorageMigrationModal';
 import { EnrollmentModal } from './components/enrollments/EnrollmentModal';
@@ -56,7 +57,18 @@ const parseHashState = () => {
 };
 
 const AppContent: React.FC = () => {
-  const { isAuthenticated, isEmailVerified, isLoading, isWakingServer, isLoginOpen, user } = useAuth();
+  const {
+    isAuthenticated,
+    isEmailVerified,
+    isLoading,
+    isWakingServer,
+    sessionCheckError,
+    retrySessionCheck,
+    isLoginOpen,
+    loginPrompt,
+    closeLoginPrompt,
+    user,
+  } = useAuth();
   const [isOnline, setIsOnline] = useState(
     typeof navigator !== 'undefined' ? navigator.onLine : true
   );
@@ -155,6 +167,7 @@ const AppContent: React.FC = () => {
     isAuthenticated,
     isEmailVerified,
     isLoginOpen,
+    hasSessionError: Boolean(sessionCheckError),
   });
 
   if (screenState === 'loading') {
@@ -169,6 +182,33 @@ const AppContent: React.FC = () => {
             El servidor está despertando, puede tardar hasta 1 minuto
           </p>
         )}
+      </div>
+    );
+  }
+
+  if (screenState === 'session-error-screen') {
+    return (
+      <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center text-slate-100 px-4 text-center">
+        <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mb-4 text-amber-400">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <h2 className="text-base font-bold text-white mb-1">El servidor está despertando</h2>
+        <p className="text-xs text-slate-400 max-w-md mb-2">
+          Puede tardar hasta 1 minuto en responder. Tu sesión no se cerró.
+        </p>
+        {sessionCheckError && (
+          <p className="text-xs text-slate-500 max-w-md mb-5">{sessionCheckError}</p>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            void retrySessionCheck();
+          }}
+          className="inline-flex items-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition-colors cursor-pointer"
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>Reintentar</span>
+        </button>
       </div>
     );
   }
@@ -366,6 +406,15 @@ const AppContent: React.FC = () => {
           <OnboardingModal />
           <TutorialSpotlight currentView={currentView} onNavigateView={handleSetView} />
         </>
+      )}
+      {!isAuthenticated && (
+        <LoginPromptModal
+          isOpen={Boolean(loginPrompt)}
+          onClose={closeLoginPrompt}
+          actionLabel={loginPrompt?.actionLabel || 'continuar'}
+          description={loginPrompt?.description}
+          returnToHash={loginPrompt?.returnToHash}
+        />
       )}
       <SearchModal />
     </div>
