@@ -17,10 +17,18 @@ import {
   X,
 } from 'lucide-react';
 import { professorsApi } from '../../api/professors.api';
+import {
+  publicApi,
+  type PublicProfessorDetail,
+  type PublicReviewItem,
+} from '../../api/public.api';
+import { useOptionalAuth } from '../../context/AuthContext';
+import { useOptionalCareer } from '../../context/CareerContext';
 import type {
   PaginatedReviewsResponse,
   ProfessorDetail,
   PublicProfessorReview,
+  RatingStatus,
   ReviewsThresholdsMeta,
 } from '../../types/professor';
 import {
@@ -29,6 +37,211 @@ import {
 } from '../../utils/professorRatingsLogic';
 import { StarRating } from './StarRating';
 import { ReportReviewModal } from './ReportReviewModal';
+
+const SPANISH_MONTHS_SHORT = [
+  'ene.',
+  'feb.',
+  'mar.',
+  'abr.',
+  'may.',
+  'jun.',
+  'jul.',
+  'ago.',
+  'sep.',
+  'oct.',
+  'nov.',
+  'dic.',
+] as const;
+
+export function formatPublicReviewMonthYear(rawCreatedAt: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec((rawCreatedAt || '').trim());
+  if (!match) return rawCreatedAt || 'reciente';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || month < 1 || month > 12) return rawCreatedAt;
+  return `${SPANISH_MONTHS_SHORT[month - 1]} ${year}`;
+}
+
+export function formatPublicAttendedPeriod(
+  academicYear: number | null,
+  term: string | null
+): string | null {
+  if (!academicYear && !term) return null;
+  if (academicYear && term) {
+    return `${academicYear} · ${term === 'A' ? 'Anual' : term}`;
+  }
+  if (academicYear) {
+    return String(academicYear);
+  }
+  return term === 'A' ? 'Anual' : term;
+}
+
+function mapPublicProfessorDetail(detail: PublicProfessorDetail): ProfessorDetail {
+  return {
+    ...detail,
+    ratingStatus: detail.ratingStatus as RatingStatus,
+    bayesianScore: detail.bayesianScore ?? 0,
+    aliases: [],
+    subjects: detail.subjects.map((sub) => ({
+      ...sub,
+      ratingStatus: sub.ratingStatus as RatingStatus,
+      bayesianScore: sub.bayesianScore ?? 0,
+    })),
+  };
+}
+
+function mapPublicReviewToCardItem(
+  professorId: string,
+  item: PublicReviewItem
+): PublicProfessorReview {
+  return {
+    id: item.id,
+    professorId,
+    subjectId: item.subjectId,
+    subjectCode: item.subjectCode,
+    subjectName: item.subjectName,
+    studentLabel: '',
+    academicYear: item.academicYear,
+    term: (item.term as '1C' | '2C' | 'A' | null) ?? null,
+    attendedPeriod: formatPublicAttendedPeriod(item.academicYear, item.term),
+    overall: item.overall,
+    clarity: item.clarity,
+    treatment: item.treatment,
+    availability: item.availability,
+    difficulty: item.difficulty,
+    wouldRecommend: item.wouldRecommend,
+    comment: item.comment,
+    helpfulCount: item.helpfulCount,
+    viewerHasVotedHelpful: false,
+    viewerHasReported: false,
+    publishedMonthYear: item.createdAt,
+    publishedLabel: formatPublicReviewMonthYear(item.createdAt),
+  };
+}
+
+export interface PublicReviewCardViewProps {
+  subjectName: string;
+  attendedPeriod: string | null;
+  publishedLabel: string;
+  overall: number;
+  clarity: number | null;
+  treatment: number | null;
+  availability: number | null;
+  difficulty: number | null;
+  wouldRecommend: boolean | null;
+  comment: string | null;
+  helpfulCount: number;
+  onHelpfulClick: () => void;
+  onReportClick: () => void;
+}
+
+export const PublicReviewCardView: React.FC<PublicReviewCardViewProps> = ({
+  subjectName,
+  attendedPeriod,
+  publishedLabel,
+  overall,
+  clarity,
+  treatment,
+  availability,
+  difficulty,
+  wouldRecommend,
+  comment,
+  helpfulCount,
+  onHelpfulClick,
+  onReportClick,
+}) => {
+  return (
+    <div className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/90 space-y-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-white">{subjectName}</span>
+            {attendedPeriod && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                Cursada {attendedPeriod}
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-slate-500 flex items-center gap-1">
+            <Calendar className="w-3 h-3" />
+            <span>Publicado en {publishedLabel}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <StarRating value={overall} readOnly size="sm" />
+          {wouldRecommend === true && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              <ThumbsUp className="w-2.5 h-2.5" />
+              <span>Recomienda</span>
+            </span>
+          )}
+          {wouldRecommend === false && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">
+              <ThumbsDown className="w-2.5 h-2.5" />
+              <span>No recomienda</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {(clarity !== null || treatment !== null || availability !== null || difficulty !== null) && (
+        <div className="flex flex-wrap gap-1.5 text-[10px]">
+          {clarity !== null && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300">
+              Claridad: <strong>{clarity}/5</strong>
+            </span>
+          )}
+          {treatment !== null && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300">
+              Trato: <strong>{treatment}/5</strong>
+            </span>
+          )}
+          {availability !== null && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300">
+              Disponibilidad: <strong>{availability}/5</strong>
+            </span>
+          )}
+          {difficulty !== null && (
+            <span className="px-2 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-slate-300">
+              Exigencia: <strong>{difficulty}/5</strong>
+            </span>
+          )}
+        </div>
+      )}
+
+      {comment ? (
+        <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-line break-words">
+          {comment}
+        </p>
+      ) : (
+        <p className="text-[11px] italic text-slate-500">
+          Calificación con estrellas sin comentario escrito.
+        </p>
+      )}
+
+      <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px]">
+        <button
+          type="button"
+          onClick={onHelpfulClick}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[44px] rounded-lg border font-semibold transition-all cursor-pointer bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200"
+        >
+          <ThumbsUp className="w-3 h-3" />
+          <span>Útil ({helpfulCount})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onReportClick}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 min-h-[44px] rounded-lg text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+        >
+          <Flag className="w-3 h-3" />
+          <span>Reportar</span>
+        </button>
+      </div>
+    </div>
+  );
+};
 
 interface ProfessorDetailModalProps {
   professorId: string | null;
@@ -43,6 +256,11 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
   onWriteReview,
   onRatingsChanged,
 }) => {
+  const auth = useOptionalAuth();
+  const isAuthenticated = Boolean(auth?.isAuthenticated);
+  const career = useOptionalCareer();
+  const activePlanId = career?.activePlan?.plan.id;
+
   const shouldReduceMotion = useReducedMotion();
   const [professor, setProfessor] = useState<ProfessorDetail | null>(null);
   const [thresholds, setThresholds] = useState<ReviewsThresholdsMeta | null>(null);
@@ -52,47 +270,115 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
   const [page, setPage] = useState<number>(1);
   const [isLoadingDetail, setIsLoadingDetail] = useState<boolean>(false);
   const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
+  const [isLoadingMoreReviews, setIsLoadingMoreReviews] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [reportingReview, setReportingReview] = useState<PublicProfessorReview | null>(null);
   const [votingReviewId, setVotingReviewId] = useState<string | null>(null);
 
-  const loadFullDetail = useCallback(async (id: string) => {
-    setIsLoadingDetail(true);
-    setErrorMsg(null);
-    try {
-      const res = await professorsApi.getProfessorDetail(id);
-      if (res.success && res.data) {
-        setProfessor(res.data.professor);
-        setReviewsPage(res.data.reviewsPage);
-        setThresholds(res.data.thresholds);
+  const loadFullDetail = useCallback(
+    async (id: string) => {
+      setIsLoadingDetail(true);
+      setErrorMsg(null);
+      try {
+        if (isAuthenticated) {
+          const res = await professorsApi.getProfessorDetail(id);
+          if (res.success && res.data) {
+            setProfessor(res.data.professor);
+            setReviewsPage(res.data.reviewsPage);
+            setThresholds(res.data.thresholds);
+          }
+        } else {
+          const [detailRes, reviewsRes] = await Promise.all([
+            publicApi.getProfessorDetail(id, activePlanId),
+            publicApi.getProfessorReviews(id, {
+              planId: activePlanId,
+              sort: 'recent',
+              page: 1,
+              pageSize: 10,
+            }),
+          ]);
+          if (detailRes.success && detailRes.data) {
+            setProfessor(mapPublicProfessorDetail(detailRes.data.professor));
+            setThresholds(detailRes.data.thresholds);
+          }
+          if (reviewsRes.success && reviewsRes.data) {
+            setReviewsPage({
+              items: reviewsRes.data.items.map((item) => mapPublicReviewToCardItem(id, item)),
+              page: reviewsRes.data.page,
+              pageSize: reviewsRes.data.pageSize,
+              total: reviewsRes.data.total,
+              totalPages: reviewsRes.data.totalPages,
+            });
+          }
+        }
+      } catch (err: any) {
+        if (!isAuthenticated && err?.status === 404) {
+          setErrorMsg('No encontramos este docente en el plan seleccionado.');
+        } else {
+          setErrorMsg(err?.message || 'No se pudo cargar la ficha del profesor.');
+        }
+      } finally {
+        setIsLoadingDetail(false);
       }
-    } catch (err: any) {
-      setErrorMsg(err?.message || 'No se pudo cargar la ficha del profesor.');
-    } finally {
-      setIsLoadingDetail(false);
-    }
-  }, []);
+    },
+    [isAuthenticated, activePlanId]
+  );
 
   const loadFilteredReviews = useCallback(
-    async (id: string, subId: string, sort: 'recent' | 'helpful', nextPage: number) => {
-      setIsLoadingReviews(true);
+    async (
+      id: string,
+      subId: string,
+      sort: 'recent' | 'helpful',
+      nextPage: number,
+      append = false
+    ) => {
+      if (append) {
+        setIsLoadingMoreReviews(true);
+      } else {
+        setIsLoadingReviews(true);
+      }
       try {
-        const res = await professorsApi.getProfessorReviews(id, {
-          subjectId: subId || undefined,
-          sort,
-          page: nextPage,
-          pageSize: 8,
-        });
-        if (res.success && res.data) {
-          setReviewsPage(res.data);
+        if (isAuthenticated) {
+          const res = await professorsApi.getProfessorReviews(id, {
+            subjectId: subId || undefined,
+            sort,
+            page: nextPage,
+            pageSize: 8,
+          });
+          if (res.success && res.data) {
+            setReviewsPage(res.data);
+          }
+        } else {
+          const res = await publicApi.getProfessorReviews(id, {
+            planId: activePlanId,
+            subjectId: subId || undefined,
+            sort,
+            page: nextPage,
+            pageSize: 10,
+          });
+          if (res.success && res.data) {
+            const mapped = res.data.items.map((item) => mapPublicReviewToCardItem(id, item));
+            setReviewsPage((prev) =>
+              append && prev
+                ? {
+                    ...res.data,
+                    items: [...prev.items, ...mapped],
+                  }
+                : {
+                    ...res.data,
+                    items: mapped,
+                  }
+            );
+          }
         }
       } catch {
         // Conservar página actual si falla recarga puntual
       } finally {
         setIsLoadingReviews(false);
+        setIsLoadingMoreReviews(false);
       }
     },
-    []
+    [isAuthenticated, activePlanId]
   );
 
   useEffect(() => {
@@ -114,24 +400,36 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
     if (!professorId) return;
     setSelectedSubjectId(subId);
     setPage(1);
-    loadFilteredReviews(professorId, subId, sortBy, 1);
+    loadFilteredReviews(professorId, subId, sortBy, 1, false);
   };
 
   const handleChangeSort = (nextSort: 'recent' | 'helpful') => {
     if (!professorId || nextSort === sortBy) return;
     setSortBy(nextSort);
     setPage(1);
-    loadFilteredReviews(professorId, selectedSubjectId, nextSort, 1);
+    loadFilteredReviews(professorId, selectedSubjectId, nextSort, 1, false);
   };
 
   const handleChangePage = (nextPage: number) => {
     if (!professorId || !reviewsPage) return;
     if (nextPage < 1 || nextPage > reviewsPage.totalPages) return;
     setPage(nextPage);
-    loadFilteredReviews(professorId, selectedSubjectId, sortBy, nextPage);
+    loadFilteredReviews(professorId, selectedSubjectId, sortBy, nextPage, false);
+  };
+
+  const handleLoadMorePublicReviews = () => {
+    if (!professorId || !reviewsPage || isLoadingMoreReviews) return;
+    if (page >= reviewsPage.totalPages) return;
+    const nextPage = page + 1;
+    setPage(nextPage);
+    loadFilteredReviews(professorId, selectedSubjectId, sortBy, nextPage, true);
   };
 
   const handleToggleHelpful = async (review: PublicProfessorReview) => {
+    if (!isAuthenticated) {
+      auth?.openLoginPrompt('votar reseñas útiles', { returnToHash: '#professors' });
+      return;
+    }
     if (votingReviewId) return;
     setVotingReviewId(review.id);
     try {
@@ -545,7 +843,33 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {reviewsPage.items.map((rev) => (
+                      {reviewsPage.items.map((rev) =>
+                        !isAuthenticated ? (
+                          <PublicReviewCardView
+                            key={rev.id}
+                            subjectName={rev.subjectName}
+                            attendedPeriod={rev.attendedPeriod}
+                            publishedLabel={rev.publishedLabel}
+                            overall={rev.overall}
+                            clarity={rev.clarity}
+                            treatment={rev.treatment}
+                            availability={rev.availability}
+                            difficulty={rev.difficulty}
+                            wouldRecommend={rev.wouldRecommend}
+                            comment={rev.comment}
+                            helpfulCount={rev.helpfulCount}
+                            onHelpfulClick={() =>
+                              auth?.openLoginPrompt('votar reseñas útiles', {
+                                returnToHash: '#professors',
+                              })
+                            }
+                            onReportClick={() =>
+                              auth?.openLoginPrompt('reportar una reseña', {
+                                returnToHash: '#professors',
+                              })
+                            }
+                          />
+                        ) : (
                         <div
                           key={rev.id}
                           className="p-4 rounded-2xl bg-slate-950/60 border border-slate-800/90 space-y-2.5"
@@ -662,35 +986,61 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
                             </button>
                           </div>
                         </div>
-                      ))}
+                        )
+                      )}
 
                       {/* Controles de paginación */}
-                      {reviewsPage.totalPages > 1 && (
-                        <div className="flex items-center justify-between pt-2 text-xs">
-                          <button
-                            type="button"
-                            disabled={page <= 1}
-                            onClick={() => handleChangePage(page - 1)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer"
-                          >
-                            <ChevronLeft className="w-3.5 h-3.5" />
-                            <span>Anterior</span>
-                          </button>
-
+                      {!isAuthenticated && reviewsPage.totalPages > 1 ? (
+                        <div className="flex flex-col items-center gap-2 pt-2 text-xs">
                           <span className="font-mono text-slate-400">
-                            Página {page} de {reviewsPage.totalPages}
+                            Mostrando {reviewsPage.items.length} de {reviewsPage.total} opiniones
                           </span>
-
-                          <button
-                            type="button"
-                            disabled={page >= reviewsPage.totalPages}
-                            onClick={() => handleChangePage(page + 1)}
-                            className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer"
-                          >
-                            <span>Siguiente</span>
-                            <ChevronRight className="w-3.5 h-3.5" />
-                          </button>
+                          {page < reviewsPage.totalPages && (
+                            <button
+                              type="button"
+                              disabled={isLoadingMoreReviews}
+                              onClick={handleLoadMorePublicReviews}
+                              className="px-4 py-2 min-h-[44px] rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-semibold flex items-center gap-2 disabled:opacity-50 cursor-pointer"
+                            >
+                              {isLoadingMoreReviews ? (
+                                <>
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                                  <span>Cargando más...</span>
+                                </>
+                              ) : (
+                                <span>Ver más</span>
+                              )}
+                            </button>
+                          )}
                         </div>
+                      ) : (
+                        reviewsPage.totalPages > 1 && (
+                          <div className="flex items-center justify-between pt-2 text-xs">
+                            <button
+                              type="button"
+                              disabled={page <= 1}
+                              onClick={() => handleChangePage(page - 1)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer"
+                            >
+                              <ChevronLeft className="w-3.5 h-3.5" />
+                              <span>Anterior</span>
+                            </button>
+
+                            <span className="font-mono text-slate-400">
+                              Página {page} de {reviewsPage.totalPages}
+                            </span>
+
+                            <button
+                              type="button"
+                              disabled={page >= reviewsPage.totalPages}
+                              onClick={() => handleChangePage(page + 1)}
+                              className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-300 hover:text-white disabled:opacity-40 flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>Siguiente</span>
+                              <ChevronRight className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )
                       )}
                     </div>
                   )}
@@ -719,27 +1069,29 @@ export const ProfessorDetailModal: React.FC<ProfessorDetailModalProps> = ({
       </AnimatePresence>
 
       {/* Modal secundario para reportar una reseña */}
-      <ReportReviewModal
-        reviewId={reportingReview?.id || null}
-        professorName={professor?.displayName}
-        onClose={() => setReportingReview(null)}
-        onReported={({ autoHidden, reviewId }) => {
-          if (reviewsPage) {
-            if (autoHidden) {
-              // Si se ocultó automáticamente al llegar a 3 reportes, refrescar ficha completa
-              if (professorId) loadFullDetail(professorId);
-              onRatingsChanged?.();
-            } else {
-              setReviewsPage({
-                ...reviewsPage,
-                items: reviewsPage.items.map((it) =>
-                  it.id === reviewId ? { ...it, viewerHasReported: true } : it
-                ),
-              });
+      {isAuthenticated && (
+        <ReportReviewModal
+          reviewId={reportingReview?.id || null}
+          professorName={professor?.displayName}
+          onClose={() => setReportingReview(null)}
+          onReported={({ autoHidden, reviewId }) => {
+            if (reviewsPage) {
+              if (autoHidden) {
+                // Si se ocultó automáticamente al llegar a 3 reportes, refrescar ficha completa
+                if (professorId) loadFullDetail(professorId);
+                onRatingsChanged?.();
+              } else {
+                setReviewsPage({
+                  ...reviewsPage,
+                  items: reviewsPage.items.map((it) =>
+                    it.id === reviewId ? { ...it, viewerHasReported: true } : it
+                  ),
+                });
+              }
             }
-          }
-        }}
-      />
+          }}
+        />
+      )}
     </>
   );
 };

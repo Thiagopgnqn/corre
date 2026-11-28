@@ -22,8 +22,9 @@ import { useCareer } from '../../context/CareerContext';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { BottomSheet } from '../common/BottomSheet';
 import { professorsApi } from '../../api/professors.api';
+import { publicApi } from '../../api/public.api';
 import { useProfessorRatings } from '../../hooks/useProfessorRatings';
-import type { OwnReviewItem, ProfessorListItem, ReviewableData } from '../../types/professor';
+import type { OwnReviewItem, ProfessorListItem, RatingStatus, ReviewableData } from '../../types/professor';
 import type { EnrollmentTerm } from '../../types/enrollment';
 import {
   getActiveRecommendedReviewPairs,
@@ -38,8 +39,9 @@ import { AdminModerationModal } from './AdminModerationModal';
 import { StarRating } from './StarRating';
 
 export const ProfessorsDirectory: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isAuthenticated, openLoginPrompt } = useAuth();
   const {
+    activePlan,
     activeState,
     enrollments,
     openEnrollmentModal,
@@ -50,7 +52,7 @@ export const ProfessorsDirectory: React.FC = () => {
     allSubjects,
     isSimulationMode,
   } = useCareer();
-  const { reloadRatings } = useProfessorRatings(true);
+  const { reloadRatings } = useProfessorRatings(isAuthenticated);
   const shouldReduceMotion = useReducedMotion();
 
   const isAdmin = user?.role === 'admin';
@@ -125,8 +127,9 @@ export const ProfessorsDirectory: React.FC = () => {
 
   // Al entrar al directorio, marcar recomendaciones como vistas para limpiar el badge del navbar
   useEffect(() => {
+    if (!isAuthenticated) return;
     markReviewRecommendationsSeen().catch(() => {});
-  }, [markReviewRecommendationsSeen]);
+  }, [isAuthenticated, markReviewRecommendationsSeen]);
 
   // Debounce búsqueda de texto
   useEffect(() => {
@@ -137,27 +140,59 @@ export const ProfessorsDirectory: React.FC = () => {
   }, [searchInput]);
 
   const loadDirectory = useCallback(async () => {
+    if (!isAuthenticated && !activePlan?.plan.id) {
+      return;
+    }
     setIsLoading(true);
     setErrorMsg(null);
     try {
-      const res = await professorsApi.listProfessors({
-        search: debouncedSearch || undefined,
-        subjectId: subjectFilter || undefined,
-        minRating: minRatingFilter > 0 ? minRatingFilter : undefined,
-        withReviewsOnly,
-        sort: sortBy,
-      });
-      if (res.success && res.data) {
-        setProfessors(res.data.professors);
+      if (isAuthenticated) {
+        const res = await professorsApi.listProfessors({
+          search: debouncedSearch || undefined,
+          subjectId: subjectFilter || undefined,
+          minRating: minRatingFilter > 0 ? minRatingFilter : undefined,
+          withReviewsOnly,
+          sort: sortBy,
+        });
+        if (res.success && res.data) {
+          setProfessors(res.data.professors);
+        }
+      } else {
+        const res = await publicApi.listProfessors({
+          planId: activePlan?.plan.id,
+          search: debouncedSearch || undefined,
+          subjectId: subjectFilter || undefined,
+          minRating: minRatingFilter > 0 ? minRatingFilter : undefined,
+          withReviewsOnly,
+          sort: sortBy,
+        });
+        if (res.success && res.data) {
+          setProfessors(
+            res.data.professors.map((p) => ({
+              ...p,
+              ratingStatus: p.ratingStatus as RatingStatus,
+              bayesianScore: p.bayesianScore ?? 0,
+            }))
+          );
+        }
       }
     } catch (err: any) {
       setErrorMsg(err?.message || 'No se pudo cargar el directorio de profesores.');
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch, subjectFilter, minRatingFilter, withReviewsOnly, sortBy]);
+  }, [
+    isAuthenticated,
+    activePlan?.plan.id,
+    debouncedSearch,
+    subjectFilter,
+    minRatingFilter,
+    withReviewsOnly,
+    sortBy,
+  ]);
 
   const loadMyReviewsSummary = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       const res = await professorsApi.getReviewable();
       if (res.success && res.data) {
@@ -168,10 +203,10 @@ export const ProfessorsDirectory: React.FC = () => {
     } catch {
       // Silencioso en caso de carga inicial offline
     }
-  }, []);
+  }, [isAuthenticated]);
 
   const loadAdminBadge = useCallback(async () => {
-    if (!isAdmin) return;
+    if (!isAuthenticated || !isAdmin) return;
     try {
       const res = await professorsApi.adminGetModerationQueue();
       if (res.success && res.data) {
@@ -180,18 +215,23 @@ export const ProfessorsDirectory: React.FC = () => {
     } catch {
       // Ignorar
     }
-  }, [isAdmin]);
+  }, [isAuthenticated, isAdmin]);
 
   useEffect(() => {
     loadDirectory();
   }, [loadDirectory]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
     loadMyReviewsSummary();
     loadAdminBadge();
-  }, [loadMyReviewsSummary, loadAdminBadge]);
+  }, [isAuthenticated, loadMyReviewsSummary, loadAdminBadge]);
 
   const refreshEverything = useCallback(async () => {
+    if (!isAuthenticated) {
+      await loadDirectory();
+      return;
+    }
     await Promise.all([
       loadDirectory(),
       loadMyReviewsSummary(),
@@ -199,7 +239,14 @@ export const ProfessorsDirectory: React.FC = () => {
       loadAdminBadge(),
       refreshReviewableSummary(),
     ]);
-  }, [loadDirectory, loadMyReviewsSummary, reloadRatings, loadAdminBadge, refreshReviewableSummary]);
+  }, [
+    isAuthenticated,
+    loadDirectory,
+    loadMyReviewsSummary,
+    reloadRatings,
+    loadAdminBadge,
+    refreshReviewableSummary,
+  ]);
 
   const handleOpenWriteReview = (
     profId?: string | null,
@@ -207,6 +254,10 @@ export const ProfessorsDirectory: React.FC = () => {
     academicYear?: number | null,
     term?: EnrollmentTerm | null
   ) => {
+    if (!isAuthenticated) {
+      openLoginPrompt('dejar una reseña', { returnToHash: '#professors' });
+      return;
+    }
     setEditingReview(null);
     setPreselectedProfForReview(profId || null);
     setPreselectedSubjectForReview(subjectId || null);
@@ -309,25 +360,31 @@ export const ProfessorsDirectory: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setShowMyReviews(!showMyReviews)}
-            className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-              showMyReviews
+            onClick={() => {
+              if (!isAuthenticated) {
+                openLoginPrompt('ver tus reseñas publicadas', { returnToHash: '#professors' });
+                return;
+              }
+              setShowMyReviews(!showMyReviews);
+            }}
+            className={`px-3.5 py-2 min-h-[44px] rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+              isAuthenticated && showMyReviews
                 ? 'bg-indigo-600/25 border-indigo-400 text-white'
                 : 'bg-slate-950/80 hover:bg-slate-800 border-slate-800 text-slate-300'
             }`}
           >
             <UserCheck className="w-4 h-4 text-indigo-400" />
-            <span>Mis reseñas ({myReviews.length})</span>
+            <span>{isAuthenticated ? `Mis reseñas (${myReviews.length})` : 'Mis reseñas'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleOpenWriteReview(null)}
-            className="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
+            className="px-4 py-2 min-h-[44px] rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white text-xs font-extrabold shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <MessageSquarePlus className="w-4 h-4" />
             <span>Dejar una reseña</span>
-            {eligibleCount > 0 && (
+            {isAuthenticated && eligibleCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full bg-white/20 text-white font-mono text-[10px]">
                 {eligibleCount}
               </span>
@@ -338,7 +395,7 @@ export const ProfessorsDirectory: React.FC = () => {
 
       {/* Panel desplegable: Mis reseñas */}
       <AnimatePresence>
-        {showMyReviews && (
+        {isAuthenticated && showMyReviews && (
           <motion.div
             initial={shouldReduceMotion ? false : { opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
@@ -431,7 +488,7 @@ export const ProfessorsDirectory: React.FC = () => {
       </AnimatePresence>
 
       {/* Banner amable: Contanos con quién cursaste */}
-      {(missingEnrollmentSubjects.length > 0 || isTutorialOpen) && (
+      {isAuthenticated && (missingEnrollmentSubjects.length > 0 || isTutorialOpen) && (
         <div
           data-tour="enrollments-recommendations-banner"
           className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-3.5 sm:p-4 backdrop-blur-sm flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md"
@@ -471,7 +528,7 @@ export const ProfessorsDirectory: React.FC = () => {
       )}
 
       {/* Sección: Profesores que podés reseñar */}
-      {recommendedPairs.length > 0 && (
+      {isAuthenticated && recommendedPairs.length > 0 && (
         <div className="rounded-2xl border border-amber-500/25 bg-amber-950/15 p-4 space-y-3 shadow-lg transition-all">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -774,31 +831,35 @@ export const ProfessorsDirectory: React.FC = () => {
         onRatingsChanged={refreshEverything}
       />
 
-      {/* Modal para escribir o editar reseña */}
-      <ReviewFormModal
-        isOpen={reviewModalOpen}
-        onClose={() => {
-          setReviewModalOpen(false);
-          setEditingReview(null);
-          setPreselectedProfForReview(null);
-          setPreselectedSubjectForReview(null);
-          setPreselectedYearForReview(null);
-          setPreselectedTermForReview(null);
-        }}
-        initialProfessorId={preselectedProfForReview}
-        initialSubjectId={preselectedSubjectForReview}
-        initialAcademicYear={preselectedYearForReview}
-        initialTerm={preselectedTermForReview}
-        editingReview={editingReview}
-        onSaved={refreshEverything}
-      />
+      {isAuthenticated && (
+        <>
+          {/* Modal para escribir o editar reseña */}
+          <ReviewFormModal
+            isOpen={reviewModalOpen}
+            onClose={() => {
+              setReviewModalOpen(false);
+              setEditingReview(null);
+              setPreselectedProfForReview(null);
+              setPreselectedSubjectForReview(null);
+              setPreselectedYearForReview(null);
+              setPreselectedTermForReview(null);
+            }}
+            initialProfessorId={preselectedProfForReview}
+            initialSubjectId={preselectedSubjectForReview}
+            initialAcademicYear={preselectedYearForReview}
+            initialTerm={preselectedTermForReview}
+            editingReview={editingReview}
+            onSaved={refreshEverything}
+          />
 
-      {/* Modal de moderación (exclusivo rol admin) */}
-      <AdminModerationModal
-        isOpen={moderationModalOpen}
-        onClose={() => setModerationModalOpen(false)}
-        onModerated={refreshEverything}
-      />
+          {/* Modal de moderación (exclusivo rol admin) */}
+          <AdminModerationModal
+            isOpen={moderationModalOpen}
+            onClose={() => setModerationModalOpen(false)}
+            onModerated={refreshEverything}
+          />
+        </>
+      )}
 
       {/* BottomSheet de Filtros para Mobile */}
       <BottomSheet
