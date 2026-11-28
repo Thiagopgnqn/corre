@@ -315,6 +315,13 @@ export interface LoadPlanCatalogOptions {
   forceRefresh?: boolean;
   getVersion?: (options?: RequestInit) => Promise<CatalogVersionResponse>;
   getPlan?: (planId: string, options?: RequestInit) => Promise<PlanDetailResponse>;
+  readCache?: (planId: string, storage?: Pick<Storage, 'getItem'>) => CachedPlanCatalog | null;
+  writeCache?: (
+    requestedPlanId: string,
+    version: string,
+    catalog: ActivePlanCatalog,
+    storage?: Pick<Storage, 'setItem'>
+  ) => void;
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
   onImmediateCache?: (catalog: ActivePlanCatalog) => void;
   onWakingChange?: (isWaking: boolean) => void;
@@ -343,13 +350,15 @@ export async function loadPlanCatalogSmart(
   const requestedPlanId = options.planId || 'current';
   const getVersionFn = options.getVersion ?? ((reqOpts?: RequestInit) => catalogApi.getVersion(reqOpts));
   const getPlanFn = options.getPlan ?? ((id: string, reqOpts?: RequestInit) => catalogApi.getPlan(id, reqOpts));
+  const readCacheFn = options.readCache ?? readCachedCatalog;
+  const writeCacheFn = options.writeCache ?? writeCachedCatalog;
   const sleepFn = options.sleep ?? defaultSleep;
   const maxRetries = options.maxRetries ?? 3;
   const baseBackoffMs = options.baseBackoffMs ?? 1000;
   const wakingDelayMs = options.wakingDelayMs ?? 2500;
   const attemptTimeoutMs = options.attemptTimeoutMs ?? 15000;
 
-  const cached = options.forceRefresh ? null : readCachedCatalog(requestedPlanId, options.storage);
+  const cached = options.forceRefresh ? null : readCacheFn(requestedPlanId, options.storage);
   if (cached) {
     options.onImmediateCache?.(cached.catalog);
   }
@@ -415,7 +424,7 @@ export async function loadPlanCatalogSmart(
         }
         const effectiveVersion =
           remoteVersion || String(planRes.data.plan.updatedAt ?? cached.version);
-        writeCachedCatalog(requestedPlanId, effectiveVersion, planRes.data, options.storage);
+        writeCacheFn(requestedPlanId, effectiveVersion, planRes.data, options.storage);
         return {
           catalog: planRes.data,
           version: effectiveVersion,
@@ -444,7 +453,7 @@ export async function loadPlanCatalogSmart(
     const versionRes = await getVersionFn().catch(() => null);
     const effectiveVersion =
       versionRes?.version || String(planRes.data.plan.updatedAt ?? '1');
-    writeCachedCatalog(requestedPlanId, effectiveVersion, planRes.data, options.storage);
+    writeCacheFn(requestedPlanId, effectiveVersion, planRes.data, options.storage);
 
     return {
       catalog: planRes.data,
